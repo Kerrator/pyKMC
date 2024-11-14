@@ -8,7 +8,6 @@ from executorlib import Executor
 
 
 
-# ! Test class minimisation : 
 class Minimization:
 
     def __init__(self, atoms, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
@@ -23,6 +22,7 @@ class Minimization:
     def run(self) : 
         """
         Execute minimization based on minimization_style
+        return Atoms ASE object with updated positions
         """
 
         with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
