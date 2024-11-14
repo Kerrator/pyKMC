@@ -4,62 +4,87 @@ import numpy as np
 from subprocess import run
 from mpi4py import MPI
 from .utilities import modify_lammps_data_2D
+from executorlib import Executor
 
 
-def minimize_lammps(atoms, parameters, potential, dimension=3) : 
-    """
-    Run Lammps minimization
-        Parameters : 
-            atoms (ASE Atoms Objects) 
-            parameters (dict) : dictionary of lammps commands related to the minimization 
-            potential (dict) : dictionary of lammps commands related to the potential 
-            dimension (int) : dimension (default 3)
 
-        Return : 
-            atoms (ASE Atoms Objects) : same Atoms Objects as input with updated positions after minimization
-    """ 
-    #for MPI : 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    nprocs = comm.Get_size()
+# ! Test class minimisation : 
+class Minimization:
 
-    #Write lammps data file : 
-    lammps_data_file = 'initial_config_minimization.lmp'
-    if rank == 0 :
-        write_lammps_data(lammps_data_file, atoms, masses=True)
-        if dimension == 2 : 
-            modify_lammps_data_2D(lammps_data_file)
+    def __init__(self, atoms, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
+        #Initialization of class parameters 
+        self.atoms = atoms
+        self.minimization_style = minimization_style
+        self.minimization_params = minimization_params
+        self.potential = potential
+        self.dimension = dimension
+        self.nprocs = nprocs
 
-    #initialize lammps :
-    lmp = lammps()
+    def run(self) : 
+        """
+        Execute minimization based on minimization_style
+        """
 
-    #TODO should add posibility to use watherver parameters
-    #for the moment default parameters 
-    lmp.command('units metal')
-    lmp.command('atom_style atomic')
-    lmp.command('dimension {}'.format(dimension))
-    lmp.command('boundary p p p')
-    lmp.command('read_data {}'.format(lammps_data_file))
-        #Potential
-    for key, val in potential.items() : 
-        lmp.command('{} {}'.format(key, val))
-        #Minimization 
-    for key, val in parameters.items() :
-        lmp.command('{} {}'.format(key, val)) 
-    #gather all positions 
-    positions = lmp.gather_atoms("x", 1, 3)
+        with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+            match self.minimization_style : 
+                case "lammps":
+                    #fs = exe.submit(minimize_lammps, self.atoms, self.minimization_params, self.potential, self.dimension)
+                    exe.submit(self.minimize_lammps)
+                    #atoms = fs.result()
+                    return self.atoms
+                case _:
+                    raise Exception("Minimization style not known")
 
-    if rank == 0 : 
-        #convert ctype positions into a numpy array
-        positions = np.ctypeslib.as_array(positions)
-        positions = np.reshape(positions, (-1, 3))
-        #set new positions after minimization
-        atoms.set_positions(positions)
-        #clean files
-        run('rm {}'.format(lammps_data_file), shell=True)
-    #close lammps/MPI
-    MPI.Finalize()
-    return atoms
+    def minimize_lammps(self) : 
+        """
+        Run Lammps minimization
+            Parameters : 
+                atoms (ASE Atoms Objects) 
+                parameters (dict) : dictionary of lammps commands related to the minimization 
+                potential (dict) : dictionary of lammps commands related to the potential 
+                dimension (int) : dimension (default 3)
 
+            Return : 
+                atoms (ASE Atoms Objects) : same Atoms Objects as input with updated positions after minimization
+        """ 
+        #for MPI : 
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
 
-    
+        #Write lammps data file : 
+        lammps_data_file = 'initial_config_minimization.lmp'
+        if rank == 0 :
+            write_lammps_data(lammps_data_file, self.atoms, masses=True)
+            if self.dimension == 2 : 
+                modify_lammps_data_2D(lammps_data_file)
+
+        #initialize lammps :
+        lmp = lammps()
+
+        #TODO should add posibility to use watherver parameters
+        #for the moment default parameters 
+        lmp.command('units metal')
+        lmp.command('atom_style atomic')
+        lmp.command('dimension {}'.format(self.dimension))
+        lmp.command('boundary p p p')
+        lmp.command('read_data {}'.format(lammps_data_file))
+            #Potential
+        for key, val in self.potential.items() : 
+            lmp.command('{} {}'.format(key, val))
+            #Minimization 
+        for key, val in self.minimization_params.items() :
+            lmp.command('{} {}'.format(key, val)) 
+        #gather all positions 
+        positions = lmp.gather_atoms("x", 1, 3)
+
+        if rank == 0 : 
+            #convert ctype positions into a numpy array
+            positions = np.ctypeslib.as_array(positions)
+            positions = np.reshape(positions, (-1, 3))
+            #set new positions after minimization
+            self.atoms.set_positions(positions)
+            #clean files
+            run('rm {}'.format(lammps_data_file), shell=True)
+        #close lammps/MPI
+        lmp.close()

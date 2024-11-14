@@ -1,2 +1,5 @@
 *.Ni_v6_2.0_LKBeland2016.eam
 *log.lammps
+*__pycache__/
+*.pyc
+*=5
