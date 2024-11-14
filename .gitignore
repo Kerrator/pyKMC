@@ -3,3 +3,4 @@
 *__pycache__/
 *.pyc
 *=5
+*initial_config_minimization.lmp
