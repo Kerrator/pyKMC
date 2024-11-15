@@ -18,6 +18,7 @@ class AtomicEnvironment() :
         self.nprocs = nprocs
 
         self.list_env = None
+        self.dict_env = None
 
     def run(self): 
         """
@@ -28,10 +29,25 @@ class AtomicEnvironment() :
                 case "cna":
                     fs = exe.submit(self.cna)
                     self.list_env = fs.result()
-                    return self.list_env
+                    #return self.list_env
+                case "hausdorff_dist" : 
+                    self.hausdorff_dist()
                 case _:
                     raise Exception("Atomic environment style not known")
-                
+        #To dict : 
+        #List of different atomic environment : 
+        #diff_env = set(self.list_env)
+        #diff_env = list(diff_env) 
+
+        ##List of dictionnaries of different Topo ID and 
+        #self.dict_env = []
+        #for ID in diff_env : 
+        #    #index with same ID : 
+        #    indexsame = [i for i,e in enumerate(self.list_env) if e == ID]
+        #    tmp = {"ID" : ID, 
+        #           "atom index" : indexsame}
+        #    self.dict_env.append(tmp)
+
 
     def write_to_file(self) : 
         """
@@ -95,3 +111,19 @@ class AtomicEnvironment() :
             list_topo = None
         list_topo = comm.bcast(list_topo, root=0)
         return list_topo
+    
+
+    #def hausdorff_dist(self) : 
+    #    """
+    #    Compute compute Hausdorff distance between structures
+    #    using the CShDA algorithm and IRA
+    #    """
+    #    #For the moment, we select the first atom and its environment and compute the Hausdorff distance with all other atoms environments 
+    #    #if the distance is lower than the threshold, atoms are considereted to have the same environment and we attribut them an ID
+    #    #We repeat until all atoms have an ID 
+
+    #    list_index = [i for i in range(self.atoms.get_global_number_of_atoms())] 
+
+    #    res = []
+    #    for ind in list_index : 
+    #        

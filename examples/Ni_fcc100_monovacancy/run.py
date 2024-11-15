@@ -21,6 +21,16 @@ atoms = read(init_config_file)
 #2-Run Minimization
 #atoms = Minimization(atoms, 'lammps', minimization, potential, dimension=2, nprocs=8).run()
 
-atenv = AtomicEnvironment(atoms, 'cna',atomenv , potential, dimension=3)
+#atenv = AtomicEnvironment(atoms, 'cna',atomenv , potential, dimension=3)
+atenv = AtomicEnvironment(atoms, 'hausdorff_dist',atomenv , potential, dimension=3)
 atenv.run()
-print(atenv.list_env)
+#z = [] 
+#for e in atenv.list_env : 
+#    if e == 'crist' : 
+#        z.append(1)
+#    else : 
+#        z.append(40)
+#atoms.set_atomic_numbers(z)
+#view(atoms)
+#
+#print(atenv.dict_env)
