@@ -13,7 +13,8 @@ minimization = {'min_style'     : 'cg',
 potential = {'pair_style' : 'eam/alloy', 
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
-atomenv = {'rnei' : 3.01}
+atomenv = {'rnei' : 3.01, 
+           'rcut' : 5.0}
 
 #1-Read initial configuration 
 atoms = read(init_config_file)
@@ -22,7 +23,8 @@ atoms = read(init_config_file)
 #atoms = Minimization(atoms, 'lammps', minimization, potential, dimension=2, nprocs=8).run()
 
 #atenv = AtomicEnvironment(atoms, 'cna',atomenv , potential, dimension=3)
-atenv = AtomicEnvironment(atoms, 'hausdorff_dist',atomenv , potential, dimension=3)
+#atenv = AtomicEnvironment(atoms, 'hausdorff_dist',atomenv , potential, dimension=3)
+atenv = AtomicEnvironment(atoms, 'graph_nauty',atomenv, dimension=3)
 atenv.run()
 #z = [] 
 #for e in atenv.list_env : 
@@ -33,4 +35,4 @@ atenv.run()
 #atoms.set_atomic_numbers(z)
 #view(atoms)
 #
-#print(atenv.dict_env)
+print(atenv.dict_env)

@@ -4,6 +4,7 @@ import numpy as np
 from mpi4py import MPI
 from lammps import lammps
 from executorlib import Executor
+import pynauty
 
 
 class AtomicEnvironment() : 
@@ -30,23 +31,26 @@ class AtomicEnvironment() :
                     fs = exe.submit(self.cna)
                     self.list_env = fs.result()
                     #return self.list_env
-                case "hausdorff_dist" : 
-                    self.hausdorff_dist()
+                #case "hausdorff_dist" : 
+                #    self.hausdorff_dist()
+                case "graph_nauty" : 
+                    fs = exe.submit(self.graph_nauty)
+                    self.list_env = fs.result()
                 case _:
                     raise Exception("Atomic environment style not known")
         #To dict : 
         #List of different atomic environment : 
-        #diff_env = set(self.list_env)
-        #diff_env = list(diff_env) 
+        diff_env = set(self.list_env)
+        diff_env = list(diff_env) 
 
         ##List of dictionnaries of different Topo ID and 
-        #self.dict_env = []
-        #for ID in diff_env : 
-        #    #index with same ID : 
-        #    indexsame = [i for i,e in enumerate(self.list_env) if e == ID]
-        #    tmp = {"ID" : ID, 
-        #           "atom index" : indexsame}
-        #    self.dict_env.append(tmp)
+        self.dict_env = []
+        for ID in diff_env : 
+            #index with same ID : 
+            indexsame = [i for i,e in enumerate(self.list_env) if e == ID]
+            tmp = {"ID" : ID, 
+                   "atom index" : indexsame}
+            self.dict_env.append(tmp)
 
 
     def write_to_file(self) : 
@@ -112,6 +116,44 @@ class AtomicEnvironment() :
         list_topo = comm.bcast(list_topo, root=0)
         return list_topo
     
+    def graph_nauty(self) :
+        """
+        Compute pynauty certificate based on graph canonical form
+        need rnei 
+        need rcut
+        """ 
+        #TODO : check if rnei and rcut in atomenv_params
+        rnei = self.atomenv_params['rnei']
+        rcut = self.atomenv_params['rcut']
+
+        #Setup Parallisation : 
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
+            #Split index atoms in approximatively even number sublist
+        split = np.array_split(range(self.atoms.get_global_number_of_atoms()), nprocs)
+        local_index = split[rank] 
+
+        #Create graphs 
+        list_g = make_graph1(self.atoms, local_index, rnei, rcut)
+        #Gather graphs
+        global_g = comm.gather(list_g, root=0)
+        #Flattent list of list 
+        if rank == 0 : 
+            flat_list_g = [] 
+            for ll in global_g : 
+                for g in ll : 
+                    flat_list_g.append(g)
+            #Nauty Certificate : 
+            list_topo = [] 
+            for g in flat_list_g : 
+                list_topo.append(pynauty.certificate(g))
+        else : 
+            list_topo = None 
+    
+        list_topo = comm.bcast(list_topo, root=0)
+        return list_topo
+    
 
     #def hausdorff_dist(self) : 
     #    """
@@ -127,3 +169,28 @@ class AtomicEnvironment() :
     #    res = []
     #    for ind in list_index : 
     #        
+def make_graph1(atoms, list_id, rnei, rcut) : 
+    """
+    Create graph for all atoms with index in the list_id
+    Using ASE get_distances
+    """
+    #index all atoms to compute distances : 
+    ind = np.linspace(0, atoms.get_global_number_of_atoms()-1, atoms.get_global_number_of_atoms()).astype(int)
+    #liste graphe
+    list_g = []
+    for k in list_id : 
+        dist = atoms.get_distances(k, ind, mic=True)
+
+        N = len(np.where(dist<rcut)[0])
+        #index in rcut sphere
+        indin = np.where(dist<rcut)[0]
+        g = pynauty.Graph(N)
+
+        #create graphe connextion
+        for i in range(N) : 
+            tmp = np.where(atoms.get_distances(indin[i], indin, mic=True) < rnei)[0]
+            tmp = tmp.tolist()
+            tmp.remove(i)
+            g.connect_vertex(i, tmp)
+        list_g.append(g)
+    return list_g
