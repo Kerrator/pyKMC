@@ -2,6 +2,7 @@ from ase.io import read, write
 from pykmc.minimization import Minimization 
 from pykmc.atomic_environment import AtomicEnvironment
 from ase.visualize import view
+import cProfile
 
 #PARAMETERS : 
 #init_config_file = './initial_config.xyz'
@@ -24,8 +25,9 @@ atoms = read(init_config_file)
 
 #atenv = AtomicEnvironment(atoms, 'cna',atomenv , potential, dimension=3)
 #atenv = AtomicEnvironment(atoms, 'hausdorff_dist',atomenv , potential, dimension=3)
-atenv = AtomicEnvironment(atoms, 'graph_nauty',atomenv, dimension=3)
-atenv.run()
+atenv = AtomicEnvironment(atoms, 'graph_nauty',atomenv, dimension=3, nprocs=1)
+#atenv.run()
+#cProfile.run('atenv.run()')
 #z = [] 
 #for e in atenv.list_env : 
 #    if e == 'crist' : 
@@ -35,4 +37,4 @@ atenv.run()
 #atoms.set_atomic_numbers(z)
 #view(atoms)
 #
-print(atenv.dict_env)
+#print(atenv.dict_env)

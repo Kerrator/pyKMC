@@ -5,6 +5,9 @@ from mpi4py import MPI
 from lammps import lammps
 from executorlib import Executor
 import pynauty
+from ase.neighborlist import NeighborList
+from itertools import chain
+
 
 
 class AtomicEnvironment() : 
@@ -29,13 +32,15 @@ class AtomicEnvironment() :
             match self.atomenv_style : 
                 case "cna":
                     fs = exe.submit(self.cna)
-                    self.list_env = fs.result()
-                    #return self.list_env
+                    self.list_env = fs.result() 
                 #case "hausdorff_dist" : 
                 #    self.hausdorff_dist()
                 case "graph_nauty" : 
                     fs = exe.submit(self.graph_nauty)
-                    self.list_env = fs.result()
+                    if self.nprocs == 1 : 
+                        self.list_env = fs.result()
+                    else : 
+                        self.list_env = list(chain(*fs.result()))
                 case _:
                     raise Exception("Atomic environment style not known")
         #To dict : 
@@ -136,23 +141,28 @@ class AtomicEnvironment() :
 
         #Create graphs 
         list_g = make_graph1(self.atoms, local_index, rnei, rcut)
-        #Gather graphs
-        global_g = comm.gather(list_g, root=0)
-        #Flattent list of list 
-        if rank == 0 : 
-            flat_list_g = [] 
-            for ll in global_g : 
-                for g in ll : 
-                    flat_list_g.append(g)
-            #Nauty Certificate : 
-            list_topo = [] 
-            for g in flat_list_g : 
-                list_topo.append(pynauty.certificate(g))
-        else : 
-            list_topo = None 
-    
-        list_topo = comm.bcast(list_topo, root=0)
+        list_topo = [] 
+        for g in list_g : 
+            list_topo.append(pynauty.certificate(g))######
         return list_topo
+        #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
+        #Gather graphs
+        #global_g = comm.gather(list_g, root=0)
+        ##Flattent list of list 
+        #if rank == 0 : 
+        #    flat_list_g = [] 
+        #    for ll in global_g : 
+        #        for g in ll : 
+        #            flat_list_g.append(g)
+        #    #Nauty Certificate : 
+        #    list_topo = [] 
+        #    for g in flat_list_g : 
+        #        list_topo.append(pynauty.certificate(g))
+        #    #else : 
+        #    #    list_topo = None 
+    
+        ##list_topo = comm.bcast(list_topo, root=0)
+        #    return list_topo
     
 
     #def hausdorff_dist(self) : 
@@ -193,4 +203,23 @@ def make_graph1(atoms, list_id, rnei, rcut) :
             tmp.remove(i)
             g.connect_vertex(i, tmp)
         list_g.append(g)
+    return list_g
+
+def make_graph2(atoms, list_id, rnei, rcut) : 
+    """ 
+    """
+    list_g = [] 
+    nl = NeighborList(atoms.get_global_number_of_atoms*[rcut/2], self_interaction=False, bothways=True)
+    for k  in list_id : 
+        nl.update(atoms)
+        index = nl.get_neighbors(k)[0]
+
+        index = np.append(index, k)
+        N = len(index)
+
+        g = pynauty.Graph(N)
+
+        for i in index : 
+            g.connect_vertex(i, nl.get_neighbors(i)[0])             
+            list_g.append(g)
     return list_g
