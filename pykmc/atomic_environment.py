@@ -7,6 +7,8 @@ from executorlib import Executor
 import pynauty
 from ase.neighborlist import NeighborList
 from itertools import chain
+from ase import Atoms
+from profiling_decorator import profile
 
 
 
@@ -23,7 +25,6 @@ class AtomicEnvironment() :
 
         self.list_env = None
         self.dict_env = None
-
     def run(self): 
         """
         Run similar atomic environment search based on topology_style
@@ -120,7 +121,7 @@ class AtomicEnvironment() :
             list_topo = None
         list_topo = comm.bcast(list_topo, root=0)
         return list_topo
-    
+    @profile
     def graph_nauty(self) :
         """
         Compute pynauty certificate based on graph canonical form
@@ -141,10 +142,13 @@ class AtomicEnvironment() :
 
         #Create graphs 
         list_g = make_graph1(self.atoms, local_index, rnei, rcut)
+        #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
         list_topo = [] 
         for g in list_g : 
             list_topo.append(pynauty.certificate(g))######
         return list_topo
+    
+        #!NOT NEEDED ANYMORE 
         #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
         #Gather graphs
         #global_g = comm.gather(list_g, root=0)
@@ -178,7 +182,7 @@ class AtomicEnvironment() :
 
     #    res = []
     #    for ind in list_index : 
-    #        
+    #     
 def make_graph1(atoms, list_id, rnei, rcut) : 
     """
     Create graph for all atoms with index in the list_id
@@ -205,21 +209,38 @@ def make_graph1(atoms, list_id, rnei, rcut) :
         list_g.append(g)
     return list_g
 
+#@profile 
 def make_graph2(atoms, list_id, rnei, rcut) : 
     """ 
+    Make graph using neighborlist ASE 
     """
+    #TODO Check pbc
     list_g = [] 
-    nl = NeighborList(atoms.get_global_number_of_atoms*[rcut/2], self_interaction=False, bothways=True)
-    for k  in list_id : 
-        nl.update(atoms)
-        index = nl.get_neighbors(k)[0]
+    #Create NeighborList for all atoms : 
+    cutoffs = atoms.get_global_number_of_atoms()*[rcut/2] 
+    nlall = NeighborList(cutoffs, self_interaction=True, bothways=True)
+    nlall.update(atoms) 
+    #loop over all atoms in list_id : 
+    for k in list_id : 
+        #create subatoms (otherwise conflict with the way pynauty constructs graph)
+        subatomsnei = nlall.get_neighbors(k)[0].tolist()
+        subatoms = Atoms(positions=atoms.get_positions()[subatomsnei], cell=atoms.get_cell(), pbc=True)
+        #Create Neighborlist for subatoms 
+        cut = subatoms.get_global_number_of_atoms()*[rnei/2]
+        nl = NeighborList(cut, self_interaction=False, bothways=True)
+        nl.update(subatoms)        
 
-        index = np.append(index, k)
-        N = len(index)
+        g = pynauty.Graph(len(subatomsnei))
 
-        g = pynauty.Graph(N)
+        #Loop over all neighbor 
+        for i in range(len(subatomsnei)):
+            g.connect_vertex(i, nl.get_neighbors(i)[0].tolist())
+        list_g.append(g)
 
-        for i in index : 
-            g.connect_vertex(i, nl.get_neighbors(i)[0])             
-            list_g.append(g)
     return list_g
+
+def make_graph3(atoms, list_id, rnei, rcut) : 
+    """
+    Test using scipy cKDTree, it means that we need do deal with pbc by hand 
+    """
+
