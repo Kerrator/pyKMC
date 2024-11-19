@@ -6,7 +6,9 @@ import cProfile
 
 #PARAMETERS : 
 #init_config_file = './initial_config.xyz'
-init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy/Ni_monovacancy.xyz'
+#init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy/Ni_monovacancy.xyz'
+#init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_4000at/Ni_cristal_4000at_4defects.xyz'
+init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_10976at/Ni_cristal_10976at_3defects.xyz'
 
 minimization = {'min_style'     : 'cg', 
                 'minimize '     : '1.0e-6 1.0e-8 100 1000'}
@@ -33,10 +35,10 @@ atenv.run()
 #for i in range(len(atenv.dict_env)) : 
 #    list_at = atenv.dict_env[i]['atom index'] 
 #    for a in list_at : 
-#        z[a] = i+1
+#        z[a] = i+35
 #
 #atoms.set_atomic_numbers(z)
 #view(atoms)
 ##
-#print(atenv.dict_env)
+print(atenv.dict_env)
 #

@@ -9,6 +9,9 @@ from ase.neighborlist import NeighborList
 from itertools import chain
 from ase import Atoms
 from profiling_decorator import profile
+from scipy.spatial import cKDTree
+from scipy.spatial.distance import cdist
+
 
 
 
@@ -25,10 +28,12 @@ class AtomicEnvironment() :
 
         self.list_env = None
         self.dict_env = None
+    @profile
     def run(self): 
         """
         Run similar atomic environment search based on topology_style
         """
+        #TODO voir comment recuperer l'erreur de la fonction appelée avec exe.submit(), c'est un enfer a debugger sinon
         with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
             match self.atomenv_style : 
                 case "cna":
@@ -121,7 +126,6 @@ class AtomicEnvironment() :
             list_topo = None
         list_topo = comm.bcast(list_topo, root=0)
         return list_topo
-    @profile
     def graph_nauty(self) :
         """
         Compute pynauty certificate based on graph canonical form
@@ -141,34 +145,15 @@ class AtomicEnvironment() :
         local_index = split[rank] 
 
         #Create graphs 
-        list_g = make_graph1(self.atoms, local_index, rnei, rcut)
+        #list_g = make_graph1(self.atoms, local_index, rnei, rcut)
         #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
+        #list_g = make_graph3(self.atoms, local_index, rnei, rcut)
+        list_g = make_graph4(self.atoms, local_index, rnei, rcut)
         list_topo = [] 
         for g in list_g : 
             list_topo.append(pynauty.certificate(g))######
         return list_topo
     
-        #!NOT NEEDED ANYMORE 
-        #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
-        #Gather graphs
-        #global_g = comm.gather(list_g, root=0)
-        ##Flattent list of list 
-        #if rank == 0 : 
-        #    flat_list_g = [] 
-        #    for ll in global_g : 
-        #        for g in ll : 
-        #            flat_list_g.append(g)
-        #    #Nauty Certificate : 
-        #    list_topo = [] 
-        #    for g in flat_list_g : 
-        #        list_topo.append(pynauty.certificate(g))
-        #    #else : 
-        #    #    list_topo = None 
-    
-        ##list_topo = comm.bcast(list_topo, root=0)
-        #    return list_topo
-    
-
     #def hausdorff_dist(self) : 
     #    """
     #    Compute compute Hausdorff distance between structures
@@ -214,7 +199,6 @@ def make_graph2(atoms, list_id, rnei, rcut) :
     """ 
     Make graph using neighborlist ASE 
     """
-    #TODO Check pbc
     list_g = [] 
     #Create NeighborList for all atoms : 
     cutoffs = atoms.get_global_number_of_atoms()*[rcut/2] 
@@ -238,9 +222,116 @@ def make_graph2(atoms, list_id, rnei, rcut) :
         list_g.append(g)
 
     return list_g
-
 def make_graph3(atoms, list_id, rnei, rcut) : 
     """
     Test using scipy cKDTree, it means that we need do deal with pbc by hand 
     """
+    list_g = [] 
+    positions = atoms.get_positions() 
+    cell = atoms.get_cell()
+    #get positions and extend to take into account the PBC 
+    shifts = np.array([[x, y, z] for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1)])
+    replicated_positions = np.vstack([positions + np.dot(shift, cell) for shift in shifts])
+    # Construire le KDTree avec les positions répliquées
+    tree = cKDTree(replicated_positions)
+    
+    # Construire un graphe pour chaque atome
+    for atom_idx in list_id:
+        # Trouver les indices des voisins dans le rayon rcut
+        neighbors_idx = tree.query_ball_point(positions[atom_idx], rcut)
+
+        # Renuméroter les indices localement (0 à number_of_vertices-1)
+        neighbors_global = list(neighbors_idx)  # Inclut les atomes répliqués #????
+        local_to_global = {local_idx: global_idx for local_idx, global_idx in enumerate(neighbors_global)}
+        global_to_local = {v: k for k, v in local_to_global.items()}
+
+
+        #CDIST
+        # Utiliser cdist pour calculer toutes les distances entre les voisins
+        #dist_matrix = cdist(replicated_positions[neighbors_global], replicated_positions[neighbors_global])
+
+        ## Construire le dictionnaire d'adjacence avec indices locaux
+        #adjacency_dict = {global_to_local[i]: [] for i in neighbors_global}
+
+        ## Associer correctement les indices dans dist_matrix
+        #for i in range(len(neighbors_global)):
+        #    for j in range(len(neighbors_global)):
+        #        if i != j:  # Pas d'auto-boucle
+        #            if dist_matrix[i, j] <= rnei:
+        #                adjacency_dict[i].append(j)
+        #END CDIST 
+
+        #Local Tree
+
+        # Construire le dictionnaire d'adjacence avec indices locaux
+        adjacency_dict = {local_idx: [] for local_idx in local_to_global.keys()}
+
+        # Trouver les voisins dans le rayon rnei en utilisant le deuxième KDTree
+        for i, ind in enumerate(neighbors_global):
+            # Recherche des voisins dans le rayon rnei
+            neighbors_local = tree.query_ball_point(replicated_positions[ind], rnei)
+            for neighbor in neighbors_local:
+                if neighbor != ind and neighbor in neighbors_global:  # Ne pas ajouter soi-même comme voisin
+                    adjacency_dict[i].append(global_to_local[neighbor])  # Utilisation des indices locaux
+        #END Local Tree
+
+        
+        graph = pynauty.Graph(
+            number_of_vertices=len(neighbors_idx),
+            adjacency_dict=adjacency_dict,
+            directed=False
+        )
+        
+        list_g.append(graph)
+    return list_g
+
+def make_graph4(atoms, list_id, rnei, rcut) : 
+    """
+    Test using scipy cKDTree, with boxsize 
+    """
+    #TODO could try to use cdist insteed of the neighbor_local tree search (should be more efficiant for few atoms) but 
+    #need to duplicated local environement
+    list_g = [] 
+    positions = atoms.get_positions() 
+    cell = atoms.get_cell()
+
+    # Construire le KDTree avec les positions répliquées
+    tree = cKDTree(positions, boxsize=np.diag(cell))
+    
+    # Construire un graphe pour chaque atome
+    for atom_idx in list_id:
+        # Trouver les indices des voisins dans le rayon rcut
+        atominenv_idx = tree.query_ball_point(positions[atom_idx], rcut)
+        atominenv_idx = list(atominenv_idx)
+
+        # Renuméroter les indices localement (0 à number_of_vertices-1)
+        local_to_global = {local_idx: global_idx for local_idx, global_idx in enumerate(atominenv_idx)}
+        global_to_local = {v: k for k, v in local_to_global.items()}
+        
+        # Construire le dictionnaire d'adjacence avec indices locaux
+        adjacency_dict = {local_idx: [] for local_idx in local_to_global.keys()}
+
+
+        # Trouver les voisins dans le rayon rnei en utilisant le deuxième KDTree
+        for i, ind in enumerate(atominenv_idx):
+            # Recherche des voisins dans le rayon rnei
+            neighbors_local = tree.query_ball_point(positions[ind], rnei)
+            for neighbor in neighbors_local:
+                if neighbor != ind and neighbor in atominenv_idx:  # Ne pas ajouter soi-même comme voisin
+                    adjacency_dict[i].append(global_to_local[neighbor])  # Utilisation des indices locaux
+
+        
+        graph = pynauty.Graph(
+            number_of_vertices=len(atominenv_idx),
+            adjacency_dict=adjacency_dict,
+            directed=False
+        )
+        
+        list_g.append(graph)
+    return list_g
+
+
+        
+
+
 
