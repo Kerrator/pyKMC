@@ -49,6 +49,7 @@ class AtomicEnvironment() :
                         self.list_env = list(chain(*fs.result()))
                 case _:
                     raise Exception("Atomic environment style not known")
+        #TODO Voir si ça reste comme ça pour la gestion des données, ça prend du temps de constuire ça et c'est pas vraiment utile
         #To dict : 
         #List of different atomic environment : 
         diff_env = set(self.list_env)
@@ -88,6 +89,7 @@ class AtomicEnvironment() :
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
+        #TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
         #lammps: 
         lmp = lammps(comm=comm) 
         lmp.command('units metal')
@@ -126,6 +128,7 @@ class AtomicEnvironment() :
             list_topo = None
         list_topo = comm.bcast(list_topo, root=0)
         return list_topo
+
     def graph_nauty(self) :
         """
         Compute pynauty certificate based on graph canonical form
@@ -167,7 +170,10 @@ class AtomicEnvironment() :
 
     #    res = []
     #    for ind in list_index : 
-    #     
+       
+     
+    
+  
 def make_graph1(atoms, list_id, rnei, rcut) : 
     """
     Create graph for all atoms with index in the list_id
@@ -222,6 +228,7 @@ def make_graph2(atoms, list_id, rnei, rcut) :
         list_g.append(g)
 
     return list_g
+
 def make_graph3(atoms, list_id, rnei, rcut) : 
     """
     Test using scipy cKDTree, it means that we need do deal with pbc by hand 
