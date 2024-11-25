@@ -12,6 +12,8 @@ class System(Atoms):
                          positions=atoms.get_positions(),
                          cell=atoms.get_cell(),
                          pbc=atoms.get_pbc())
+
+        self.environment = None
         
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
         """ 
@@ -20,3 +22,11 @@ class System(Atoms):
         from .minimization import Minimization 
         minimizer = Minimization(self, minimization_style, minimization_params, potential, dimension, nprocs)
         minimizer.run()
+
+    def find_environment(self, environment_style, environement_params, dimension=3, nprocs=1) : 
+        """ 
+        Find atomic environment for each atoms in System and create a dictionary 
+        """
+        from .atomic_environment import AtomicEnvironment 
+        atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs)
+        atomic_environment.run()

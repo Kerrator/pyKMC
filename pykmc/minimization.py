@@ -67,7 +67,7 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #initialize lammps :
-        lmp = lammps(cmdargs=['-log', 'log_minimize.lammps'])
+        lmp = lammps(comm=comm,cmdargs=['-log', 'log_minimize.lammps'])
 
         #TODO should add posibility to use watherver parameters
         #for the moment default parameters 
