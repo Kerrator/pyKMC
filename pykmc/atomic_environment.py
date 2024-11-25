@@ -28,6 +28,7 @@ class AtomicEnvironment() :
 
         self.list_env = None
         self.dict_env = None
+
     @profile
     def run(self): 
         """
@@ -38,11 +39,20 @@ class AtomicEnvironment() :
             match self.atomenv_style : 
                 case "cna":
                     fs = exe.submit(self.cna)
-                    self.list_env = fs.result() 
+                    if self.nprocs == 1 :
+                        self.list_env = fs.result() 
+                    else : 
+                        self.list_env = fs.result()[0]
                 #case "hausdorff_dist" : 
                 #    self.hausdorff_dist()
                 case "graph_nauty" : 
                     fs = exe.submit(self.graph_nauty)
+                    if self.nprocs == 1 : 
+                        self.list_env = fs.result()
+                    else : 
+                        self.list_env = list(chain(*fs.result()))
+                case "cna/graph_nauty" : 
+                    fs = exe.submit(self.cna_graph_nauty)
                     if self.nprocs == 1 : 
                         self.list_env = fs.result()
                     else : 
@@ -52,6 +62,7 @@ class AtomicEnvironment() :
         #TODO Voir si ça reste comme ça pour la gestion des données, ça prend du temps de constuire ça et c'est pas vraiment utile
         #To dict : 
         #List of different atomic environment : 
+        
         diff_env = set(self.list_env)
         diff_env = list(diff_env) 
 
@@ -69,7 +80,7 @@ class AtomicEnvironment() :
         """
         write similar atomic environment to file as a list of dict using yaml.
         """
-
+    @profile
     def cna(self) : 
         """ 
         compute CNA using lammps. 
@@ -110,6 +121,7 @@ class AtomicEnvironment() :
         id = id-1 #Lammps index start at 1
 
         lmp.close()
+        #TODO change so its fs.results that deal with the gather part, but annoying since lammps does not sort id
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
@@ -148,10 +160,10 @@ class AtomicEnvironment() :
         local_index = split[rank] 
 
         #Create graphs 
-        #list_g = make_graph1(self.atoms, local_index, rnei, rcut)
+        list_g = make_graph1(self.atoms, local_index, rnei, rcut)
         #list_g = make_graph2(self.atoms, local_index, rnei, rcut)
         #list_g = make_graph3(self.atoms, local_index, rnei, rcut)
-        list_g = make_graph4(self.atoms, local_index, rnei, rcut)
+        #list_g = make_graph4(self.atoms, local_index, rnei, rcut)
         list_topo = [] 
         for g in list_g : 
             list_topo.append(pynauty.certificate(g))######
@@ -170,9 +182,298 @@ class AtomicEnvironment() :
 
     #    res = []
     #    for ind in list_index : 
-       
+
+    def cna_graph_nauty2(self) : 
+        """
+        Full use of Lammps to compute CNA and graph using neighborlist 
+        Use two potential pair style with rcut and rnei cutoff to define two different neighborlist
+        """
+        
+        #for MPI : 
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
+
+
+        #Write lammps data file : 
+        lammps_data_file = 'initial_config_minimization.lmp'
+        if rank == 0 :
+            write_lammps_data(lammps_data_file, self.atoms, masses=True)
+            if self.dimension == 2 : 
+                modify_lammps_data_2D(lammps_data_file)
+
+
+        #Lammps : 
+        lmp = lammps(comm=comm)
+            #basic parameters
+        lmp.command('units metal')
+        lmp.command('atom_style atomic')
+        lmp.command('dimension 3') 
+        lmp.command('boundary p p p')
+        lmp.command('atom_modify map yes')
+            #read data file
+        lmp.command('read_data {}'.format(lammps_data_file))
+            #potential
+        lmp.command('pair_style zero 5.0 full')
+        lmp.command('pair_coeff * *')
+            #compute cna
+        lmp.command('neighbor 0.0 bin')
+        lmp.command('neigh_modify every 1 delay 0 check yes')
+        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
+        lmp.command('run 0')
+
+
+        #Extract cna
+        cna_array = lmp.numpy.extract_compute("c1", 1,1)
+        print(len(cna_array))
+        #Extract atom id 
+        tag = lmp.numpy.extract_atom("id")
+        tag -= 1
+        print(len(tag))
+        #id = id-1 #Lammps index start at 1
+        ##Find non cristalline atoms id
+        #non_crist_id = np.where(cna_array == 5)[0]
+
+        ## Find neighbor list rcut 
+        nlidx_rcut = lmp.find_pair_neighlist('zero')
+        nl_rcut = lmp.numpy.get_neighlist(nlidx_rcut)
+        #print(nl_rcut)
+        ## Find neighbor list rnei 
+        #nlidx_rnei = lmp.find_pair_neighlist('lj/cut')
+        #nl_rnei = lmp.numpy.get_neighlist(nlidx_rnei)
+
+        _, a = nl_rcut.get(0)
+        print(a)
+
+        #test = lmp.map(1000)
+        #print(test)
+        print("LAMMPS version:", lmp.version())
+
+
+
+
+
+        #list_topo = []
+        #for i in range(len(id)) : 
+        #    if i in non_crist_id : 
+        #        print(i, ' Non cristalline atom: ', id[i])
+        #        _, env = nl_rcut.get(i)
+        #        #all atoms in the environment of the central non cristalline atom
+        #        env = np.append(env, i)
+        #        #env = [id[i] for i in env]
+        #        print(len(env))
+
+        ##        adjacency_dict = {id: [] for id in env}
+
+                #Loop over atoms in environment
+         #       for j in env : 
+         #           #find neighbor atoms define by rnei 
+         #           _, neigh = nl_rnei.get(id[j])
+         #           #neighbor atoms need to be in the environement : 
+         #           print('neigh', neigh)
+         #           #neigh = np.intersect1d(env,neigh)
+         #           #print(neigh)
+
+
+
+
+
+                
+
+
+
+
+    def cna_graph_nauty3(self) : 
+        """
+        Full use of Lammps to compute CNA and find pair list and distances for non cristalline atoms 
+        """
+        
+        #for MPI : 
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
+
+
+        #Write lammps data file : 
+        lammps_data_file = 'initial_config_minimization.lmp'
+        if rank == 0 :
+            write_lammps_data(lammps_data_file, self.atoms, masses=True)
+            if self.dimension == 2 : 
+                modify_lammps_data_2D(lammps_data_file)
+
+
+        #Lammps : 
+        lmp = lammps(comm=comm)
+            #basic parameters
+        lmp.command('units metal')
+        lmp.command('atom_style atomic')
+        lmp.command('dimension 3') 
+        lmp.command('boundary p p p')
+            #read data file
+        lmp.command('read_data {}'.format(lammps_data_file))
+            #potential
+        lmp.command('pair_style zero 5.0 full')
+        lmp.command('pair_coeff * *')
+            #compute cna
+        lmp.command('neighbor 0.0 bin')
+        lmp.command('neigh_modify every 1 delay 0 check yes')
+        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
+        lmp.command('compute c2 all property/local patom1 patom2')
+        lmp.command('compute dist all pair/local dist')
+        lmp.command('run 0')
+
+
+        #Extract cna
+        cna_array = lmp.numpy.extract_compute("c1", 1,1)
+        #Extract atom id 
+        tags = lmp.numpy.extract_atom("id")
+        #Find non cristalline atoms id
+        non_crist_id = np.where(cna_array == 5)[0]
+        non_crist_id = tags[non_crist_id]
+        print(non_crist_id)
+        # look up the neighbor list
+        nlidx = lmp.find_pair_neighlist('zero')
+        nl = lmp.numpy.get_neighlist(nlidx)
+
+
+        #pairs distance of atoms in rcut define by pair style
+        dists = lmp.numpy.extract_compute('dist',  2, 1)
+        #pairs of atoms in rcut define by pair style
+        pairs = lmp.numpy.extract_compute('c2', 2, 2)
+
+        #all pairs distances
+        allpairs = comm.allgather(pairs)
+        allpairs = list(chain(*allpairs)) #to flat 
+        allpairs = np.array(allpairs)
+        #all distances : 
+        alldists = comm.allgather(dists)
+        alldists = list(chain(*alldists))
+
+
+        #! TOCHANGE np where on big system taking to much time
+        list_topo = []
+        for i in tags : 
+            if i in non_crist_id : 
+                env1 = [int(p[1]) for p in allpairs if p[0] == i]
+                env2 = [int(p[0]) for p in allpairs if p[1] == i]
+                env = env1+env2
+                env.append(i) #add central atom
+                #Create graph for the ith atom : 
+                map_graph_index = {e: i for i,e in enumerate(env)}
+                adjacency_dict = {i: [] for i in range(len(env))}
+                #Double loop on atoms in the atomic environment of i 
+                for id1 in env :
+                    for id2 in env : 
+                        if id1 != id2 : 
+                            k = np.where(((id1 == allpairs[:,0]) & (id2 == allpairs[:,1]))|((id1 == allpairs[:,1]) & (id2 == allpairs[:,0])))[0]
+                            if len(k) > 0 : 
+                                k = k[0]
+                                if  alldists[k] < 3.0 : 
+                                    adjacency_dict[map_graph_index[id1]].append(map_graph_index[id2])
+#                print(adjacency_dict)
+                graph = pynauty.Graph(number_of_vertices=len(env),
+                                      adjacency_dict=adjacency_dict,
+                                    )
+                list_topo.append(pynauty.certificate(graph))
+            else : 
+                list_topo.append('crist')
+
+
+
+
+        #sort list based on tags : 
+        list_topo = [e for i, e in sorted(zip(tags, list_topo))]
+
+        return list_topo
+
+
+
+    def cna_graph_nauty(self) : 
+        """
+        without neighboor from lammps
+        """
+        
+        #for MPI : 
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
+
+
+        #Write lammps data file : 
+        lammps_data_file = 'initial_config_minimization.lmp'
+        if rank == 0 :
+            write_lammps_data(lammps_data_file, self.atoms, masses=True)
+            if self.dimension == 2 : 
+                modify_lammps_data_2D(lammps_data_file)
+
+
+        #Lammps : 
+        lmp = lammps(comm=comm)
+            #basic parameters
+        lmp.command('units metal')
+        lmp.command('atom_style atomic')
+        lmp.command('dimension 3') 
+        lmp.command('boundary p p p')
+            #read data file
+        lmp.command('read_data {}'.format(lammps_data_file))
+            #potential
+        lmp.command('pair_style zero 5.0 full')
+        lmp.command('pair_coeff * *')
+            #compute cna
+        lmp.command('neighbor 0.0 bin')
+        lmp.command('neigh_modify every 1 delay 0 check yes')
+        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
+        lmp.command('run 0')
+
+
+        #Extract cna
+        cna_array = lmp.numpy.extract_compute("c1", 1,1)
+        #Extract atom id 
+        tags = lmp.numpy.extract_atom("id")
+        #Find non cristalline atoms id
+        non_crist_id = np.where(cna_array == 5)[0]
+        non_crist_id = tags[non_crist_id]
+
+        # look up the neighbor list
+        nlidx = lmp.find_pair_neighlist('zero')
+        nl = lmp.numpy.get_neighlist(nlidx)
+        
+        positions = self.atoms.get_positions() 
+        cell = self.atoms.get_cell()
+        # Construire le KDTree avec les positions répliquées
+        tree = cKDTree(positions, boxsize=np.diag(cell))
+
+        list_topo = []
+        for i in tags : 
+            if i in non_crist_id :
+                atominenv_idx = tree.query_ball_point(positions[i], self.atomenv_params['rcut'])
+                atominenv_idx = list(atominenv_idx)
+                # Renuméroter les indices localement (0 à number_of_vertices-1)
+                map_graph_index = {e: i for i,e in enumerate(atominenv_idx)} 
+                #adjacency_dict = {i: [] for i in range(len(atominenv_idx))}
+#                adjacency_dict = {}
+                
+                graph = pynauty.Graph(len(atominenv_idx))
+                for ind in atominenv_idx:
+                    # Recherche des voisins dans le rayon rnei
+                    neighbors_local = tree.query_ball_point(positions[ind], self.atomenv_params['rnei'])
+                    neighbors_local.remove(ind)
+                    neighbors_local = list(set(neighbors_local).intersection(atominenv_idx))
+#                    adjacency_dict[map_graph_index[ind]] = [map_graph_index[e] for e in neighbors_local]
+#                print(adjacency_dict)
+                #graph = pynauty.Graph(number_of_vertices=len(atominenv_idx),
+                #                      adjacency_dict=adjacency_dict,
+                 #                   )
+                    graph.connect_vertex(map_graph_index[ind],[map_graph_index[e] for e in neighbors_local] )
+                list_topo.append(pynauty.certificate(graph))
+                #print(adjacency_dict)
+            else : 
+                list_topo.append('crist')
+        #sort list based on tags : 
+        list_topo = [e for i, e in sorted(zip(tags, list_topo))]
+
+        return list_topo
      
-    
   
 def make_graph1(atoms, list_id, rnei, rcut) : 
     """
@@ -255,31 +556,31 @@ def make_graph3(atoms, list_id, rnei, rcut) :
 
         #CDIST
         # Utiliser cdist pour calculer toutes les distances entre les voisins
-        #dist_matrix = cdist(replicated_positions[neighbors_global], replicated_positions[neighbors_global])
+        dist_matrix = cdist(replicated_positions[neighbors_global], replicated_positions[neighbors_global])
 
-        ## Construire le dictionnaire d'adjacence avec indices locaux
-        #adjacency_dict = {global_to_local[i]: [] for i in neighbors_global}
+        # Construire le dictionnaire d'adjacence avec indices locaux
+        adjacency_dict = {global_to_local[i]: [] for i in neighbors_global}
 
-        ## Associer correctement les indices dans dist_matrix
-        #for i in range(len(neighbors_global)):
-        #    for j in range(len(neighbors_global)):
-        #        if i != j:  # Pas d'auto-boucle
-        #            if dist_matrix[i, j] <= rnei:
-        #                adjacency_dict[i].append(j)
+        # Associer correctement les indices dans dist_matrix
+        for i in range(len(neighbors_global)):
+            for j in range(len(neighbors_global)):
+                if i != j:  # Pas d'auto-boucle
+                    if dist_matrix[i, j] <= rnei:
+                        adjacency_dict[i].append(j)
         #END CDIST 
 
         #Local Tree
 
         # Construire le dictionnaire d'adjacence avec indices locaux
-        adjacency_dict = {local_idx: [] for local_idx in local_to_global.keys()}
+        #adjacency_dict = {local_idx: [] for local_idx in local_to_global.keys()}
 
-        # Trouver les voisins dans le rayon rnei en utilisant le deuxième KDTree
-        for i, ind in enumerate(neighbors_global):
-            # Recherche des voisins dans le rayon rnei
-            neighbors_local = tree.query_ball_point(replicated_positions[ind], rnei)
-            for neighbor in neighbors_local:
-                if neighbor != ind and neighbor in neighbors_global:  # Ne pas ajouter soi-même comme voisin
-                    adjacency_dict[i].append(global_to_local[neighbor])  # Utilisation des indices locaux
+        ## Trouver les voisins dans le rayon rnei en utilisant le deuxième KDTree
+        #for i, ind in enumerate(neighbors_global):
+        #    # Recherche des voisins dans le rayon rnei
+        #    neighbors_local = tree.query_ball_point(replicated_positions[ind], rnei)
+        #    for neighbor in neighbors_local:
+        #        if neighbor != ind and neighbor in neighbors_global:  # Ne pas ajouter soi-même comme voisin
+        #            adjacency_dict[i].append(global_to_local[neighbor])  # Utilisation des indices locaux
         #END Local Tree
 
         
@@ -310,7 +611,7 @@ def make_graph4(atoms, list_id, rnei, rcut) :
         # Trouver les indices des voisins dans le rayon rcut
         atominenv_idx = tree.query_ball_point(positions[atom_idx], rcut)
         atominenv_idx = list(atominenv_idx)
-
+        #TODO Not necessary
         # Renuméroter les indices localement (0 à number_of_vertices-1)
         local_to_global = {local_idx: global_idx for local_idx, global_idx in enumerate(atominenv_idx)}
         global_to_local = {v: k for k, v in local_to_global.items()}
