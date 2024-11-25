@@ -30,7 +30,7 @@ system = System(init_config_file)
 
 np.savetxt('test0', system.get_positions())
 
-system.minimize('lammps', minimization, potential)
+system.minimize('lammps', minimization, potential, nprocs=8)
 
 np.savetxt('test1', system.get_positions())
 

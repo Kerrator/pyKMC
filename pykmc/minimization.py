@@ -9,9 +9,13 @@ from executorlib import Executor
 
 
 class Minimization:
+    """ Class to execute diffent minimization procedure
+    """
 
     def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs) : 
-        #Initialization of class parameters 
+        """ 
+         
+        """
         self.system = system
         self.minimization_style = minimization_style
         self.minimization_params = minimization_params
@@ -63,7 +67,7 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #initialize lammps :
-        lmp = lammps()
+        lmp = lammps(cmdargs=['-log', 'log_minimize.lammps'])
 
         #TODO should add posibility to use watherver parameters
         #for the moment default parameters 

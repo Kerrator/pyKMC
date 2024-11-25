@@ -2,6 +2,9 @@ from ase import Atoms
 from ase.io import read
 
 class System(Atoms):
+    """
+    Extension of the Atoms Ase object 
+    """
 
     def __init__(self, file_path):
         atoms = read(file_path)  # Load configurations from file 
