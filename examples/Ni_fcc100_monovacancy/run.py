@@ -1,4 +1,5 @@
 from ase.io import read, write
+from pykmc.system import System
 from pykmc.minimization import Minimization 
 from pykmc.atomic_environment import AtomicEnvironment
 from ase.visualize import view
@@ -6,12 +7,12 @@ import cProfile
 
 #PARAMETERS : 
 #init_config_file = './initial_config.xyz'
-#init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy/Ni_monovacancy.xyz'
+init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy/Ni_monovacancy.xyz'
 #init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_108at/Ni_cristal_108at.xyz'
 #init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_4000at/Ni_cristal_4000at_4defects.xyz'
 #init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_10976at/Ni_cristal_10976at_3defects.xyz'
 #init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_32000at_50defects/Ni_cristal_32000at_50defects_10defects.xyz'
-init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_108000at_1defects/Ni_cristal_108000at_1defects_1defects.xyz'
+#init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_108000at_1defects/Ni_cristal_108000at_1defects_1defects.xyz'
 
 
 minimization = {'min_style'     : 'cg', 
@@ -27,9 +28,14 @@ potential = {'pair_style' : 'lj/cut 6.0',
 atomenv = {'rnei' : 3.01, 
            'rcut' : 5.5}
 
-#1-Read initial configuration 
-atoms = read(init_config_file)
-atoms.set_pbc(True)
+#1-Initialize the system : 
+system = System(init_config_file)
+print(system)
+
+
+
+#atoms = read(init_config_file)
+#atoms.set_pbc(True)
 
 #2-Run Minimization
 #atoms = Minimization(atoms, 'lammps', minimization, potential, dimension=2, nprocs=8).run()
@@ -37,8 +43,8 @@ atoms.set_pbc(True)
 #atenv = AtomicEnvironment(atoms, 'cna',atomenv , potential, dimension=3, nprocs=2)
 #atenv = AtomicEnvironment(atoms, 'hausdorff_dist',atomenv , potential, dimension=3)
 #atenv = AtomicEnvironment(atoms, 'graph_nauty',atomenv, dimension=3, nprocs=8)
-atenv = AtomicEnvironment(atoms, 'cna/graph_nauty',atomenv, dimension=3, nprocs=1)
-atenv.run()
+#atenv = AtomicEnvironment(atoms, 'cna/graph_nauty',atomenv, dimension=3, nprocs=1)
+#atenv.run()
 #cProfile.run('atenv.run()')
 #z = 499*[1]
 #for i in range(len(atenv.dict_env)) : 
