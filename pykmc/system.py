@@ -9,3 +9,11 @@ class System(Atoms):
                          positions=atoms.get_positions(),
                          cell=atoms.get_cell(),
                          pbc=atoms.get_pbc())
+        
+    def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
+        """ 
+        Minimize the system and update system positions 
+        """
+        from .minimization import Minimization 
+        minimizer = Minimization(self, minimization_style, minimization_params, potential, dimension, nprocs)
+        minimizer.run()

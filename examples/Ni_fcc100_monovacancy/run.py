@@ -4,6 +4,7 @@ from pykmc.minimization import Minimization
 from pykmc.atomic_environment import AtomicEnvironment
 from ase.visualize import view
 import cProfile
+import numpy as np
 
 #PARAMETERS : 
 #init_config_file = './initial_config.xyz'
@@ -18,21 +19,20 @@ init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy
 minimization = {'min_style'     : 'cg', 
                 'minimize '     : '1.0e-6 1.0e-8 100 1000'}
 
-#potential = {'pair_style' : 'eam/alloy', 
-#             'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
-
-potential = {'pair_style' : 'lj/cut 6.0',
-             'pair_coeff' : '* * 0.23144 2.49'}
-
+potential = {'pair_style' : 'eam/alloy', 
+             'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
            'rcut' : 5.5}
 
 #1-Initialize the system : 
 system = System(init_config_file)
-print(system)
 
+np.savetxt('test0', system.get_positions())
 
+system.minimize('lammps', minimization, potential)
+
+np.savetxt('test1', system.get_positions())
 
 #atoms = read(init_config_file)
 #atoms.set_pbc(True)

@@ -10,9 +10,9 @@ from executorlib import Executor
 
 class Minimization:
 
-    def __init__(self, atoms, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
+    def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs) : 
         #Initialization of class parameters 
-        self.atoms = atoms
+        self.system = system
         self.minimization_style = minimization_style
         self.minimization_params = minimization_params
         self.potential = potential
@@ -28,12 +28,15 @@ class Minimization:
         with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
             match self.minimization_style : 
                 case "lammps":
-                    #fs = exe.submit(minimize_lammps, self.atoms, self.minimization_params, self.potential, self.dimension)
-                    exe.submit(self.minimize_lammps)
-                    #atoms = fs.result()
-                    return self.atoms
+                    fs = exe.submit(self.minimize_lammps)
+                    if self.nprocs == 1 : 
+                        positions = fs.result()
+                    else : 
+                        positions = fs.result()[0]
                 case _:
                     raise Exception("Minimization style not known")
+        #Set new positions : 
+        self.system.set_positions(positions)
 
     def minimize_lammps(self) : 
         """
@@ -55,7 +58,7 @@ class Minimization:
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
-            write_lammps_data(lammps_data_file, self.atoms, masses=True)
+            write_lammps_data(lammps_data_file, self.system, masses=True)
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
@@ -82,9 +85,9 @@ class Minimization:
             #convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
-            #set new positions after minimization
-            self.atoms.set_positions(positions)
             #clean files
             run('rm {}'.format(lammps_data_file), shell=True)
+            #set new positions after minimization
+            return positions 
         #close lammps/MPI
         lmp.close()
