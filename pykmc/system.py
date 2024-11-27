@@ -34,12 +34,12 @@ class System(Atoms):
         minimizer = Minimization(self, minimization_style, minimization_params, potential, dimension, nprocs, backend)
         minimizer.run()
 
-    def find_environment(self, environment_style, environement_params, dimension=3, nprocs=1) : 
+    def find_environment(self, environment_style, environement_params, dimension=3, nprocs=1, backend='local') : 
         """ 
         Find atomic environment for each atoms in System and create a dictionary 
         """
         from .atomic_environment import AtomicEnvironment 
-        atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs)
+        atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs, backend)
         atomic_environment.run()
 
     def event_search(self, search_style, search_params, potential, dimension=3, nprocs=1) : 

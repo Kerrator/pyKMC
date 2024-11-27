@@ -27,12 +27,14 @@ system = System(init_config_file)
 
 #2-Minimize the system : 
 system.minimize('lammps', minimization, potential, nprocs=1, backend='slurm_allocation')
+print(system.get_positions())
+print(system.get_cell())
 
 #3-find atomic environement
-#system.find_environment('cna', atomenv, nprocs=8)
+system.find_environment('cna', atomenv, nprocs=8)
 #system.find_environment('graph', atomenv, nprocs=8)
-#system.find_environment('cna/graph', atomenv, nprocs=8)
-#print(system.environment)
+#system.find_environment('cna/graph', atomenv, nprocs=1)
+print(system.environment)
 
 #4-Generate catalog
-#system.event_search('dimer', search_params, potential, nprocs=1)
+#system.event_search('pARTn', search_params, potential, nprocs=1)

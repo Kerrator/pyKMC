@@ -17,19 +17,21 @@ from scipy.spatial.distance import cdist
 
 class AtomicEnvironment() : 
 
-    def __init__(self, system, atomenv_style, atomenv_params, dimension=3, nprocs=1) : 
+    def __init__(self, system, atomenv_style, atomenv_params, dimension, nprocs, backend) : 
         self.system = system
         self.atomenv_style = atomenv_style
         self.atomenv_params = atomenv_params
         self.dimension = dimension
         self.nprocs = nprocs
+        self.backend = backend
 
     def run(self): 
         """
         Run similar atomic environment search based on topology_style
         """
         #TODO voir comment recuperer l'erreur de la fonction appelée avec exe.submit(), c'est un enfer a debugger sinon
-        with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+        #with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+        with Executor(backend =self.backend, max_cores=self.nprocs) as exe : 
             match self.atomenv_style : 
                 case "cna":
                     fs = exe.submit(self.cna)
