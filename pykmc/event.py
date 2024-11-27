@@ -108,7 +108,7 @@ class EventSearch() :
 
         # Set up LAMMPS calculator
         run('export ASE_LAMMPSRUN_COMMAND=/Users/hugomoison/Programmes/lammps-29Aug2024/src', shell=True)
-        lammps_command = ["lmp"]  
+        lammps_command = ["lmp_mpi"]  
         lammps_parameters = {'pair_style': 'eam', 'pair_coeff': ['* * ./Ni_v6_2.0_LKBeland2016.eam Ni']}
         files = ['Ni_v6_2.0_LKBeland2016.eam']
         #initial potential energy : 
