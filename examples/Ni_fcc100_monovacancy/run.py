@@ -39,10 +39,10 @@ print(system.cell)
 #system.minimize('lammps', minimization, potential, nprocs=8)
 
 #3-find atomic environement
-#system.find_environment('cna', atomenv, nprocs=8)
+system.find_environment('cna', atomenv, nprocs=8)
 #system.find_environment('graph', atomenv, nprocs=8)
-system.find_environment('cna/graph', atomenv, nprocs=8)
-#print(system.environment)
+#system.find_environment('cna/graph', atomenv, nprocs=8)
+print(system.environment)
 
 #4-Generate catalog
-system.event_search('dimer', search_params, potential, nprocs=1)
+#system.event_search('dimer', search_params, potential, nprocs=1)

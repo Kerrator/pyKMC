@@ -35,14 +35,14 @@ class Minimization:
             match self.minimization_style : 
                 case "lammps":
                     fs = exe.submit(self.minimize_lammps)
-                    if self.nprocs == 1 : 
-                        positions = fs.result()
-                    else : 
-                        positions = fs.result()[0]
                 case _:
                     raise Exception("Minimization style not known")
         #Set new positions : 
+        positions = fs.result()
+        positions[np.abs(positions) < 1e-6] = 0
         self.system.set_positions(positions)
+        print(self.system.get_positions())
+        #self.system.set_positions(wrap_positions(positions, cell=self.system.get_cell(), pbc = [1,1,1]))
 
     def minimize_lammps(self) : 
         """

@@ -18,7 +18,7 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
-           'rcut' : 4.0}
+           'rcut' : 3.3}
 
 search_params = {'nsearch' : 5}
 
@@ -26,14 +26,12 @@ search_params = {'nsearch' : 5}
 system = System(init_config_file)
 
 #2-Minimize the system : 
-system.minimize('lammps', minimization, potential, nprocs=1, backend='slurm_allocation')
-print(system.get_positions())
-print(system.get_cell())
+system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
 
 #3-find atomic environement
-system.find_environment('cna', atomenv, nprocs=8)
-#system.find_environment('graph', atomenv, nprocs=8)
-#system.find_environment('cna/graph', atomenv, nprocs=1)
+#system.find_environment('cna', atomenv, nprocs=1)
+#system.find_environment('graph', atomenv, nprocs=1)
+system.find_environment('cna/graph', atomenv, nprocs=8)
 print(system.environment)
 
 #4-Generate catalog

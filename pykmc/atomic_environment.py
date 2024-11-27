@@ -35,25 +35,14 @@ class AtomicEnvironment() :
             match self.atomenv_style : 
                 case "cna":
                     fs = exe.submit(self.cna)
-                    if self.nprocs == 1 :
-                        list_env = fs.result() 
-                    else : 
-                        list_env = fs.result()[0]
                 case "graph" : 
                     fs = exe.submit(self.graph_nauty)
-                    if self.nprocs == 1 : 
-                        list_env = fs.result()
-                    else : 
-                        list_env = list(chain(*fs.result()))
                 case "cna/graph" : 
                     fs = exe.submit(self.cna_graph_nauty)
-                    if self.nprocs == 1 : 
-                        list_env = fs.result()
-                    else : 
-                        list_env = fs.result()[0] 
                 case _:
                     raise Exception("Atomic environment style not known")
 
+        list_env = fs.result()
         #From list of atomic environment we create a dictionary, and update system.environment
         diff_env = set(list_env)
         diff_env = list(diff_env) 
