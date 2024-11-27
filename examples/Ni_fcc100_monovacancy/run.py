@@ -5,8 +5,12 @@ from pykmc.atomic_environment import AtomicEnvironment
 from ase.visualize import view
 import cProfile
 import numpy as np
+import sys
 
-#PARAMETERS : 
+#PARAMETERS :
+ARTn_path = '/Users/hugomoison/Postdoc/artn-plugin-DEVEL/interface'
+sys.path.append('ARTn_path')
+
 #init_config_file = './initial_config.xyz'
 init_config_file = '/Users/hugomoison/Postdoc/projet_kmc/examples/Ni_monovacancy/Ni_monovacancy.xyz'
 #init_config_file = '/Users/hugomoison/Postdoc/Vault/Ni_cystal_with_defect/Ni_cristal_108at/Ni_cristal_108at.xyz'
@@ -29,6 +33,7 @@ search_params = {'nsearch' : 5}
 
 #1-Initialize the system : 
 system = System(init_config_file)
+print(system.cell)
 
 #2-Minimize the system : 
 #system.minimize('lammps', minimization, potential, nprocs=8)
@@ -40,4 +45,4 @@ system.find_environment('cna/graph', atomenv, nprocs=8)
 #print(system.environment)
 
 #4-Generate catalog
-system.event_search('ARTn', search_params, nprocs=1)
+system.event_search('dimer', search_params, potential, nprocs=1)
