@@ -37,12 +37,11 @@ class Minimization:
                     fs = exe.submit(self.minimize_lammps)
                 case _:
                     raise Exception("Minimization style not known")
+        #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
         #Set new positions : 
         positions = fs.result()
-        positions[np.abs(positions) < 1e-6] = 0
+        positions[positions < 0] = 0
         self.system.set_positions(positions)
-        print(self.system.get_positions())
-        #self.system.set_positions(wrap_positions(positions, cell=self.system.get_cell(), pbc = [1,1,1]))
 
     def minimize_lammps(self) : 
         """
@@ -86,6 +85,9 @@ class Minimization:
             lmp.command('{} {}'.format(key, val)) 
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
+
+        test = lmp.extract_box()
+        print(test)
 
         if rank == 0 : 
             #convert ctype positions into a numpy array
