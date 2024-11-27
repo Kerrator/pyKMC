@@ -12,7 +12,7 @@ class Minimization:
     """ Class to execute diffent minimization procedure
     """
 
-    def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs) : 
+    def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs, backend) : 
         """ 
          
         """
@@ -22,6 +22,7 @@ class Minimization:
         self.potential = potential
         self.dimension = dimension
         self.nprocs = nprocs
+        self.backend = backend
 
     def run(self) : 
         """
@@ -29,7 +30,8 @@ class Minimization:
         return Atoms ASE object with updated positions
         """
 
-        with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+        #with Executor(backend=self.backend, max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+        with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
             match self.minimization_style : 
                 case "lammps":
                     fs = exe.submit(self.minimize_lammps)

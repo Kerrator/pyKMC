@@ -26,12 +26,12 @@ class System(Atoms):
         else : 
             self.catalog = catalog #for restart
         
-    def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1) : 
+    def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 
         Minimize the system and update system positions 
         """
         from .minimization import Minimization 
-        minimizer = Minimization(self, minimization_style, minimization_params, potential, dimension, nprocs)
+        minimizer = Minimization(self, minimization_style, minimization_params, potential, dimension, nprocs, backend)
         minimizer.run()
 
     def find_environment(self, environment_style, environement_params, dimension=3, nprocs=1) : 

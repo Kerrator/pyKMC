@@ -1,0 +1,72 @@
+LAMMPS (29 Aug 2024 - Update 1)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread. (src/src/comm.cpp:98)
+  using 1 OpenMP thread(s) per MPI task
+Reading data file ...
+  orthogonal box = (0 0 0) to (17.6 17.6 17.6)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  499 atoms
+  read_data CPU = 0.003 seconds
+
+CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE
+
+Your simulation uses code contributions which should be cited:
+- Type Label Framework: https://doi.org/10.1021/acs.jpcb.3c08419
+The log file lists these citations in BibTeX format.
+
+CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE
+
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8.5
+  ghost atom cutoff = 8.5
+  binsize = 4.25, bins = 5 5 5
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair eam/alloy, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+Setting up cg style minimization ...
+  Unit style    : metal
+  Current step  : 0
+Per MPI rank memory allocation (min/avg/max) = 4.57 | 4.57 | 4.57 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press     
+         0   0             -2218.9289      0             -2218.9289     -405.35212    
+         3   0             -2218.9776      0             -2218.9776     -637.39527    
+Loop time of 0.0138762 on 1 procs for 3 steps with 499 atoms
+
+99.4% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final = 
+     -2218.92894181319  -2218.97618104158  -2218.97762153824
+  Force two-norm initial, final = 1.0266971 0.090439259
+  Force max component initial, final = 0.20103783 0.0064697478
+  Final line search alpha, max atom move = 1 0.0064697478
+  Iterations, force evaluations = 3 6
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.013653   | 0.013653   | 0.013653   |   0.0 | 98.39
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00010278 | 0.00010278 | 0.00010278 |   0.0 |  0.74
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.0001206  |            |       |  0.87
+
+Nlocal:            499 ave         499 max         499 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2929 ave        2929 max        2929 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          55776 ave       55776 max       55776 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 55776
+Ave neighs/atom = 111.77555
+Neighbor list builds = 0
+Dangerous builds = 0
+Total wall time: 0:00:00
