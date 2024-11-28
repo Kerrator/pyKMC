@@ -1,0 +1,21 @@
+Metadata-Version: 2.1
+Name: pykmc
+Version: 0.0.1
+Summary: test kmc and python
+Author: Hugo Moison
+Project-URL: Homepage, https://github.com/hugomoison/pyKMC
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+
+# pyKMC
+
+in ./utils :
+
+- generate_initial_configs : 
+scripts to generate example initial configurations 
+
+- visualization : 
+scripts to visualize similar atomic environment search

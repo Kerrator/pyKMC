@@ -27,14 +27,15 @@ search_params = {'nsearch' : 5,
 system = System(init_config_file)
 
 #2-Minimize the system : 
-system.minimize('lammps', minimization, potential, nprocs=10, backend='slurm_allocation')
-
+print(system.positions)
+system.minimize('lammps', minimization, potential, nprocs=8, backend='local')
+print(system.positions)
 #3-find atomic environement
 #system.find_environment('cna', atomenv, nprocs=1)
 #system.find_environment('graph', atomenv, nprocs=1)
-system.find_environment('cna/graph', atomenv, nprocs=1, backend='slurm_allocation')
-print("DICO ENV:")
-print(system.environment)
+#system.find_environment('cna/graph', atomenv, nprocs=1, backend='slurm_allocation')
+#print("DICO ENV:")
+#print(system.environment)
 
 #4-Generate catalog
-system.event_search('pARTn', search_params, potential, nprocs=1, backend='slurm_allocation')
+#system.event_search('pARTn', search_params, potential, nprocs=1, backend='slurm_allocation')
