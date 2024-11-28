@@ -4,3 +4,14 @@
 *.pyc
 *=5
 *initial_config_minimization.lmp
+*artn.in                          
+*latest_eigenvec.xyz  
+*min2.xyz                    
+*sad1.xyz
+*artn.out                         
+*log_cna.lammps       
+*mincounter                  
+*sadcounter
+*initp.xyz                        
+*log_minimize.lammps  
+*min1.xyz

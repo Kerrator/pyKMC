@@ -42,11 +42,11 @@ class System(Atoms):
         atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs, backend)
         atomic_environment.run()
 
-    def event_search(self, search_style, search_params, potential, dimension=3, nprocs=1) : 
+    def event_search(self, search_style, search_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 
         For each atomic environment ID that are not in the catalog (except 'crist'), we launch 20 ARTn search 
         and add event to the catalog
         """
         from .event import EventSearch 
-        event_search = EventSearch(self, search_style, search_params, potential, dimension, nprocs)
+        event_search = EventSearch(self, search_style, search_params, potential, dimension, nprocs, backend)
         event_search.run()

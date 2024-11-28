@@ -7,18 +7,20 @@ from ase.mep import DimerControl, MinModeAtoms, MinModeTranslate
 from ase.calculators.lammpsrun import LAMMPS
 from ase import Atoms
 from subprocess import run
-#import pypARTn2
+from executorlib import Executor
+import pypARTn2
 
 
 class EventSearch() : 
 
-    def __init__(self, system, search_style, search_params, potential, dimension=3, nprocs=1) -> None:
+    def __init__(self, system, search_style, search_params, potential, dimension, nprocs, backend) -> None:
         self.system = system 
         self.search_style = search_style
         self.search_params = search_params 
         self.potential = potential
         self.dimension = dimension 
         self.nprocs = nprocs 
+        self.backend = backend
 
 
     def run(self) : 
@@ -37,9 +39,9 @@ class EventSearch() :
             l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
             #then we do a pART search and put the result of each search in self.system.catalog
             #for atom_index in l_atoms_search : 
-            for atom_index in [l_atoms_search[0]] : 
-                #self.pARTn_search(atom_index=atom_index)
-                self.pARTn_search(atom_index=atom_index, potential = self.potential)
+            for atom_index in [l_atoms_search[0]] : #TEST pour un event search 
+                with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
+                    exe.submit(self.pARTn_search(atom_index=atom_index, potential = self.potential))
 
 
     def new_environment(self) : 
@@ -60,46 +62,58 @@ class EventSearch() :
         Use pARTn with Lammps to find events
         atom_index : atom on which we perform the search (the one that we init_push)
         """
-        print('yes')
         
         #for MPI : 
-        #comm = MPI.COMM_WORLD
-        #rank = comm.Get_rank()
-        #nprocs = comm.Get_size()
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        nprocs = comm.Get_size()
 
-        ##Write lammps data file : 
-        #lammps_data_file = 'initial_config_minimization.lmp'
-        #if rank == 0 :
-        #    write_lammps_data(lammps_data_file, self.system, masses=True)
-        #    if self.dimension == 2 : 
-        #        modify_lammps_data_2D(lammps_data_file)
+        #Write lammps data file : 
+        lammps_data_file = 'initial_config_minimization.lmp'
+        if rank == 0 :
+            write_lammps_data(lammps_data_file, self.system, masses=True)
+            if self.dimension == 2 : 
+                modify_lammps_data_2D(lammps_data_file)
 
-        ##Setup pARTn : 
-        #artn = pypARTn2.artn( engine = "lmp" ) 
-        #artn.set("engine_units","lammps/metal" )
-        #artn.set('lpush_final = .true.')
-        #artn.set('lmove_nextmin = .true.')
-        #artn.set('ninit = 3')
-        #artn.set('forc_thr = 0.01')
-        #artn.set('push_step_size = 0.3')
-        #artn.set("push_mode = 'list'")
-        #artn.set('push_ids = {}'.format(atom_index))
+        #TODO pypARTNn2.artn() seems to have bugs,
+        #TODO  cant use artn.set() or artn.extract()
+        #TODO  For the moment doing it by writing/reading files
+        #TODO Need to talk to Micha
 
+        #Setup pARTn : 
+        if rank == 0 : #write artn.in file 
+            artninfile = 'artn.in'
+            file = open(artninfile, 'w')
+            file.write('&ARTN_PARAMETERS\n')
+            file.write("engine_units='lammps/metal'\n")
+            file.write("verbose 1\n")
+            file.write("lpush_final = .true.\n")
+            file.write("lmove_nextmin = .true.\n")
+            file.write("ninit = 1\n")
+            file.write("forc_thr = 0.01\n")
+            file.write("push_step_size = 0.5\n")
+            file.write("push_mode = 'list'\n")
+            file.write("push_ids = {}\n".format(atom_index))
+            file.write('nsmooth = 1')
+            file.close()
 
-        ##Setup Lammps : 
-        #lmp = lammps()
-        #lmp.command("units metal")
-        #lmp.command('atom_style atomic')
-        #lmp.command("dimension 3")
-        #lmp.command("boundary p p p")
-        #lmp.command("read_data {}".format(lammps_data_file))
-        #    #Potential : 
-        #for key, val in potential.items() : 
-        #    lmp.command("{} {}".format(key, val))
-        #lmp.command("plugin load {}".format(self.search_params['path_artnso']))
-        #lmp.command("fix 10 all artn dmax 8.0")
-        #lmp.command("min_style fire")
-        #lmp.command("minimize 1e-3 1e-3 1000 1000")
+        #Setup Lammps : 
+        lmp = lammps()
+        lmp.command("units metal")
+        lmp.command('atom_style atomic')
+        lmp.command("dimension 3")
+        lmp.command("boundary p p p")
+        lmp.command("read_data {}".format(lammps_data_file))
+            #Potential : 
+        for key, val in potential.items() : 
+            lmp.command("{} {}".format(key, val))
+        lmp.command("plugin load {}".format(self.search_params['path_artnso']))
+        lmp.command("fix 10 all artn dmax 8.0")
+        lmp.command("min_style fire")
+        lmp.command("minimize 1e-3 1e-3 1000 1000")
+        
+        #then need to extract configurations, energy barrer
+
 
     def dimer_search(self, atom_index, potential): 
         """ 

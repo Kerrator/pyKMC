@@ -30,7 +30,9 @@ class Minimization:
         return Atoms ASE object with updated positions
         """
 
+        #TODO Need to adapte for local or slurm allocation
         #with Executor(backend=self.backend, max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
+        #with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
         with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
             match self.minimization_style : 
                 case "lammps":
