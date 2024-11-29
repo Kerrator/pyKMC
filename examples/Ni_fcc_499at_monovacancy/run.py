@@ -19,7 +19,7 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
-           'rcut' : 3.3}
+           'rcut' : 4.0}
 
 search_params = {'nsearch' : 5, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
@@ -41,4 +41,6 @@ print("DICO ENV:")
 print(system.environment)
 
 #4-Generate catalog
-system.event_search('pARTn', search_params, potential, nprocs=1, backend='slurm_allocation')
+system.event_search('pARTn', search_params, potential, nprocs=1, backend='local')
+print("CATALOG")
+print(system.catalog)

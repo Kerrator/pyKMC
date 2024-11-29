@@ -9,6 +9,9 @@ from ase import Atoms
 from subprocess import run
 from executorlib import Executor
 import pypARTn2
+from scipy.spatial import cKDTree
+import numpy as np
+import pandas as pd
 
 
 class EventSearch() : 
@@ -41,7 +44,15 @@ class EventSearch() :
             #for atom_index in l_atoms_search : 
             for atom_index in [l_atoms_search[0]] : #TEST pour un event search 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-                   f =  exe.submit(self.pARTn_search(atom_index=atom_index, potential = self.potential))
+                   fs = exe.submit(self.pARTn_search, atom_index, self.potential )
+                dfevent = pd.Series({'event_id' : id , 
+                                'initial_positions' : fs.result()[0], 
+                                'saddle_positions': fs.result()[1], 
+                                'final_position': fs.result()[2], 
+                                'energy_barrier': fs.result()[3], 
+                                'k' : 1})
+                 
+                self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
 
 
     def new_environment(self) : 
@@ -67,14 +78,25 @@ class EventSearch() :
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
+           #clear 
+        run('rm min* sad* initp.xyz latest_eigenvec.xyz artn.in artn.out', shell=True)
+        #TEST doing research on subsystem around atom_index, rcutsearch, could be usefull for large system² 
+        #tree = cKDTree(self.system.positions, boxsize=np.diag(self.system.cell)) #initialize kd tree 
+        #atominenv_idx = tree.query_ball_point(self.system.positions[atom_index], 5.0) #atom in atomic env 
+        #atominenv_idx = list(atominenv_idx)
+        #newcentralindex = atominenv_idx.index(atom_index)
+        ##TODO deal with atoms type
+        #subsystem = Atoms(positions = self.system.positions[atominenv_idx], cell=self.system.cell)
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
             write_lammps_data(lammps_data_file, self.system, masses=True)
+            #write_lammps_data(lammps_data_file, subsystem, masses=True)
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
+        #artn = pypARTn2.artn(engine='lmp')
         #TODO pypARTNn2.artn() seems to have bugs,
         #TODO  cant use artn.set() or artn.extract()
         #TODO  For the moment doing it by writing/reading files
@@ -112,7 +134,42 @@ class EventSearch() :
         lmp.command("min_style fire")
         lmp.command("minimize 1e-3 1e-3 1000 1000")
 
-        return 
+        #Need to extract min 1, min 3, saddle positions and energy barrier
+        #TODO We only want positions of the rcut environement 
+        #TODO Should check if initpositions correspond to min1 or min2
+        #TODO Should add backward reaction
+
+         
+
+
+
+        with open('./artn.out', 'r') as output : 
+            lines = output.readlines() 
+        if 'ifail:  1' not in lines[-1]: 
+            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
+            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
+        
+            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
+            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
+
+
+            min1positions = np.loadtxt('min1.xyz', skiprows=2, usecols=(1,2,3))
+            min2positions = np.loadtxt('min2.xyz', skiprows=2, usecols=(1,2,3))
+            saddlepositions = np.loadtxt('sad1.xyz', skiprows=2, usecols=(1,2,3))
+
+            #reading artn.out file : 
+            with open('./artn.out', 'r') as output : 
+                lines = output.readlines() 
+            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
+            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
+        
+            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
+            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
+
+            if delr1 < delr2 : 
+                return min1positions, saddlepositions, min2positions, dE_forward
+            else : 
+                return min2positions, saddlepositions, min1positions, dE_forward
         #then need to extract configurations, energy barrer
 
 

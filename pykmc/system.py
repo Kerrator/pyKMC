@@ -16,6 +16,11 @@ class System(Atoms):
                          pbc=atoms.get_pbc())
 
         self.environment = None
+
+        #Note :  using Dataframe is usefull to do operation on it, but doing it that way, every time we 
+        #add a new event, we have to copy the entire catalog. 
+        #Dataframe are not made to be extended
+        #could use dict of list 
         if catalog == None : 
             self.catalog = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
