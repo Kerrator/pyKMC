@@ -41,7 +41,7 @@ class EventSearch() :
             #for atom_index in l_atoms_search : 
             for atom_index in [l_atoms_search[0]] : #TEST pour un event search 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-                    exe.submit(self.pARTn_search(atom_index=atom_index, potential = self.potential))
+                   f =  exe.submit(self.pARTn_search(atom_index=atom_index, potential = self.potential))
 
 
     def new_environment(self) : 
@@ -91,7 +91,7 @@ class EventSearch() :
             file.write("lmove_nextmin = .true.\n")
             file.write("ninit = 1\n")
             file.write("forc_thr = 0.01\n")
-            file.write("push_step_size = 0.5\n")
+            file.write("push_step_size = 0.2\n")
             file.write("push_mode = 'list'\n")
             file.write("push_ids = {}\n".format(atom_index))
             file.write('nsmooth = 1')
@@ -111,7 +111,8 @@ class EventSearch() :
         lmp.command("fix 10 all artn dmax 8.0")
         lmp.command("min_style fire")
         lmp.command("minimize 1e-3 1e-3 1000 1000")
-        
+
+        return 
         #then need to extract configurations, energy barrer
 
 

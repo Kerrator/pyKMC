@@ -36,7 +36,7 @@ class Minimization:
         with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
             match self.minimization_style : 
                 case "lammps":
-                    fs = exe.submit(self.minimize_lammps)
+                    fs = exe.submit(self.minimize_lammps, resource_dict={"cores": self.nprocs})
                 case _:
                     raise Exception("Minimization style not known")
         #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)

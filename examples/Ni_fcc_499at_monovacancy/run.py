@@ -1,3 +1,4 @@
+import sys
 from ase.io import read, write
 from pykmc.system import System
 from pykmc.minimization import Minimization 
@@ -5,7 +6,7 @@ from pykmc.atomic_environment import AtomicEnvironment
 from ase.visualize import view
 import cProfile
 import numpy as np
-import sys
+
 
 #PARAMETERS :
 
@@ -21,21 +22,23 @@ atomenv = {'rnei' : 3.01,
            'rcut' : 3.3}
 
 search_params = {'nsearch' : 5, 
-                 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
+                 'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
+                # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
 #1-Initialize the system : 
 system = System(init_config_file)
 
 #2-Minimize the system : 
 print(system.positions)
-system.minimize('lammps', minimization, potential, nprocs=8, backend='local')
+print('yes')
+system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
 print(system.positions)
 #3-find atomic environement
 #system.find_environment('cna', atomenv, nprocs=1)
 #system.find_environment('graph', atomenv, nprocs=1)
-#system.find_environment('cna/graph', atomenv, nprocs=1, backend='slurm_allocation')
-#print("DICO ENV:")
-#print(system.environment)
+system.find_environment('cna/graph', atomenv, nprocs=1, backend='local')
+print("DICO ENV:")
+print(system.environment)
 
 #4-Generate catalog
-#system.event_search('pARTn', search_params, potential, nprocs=1, backend='slurm_allocation')
+system.event_search('pARTn', search_params, potential, nprocs=1, backend='slurm_allocation')
