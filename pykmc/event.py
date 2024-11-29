@@ -41,19 +41,18 @@ class EventSearch() :
             #list of atoms on which we gonna do the search
             l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
             #then we do a pART search and put the result of each search in self.system.catalog
-            #for atom_index in l_atoms_search : 
-            for atom_index in [l_atoms_search[0]] : #TEST pour un event search 
+            for atom_index in l_atoms_search : 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-                   fs = exe.submit(self.pARTn_search, atom_index, self.potential )
-                dfevent = pd.Series({'event_id' : id , 
-                                'initial_positions' : fs.result()[0], 
-                                'saddle_positions': fs.result()[1], 
-                                'final_position': fs.result()[2], 
-                                'energy_barrier': fs.result()[3], 
-                                'k' : 1})
-                 
-                self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
+                    fs = exe.submit(self.pARTn_search, atom_index, self.potential )
+                if fs.result() is not None : 
+                    dfevent = pd.Series({'event_id' : id , 
+                                    'initial_positions' : fs.result()[0], 
+                                    'saddle_positions': fs.result()[1], 
+                                    'final_position': fs.result()[2], 
+                                    'energy_barrier': fs.result()[3], 
+                                    'k' : 1})
 
+                    self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
 
     def new_environment(self) : 
         """ 
@@ -96,31 +95,26 @@ class EventSearch() :
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
-        #artn = pypARTn2.artn(engine='lmp')
-        #TODO pypARTNn2.artn() seems to have bugs,
-        #TODO  cant use artn.set() or artn.extract()
-        #TODO  For the moment doing it by writing/reading files
-        #TODO Need to talk to Micha
 
         #Setup pARTn : 
-        if rank == 0 : #write artn.in file 
-            artninfile = 'artn.in'
-            file = open(artninfile, 'w')
-            file.write('&ARTN_PARAMETERS\n')
-            file.write("engine_units='lammps/metal'\n")
-            file.write("verbose 1\n")
-            file.write("lpush_final = .true.\n")
-            file.write("lmove_nextmin = .true.\n")
-            file.write("ninit = 1\n")
-            file.write("forc_thr = 0.01\n")
-            file.write("push_step_size = 0.2\n")
-            file.write("push_mode = 'list'\n")
-            file.write("push_ids = {}\n".format(atom_index))
-            file.write('nsmooth = 1')
-            file.close()
-
+        #if rank == 0 : #write artn.in file 
+        #    artninfile = 'artn.in'
+        #    file = open(artninfile, 'w')
+        #    file.write('&ARTN_PARAMETERS\n')
+        #    file.write("engine_units='lammps/metal'\n")
+        #    file.write("verbose 1\n")
+        #    file.write("lpush_final = .true.\n")
+        #    file.write("lmove_nextmin = .true.\n")
+        #    file.write("ninit = 1\n")
+        #    file.write("forc_thr = 0.01\n")
+        #    file.write("push_step_size = 0.2\n")
+        #    file.write("push_mode = 'list'\n")
+        #    file.write("push_ids = {}\n".format(atom_index))
+        #    file.write('nsmooth = 1')
+        #    file.close()
         #Setup Lammps : 
         lmp = lammps()
+        artn = pypARTn2.artn(engine='lmp')
         lmp.command("units metal")
         lmp.command('atom_style atomic')
         lmp.command("dimension 3")
@@ -132,7 +126,20 @@ class EventSearch() :
         lmp.command("plugin load {}".format(self.search_params['path_artnso']))
         lmp.command("fix 10 all artn dmax 8.0")
         lmp.command("min_style fire")
+        #SETUP ARTN
+        artn.set('engine_units', 'lammps/metal')
+        artn.set('verbose',1)
+        artn.set("lpush_final", True)
+        artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
+        artn.set("ninit", 1)
+        artn.set("forc_thr", 0.01)
+        artn.set("push_step_size",  0.2)
+        artn.set("push_mode" ,'list')
+        artn.set("push_ids", [atom_index])
+        artn.set('nsmooth',  1)
+        #Run
         lmp.command("minimize 1e-3 1e-3 1000 1000")
+        lmp.close()
 
         #Need to extract min 1, min 3, saddle positions and energy barrier
         #TODO We only want positions of the rcut environement 
@@ -142,36 +149,37 @@ class EventSearch() :
          
 
 
-
-        with open('./artn.out', 'r') as output : 
-            lines = output.readlines() 
-        if 'ifail:  1' not in lines[-1]: 
-            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
-            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
-        
-            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
-            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
-
-
-            min1positions = np.loadtxt('min1.xyz', skiprows=2, usecols=(1,2,3))
-            min2positions = np.loadtxt('min2.xyz', skiprows=2, usecols=(1,2,3))
-            saddlepositions = np.loadtxt('sad1.xyz', skiprows=2, usecols=(1,2,3))
-
-            #reading artn.out file : 
-            with open('./artn.out', 'r') as output : 
-                lines = output.readlines() 
-            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
-            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
-        
-            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
-            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
-
-            if delr1 < delr2 : 
-                return min1positions, saddlepositions, min2positions, dE_forward
-            else : 
-                return min2positions, saddlepositions, min1positions, dE_forward
-        #then need to extract configurations, energy barrer
-
+#        with open('./artn.out', 'r') as output : 
+#            lines = output.readlines() 
+#        if 'ifail:  1' not in lines[-1]: 
+#            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
+#            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
+#        
+#            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
+#            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
+#
+#
+#            min1positions = np.loadtxt('min1.xyz', skiprows=2, usecols=(1,2,3))
+#            min2positions = np.loadtxt('min2.xyz', skiprows=2, usecols=(1,2,3))
+#            saddlepositions = np.loadtxt('sad1.xyz', skiprows=2, usecols=(1,2,3))
+#
+#            #reading artn.out file : 
+#            with open('./artn.out', 'r') as output : 
+#                lines = output.readlines() 
+#            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
+#            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
+#        
+#            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
+#            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
+#
+#            if delr1 < delr2 : 
+#                return min1positions, saddlepositions, min2positions, dE_forward
+#            else : 
+#                return min2positions, saddlepositions, min1positions, dE_forward
+#        else : 
+#            return None
+#        #then need to extract configurations, energy barrer
+#
 
     def dimer_search(self, atom_index, potential): 
         """ 
