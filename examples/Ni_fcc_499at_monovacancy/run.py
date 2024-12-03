@@ -29,16 +29,11 @@ search_params = {'nsearch' : 5,
 system = System(init_config_file)
 
 #2-Minimize the system : 
-print(system.positions)
-print('yes')
 system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
-print(system.positions)
 #3-find atomic environement
 #system.find_environment('cna', atomenv, nprocs=1)
 #system.find_environment('graph', atomenv, nprocs=1)
 system.find_environment('cna/graph', atomenv, nprocs=1, backend='local')
-print("DICO ENV:")
-print(system.environment)
 
 #4-Generate catalog
 system.event_search('pARTn', search_params, potential, nprocs=1, backend='local')

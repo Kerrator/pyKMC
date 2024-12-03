@@ -44,6 +44,7 @@ class EventSearch() :
             for atom_index in l_atoms_search : 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
+                    print(fs.result())
                 if fs.result() is not None : 
                     dfevent = pd.Series({'event_id' : id , 
                                     'initial_positions' : fs.result()[0], 
@@ -77,8 +78,7 @@ class EventSearch() :
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
-           #clear 
-        run('rm min* sad* initp.xyz latest_eigenvec.xyz artn.in artn.out', shell=True)
+
         #TEST doing research on subsystem around atom_index, rcutsearch, could be usefull for large system² 
         #tree = cKDTree(self.system.positions, boxsize=np.diag(self.system.cell)) #initialize kd tree 
         #atominenv_idx = tree.query_ball_point(self.system.positions[atom_index], 5.0) #atom in atomic env 
@@ -96,22 +96,6 @@ class EventSearch() :
                 modify_lammps_data_2D(lammps_data_file)
 
 
-        #Setup pARTn : 
-        #if rank == 0 : #write artn.in file 
-        #    artninfile = 'artn.in'
-        #    file = open(artninfile, 'w')
-        #    file.write('&ARTN_PARAMETERS\n')
-        #    file.write("engine_units='lammps/metal'\n")
-        #    file.write("verbose 1\n")
-        #    file.write("lpush_final = .true.\n")
-        #    file.write("lmove_nextmin = .true.\n")
-        #    file.write("ninit = 1\n")
-        #    file.write("forc_thr = 0.01\n")
-        #    file.write("push_step_size = 0.2\n")
-        #    file.write("push_mode = 'list'\n")
-        #    file.write("push_ids = {}\n".format(atom_index))
-        #    file.write('nsmooth = 1')
-        #    file.close()
         #Setup Lammps : 
         lmp = lammps()
         artn = pypARTn2.artn(engine='lmp')
@@ -139,47 +123,34 @@ class EventSearch() :
         artn.set('nsmooth',  1)
         #Run
         lmp.command("minimize 1e-3 1e-3 1000 1000")
-        lmp.close()
 
         #Need to extract min 1, min 3, saddle positions and energy barrier
         #TODO We only want positions of the rcut environement 
         #TODO Should check if initpositions correspond to min1 or min2
         #TODO Should add backward reaction
-
          
+        err = artn.get_runparam("error_message")
+        if not err : 
+            delr1 = artn.extract('delr_min1') 
+            delr2 = artn.extract('delr_min2')
 
+            E_sad = artn.extract("etot_sad")
+            E_min1 = artn.extract("etot_min1")
+            E_min2 = artn.extract("etot_min2")
+            dE_forward = E_sad - E_min1 
+            dE_backward = E_sad - E_min2 
+ 
+            min1positions = artn.extract("tau_min1")
+            min2positions = artn.extract("tau_min2")
+            saddlepositions = artn.extract("tau_sad")
 
-#        with open('./artn.out', 'r') as output : 
-#            lines = output.readlines() 
-#        if 'ifail:  1' not in lines[-1]: 
-#            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
-#            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
-#        
-#            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
-#            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
-#
-#
-#            min1positions = np.loadtxt('min1.xyz', skiprows=2, usecols=(1,2,3))
-#            min2positions = np.loadtxt('min2.xyz', skiprows=2, usecols=(1,2,3))
-#            saddlepositions = np.loadtxt('sad1.xyz', skiprows=2, usecols=(1,2,3))
-#
-#            #reading artn.out file : 
-#            with open('./artn.out', 'r') as output : 
-#                lines = output.readlines() 
-#            delr1 = [e for e in lines if 'DEBRIEF(RLX :1)' in e][0].split()[27]
-#            delr2 = [e for e in lines if 'DEBRIEF(RLX :2)' in e][0].split()[27]
-#        
-#            dE_forward = [e for e in lines if 'forward  E_act' in e][-1].split()[3]
-#            dE_backward = [e for e in lines if 'backward E_act' in e][-1].split()[3]
-#
-#            if delr1 < delr2 : 
-#                return min1positions, saddlepositions, min2positions, dE_forward
-#            else : 
-#                return min2positions, saddlepositions, min1positions, dE_forward
-#        else : 
-#            return None
-#        #then need to extract configurations, energy barrer
-#
+            if delr1 < delr2 : 
+                return min1positions, saddlepositions, min2positions, dE_forward
+            else : 
+                return min2positions, saddlepositions, min1positions, dE_forward
+        else : 
+            print("pARTn Error message :", err)
+            return None
 
     def dimer_search(self, atom_index, potential): 
         """ 
