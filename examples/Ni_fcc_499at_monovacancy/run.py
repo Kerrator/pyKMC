@@ -19,23 +19,27 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
-           'rcut' : 4.0}
+           'rcut' : 5.0}
 
-search_params = {'nsearch' : 5, 
+search_params = {'nsearch' : 10, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
+kmc_parameters = {'nkmc_steps' : 5}
 #1-Initialize the system : 
 system = System(init_config_file)
+#KMC 
+system.kmc(kmc_parameters, minimization,atomenv, search_params, potential )
 
+write('test2.xsf', system.kmc_traj)
 #2-Minimize the system : 
-system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
+#system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
 #3-find atomic environement
 #system.find_environment('cna', atomenv, nprocs=1)
 #system.find_environment('graph', atomenv, nprocs=1)
-system.find_environment('cna/graph', atomenv, nprocs=1, backend='local')
+#system.find_environment('cna/graph', atomenv, nprocs=1, backend='local')
 
 #4-Generate catalog
-system.event_search('pARTn', search_params, potential, nprocs=1, backend='local')
-print("CATALOG")
-print(system.catalog)
+#system.event_search('pARTn', search_params, potential, nprocs=1, backend='local')
+#print("CATALOG")
+#print(system.catalog)

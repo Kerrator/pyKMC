@@ -44,12 +44,11 @@ class EventSearch() :
             for atom_index in l_atoms_search : 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
-                    print(fs.result())
                 if fs.result() is not None : 
                     dfevent = pd.Series({'event_id' : id , 
                                     'initial_positions' : fs.result()[0], 
                                     'saddle_positions': fs.result()[1], 
-                                    'final_position': fs.result()[2], 
+                                    'final_positions': fs.result()[2], 
                                     'energy_barrier': fs.result()[3], 
                                     'k' : 1})
 

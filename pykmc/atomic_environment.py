@@ -232,7 +232,7 @@ def make_graph(atoms, list_id, rnei, rcut) :
     list_g = [] 
     positions = atoms.get_positions() 
     cell = atoms.get_cell()
-
+    print(np.diag(cell))
     # Construire le KDTree avec les positions répliquées
     tree = cKDTree(positions, boxsize=np.diag(cell))
     

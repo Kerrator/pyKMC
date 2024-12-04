@@ -88,8 +88,6 @@ class Minimization:
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 
-        test = lmp.extract_box()
-        print(test)
 
         if rank == 0 : 
             #convert ctype positions into a numpy array

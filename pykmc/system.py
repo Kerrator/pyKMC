@@ -25,11 +25,13 @@ class System(Atoms):
             self.catalog = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
                                                  'saddle_positions', 
-                                                 'final_position', 
+                                                 'final_positions', 
                                                  'energy_barrier', 
                                                  'k'])
         else : 
             self.catalog = catalog #for restart
+        
+        self.kmc_traj = None
         
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 
@@ -55,3 +57,10 @@ class System(Atoms):
         from .event import EventSearch 
         event_search = EventSearch(self, search_style, search_params, potential, dimension, nprocs, backend)
         event_search.run()
+
+    def kmc(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension=3, backend='local') :
+        """
+        """ 
+        from .kmc import KMC 
+        kmc = KMC(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension, backend)
+        kmc.run()
