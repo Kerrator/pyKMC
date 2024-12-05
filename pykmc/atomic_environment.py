@@ -11,6 +11,7 @@ from ase import Atoms
 from profiling_decorator import profile
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
+from decimal import *
 
 
 
@@ -230,11 +231,14 @@ def make_graph(atoms, list_id, rnei, rcut) :
     #TODO could try to use cdist insteed of the neighbor_local tree search (should be more efficiant for few atoms) but 
     #need to duplicated local environement
     list_g = [] 
-    positions = atoms.get_positions() 
+    positions = atoms.get_positions(wrap=True) 
     cell = atoms.get_cell()
-    print(np.diag(cell))
+    alat = cell[0][0]
+    alat = Decimal(alat)
     # Construire le KDTree avec les positions répliquées
-    tree = cKDTree(positions, boxsize=np.diag(cell))
+    #tree = cKDTree(positions, boxsize=np.diag(cell))
+    print([alat]*3)
+    tree = cKDTree(positions, boxsize=[alat]*3)
     
     # Construire un graphe pour chaque atome
     for atom_idx in list_id:

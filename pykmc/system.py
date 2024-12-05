@@ -64,3 +64,8 @@ class System(Atoms):
         from .kmc import KMC 
         kmc = KMC(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension, backend)
         kmc.run()
+
+    def point_set_registration(self, psr_style, dimension=3, nprocs=1, backend='local') : 
+        from .point_set_registration import PointSetRegistration 
+        psr = PointSetRegistration(self, psr_style, dimension, nprocs, backend)
+        psr.run()

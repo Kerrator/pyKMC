@@ -7,7 +7,7 @@ import numpy as np
 class KMC() : 
     """class to execute kmc simulation 
     """ 
-    def __init__(self, system, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential, dimension, backend) : 
+    def __init__(self, system, kmc_parameters, minimization_params, atomenv_params, eventsearch_params,  potential, dimension, backend) : 
         """ 
          
         """
@@ -33,13 +33,14 @@ class KMC() :
             self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
             self.system.find_environment('cna/graph', self.atomenv_params, dimension=3, nprocs=1)
             self.system.event_search('pARTn', self.eventsearch_params, self.potential)
-            if len(self.system.catalog)>1 : 
-                idx_cat = self.select_event() 
-                self.update_positions(idx_cat) 
-            traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
-                         positions=self.system.get_positions(),
-                         cell=self.system.get_cell(),
-                         pbc=self.system.get_pbc()))
+            self.system.point_set_registration('ira')
+            #if len(self.system.catalog)>1 : 
+            #    idx_cat = self.select_event() 
+            #    self.update_positions(idx_cat) 
+            #traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
+            #             positions=self.system.get_positions(),
+            #             cell=self.system.get_cell(),
+            #             pbc=self.system.get_pbc()))
 
         self.system.kmc_traj = traj
 
@@ -59,9 +60,9 @@ class KMC() :
         update positions based on selected event 
         """ 
         #TODO Need to fix this shit
+        self.system.wrap(eps=1e-2)
         positions = self.system.catalog.loc[idx_cat].at["final_positions"]
         positions[positions < 0] = 0
         positions[positions > self.system.cell[0][0]-0.1] = self.system.cell[0][0]-0.1
         self.system.set_positions(positions)
         #self.system.set_positions(self.system.catalog.loc[idx_cat].at["final_positions"])
-        self.system.wrap()

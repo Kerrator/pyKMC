@@ -19,19 +19,19 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
-           'rcut' : 5.0}
+           'rcut' : 4.0}
 
-search_params = {'nsearch' : 10, 
+search_params = {'nsearch' : 2, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
-kmc_parameters = {'nkmc_steps' : 5}
+kmc_parameters = {'nkmc_steps' : 1}
 #1-Initialize the system : 
 system = System(init_config_file)
 #KMC 
 system.kmc(kmc_parameters, minimization,atomenv, search_params, potential )
 
-write('test2.xsf', system.kmc_traj)
+write('test4.xsf', system.kmc_traj)
 #2-Minimize the system : 
 #system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
 #3-find atomic environement
