@@ -40,6 +40,7 @@ class Minimization:
                 case _:
                     raise Exception("Minimization style not known")
         #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
+        #TODO check create_atoms : https://docs.lammps.org/Python_module.html#lammps.lammps
         #Set new positions : 
         positions = fs.result()
         positions[positions < 0] = 0

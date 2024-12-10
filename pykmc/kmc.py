@@ -2,6 +2,7 @@ import random
 from ase import Atoms
 import numpy as np
 
+#TODO Could add a write_log() file to call at each steps
 
 
 class KMC() : 
