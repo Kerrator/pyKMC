@@ -33,7 +33,7 @@ class Minimization:
         #TODO Need to adapte for local or slurm allocation
         #with Executor(backend=self.backend, max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
         #with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-        with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
+        with Executor(backend="local") as exe :#, max_cores = self.nprocs, resource_dict={"cores_per_worker":1}) as exe : 
             match self.minimization_style : 
                 case "lammps":
                     fs = exe.submit(self.minimize_lammps, resource_dict={"cores": self.nprocs})
@@ -62,6 +62,7 @@ class Minimization:
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
+        print(rank, nprocs)
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
