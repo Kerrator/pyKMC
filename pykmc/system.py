@@ -29,9 +29,9 @@ class System(Atoms):
                                                  'energy_barrier', 
                                                  'k'])
         else : 
-            self.catalog = catalog #for restart
+            self.catalog = pd.read_pickle(catalog) #for restart
         
-        self.kmc_traj = None
+        self.kmc_traj = None #for restart
         
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 

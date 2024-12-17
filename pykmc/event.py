@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 
+
 class EventSearch() : 
 
     def __init__(self, system, search_style, search_params, potential, dimension, nprocs, backend) -> None:
@@ -44,15 +45,17 @@ class EventSearch() :
             for atom_index in l_atoms_search : 
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
-                if fs.result() is not None : 
-                    dfevent = pd.Series({'event_id' : id , 
+                if fs.result() is not None :
+                    #try add over and lower limit : 
+                    if fs.result()[3] > 0.1 and fs.result()[3] < 5 :  
+                        dfevent = pd.Series({'event_id' : id , 
                                     'initial_positions' : fs.result()[0], 
                                     'saddle_positions': fs.result()[1], 
                                     'final_positions': fs.result()[2], 
                                     'energy_barrier': fs.result()[3], 
                                     'k' : 1})
 
-                    self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
+                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
 
     def new_environment(self) : 
         """ 
@@ -78,19 +81,22 @@ class EventSearch() :
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #TEST doing research on subsystem around atom_index, rcutsearch, could be usefull for large system² 
-        #tree = cKDTree(self.system.positions, boxsize=np.diag(self.system.cell)) #initialize kd tree 
-        #atominenv_idx = tree.query_ball_point(self.system.positions[atom_index], 5.0) #atom in atomic env 
-        #atominenv_idx = list(atominenv_idx)
-        #newcentralindex = atominenv_idx.index(atom_index)
-        ##TODO deal with atoms type
-        #subsystem = Atoms(positions = self.system.positions[atominenv_idx], cell=self.system.cell)
 
+        #Create a subsystem base on central atom neighbor list 
+        #rcutevent = self.system.cell[0][0]
+        rcutevent = 8.0
+        ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+        dist = self.system.get_distances(atom_index, ind, mic=True)
+        neighbor_list = np.where(dist<rcutevent)[0]
+
+        subsystem = Atoms(positions=self.system.get_positions()[neighbor_list], cell=self.system.get_cell(), pbc=True)
+        atom_index = np.where((subsystem.get_positions() == (self.system.positions[atom_index][0], self.system.positions[atom_index][1], self.system.positions[atom_index][2])).all(axis=1))[0][0]
+        print('HERERERE', atom_index)
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
-            write_lammps_data(lammps_data_file, self.system, masses=True)
-            #write_lammps_data(lammps_data_file, subsystem, masses=True)
+#            write_lammps_data(lammps_data_file, self.system, masses=True)
+            write_lammps_data(lammps_data_file, subsystem, masses=True)
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 

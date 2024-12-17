@@ -12,6 +12,7 @@ from profiling_decorator import profile
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 from decimal import *
+from subprocess import run
 
 
 
@@ -31,17 +32,16 @@ class AtomicEnvironment() :
         Run similar atomic environment search based on topology_style
         """
         #TODO voir comment recuperer l'erreur de la fonction appelée avec exe.submit(), c'est un enfer a debugger sinon
-        #with Executor(max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
-        with Executor(backend =self.backend, max_cores=self.nprocs) as exe : 
+        with Executor(backend =self.backend) as exe : 
             match self.atomenv_style : 
                 case "cna":
-                    fs = exe.submit(self.cna)
+                    fs = exe.submit(self.cna, resource_dict={"cores": self.nprocs})
                 case "graph" : 
-                    fs = exe.submit(self.graph_nauty)
+                    fs = exe.submit(self.graph_nauty, resource_dict={"cores": self.nprocs})
                 case "cna/graph" : 
-                    fs = exe.submit(self.cna_graph_nauty)
+                    fs = exe.submit(self.cna_graph_nauty, resource_dict={"cores": self.nprocs})
                 case _:
-                    raise Exception("Atomic environment style not known")
+                    raise Exception("Atomic environment style unknown")
 
         list_env = fs.result()
         #From list of atomic environment we create a dictionary, and update system.environment
@@ -63,6 +63,7 @@ class AtomicEnvironment() :
         """
         write similar atomic environment to file as a list of dict using yaml.
         """
+        #TODO write to file 
 
     def cna(self) : 
         """ 
@@ -77,7 +78,7 @@ class AtomicEnvironment() :
 
 
         #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization.lmp'
+        lammps_data_file = 'initial_config_cna.lmp'
         if rank == 0 :
             write_lammps_data(lammps_data_file, self.system, masses=True)
             if self.dimension == 2 : 
@@ -119,6 +120,9 @@ class AtomicEnvironment() :
                     list_topo.append('notcrist') 
                 else : 
                     list_topo.append('crist')
+            #Clean input file
+            run('rm {}'.format(lammps_data_file), shell=True)
+
             return list_topo
     
 
@@ -164,7 +168,7 @@ class AtomicEnvironment() :
         nprocs = comm.Get_size()
 
         #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization.lmp'
+        lammps_data_file = 'initial_config_cna.lmp'
         if rank == 0 :
             write_lammps_data(lammps_data_file, self.system, masses=True)
             if self.dimension == 2 : 
@@ -221,6 +225,8 @@ class AtomicEnvironment() :
                     list_topo.append(pynauty.certificate(graphs[:,1][ind]))
                 else : 
                     list_topo.append('crist')
+            #Clean input file
+            run('rm {}'.format(lammps_data_file), shell=True)
             return list_topo
         
 
@@ -237,7 +243,6 @@ def make_graph(atoms, list_id, rnei, rcut) :
     alat = Decimal(alat)
     # Construire le KDTree avec les positions répliquées
     #tree = cKDTree(positions, boxsize=np.diag(cell))
-    print([alat]*3)
     tree = cKDTree(positions, boxsize=[alat]*3)
     
     # Construire un graphe pour chaque atome

@@ -14,7 +14,7 @@ class Minimization:
 
     def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs, backend) : 
         """ 
-         
+        Initialization 
         """
         self.system = system
         self.minimization_style = minimization_style
@@ -30,17 +30,13 @@ class Minimization:
         return Atoms ASE object with updated positions
         """
 
-        #TODO Need to adapte for local or slurm allocation
-        #with Executor(backend=self.backend, max_cores=self.nprocs, cores_per_worker=self.nprocs) as exe : 
-        #with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-        with Executor(backend="local") as exe :#, max_cores = self.nprocs, resource_dict={"cores_per_worker":1}) as exe : 
+        with Executor(backend=self.backend) as exe :
             match self.minimization_style : 
                 case "lammps":
                     fs = exe.submit(self.minimize_lammps, resource_dict={"cores": self.nprocs})
                 case _:
                     raise Exception("Minimization style not known")
         #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
-        #TODO check create_atoms : https://docs.lammps.org/Python_module.html#lammps.lammps
         #Set new positions : 
         positions = fs.result()
         positions[positions < 0] = 0
@@ -56,14 +52,14 @@ class Minimization:
                 dimension (int) : dimension (default 3)
 
             Return : 
-                atoms (ASE Atoms Objects) : same Atoms Objects as input with updated positions after minimization
+                positions (numpy array) : updated positions after minimization
         """ 
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
-        print(rank, nprocs)
 
+        #TODO check create_atoms : https://docs.lammps.org/Python_module.html#lammps.lammps
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
@@ -90,14 +86,12 @@ class Minimization:
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 
-
+        #Close lammps/MPI
+        lmp.close()
         if rank == 0 : 
             #convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
             #clean files
             run('rm {}'.format(lammps_data_file), shell=True)
-            #set new positions after minimization
             return positions 
-        #close lammps/MPI
-        lmp.close()
