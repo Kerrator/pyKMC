@@ -6,13 +6,14 @@ import pandas as pd
 class PointSetRegistration() : 
     """ 
     """ 
-    def __init__(self,  system, psr_style, idx_cat, dimension, nprocs, backend) : 
+    def __init__(self,  system, psr_style, idx_cat, central_atom_index, dimension, nprocs, backend) : 
         """ 
          
         """
         self.psr_style = psr_style
         self.system = system
         self.idx_cat = idx_cat
+        self.central_atom_index = central_atom_index
         self.dimension = dimension
         self.backend = backend
         self.nprocs = nprocs 
@@ -21,11 +22,11 @@ class PointSetRegistration() :
         """ 
         """ 
         if self.psr_style == 'ira' : 
-            self.ira(self.idx_cat)
+            self.ira(self.idx_cat, self.central_atom_index)
         else : 
             print(ERROR)
     
-    def ira(self, idx_cat) : 
+    def ira(self, idx_cat, central_atom_index) : 
         """ 
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
         idx_cat : index in catalog of the selected event 
@@ -41,14 +42,14 @@ class PointSetRegistration() :
         #system structure : 
             #find in environment one atom with the event ID 
         #TODO better
-        for dic in self.system.environment : 
-            if dic['ID'] == id : 
-                atom_index_list = dic['atom index']
+        #for dic in self.system.environment : 
+        #    if dic['ID'] == id : 
+        #        atom_index_list = dic['atom index']
         #random atom : 
-        atom_index = random.choice(atom_index_list)
+        #atom_index = random.choice(atom_index_list)
         rcutevent = 8.0
         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-        dist = self.system.get_distances(atom_index, ind, mic=True)
+        dist = self.system.get_distances(central_atom_index, ind, mic=True)
         neighbor_list = np.where(dist<rcutevent)[0]
 
         coords1 = self.system.get_positions()[neighbor_list] 
@@ -58,11 +59,11 @@ class PointSetRegistration() :
         kmax_factor = 2.0
         rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
 
-        a = [[rmat, tr, perm, dh, atom_index, idx_cat]]
+        a = [[rmat, tr, perm, dh, central_atom_index, idx_cat]]
         results = pd.DataFrame(a, columns=['R', 
                                         'T', 
                                         'P', 
-                                        'dh', 'atom index', 'n event'])
+                                        'dh', 'central atom index', 'n event'])
         results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
 
 

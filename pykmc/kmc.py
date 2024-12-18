@@ -37,7 +37,8 @@ class KMC() :
             #self.system.point_set_registration('ira')
             if len(self.system.catalog)>1 : 
                 idx_cat = self.select_event() 
-                self.system.point_set_registration('ira')
+                central_atom_index = self.select_central_atom(idx_cat)
+                self.system.point_set_registration('ira', idx_cat, central_atom_index)
             #    self.update_positions(idx_cat) 
             #traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
             #             positions=self.system.get_positions(),
@@ -55,7 +56,19 @@ class KMC() :
         l_env = [dict['ID'] for dict in self.system.environment]
         l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
 
-        return random.choice(l_catalog) 
+        return random.choice(l_catalog)
+
+    def select_central_atom(self, idx_cat) : 
+        """ 
+        Find a central atom with same ID than the event at idx_cat in catalog
+        """ 
+        id = self.system.catalog.loc[idx_cat].at['event_id'] 
+        for dic in self.system.environment : 
+            if dic['ID'] == id : 
+                atom_index_list = dic['atom index']
+        #random atom : 
+        central_atom_index = random.choice(atom_index_list)
+        return central_atom_index
 
     def update_positions(self, idx_cat) : 
         """ 

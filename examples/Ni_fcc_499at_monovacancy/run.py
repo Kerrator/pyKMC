@@ -19,9 +19,9 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
 
 atomenv = {'rnei' : 3.01, 
-           'rcut' : 4.0}
+           'rcut' : 6.0}
 
-search_params = {'nsearch' : 2, 
+search_params = {'nsearch' : 10, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
