@@ -148,7 +148,7 @@ class EventSearch() :
             min1positions = artn.extract("tau_min1")
             min2positions = artn.extract("tau_min2")
             saddlepositions = artn.extract("tau_sad")
-
+        #TODO check if delr1 close to initial
             if delr1 < delr2 : 
                 return min1positions, saddlepositions, min2positions, dE_forward
             else : 

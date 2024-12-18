@@ -31,7 +31,7 @@ system.minimize('lammps', minimization_params, potential, nprocs = nprocs, backe
 system.find_environment(style_atomenv, atomicenv_params, nprocs = nprocs, backend=backend)
 #PSR
 with cProfile.Profile() as profile : 
-    system.point_set_registration(style_psr, nprocs=nprocs, backend=backend)
+    system.point_set_registration(style_psr, 0, nprocs=nprocs, backend=backend)
 stats = Stats(profile)
 print("Profiling psr = : ", style_psr)
 stats.print_stats(0)

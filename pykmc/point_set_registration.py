@@ -6,12 +6,13 @@ import pandas as pd
 class PointSetRegistration() : 
     """ 
     """ 
-    def __init__(self,  system, psr_style, dimension, nprocs, backend) : 
+    def __init__(self,  system, psr_style, idx_cat, dimension, nprocs, backend) : 
         """ 
          
         """
         self.psr_style = psr_style
         self.system = system
+        self.idx_cat = idx_cat
         self.dimension = dimension
         self.backend = backend
         self.nprocs = nprocs 
@@ -20,7 +21,7 @@ class PointSetRegistration() :
         """ 
         """ 
         if self.psr_style == 'ira' : 
-            self.ira(0)
+            self.ira(self.idx_cat)
         else : 
             print(ERROR)
     

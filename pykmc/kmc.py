@@ -34,9 +34,10 @@ class KMC() :
             self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
             self.system.find_environment('cna/graph', self.atomenv_params, dimension=3, nprocs=1)
             self.system.event_search('pARTn', self.eventsearch_params, self.potential)
-            self.system.point_set_registration('ira')
-            #if len(self.system.catalog)>1 : 
-            #    idx_cat = self.select_event() 
+            #self.system.point_set_registration('ira')
+            if len(self.system.catalog)>1 : 
+                idx_cat = self.select_event() 
+                self.system.point_set_registration('ira')
             #    self.update_positions(idx_cat) 
             #traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
             #             positions=self.system.get_positions(),

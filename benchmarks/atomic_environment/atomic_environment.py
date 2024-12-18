@@ -12,9 +12,9 @@ init_config_file = '../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz'
 
 atomicenv_params = {'rnei': 3.01,
                     'rcut'  : 6.0}
-nprocs = 8 
+nprocs = 1 
 backend = 'local'
-style = 'graph'
+style = 'cna/graph'
 
 #Initialization 
 system = System(init_config_file) 
