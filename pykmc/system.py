@@ -1,6 +1,8 @@
 from ase import Atoms
 from ase.io import read
 import pandas as pd
+from .log import Logger
+import os
 
 class System(Atoms):
     """
@@ -9,6 +11,20 @@ class System(Atoms):
     #TODO Should make a function that write lammps data file, or check if it s one instead of writing it every
     #time we call lammps 
     def __init__(self, file_path, catalog=None):
+
+        #Setup logfile
+        try : 
+            os.remove('pykmc.log')
+        except OSError : 
+            pass 
+        self.logger = Logger('pykmc.log')
+        self.logger.title(self.logger)
+        self.logger.logger.info('##############################')
+        self.logger.logger.info('#       INITIALIZATION       #')
+        self.logger.logger.info('##############################')
+
+        #Read initial config file
+        self.logger.logger.info('reading {} configuration file'.format(file_path))
         atoms = read(file_path)  # Load configurations from file 
         super().__init__(symbols=atoms.get_chemical_symbols(),
                          positions=atoms.get_positions(),
@@ -29,10 +45,11 @@ class System(Atoms):
                                                  'energy_barrier', 
                                                  'k'])
         else : 
+            self.logger.logger.info('reading {} catalog file'.format(catalog))
             self.catalog = pd.read_pickle(catalog) #for restart
         
         self.kmc_traj = None #for restart
-        
+
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 
         Minimize the system and update system positions 
