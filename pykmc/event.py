@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pynauty
 from .atomic_environment import make_graph 
+import logging
 
 
 class EventSearch() : 
@@ -41,9 +42,11 @@ class EventSearch() :
             #extract list of atoms in system.environment having the id 
             l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0] 
             #list of atoms on which we gonna do the search
+            self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
             l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
             #then we do a pART search and put the result of each search in self.system.catalog
             for atom_index in l_atoms_search : 
+               # self.system.logger.logger.info('> Launching pARTn search')
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
                 if fs.result() is not None :
@@ -89,13 +92,16 @@ class EventSearch() :
         Use pARTn with Lammps to find events
         atom_index : atom on which we perform the search (the one that we init_push)
         """
-        
+        #Logs
+        #TODO : Don't understand why inside executor I need to add logging.basicConfig. Otherwise it does not print to log 
+        logging.basicConfig(filename='pykmc.log', filemode='a', level=logging.DEBUG, format='%(message)s')
+        self.system.logger.logger.info('> Launching pARTn search')
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-
+        
         #Create a subsystem base on central atom neighbor lsh z ist 
         #rcutevent = self.system.cell[0][0]
         #rcutevent = 8.0
@@ -115,7 +121,7 @@ class EventSearch() :
 
 
         #Setup Lammps : 
-        lmp = lammps()
+        lmp = lammps(comm=comm,cmdargs=['-log', 'log.pARTn.lammps', '-screen', 'none'])
         artn = pypARTn2.artn(engine='lmp')
         lmp.command("units metal")
         lmp.command('atom_style atomic')
@@ -177,14 +183,17 @@ class EventSearch() :
             if delr1 < 0.2 or delr2 < 0.2 :  
                 if delr1 < delr2 : 
                     #return min1positions, saddlepositions, min2positions, dE_forward
+                    self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
                     return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
                 else : 
                     #return min2positions, saddlepositions, min1positions, dE_forward
+                    self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
                     return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
             else :
+                self.system.logger.logger.error('ERROR: minima too far away from initial configuration')
                 return None
         else : 
-            print("pARTn Error message :", err)
+            self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
             return None
 
     def dimer_search(self, atom_index, potential): 

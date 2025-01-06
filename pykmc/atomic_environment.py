@@ -41,6 +41,7 @@ class AtomicEnvironment() :
                 case "cna/graph" : 
                     fs = exe.submit(self.cna_graph_nauty, resource_dict={"cores": self.nprocs})
                 case _:
+                    self.system.logger.logger.error('ERROR:Atomic environment style not known')
                     raise Exception("Atomic environment style unknown")
 
         list_env = fs.result()
@@ -57,6 +58,11 @@ class AtomicEnvironment() :
                    "atom index" : indexsame}
             dict_env.append(tmp)
         self.system.environment = dict_env
+
+        #Add if debug  
+        for i, e in enumerate(self.system.environment) : 
+            self.system.logger.logger.debug("DEBUG: Atomic environment n° {} : {} atoms".format(i, len(e['atom index'])))
+        self.system.logger.logger.info('')
 
 
     def write_to_file(self) : 
@@ -86,7 +92,7 @@ class AtomicEnvironment() :
 
         #TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
         #lammps: 
-        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps']) 
+        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension 3') 
@@ -176,7 +182,7 @@ class AtomicEnvironment() :
 
         #TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
         #lammps: 
-        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps']) 
+        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension 3') 

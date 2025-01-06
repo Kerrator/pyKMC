@@ -10,4 +10,6 @@
 ##############################
 reading ../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz configuration file
 
-Use lammps for minimization
+DEBUG: Atomic environment n° 0 : 12 atoms
+DEBUG: Atomic environment n° 1 : 487 atoms
+

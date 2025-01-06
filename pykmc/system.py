@@ -49,6 +49,7 @@ class System(Atoms):
             self.catalog = pd.read_pickle(catalog) #for restart
         
         self.kmc_traj = None #for restart
+        self.logger.logger.info('')
 
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
         """ 

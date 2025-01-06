@@ -22,7 +22,7 @@ system = System(init_config_file)
 traj = [Atoms(positions = system.positions, cell = system.cell, symbols = system.symbols)]
 #Minimization 
 with cProfile.Profile() as profile : 
-    system.minimize('ammps', minimization_params, potential, nprocs = nprocs, backend=backend)
+    system.minimize('lammps', minimization_params, potential, nprocs = nprocs, backend=backend)
 stats = Stats(profile)
 print("Profiling minimization : ")
 stats.print_stats(0)
