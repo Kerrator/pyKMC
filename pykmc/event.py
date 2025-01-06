@@ -12,7 +12,8 @@ import pypARTn2
 from scipy.spatial import cKDTree
 import numpy as np
 import pandas as pd
-
+import pynauty
+from .atomic_environment import make_graph 
 
 
 class EventSearch() : 
@@ -47,7 +48,7 @@ class EventSearch() :
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
                 if fs.result() is not None :
                     #try add over and lower limit : 
-                    if fs.result()[3] > 0.1 and fs.result()[3] < 5 :  
+                    if fs.result()[3] > 0.1 and fs.result()[3] < 2.0 :  
                         dfevent = pd.Series({'event_id' : id , 
                                     'initial_positions' : fs.result()[0], 
                                     'saddle_positions': fs.result()[1], 
@@ -55,7 +56,20 @@ class EventSearch() :
                                     'energy_barrier': fs.result()[3], 
                                     'k' : 1})
 
-                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True) 
+                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                        #Add reverse event : 
+                        #compute finale positions ID : 
+                        g = make_graph(self.system, [fs.result()[4]], 3.0, 3.5 )
+                        reverse_id = pynauty.certificate(g[0])
+                        dfevent = pd.Series({'event_id' : reverse_id, 
+                                    'initial_positions' : fs.result()[2], 
+                                    'saddle_positions': fs.result()[1], 
+                                    'final_positions': fs.result()[1], 
+                                    'energy_barrier': fs.result()[3], 
+                                    'k' : 1})
+                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+
+
 
     def new_environment(self) : 
         """ 
@@ -82,21 +96,20 @@ class EventSearch() :
         nprocs = comm.Get_size()
 
 
-        #Create a subsystem base on central atom neighbor list 
+        #Create a subsystem base on central atom neighbor lsh z ist 
         #rcutevent = self.system.cell[0][0]
-        rcutevent = 8.0
-        ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-        dist = self.system.get_distances(atom_index, ind, mic=True)
-        neighbor_list = np.where(dist<rcutevent)[0]
+        #rcutevent = 8.0
+        #ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+        #dist = self.system.get_distances(atom_index, ind, mic=True)
+        #neighbor_list = np.where(dist<rcutevent)[0]
 
-        subsystem = Atoms(positions=self.system.get_positions()[neighbor_list], cell=self.system.get_cell(), pbc=True)
-        atom_index = np.where((subsystem.get_positions() == (self.system.positions[atom_index][0], self.system.positions[atom_index][1], self.system.positions[atom_index][2])).all(axis=1))[0][0]
-        print('HERERERE', atom_index)
+        #subsystem = Atoms(positions=self.system.get_positions()[neighbor_list], cell=self.system.get_cell(), pbc=True)
+        #atom_index = np.where((subsystem.get_positions() == (self.system.positions[atom_index][0], self.system.positions[atom_index][1], self.system.positions[atom_index][2])).all(axis=1))[0][0]
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
-#            write_lammps_data(lammps_data_file, self.system, masses=True)
-            write_lammps_data(lammps_data_file, subsystem, masses=True)
+            write_lammps_data(lammps_data_file, self.system, masses=True)
+            #write_lammps_data(lammps_data_file, subsystem, masses=True)
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
@@ -108,6 +121,7 @@ class EventSearch() :
         lmp.command('atom_style atomic')
         lmp.command("dimension 3")
         lmp.command("boundary p p p")
+        lmp.command('atom_modify sort 0 1')
         lmp.command("read_data {}".format(lammps_data_file))
             #Potential : 
         for key, val in potential.items() : 
@@ -117,15 +131,20 @@ class EventSearch() :
         lmp.command("min_style fire")
         #SETUP ARTN
         artn.set('engine_units', 'lammps/metal')
-        artn.set('verbose',1)
+        artn.set('verbose',2)
         artn.set("lpush_final", True)
         artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
-        artn.set("ninit", 1)
+        artn.set("ninit", 2)
         artn.set("forc_thr", 0.01)
-        artn.set("push_step_size",  0.2)
-        artn.set("push_mode" ,'list')
+        artn.set('push_mode', 'rad')
+        artn.set('push_dist_thr', 3.0)
+        artn.set("push_step_size",  0.4)
+#        artn.set("push_mode" ,'list')
         artn.set("push_ids", [atom_index])
-        artn.set('nsmooth',  1)
+        artn.set('eigen_step_size', 0.2)
+        artn.set('lanczos_disp', 0.0005)
+        artn.set('nsmooth',  3)
+        artn.set('nperp', 5)
         #Run
         lmp.command("minimize 1e-3 1e-3 1000 1000")
 
@@ -149,10 +168,21 @@ class EventSearch() :
             min2positions = artn.extract("tau_min2")
             saddlepositions = artn.extract("tau_sad")
         #TODO check if delr1 close to initial
-            if delr1 < delr2 : 
-                return min1positions, saddlepositions, min2positions, dE_forward
-            else : 
-                return min2positions, saddlepositions, min1positions, dE_forward
+            #save only atoms in rcutenv of atom_index
+            rcutevent = 5.0
+            ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+            dist = self.system.get_distances(atom_index, ind, mic=True)
+            neighbor_list = np.where(dist<rcutevent)[0]
+
+            if delr1 < 0.2 or delr2 < 0.2 :  
+                if delr1 < delr2 : 
+                    #return min1positions, saddlepositions, min2positions, dE_forward
+                    return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
+                else : 
+                    #return min2positions, saddlepositions, min1positions, dE_forward
+                    return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
+            else :
+                return None
         else : 
             print("pARTn Error message :", err)
             return None

@@ -1,6 +1,9 @@
 import random
 from ase import Atoms
 import numpy as np
+import pandas as pd 
+from ase.io import write
+from ase.calculators.lammpslib import LAMMPSlib
 
 #TODO Could add a write_log() file to call at each steps
 
@@ -30,20 +33,26 @@ class KMC() :
                          positions=self.system.get_positions(),
                          cell=self.system.get_cell(),
                          pbc=self.system.get_pbc())]
-        for step in range(nkmc_steps) : 
-            self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
+        for step in range(nkmc_steps) :
+            if step == 0 :  
+                self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
             self.system.find_environment('cna/graph', self.atomenv_params, dimension=3, nprocs=1)
             self.system.event_search('pARTn', self.eventsearch_params, self.potential)
             #self.system.point_set_registration('ira')
             if len(self.system.catalog)>1 : 
                 idx_cat = self.select_event() 
                 central_atom_index = self.select_central_atom(idx_cat)
-                self.system.point_set_registration('ira', idx_cat, central_atom_index)
+                self.system.point_set_registration('ira', idx_cat, central_atom_index, self.atomenv_params['rcut'])
+                self.update_positions(idx_cat, central_atom_index)
+                #read psr_event file 
+                #TODO better than writing file 
+                self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
             #    self.update_positions(idx_cat) 
-            #traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
-            #             positions=self.system.get_positions(),
-            #             cell=self.system.get_cell(),
-            #             pbc=self.system.get_pbc()))
+            traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
+                         positions=self.system.get_positions(),
+                         cell=self.system.get_cell(),
+                         pbc=self.system.get_pbc()))
+            write('trajkmc.xsf', traj) 
 
         self.system.kmc_traj = traj
 
@@ -70,14 +79,105 @@ class KMC() :
         central_atom_index = random.choice(atom_index_list)
         return central_atom_index
 
-    def update_positions(self, idx_cat) : 
+    def update_positions(self, idx_cat, central_atom_index) : 
         """ 
         update positions based on selected event 
         """ 
         #TODO Need to fix this shit
-        self.system.wrap(eps=1e-2)
-        positions = self.system.catalog.loc[idx_cat].at["final_positions"]
-        positions[positions < 0] = 0
-        positions[positions > self.system.cell[0][0]-0.1] = self.system.cell[0][0]-0.1
-        self.system.set_positions(positions)
+        #self.system.wrap(eps=1e-2)
+        #positions = self.system.catalog.loc[idx_cat].at["final_positions"]
+        #positions[positions < 0] = 0
+        #positions[positions > self.system.cell[0][0]-0.1] = self.system.cell[0][0]-0.1
+        #self.system.set_positions(positions)
+
+        #read psr_event file 
+        #TODO better than writing file
+        psr = pd.read_pickle('psr_event_'+str(idx_cat)+'.pickle') 
+        rmat = psr.loc[0].at['R']
+        tr = psr.loc[0].at['T']
+        perm = psr.loc[0].at['P']
+        dh = psr.loc[0].at['dh']
+
+        if dh < 0.5 : 
+            #Check if E_barrier is consistent : 
+            is_ok = self.check_saddle_energy(idx_cat, central_atom_index) 
+            is_ok = True
+            if is_ok : 
+                #transform event position 
+                coords = self.system.catalog.loc[idx_cat].at['initial_positions']
+                #coords = self.system.catalog.loc[idx_cat].at['final_positions']
+                #coords = self.system.catalog.loc[idx_cat].at['saddle_positions']
+                #coordfinal = self.system.catalog.loc[idx_cat].at['final_positions']
+                #coordsdiff = coordfinal-coords 
+                for i in range(len(coords)) : 
+                    coords[i] = np.matmul(rmat, coords[i]) + tr 
+                #coords[:] = coords[perm] 
+
+                #Then move initial to finale : 
+                #coords[:] = coords[perm] 
+                #coords += coordsdiff
+                #now update positions 
+                    #find neighbor list 
+                rcutevent = self.atomenv_params['rcut']
+                ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+                dist = self.system.get_distances(central_atom_index, ind, mic=True)
+                neighbor_list = np.where(dist<rcutevent)[0]
+                    #replace positions of the neighbors 
+                #ugly
+                c = 0 
+                for i in range(len(self.system.positions)) : 
+                    if i in neighbor_list : 
+                        self.system.positions[i] = coords[c]
+                        c +=1
+            else : 
+                print('dE not consistant')
+        else : 
+            print('dh too big')
+
+
+    def check_saddle_energy(self, idx_cat, central_atom_index) :
+        """ 
+        """ 
+        #get energy of the system : 
+        cmds = []
+        for key, val in self.potential.items() : 
+            cmds.append('{} {}'.format(key,val))
+        lammps = LAMMPSlib(lmpcmds=cmds, log_file='log.calc_energy.lammps')
+        atoms = Atoms(self.system.get_global_number_of_atoms()*['Ni'], positions=self.system.positions, cell=self.system.cell, pbc=True) 
+        atoms.calc = lammps 
+        Eini = atoms.get_potential_energy() 
+        #get saddle point energy : 
+            #update atoms positions to the saddle point : 
+        psr = pd.read_pickle('psr_event_'+str(idx_cat)+'.pickle') 
+        rmat = psr.loc[0].at['R']
+        tr = psr.loc[0].at['T']
+        perm = psr.loc[0].at['P']
+        dh = psr.loc[0].at['dh']
+        coords = self.system.catalog.loc[idx_cat].at['saddle_positions']
+        for i in range(len(coords)) : 
+            coords[i] = np.matmul(rmat, coords[i]) + tr 
+        coords[:] = coords[perm]
+        rcutevent = self.atomenv_params['rcut']
+        ind = np.linspace(0, atoms.get_global_number_of_atoms()-1, atoms.get_global_number_of_atoms()).astype(int)
+        dist = atoms.get_distances(central_atom_index, ind, mic=True)
+        neighbor_list = np.where(dist<rcutevent)[0]
+            #replace positions of the neighbors 
+        #ugly
+        c = 0 
+        newpos = atoms.get_positions()
+        for i in range(len(newpos)) : 
+            if i in neighbor_list : 
+                newpos[i] = coords[c]
+                c +=1
+        atoms.set_positions(newpos)
+        Esad = atoms.get_potential_energy() 
+        print("OUIOUIOUIOUI", Eini, Esad)
+        dE = Esad-Eini
+        print(dE)
+        write('saddlepoint_psr.xyz', atoms)
+        return abs(dE-self.system.catalog.loc[idx_cat].at['energy_barrier']) < 0.4
+
+
+
+        #
         #self.system.set_positions(self.system.catalog.loc[idx_cat].at["final_positions"])

@@ -10,7 +10,7 @@ import numpy as np
 
 #PARAMETERS :
 
-init_config_file = './Ni_monovacancy.xyz'
+init_config_file = './initial_config.xyz'
 
 minimization = {'min_style'     : 'cg', 
                 'minimize '     : '1.0e-6 1.0e-8 100 1000'}
@@ -21,13 +21,13 @@ potential = {'pair_style' : 'eam/alloy',
 atomenv = {'rnei' : 3.01, 
            'rcut' : 5.0}
 
-search_params = {'nsearch' : 10, 
+search_params = {'nsearch' : 5, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
-kmc_parameters = {'nkmc_steps' : 50}
+kmc_parameters = {'nkmc_steps' : 5}
 #1-Initialize the system : 
-system = System(init_config_file, catalog='catalog.pickle')
+system = System(init_config_file)
 #KMC 
 system.kmc(kmc_parameters, minimization,atomenv, search_params, potential )
 

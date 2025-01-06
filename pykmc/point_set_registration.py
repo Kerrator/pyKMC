@@ -6,7 +6,7 @@ import pandas as pd
 class PointSetRegistration() : 
     """ 
     """ 
-    def __init__(self,  system, psr_style, idx_cat, central_atom_index, dimension, nprocs, backend) : 
+    def __init__(self,  system, psr_style, idx_cat, central_atom_index, rcutevent, dimension, nprocs, backend) : 
         """ 
          
         """
@@ -14,6 +14,7 @@ class PointSetRegistration() :
         self.system = system
         self.idx_cat = idx_cat
         self.central_atom_index = central_atom_index
+        self.rcutevent = rcutevent
         self.dimension = dimension
         self.backend = backend
         self.nprocs = nprocs 
@@ -22,11 +23,11 @@ class PointSetRegistration() :
         """ 
         """ 
         if self.psr_style == 'ira' : 
-            self.ira(self.idx_cat, self.central_atom_index)
+            self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
         else : 
             print(ERROR)
     
-    def ira(self, idx_cat, central_atom_index) : 
+    def ira(self, idx_cat, central_atom_index, rcutevent) : 
         """ 
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
         idx_cat : index in catalog of the selected event 
@@ -47,12 +48,19 @@ class PointSetRegistration() :
         #        atom_index_list = dic['atom index']
         #random atom : 
         #atom_index = random.choice(atom_index_list)
-        rcutevent = 8.0
         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
         dist = self.system.get_distances(central_atom_index, ind, mic=True)
         neighbor_list = np.where(dist<rcutevent)[0]
 
-        coords1 = self.system.get_positions()[neighbor_list] 
+        coords1 = self.system.get_positions()[neighbor_list]
+        #try to fix pbc problem 
+        for i in range(len(coords1)) : 
+            if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > 17.6/2 : 
+                coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*17.6/2  
+            if np.linalg.norm(coords1[i][1] - self.system.positions[central_atom_index][1]) > 17.6/2 : 
+                coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*17.6/2  
+            if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > 17.6/2 : 
+                coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*17.6/2  
         nat1 = len(coords1)
         typ1 = typ2
 

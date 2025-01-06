@@ -16,7 +16,7 @@ potential = {'pair_style' : 'eam/alloy',
              'pair_coeff' : '* * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni'}
 atomicenv_params = {'rnei': 3.01,
                     'rcut'  : 6.0}
-search_params = {'nsearch' : 20, 
+search_params = {'nsearch' : 10, 
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
  
 nprocs = 1

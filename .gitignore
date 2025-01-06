@@ -17,3 +17,6 @@
 *test*
 *log_minimize.lammps
 *psr_event_*.pickle
+*atomic_environment.yml
+*.xsf
+*core

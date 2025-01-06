@@ -6,12 +6,12 @@ from lammps import lammps
 from executorlib import Executor
 import pynauty
 from ase.neighborlist import NeighborList
-from itertools import chain
+#from itertools import chain
 from ase import Atoms
-from profiling_decorator import profile
+#from profiling_decorator import profile
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
-from decimal import *
+#from decimal import *
 from subprocess import run
 
 
@@ -105,7 +105,6 @@ class AtomicEnvironment() :
         id = lmp.numpy.extract_atom("id")
         id = id-1 #Lammps index start at 1
 
-        lmp.close()
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
@@ -123,6 +122,7 @@ class AtomicEnvironment() :
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
 
+            lmp.close()
             return list_topo
     
 
@@ -193,7 +193,6 @@ class AtomicEnvironment() :
         id = lmp.numpy.extract_atom("id")
         id = id-1 #Lammps index start at 1
 
-        lmp.close()
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
@@ -227,6 +226,7 @@ class AtomicEnvironment() :
                     list_topo.append('crist')
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
+            lmp.close()
             return list_topo
         
 
@@ -240,7 +240,7 @@ def make_graph(atoms, list_id, rnei, rcut) :
     positions = atoms.get_positions(wrap=True) 
     cell = atoms.get_cell()
     alat = cell[0][0]
-    alat = Decimal(alat)
+    #alat = Decimal(alat)
     # Construire le KDTree avec les positions répliquées
     #tree = cKDTree(positions, boxsize=np.diag(cell))
     tree = cKDTree(positions, boxsize=[alat]*3)
