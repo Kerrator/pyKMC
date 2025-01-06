@@ -29,12 +29,13 @@ class Minimization:
         Execute minimization based on minimization_style
         return Atoms ASE object with updated positions
         """
-
+        self.system.logger.logger.info('Use {} for minimization'.format(self.minimization_style))
         with Executor(backend=self.backend) as exe :
             match self.minimization_style : 
                 case "lammps":
                     fs = exe.submit(self.minimize_lammps, resource_dict={"cores": self.nprocs})
                 case _:
+                    self.system.logger.logger.error('ERROR:Minimization style not known')
                     raise Exception("Minimization style not known")
         #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
         #Set new positions : 
@@ -68,7 +69,7 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #initialize lammps :
-        lmp = lammps(comm=comm,cmdargs=['-log', 'log_minimize.lammps'])
+        lmp = lammps(comm=comm,cmdargs=['-log', 'log_minimize.lammps', '-screen', 'none'])
 
         #TODO should add posibility to use watherver parameters
         #for the moment default parameters 
