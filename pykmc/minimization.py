@@ -9,9 +9,6 @@ from executorlib import Executor
 
 
 class Minimization:
-    """ Class to execute diffent minimization procedure
-    """
-
     def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs, backend) : 
         """ 
         Initialization 
