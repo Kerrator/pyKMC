@@ -16,3 +16,4 @@ class Logger() :
         log.logger.info("|---'`---|`   `` ' '`---'")
         log.logger.info("|    `---              ")
         log.logger.info("\n")
+
