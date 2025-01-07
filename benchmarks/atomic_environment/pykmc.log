@@ -7,6 +7,6 @@
 
 reading ../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz configuration file
 
-DEBUG: Atomic environment n° 0 : 12 atoms
-DEBUG: Atomic environment n° 1 : 487 atoms
+DEBUG: Atomic environment n° 0 : 487 atoms
+DEBUG: Atomic environment n° 1 : 12 atoms
 

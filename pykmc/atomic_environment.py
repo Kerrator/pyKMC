@@ -14,10 +14,48 @@ from scipy.spatial.distance import cdist
 #from decimal import *
 from subprocess import run
 
+#TODO see doc convention when attributes and parameters are the same
+#TODO write to file 
+#TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
+#TODO For each run procedure, check if the needed parameters are present
+#TODO for the cna_graph() method should use the cna methods instead of rewriting it, but with executorlib might be problematic
+#TODO Better gather results
+#TODO use cell/verlet list for graphs
+#TODO See if we can improve the way I connect in make_graph the graph atom index and system atom index (I think that some part are not necessary)
 
+class AtomicEnvironment() :
+    """
+    Define and run the procedure to find the atomic environment of each atoms in the system
 
-
-class AtomicEnvironment() : 
+    Parameters
+    ----------
+    system : System Object
+        system on which we perform the atomic environment search
+    atomenv_style : str
+        style use for the atomic environment search, can be 'cna', 'graph, 'cna/graph'
+    atomenv_params : dict of str: float
+        dictionaty of radius parameters defining the environment, 'rnei' : radius cutoff to define
+        neirest neighbors, 'rcut' : radius cutoff to define the environment (for 'graph')
+    dimension : int
+        dimension of the system
+    nprocs : int
+        number of procs available
+    backend : str
+        parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
+    
+    Methods
+    -------
+    run() 
+        run the atomic environment search procedure and update the system.environment
+    write_to_file() 
+    cna() 
+        use Lammps to compute the Common Neighbor Analysis and attribute a 'crystal' or 'noncrystal' ID to each atoms
+    graph_nauty()
+        for each atoms, create a connectivity graph and attribute the corresponding ID based and nauty certificate 
+    cna_graph_nauty() 
+        use Lammps to compute the Common Neighbor Analysis, for atoms that does not have a crystalline environment 
+        a connectivity graph is created. Attribute a 'crystal' or a nauty certificate ID to each atoms
+    """        
 
     def __init__(self, system, atomenv_style, atomenv_params, dimension, nprocs, backend) : 
         self.system = system
@@ -31,7 +69,8 @@ class AtomicEnvironment() :
         """
         Run similar atomic environment search based on topology_style
         """
-        #TODO voir comment recuperer l'erreur de la fonction appelée avec exe.submit(), c'est un enfer a debugger sinon
+
+        #Run the atomic environment search
         with Executor(backend =self.backend) as exe : 
             match self.atomenv_style : 
                 case "cna":
@@ -44,6 +83,7 @@ class AtomicEnvironment() :
                     self.system.logger.logger.error('ERROR:Atomic environment style not known')
                     raise Exception("Atomic environment style unknown")
 
+        #Get results
         list_env = fs.result()
         #From list of atomic environment we create a dictionary, and update system.environment
         diff_env = set(list_env)
@@ -62,26 +102,24 @@ class AtomicEnvironment() :
         #Add if debug  
         for i, e in enumerate(self.system.environment) : 
             self.system.logger.logger.debug("DEBUG: Atomic environment n° {} : {} atoms".format(i, len(e['atom index'])))
-        self.system.logger.logger.info('')
+        self.system.logger.new_line()
 
 
     def write_to_file(self) : 
         """
         write similar atomic environment to file as a list of dict using yaml.
         """
-        #TODO write to file 
 
     def cna(self) : 
         """ 
         compute CNA using lammps. 
-        return a list of ID : "crist" if the atom has a cristalline environement (ie CNA = 1,2,3 or 4) and "notcrist" if not (ie CNA=5)  
+        return a list of ID : "crystal" if the atom has a crystalline environement (ie CNA = 1,2,3 or 4) and "noncrystal" if not (ie CNA=5)  
         """
 
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
-
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_cna.lmp'
@@ -90,17 +128,15 @@ class AtomicEnvironment() :
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
-        #TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
-        #lammps: 
+        #Lammps: 
         lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension 3') 
         lmp.command('boundary p p p')
         lmp.command('atom_modify sort 0 1')
-
         lmp.command('read_data {}'.format(lammps_data_file))
-        lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (i guess is for the neighborlist)
+        lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (I guess it is for the neighborlist)
         lmp.command('pair_coeff * *')
         lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
         lmp.command('run 0')
@@ -115,19 +151,18 @@ class AtomicEnvironment() :
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
         if rank == 0 : 
-            #flaten arrays
+            #flaten arrays 
             global_result = np.concatenate(global_result)
             #sort by atom index 
             global_result = global_result[global_result[:,0].argsort()]
             list_topo = [] 
             for element in global_result[:,1] : 
                 if int(element) == 5 : 
-                    list_topo.append('notcrist') 
+                    list_topo.append('noncrystal') 
                 else : 
-                    list_topo.append('crist')
+                    list_topo.append('crystal')
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
-
             lmp.close()
             return list_topo
     
@@ -138,41 +173,39 @@ class AtomicEnvironment() :
         need rnei 
         need rcut
         """ 
-        #TODO : check if rnei and rcut in atomenv_params
         rnei = self.atomenv_params['rnei']
         rcut = self.atomenv_params['rcut']
 
-        #Setup Parallisation : 
+        #MPI
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
+
         #Split index atoms in approximatively even number sublist
         split = np.array_split(range(self.system.get_global_number_of_atoms()), nprocs)
         local_index = split[rank] 
 
-        #Create graphs , can use other commented functions that we tested 
+        #Create graphs , can use other commented functions that we tested (see commented make_graph functions) 
         #Here, need diagonal cell for box_size in k-d tree
         list_g = make_graph(self.system, local_index, rnei, rcut)
         list_topo = [] 
         for g in list_g : 
+            #compute certificate
             list_topo.append(pynauty.certificate(g))
         return list_topo
     
 
     def cna_graph_nauty(self) : 
         """
-        Compute CNA, and for non cristalline environement, compute the graph certificate
+        Compute CNA, and for non crystalline environement, compute the graph certificate
         """
-        #TODO use the cna methods, but with executorlib might be problematic
-        #TODO Better gather results
 
-        #Compute CNA : 
-        
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
+        #Compute CNA : 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_cna.lmp'
         if rank == 0 :
@@ -180,7 +213,6 @@ class AtomicEnvironment() :
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
-        #TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
         #lammps: 
         lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
         lmp.command('units metal')
@@ -207,7 +239,7 @@ class AtomicEnvironment() :
             global_result = np.concatenate(global_result)
             #sort by atom index 
             global_result = global_result[global_result[:,0].argsort()]
-            #Find non cristalline atoms : 
+            #Find non crystalline atoms : 
             noncrist_atom_index = [i for i,e in enumerate(global_result[:,1]) if e == 5]
             #Split index atoms in approximatively even number sublist
             split = np.array_split(noncrist_atom_index, nprocs)
@@ -229,7 +261,7 @@ class AtomicEnvironment() :
                     ind = np.where(graphs[:,0] == i)[0][0] 
                     list_topo.append(pynauty.certificate(graphs[:,1][ind]))
                 else : 
-                    list_topo.append('crist')
+                    list_topo.append('crystal')
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
             lmp.close()
@@ -238,42 +270,49 @@ class AtomicEnvironment() :
 
 def make_graph(atoms, list_id, rnei, rcut) : 
     """
-    Test using scipy cKDTree, with boxsize 
-    """
-    #TODO could try to use cdist insteed of the neighbor_local tree search (should be more efficiant for few atoms) but 
-    #need to duplicated local environement
+    Create graph, using scipy cKDTree, with boxsize to find neighbors 
+
+    Parameters
+    ----------
+    atoms : System or Atoms Object
+        current system with positions
+    list_id : List[int]
+        list of atoms index for which we create a graph
+    rnei : float
+        radial cutoff distance to define nearest neighbors
+    rcut : float
+        radial cutoff distance to define the environment
+    Returns
+    -------
+    List[pynauty.Graph]
+        list of pynauty graphs
+    """    
+
     list_g = [] 
     positions = atoms.get_positions(wrap=True) 
     cell = atoms.get_cell()
     alat = cell[0][0]
-    #alat = Decimal(alat)
-    # Construire le KDTree avec les positions répliquées
-    #tree = cKDTree(positions, boxsize=np.diag(cell))
     tree = cKDTree(positions, boxsize=[alat]*3)
     
-    # Construire un graphe pour chaque atome
+    # Creat graph for each atoms
     for atom_idx in list_id:
-        # Trouver les indices des voisins dans le rayon rcut
+        #Find atoms index inside rcut
         atominenv_idx = tree.query_ball_point(positions[atom_idx], rcut)
         atominenv_idx = list(atominenv_idx)
-        #TODO Not necessary
-        # Renuméroter les indices localement (0 à number_of_vertices-1)
+        #To reorder indexes from 0 to number of vertexes-1 (for pynauty)
         local_to_global = {local_idx: global_idx for local_idx, global_idx in enumerate(atominenv_idx)}
         global_to_local = {v: k for k, v in local_to_global.items()}
-        
-        # Construire le dictionnaire d'adjacence avec indices locaux
+        #Dictionary to map graph indexes to system indexes
         adjacency_dict = {local_idx: [] for local_idx in local_to_global.keys()}
 
-
-        # Trouver les voisins dans le rayon rnei en utilisant le deuxième KDTree
+        #Find nearest neighbor for each atoms in the environment
         for i, ind in enumerate(atominenv_idx):
-            # Recherche des voisins dans le rayon rnei
             neighbors_local = tree.query_ball_point(positions[ind], rnei)
             for neighbor in neighbors_local:
-                if neighbor != ind and neighbor in atominenv_idx:  # Ne pas ajouter soi-même comme voisin
-                    adjacency_dict[i].append(global_to_local[neighbor])  # Utilisation des indices locaux
+                if neighbor != ind and neighbor in atominenv_idx:  #not have an atom that has itself as a neighbour
+                    adjacency_dict[i].append(global_to_local[neighbor])  #Map 
 
-        
+        #Create graph 
         graph = pynauty.Graph(
             number_of_vertices=len(atominenv_idx),
             adjacency_dict=adjacency_dict,
@@ -282,7 +321,6 @@ def make_graph(atoms, list_id, rnei, rcut) :
         
         list_g.append(graph)
     return list_g
-
 
 
 #    def cna_graph_nauty2(self) : 
