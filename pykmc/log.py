@@ -12,14 +12,20 @@ class Logger() :
         self.logger = logging.getLogger('pykmc')
         logging.basicConfig(filename=logfile_name, filemode='a', level=logging.DEBUG, format='%(message)s')
 
-    def title(self, log) : 
+    def title(self) : 
         """ 
         Head of the log file 
         """
-        log.logger.info("          |              ")
-        log.logger.info(",---.,   .|__/ ,-.-.,---.")
-        log.logger.info("|   ||   ||  \ | | ||    ")
-        log.logger.info("|---'`---|`   `` ' '`---'")
-        log.logger.info("|    `---              ")
-        log.logger.info("\n")
+        self.logger.info("          |              ")
+        self.logger.info(",---.,   .|__/ ,-.-.,---.")
+        self.logger.info("|   ||   ||  \ | | ||    ")
+        self.logger.info("|---'`---|`   `` ' '`---'")
+        self.logger.info("|    `---              ")
+        self.logger.info("\n")
+    
+    def new_line(self) : 
+        """ 
+        New line in the log file
+        """ 
+        self.logger.info("")
 

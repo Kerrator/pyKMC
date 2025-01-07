@@ -20,3 +20,4 @@
 *atomic_environment.yml
 *.xsf
 *core
+*pykmc.log
