@@ -6,13 +6,41 @@ from mpi4py import MPI
 from .utilities import modify_lammps_data_2D
 from executorlib import Executor
 
-
+#TODO see doc convention when attributes and parameters are the same
+#TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
+#TODO check create_atoms lammps command: https://docs.lammps.org/Python_module.html#lammps.lammps, could be use instead of writing a .lmp config file (see latter depending if I find a solution to always have a lammps instance to run calculations) 
+#TODO should add posibility to use watherver parameters, same lammps command are hardcoded
 
 class Minimization:
+    """
+    Define and run the minimization procedure
+
+    Attributes
+    ----------
+    system : System Object 
+        the System on which we perfom the minimization 
+    minimization_style : str 
+        the minimization style use, can be 'lammps' 
+    minimization_params : dict
+        all commands needed by the program used in minimization_style to execute the minimization
+    potential : dict
+        commands to define the potential used by the program defined by minimization_style
+    dimension : int, optional
+        dimension of the system, by default 3
+    nprocs : int, optional
+        number of procs available, by default 1
+    backend : str, optional
+        parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
+
+    Methods 
+    ------- 
+    run()
+        run the minimization and update the System positions
+    minimize_lammps() 
+        run lammps to perform the minimization
+    """     
+
     def __init__(self, system, minimization_style, minimization_params, potential, dimension, nprocs, backend) : 
-        """ 
-        Initialization 
-        """
         self.system = system
         self.minimization_style = minimization_style
         self.minimization_params = minimization_params
@@ -24,9 +52,7 @@ class Minimization:
     def run(self) : 
         """
         Execute minimization based on minimization_style
-        return Atoms ASE object with updated positions
         """
-        self.system.logger.logger.info('Use {} for minimization'.format(self.minimization_style))
         with Executor(backend=self.backend) as exe :
             match self.minimization_style : 
                 case "lammps":
@@ -34,7 +60,6 @@ class Minimization:
                 case _:
                     self.system.logger.logger.error('ERROR:Minimization style not known')
                     raise Exception("Minimization style not known")
-        #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
         #Set new positions : 
         positions = fs.result()
         positions[positions < 0] = 0
@@ -42,22 +67,19 @@ class Minimization:
 
     def minimize_lammps(self) : 
         """
-        Run Lammps minimization
-            Parameters : 
-                atoms (ASE Atoms Objects) 
-                parameters (dict) : dictionary of lammps commands related to the minimization 
-                potential (dict) : dictionary of lammps commands related to the potential 
-                dimension (int) : dimension (default 3)
+        Run a Lammps minimizatin based on the minimization_params and potential
 
-            Return : 
-                positions (numpy array) : updated positions after minimization
-        """ 
-        #for MPI : 
+        Returns
+        -------
+        np.array
+            positions after the minimization
+        """        
+
+        #MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #TODO check create_atoms : https://docs.lammps.org/Python_module.html#lammps.lammps
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
@@ -65,11 +87,10 @@ class Minimization:
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
 
-        #initialize lammps :
+        #Initialize lammps :
         lmp = lammps(comm=comm,cmdargs=['-log', 'log_minimize.lammps', '-screen', 'none'])
 
-        #TODO should add posibility to use watherver parameters
-        #for the moment default parameters 
+        #For the moment default parameters 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension {}'.format(self.dimension))
