@@ -3,13 +3,44 @@ import random
 import numpy as np
 import pandas as pd 
 
+#TODO print psr DataFrame infos should be an option, self.ira should return the transformation matrix
+#TODO Check if pbc problem is really fixed, and find better solution
+#TODO style = 'ira' should not be hardcoded
+#TODO typ = 'Ni' should not be hardcoded
+#TODO deal with IRA parameters
+
 class PointSetRegistration() : 
-    """ 
-    """ 
+    """
+    Define and run the point set registration procedure
+
+    Attributes
+    ----------
+    system : System Object
+        the system
+    psr_style : str
+        the point set registration style used, can be 'ira'
+    idx_cat : int
+        index of the event in the catalog on which we gonna perform the point set registration
+    central_atom_index : int
+        atom index of the system on which we gonna perform the point set registration
+    rcutevent : float
+        radial cutoff corresponding to the one use in the event search corresponding to en environment around the central atom that have been saved 
+    dimension : int
+        dimension of the system, by default 3
+    nprocs : int, optional
+        number of procs available, by default 1
+    backend : str, optional
+        parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
+
+    Methods 
+    -------
+    run() 
+        run the point set registration
+    ira(idx_cat, central_atom_index, rcutevent)
+        use IRA to find the transformation matrix between the positions of the event and the central_atom_index environement
+    """
+
     def __init__(self,  system, psr_style, idx_cat, central_atom_index, rcutevent, dimension, nprocs, backend) : 
-        """ 
-         
-        """
         self.psr_style = psr_style
         self.system = system
         self.idx_cat = idx_cat
@@ -21,6 +52,7 @@ class PointSetRegistration() :
 
     def run(self) : 
         """ 
+        run the point set registration
         """ 
         if self.psr_style == 'ira' : 
             self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
@@ -28,10 +60,19 @@ class PointSetRegistration() :
             print(ERROR)
     
     def ira(self, idx_cat, central_atom_index, rcutevent) : 
-        """ 
+        """
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
-        idx_cat : index in catalog of the selected event 
-        """ 
+
+        Parameters
+        ----------
+        idx_cat : int
+            index of the event in the catalog
+        central_atom_index : int 
+           index of the system's central atom 
+        rcutevent : float
+            radial cutoff used in the event_search
+        """
+        #Initialize IRA
         ira = ira_mod.IRA() 
 
         #Event informations : 
@@ -40,20 +81,13 @@ class PointSetRegistration() :
         nat2 = len(coords2)
         typ2 = nat2*['Ni']
 
-        #system structure : 
-            #find in environment one atom with the event ID 
-        #TODO better
-        #for dic in self.system.environment : 
-        #    if dic['ID'] == id : 
-        #        atom_index_list = dic['atom index']
-        #random atom : 
-        #atom_index = random.choice(atom_index_list)
+        #atom in the rcutevent around the central atom
         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
         dist = self.system.get_distances(central_atom_index, ind, mic=True)
         neighbor_list = np.where(dist<rcutevent)[0]
 
         coords1 = self.system.get_positions()[neighbor_list]
-        #try to fix pbc problem 
+        #pbc problem
         for i in range(len(coords1)) : 
             if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > 17.6/2 : 
                 coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*17.6/2  
