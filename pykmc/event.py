@@ -31,6 +31,7 @@ import logging
 #TODO See if we can append artn logs, could be usefull while debugging
 #TODO Should think of a better way to compute graph, certificate for the backward reaction
 #TODO Add logs number of event found/fail
+#TODO parameter for backward reaction graph
 
 class EventSearch() : 
     """
@@ -105,7 +106,7 @@ class EventSearch() :
                         self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
                         #Add reverse event : 
                         #compute finale positions ID : 
-                        g = make_graph(self.system, [fs.result()[4]], 3.0, 3.5 )
+                        g = make_graph(self.system, [fs.result()[4]], 3.0, 7.0 )
                         reverse_id = pynauty.certificate(g[0])
                         dfevent = pd.Series({'event_id' : reverse_id, 
                                     'initial_positions' : fs.result()[2], 
@@ -224,7 +225,7 @@ class EventSearch() :
             saddlepositions = artn.extract("tau_sad")
 
             #save only atoms in rcutenv of atom_index
-            rcutevent = 5.0
+            rcutevent = 7.0
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             dist = self.system.get_distances(atom_index, ind, mic=True)
             neighbor_list = np.where(dist<rcutevent)[0]
