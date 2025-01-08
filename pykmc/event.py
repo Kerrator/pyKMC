@@ -32,6 +32,8 @@ import logging
 #TODO Should think of a better way to compute graph, certificate for the backward reaction
 #TODO Add logs number of event found/fail
 #TODO parameter for backward reaction graph
+#TODO find a way to not print in terminal ira errors (we log them)
+#FIXME Problem position are wrapped --> pbc problem 
 
 class EventSearch() : 
     """

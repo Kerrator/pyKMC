@@ -98,7 +98,7 @@ class PointSetRegistration() :
         nat1 = len(coords1)
         typ1 = typ2
 
-        kmax_factor = 2.0
+        kmax_factor = 10.0
         rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
 
         a = [[rmat, tr, perm, dh, central_atom_index, idx_cat]]
