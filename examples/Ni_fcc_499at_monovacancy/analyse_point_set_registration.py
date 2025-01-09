@@ -27,7 +27,7 @@ dh = psr.loc[0].at['dh']
 print('Distance DH = ', dh)
 
 #get rcutevent env system : 
-rcutevent = 6.0
+rcutevent = 7.0
 atom_index = psr.loc[0].at['central atom index']
 ind = np.linspace(0, system.get_global_number_of_atoms()-1, system.get_global_number_of_atoms()).astype(int)
 dist = system.get_distances(atom_index, ind, mic=True)

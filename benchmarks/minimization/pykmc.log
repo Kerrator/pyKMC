@@ -5,9 +5,5 @@
 |    `---              
 
 
-##############################
-#       INITIALIZATION       #
-##############################
-reading ../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz configuration file
+reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
 
-Use lammps for minimization

@@ -8,10 +8,10 @@ from pstats import Stats
 import yaml
 
 #Parameters : 
-init_config_file = '../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz' 
+init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 6.0}
+                    'rcut'  : 8.0}
 nprocs = 1 
 backend = 'local'
 style = 'cna/graph'

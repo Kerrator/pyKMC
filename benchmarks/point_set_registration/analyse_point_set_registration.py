@@ -4,7 +4,7 @@ from ase import Atoms
 import numpy as np 
 
 #Read input system 
-init_config_file = '../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz'
+init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz'
 system = read(init_config_file) 
 #Read catalog 
 catalog = pd.read_pickle('catalog.pickle')
@@ -27,7 +27,7 @@ dh = psr.loc[0].at['dh']
 print('Distance DH = ', dh)
 
 #get rcutevent env system : 
-rcutevent = 6.0
+rcutevent = 9.0
 atom_index = psr.loc[0].at['central atom index']
 ind = np.linspace(0, system.get_global_number_of_atoms()-1, system.get_global_number_of_atoms()).astype(int)
 dist = system.get_distances(atom_index, ind, mic=True)

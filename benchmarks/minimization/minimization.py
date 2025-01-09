@@ -8,7 +8,7 @@ import cProfile
 from pstats import Stats
 
 #Parameters : 
-init_config_file = '../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz' 
+init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 minimization_params = {'min_style' : 'cg',
                        'minimize'  : '1.0e-6 1.0e-8 100 1000'} 

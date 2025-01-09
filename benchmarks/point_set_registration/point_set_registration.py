@@ -8,7 +8,7 @@ import cProfile
 from pstats import Stats
 
 #Parameters : 
-init_config_file = '../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz' 
+init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 minimization_params = {'min_style' : 'cg',
                        'minimize'  : '1.0e-6 1.0e-8 100 1000'} 
@@ -31,7 +31,7 @@ system.minimize('lammps', minimization_params, potential, nprocs = nprocs, backe
 system.find_environment(style_atomenv, atomicenv_params, nprocs = nprocs, backend=backend)
 #PSR
 with cProfile.Profile() as profile : 
-    system.point_set_registration(style_psr, 0, 250, 6.0, nprocs=nprocs, backend=backend)
+    system.point_set_registration(style_psr, 0, 1024, 9.0, nprocs=nprocs, backend=backend)
 stats = Stats(profile)
 print("Profiling psr = : ", style_psr)
 stats.print_stats(0)

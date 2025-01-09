@@ -5,14 +5,10 @@
 |    `---              
 
 
-##############################
-#       INITIALIZATION       #
-##############################
-reading ../../examples/Ni_fcc_499at_monovacancy/Ni_monovacancy.xyz configuration file
+reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
 
-Use lammps for minimization
 DEBUG: Atomic environment n° 0 : 12 atoms
-DEBUG: Atomic environment n° 1 : 487 atoms
+DEBUG: Atomic environment n° 1 : 2035 atoms
 
 :> Launching 10 event searches
 > Launching pARTn search
@@ -20,11 +16,11 @@ ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnew
 > Launching pARTn search
 ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth 
 > Launching pARTn search
-Find one event with dE barrier = 5.562780582644336 eV
+Find one event with dE barrier = 1.1907976083712128 eV
 > Launching pARTn search
-Find one event with dE barrier = 1.1915149373044187 eV
+ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth 
 > Launching pARTn search
-Find one event with dE barrier = 4.921406670252509 eV
+Find one event with dE barrier = 1.1883171595582098 eV
 > Launching pARTn search
 ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth 
 > Launching pARTn search
@@ -32,6 +28,6 @@ ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnew
 > Launching pARTn search
 ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth 
 > Launching pARTn search
-Find one event with dE barrier = 1.1892295272868978 eV
+Find one event with dE barrier = 1.1927065982254135 eV
 > Launching pARTn search
-Find one event with dE barrier = 5.531343730289336 eV
+ERROR: pARTn error : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth 
