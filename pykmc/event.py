@@ -33,7 +33,9 @@ import logging
 #TODO Add logs number of event found/fail
 #TODO parameter for backward reaction graph
 #TODO find a way to not print in terminal ira errors (we log them)
-#FIXME Problem position are wrapped --> pbc problem 
+#TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
+#TODO Clean fixme atoms moving sphere min1 min2 saddle
+
 
 class EventSearch() : 
     """
@@ -169,10 +171,21 @@ class EventSearch() :
         #subsystem = Atoms(positions=self.system.get_positions()[neighbor_list], cell=self.system.get_cell(), pbc=True)
         #atom_index = np.where((subsystem.get_positions() == (self.system.positions[atom_index][0], self.system.positions[atom_index][1], self.system.positions[atom_index][2])).all(axis=1))[0][0]
 
+
+        #TEST put atom_index at the center of the cell to fix pbc problems : 
+        #New Atoms
+        cell = self.system.get_cell()
+        positions = self.system.get_positions()
+        atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
+        ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
+        dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
+        atoms.translate(np.array([dx, dy, dz]))
+
         #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization.lmp'
+        lammps_data_file = 'initial_config_minimization_tosee.lmp'
         if rank == 0 :
-            write_lammps_data(lammps_data_file, self.system, masses=True)
+            #write_lammps_data(lammps_data_file, self.system, masses=True)
+            write_lammps_data(lammps_data_file, atoms, masses=True)
             #write_lammps_data(lammps_data_file, subsystem, masses=True)
             if self.dimension == 2 : 
                 modify_lammps_data_2D(lammps_data_file)
@@ -184,8 +197,8 @@ class EventSearch() :
         lmp.command('atom_style atomic')
         lmp.command("dimension 3")
         lmp.command("boundary p p p")
-        lmp.command('atom_modify sort 0 1')
         lmp.command("read_data {}".format(lammps_data_file))
+        lmp.command('atom_modify sort 0 1')
             #Potential : 
         for key, val in potential.items() : 
             lmp.command("{} {}".format(key, val))
@@ -230,24 +243,137 @@ class EventSearch() :
             rcutevent = 7.0
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             dist = self.system.get_distances(atom_index, ind, mic=True)
+
+
+
+
+
+
+
+
+
+
+            #TEST fix pbc
+            #dist = atoms.get_distances(atom_index, ind, mic=True)
+
             neighbor_list = np.where(dist<rcutevent)[0]
+            #neighbor_list = neighbor_list
+            
+
+            #TEST ugly just to see if it is the problem
+            #from ase.geometry import wrap_positions
+            
+            #atoms = Atoms(positions=min1positions)
+            #atoms.set_pbc(True)
+            #atoms.set_cell([17.6, 17.6, 17.6])
+            #atoms.set_positions(atoms.get_positions(wrap=True))
+            #min1positions = atoms.get_positions()
+            #neighbor_list1 = []
+            #for i in range(len(min1positions)) : 
+            #    diff = np.subtract(min1positions[i], np.array([ax/2, ay/2, az/2]))
+            #    dist = np.sum(np.power(diff, 2))
+            #    if dist < rcutevent**2 : 
+            #        neighbor_list1.append(i)
+            
+            #atoms = Atoms(positions=saddlepositions)
+            #atoms.set_pbc(True)
+            #atoms.set_cell([17.6, 17.6, 17.6])
+            #atoms.set_positions(atoms.get_positions(wrap=True))
+            #saddlepositions = atoms.get_positions()
+            #neighbor_list2 = []
+            #for i in range(len(saddlepositions)) : 
+            #    diff = np.subtract(np.array([saddlepositions[i][0], saddlepositions[i][1], saddlepositions[i][2]]), np.array([ax/2, ay/2, az/2]))
+            #    dist = np.sum(np.power(diff, 2))
+            #    if dist < rcutevent**2 : 
+            #        neighbor_list2.append(i)
+            
+            #atoms = Atoms(positions=min2positions)
+            #atoms.set_pbc(True)
+            #atoms.set_cell([17.6, 17.6, 17.6])
+            #atoms.set_positions(atoms.get_positions(wrap=True))
+            #min2positions = atoms.get_positions()
+            #neighbor_list3 = []
+            #for i in range(len(min2positions)) : 
+            #    diff = np.subtract(np.array([min2positions[i][0], min2positions[i][1], min2positions[i][2]]), np.array([ax/2, ay/2, az/2]))
+            #    dist = np.sum(np.power(diff, 2))
+            #    if dist < rcutevent**2 : 
+            #        neighbor_list3.append(i)
+
+
+            #print(len(neighbor_list1))
+            #print(len(neighbor_list2))
+            #print(len(neighbor_list3))
+
+            #newtry, translate for each positions array
+#            atoms = Atoms(positions=min1positions)
+#            dx, dy, dz = ax/2 - min1positions[atom_index][0], ay/2 - min1positions[atom_index][1], az/2 - min1positions[atom_index][2]
+#            atoms.translate(np.array([dx, dy, dz]))
+#            dist = atoms.get_distances(atom_index, ind, mic=True)
+#            neighbor_list1 = np.where(dist<rcutevent)[0]
+#
+#            atoms = Atoms(positions=saddlepositions)
+#            dx, dy, dz = ax/2 - saddlepositions[atom_index][0], ay/2 - saddlepositions[atom_index][1], az/2 - saddlepositions[atom_index][2]
+#            atoms.translate(np.array([dx, dy, dz]))
+#            dist = atoms.get_distances(atom_index, ind, mic=True)
+#            neighbor_list2 = np.where(dist<rcutevent)[0]
+#
+#            atoms = Atoms(positions=min2positions)
+#            dx, dy, dz = ax/2 - min2positions[atom_index][0], ay/2 - min2positions[atom_index][1], az/2 - min2positions[atom_index][2]
+#            atoms.translate(np.array([dx, dy, dz]))
+#            dist = atoms.get_distances(atom_index, ind, mic=True)
+#            neighbor_list3 = np.where(dist<rcutevent)[0]
+#
+
+            #Newtry, use np.mean to center positions : 
+            min1positions = min1positions[neighbor_list]
+            min2positions = min2positions[neighbor_list]
+            saddlepositions = saddlepositions[neighbor_list]
+
+            #center of the sphère : 
+            center_min1 = np.mean(min1positions, axis=0)
+            center_min2 = np.mean(min2positions, axis=0)
+            center_saddle = np.mean(saddlepositions, axis=0)
+
+            #check if there is a translation
+            shift_min2 = center_min2 - center_min1
+            shift_saddle = center_saddle - center_min1
+            print("Shift min2:", shift_min2)
+            print("Shift saddle:", shift_saddle)
+
+            #Correct translation if needed 
+            min2positions = min2positions - shift_min2
+            saddlepositions = saddlepositions - shift_saddle
+
+
+
+
+
+
+
+
+
+
 
             #Check if min1 or min2 close to the original configuration
-            if delr1 < 0.2 or delr2 < 0.2 :  
-                if delr1 < delr2 :  
-                    self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
-                    return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
-                else : 
-                    #return min2positions, saddlepositions, min1positions, dE_forward
-                    self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
-                    return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
+            if delr1 < 0.2 or delr2 < 0.2 : 
+                #if len(neighbor_list1) == len(neighbor_list2) and len(neighbor_list1) == len(neighbor_list3)  :
+                    if delr1 < delr2 :
+                        self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
+                        return min1positions, saddlepositions, min2positions, dE_forward, atom_index 
+                        #return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
+                    else : 
+                        #return min2positions, saddlepositions, min1positions, dE_forward
+                        self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
+                        return min2positions, saddlepositions, min1positions, dE_backward, atom_index
+                        #return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
+                #else : 
+                    #print('len not consistent')
             else :
                 self.system.logger.logger.error('ERROR: minima too far away from initial configuration')
                 return None
         else : 
             self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
             return None
-
 #    def dimer_search(self, atom_index, potential): 
 #        """ 
 #        Use Dimer search with ASE and lammps

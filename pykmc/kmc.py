@@ -96,7 +96,7 @@ class KMC() :
         perm = psr.loc[0].at['P']
         dh = psr.loc[0].at['dh']
 
-        if dh < 0.2 : 
+        if dh < 0.05 : 
             #Check if E_barrier is consistent : 
             is_saddle_e_consistent = self.check_saddle_energy(idx_cat, central_atom_index)
             is_saddle_topo_consitent = self.check_saddle_topo(idx_cat, central_atom_index) 
