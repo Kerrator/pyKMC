@@ -212,8 +212,9 @@ class EventSearch() :
         artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
         artn.set("ninit", 2)
         artn.set("forc_thr", 0.01)
-        artn.set('push_mode', 'rad')
-        artn.set('push_dist_thr', 3.0)
+        artn.set('push_mode', 'list')
+        #artn.set('push_mode', 'rad')
+        #artn.set('push_dist_thr', 3.0)
         artn.set("push_step_size",  0.4)
         artn.set("push_ids", [atom_index])
         artn.set('eigen_step_size', 0.2)
@@ -343,15 +344,6 @@ class EventSearch() :
             #Correct translation if needed 
             min2positions = min2positions - shift_min2
             saddlepositions = saddlepositions - shift_saddle
-
-
-
-
-
-
-
-
-
 
 
             #Check if min1 or min2 close to the original configuration

@@ -21,3 +21,5 @@
 *.xsf
 *core
 *pykmc.log
+*log.calc_energy.lammps
+*catalog.csv

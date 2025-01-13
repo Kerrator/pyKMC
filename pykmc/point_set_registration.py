@@ -8,6 +8,7 @@ import pandas as pd
 #TODO style = 'ira' should not be hardcoded
 #TODO typ = 'Ni' should not be hardcoded
 #TODO deal with IRA parameters
+#FIXME PBC problem (when choosing atoms with atomic environment that goes outside cell)
 
 class PointSetRegistration() : 
     """
@@ -88,25 +89,24 @@ class PointSetRegistration() :
 
         coords1 = self.system.get_positions()[neighbor_list]
         #pbc problem
-        alat = self.system.cell[0][0]
-        for i in range(len(coords1)) : 
-            if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > alat/2 : 
-                coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*17.6/2  
-            if np.linalg.norm(coords1[i][1] - self.system.positions[central_atom_index][1]) > alat/2 : 
-                coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*17.6/2  
-            if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
-                coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*17.6/2  
+        #alat = self.system.cell[0][0]
+        #for i in range(len(coords1)) : 
+        #    if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > alat/2 : 
+        #        coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*17.6/2  
+        #    if np.linalg.norm(coords1[i][1] - self.system.positions[central_atom_index][1]) > alat/2 : 
+        #        coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*17.6/2  
+        #    if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
+        #        coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*17.6/2  
         nat1 = len(coords1)
         typ1 = typ2
-        print(nat1, nat2)
         kmax_factor = 2.0
         rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
 
-        a = [[rmat, tr, perm, dh, central_atom_index, idx_cat]]
+        a = [[rmat, tr, perm, dh, central_atom_index, idx_cat, neighbor_list]]
         results = pd.DataFrame(a, columns=['R', 
                                         'T', 
                                         'P', 
-                                        'dh', 'central atom index', 'n event'])
+                                        'dh', 'central atom index', 'n event', 'neighbor_list'])
         results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
 
 

@@ -12,7 +12,7 @@ print("Cell is : ",atoms.get_cell())
 
 
 #remove center atom 
-atoms.pop(1023) 
+atoms.pop(1166) 
 #atoms.pop(1706) 
 #write to file 
 write(output+'.xyz', atoms) 

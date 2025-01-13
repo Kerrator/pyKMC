@@ -96,15 +96,19 @@ class KMC() :
         perm = psr.loc[0].at['P']
         dh = psr.loc[0].at['dh']
 
-        if dh < 0.05 : 
+
+        if dh < 0.05 :
+
             #Check if E_barrier is consistent : 
             is_saddle_e_consistent = self.check_saddle_energy(idx_cat, central_atom_index)
-            is_saddle_topo_consitent = self.check_saddle_topo(idx_cat, central_atom_index) 
+            #is_saddle_topo_consitent = self.check_saddle_topo(idx_cat, central_atom_index) 
             if is_saddle_e_consistent : 
+
                 #transform event position 
                 coords = self.system.catalog.loc[idx_cat].at['final_positions']
                 for i in range(len(coords)) : 
                     coords[i] = np.matmul(rmat, coords[i]) + tr 
+                coords[:] = coords[perm]
                     #find neighbor list 
                 rcutevent = 7.0
                 ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
@@ -114,12 +118,14 @@ class KMC() :
                 #ugly
                 c = 0 
                 newpos = self.system.get_positions()
-                for i in range(len(self.system.positions)) : 
+                for i in range(len(newpos)) : 
                     if i in neighbor_list : 
                         newpos[i] = coords[c]
                         #self.system.positions[i] = coords[c]
                         c +=1
+
                 self.system.set_positions(newpos)
+                self.system.set_positions(self.system.get_positions(wrap=True))
             else : 
                 self.system.logger.logger.info('Energy barrier not consistent')
         else : 
@@ -136,7 +142,9 @@ class KMC() :
         lammps = LAMMPSlib(lmpcmds=cmds, log_file='log.calc_energy.lammps')
         atoms = Atoms(self.system.get_global_number_of_atoms()*['Ni'], positions=self.system.get_positions(), cell=self.system.cell, pbc=True) 
         atoms.calc = lammps 
+        #Current potential energy of the system 
         Eini = atoms.get_potential_energy() 
+
         #get saddle point energy : 
             #update atoms positions to the saddle point : 
         psr = pd.read_pickle('psr_event_'+str(idx_cat)+'.pickle') 
@@ -144,22 +152,29 @@ class KMC() :
         tr = psr.loc[0].at['T']
         perm = psr.loc[0].at['P']
         dh = psr.loc[0].at['dh']
+        coords = self.system.catalog.loc[idx_cat].at['initial_positions']
+        print(coords)
         coords = self.system.catalog.loc[idx_cat].at['saddle_positions']
-        for i in range(len(coords)) : 
-            coords[i] = np.matmul(rmat, coords[i]) + tr 
-        coords[:] = coords[perm]
-        rcutevent = self.atomenv_params['rcut']
-        ind = np.linspace(0, atoms.get_global_number_of_atoms()-1, atoms.get_global_number_of_atoms()).astype(int)
-        dist = atoms.get_distances(central_atom_index, ind, mic=True)
-        neighbor_list = np.where(dist<rcutevent)[0]
+        print(coords)
+        #for i in range(len(coords)) : 
+        #    coords[i] = np.matmul(rmat, coords[i]) + tr 
+        #coords[:] = coords[perm]
+        #rcutevent = 7.0
+        #ind = np.linspace(0, atoms.get_global_number_of_atoms()-1, atoms.get_global_number_of_atoms()).astype(int)
+        #dist = atoms.get_distances(central_atom_index, ind, mic=True)
+        #neighbor_list = np.where(dist<rcutevent)[0]
+        neighbor_list = psr.loc[0].at['neighbor_list']
             #replace positions of the neighbors 
         #ugly
         c = 0 
         newpos = atoms.get_positions()
+        self.system.logger.logger.info('DEBUG: {} atoms in event and {} in central atom neigh'.format(len(coords), len(neighbor_list)))
         for i in range(len(newpos)) : 
             if i in neighbor_list : 
-                newpos[i] = coords[c]
+                #newpos[i] = coords[c] 
+                newpos[i] = np.matmul(rmat, coords[c]) +tr
                 c +=1
+
         atoms.set_positions(newpos)
         Esad = atoms.get_potential_energy() 
         dE = Esad-Eini

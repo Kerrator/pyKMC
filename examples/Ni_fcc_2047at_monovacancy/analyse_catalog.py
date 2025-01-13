@@ -11,7 +11,9 @@ def write_event_traj(catalog,index) :
     col = ['initial_positions', 'saddle_positions', 'final_positions'] 
     for c in col : 
         positions = catalog.loc[index].at[c]
-        atoms = Atoms(positions = positions, cell=[17.6,17.6, 17.6], pbc=True)
+        print(positions)
+        #atoms = Atoms(positions = positions, cell=[17.6,17.6, 17.6], pbc=True)
+        atoms = Atoms(positions = positions)
         traj.append(atoms) 
 
     write('event_'+str(index)+'.xyz', traj)
