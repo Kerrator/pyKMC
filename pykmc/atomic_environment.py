@@ -22,6 +22,7 @@ from subprocess import run
 #TODO Better gather results
 #TODO use cell/verlet list for graphs
 #TODO See if we can improve the way I connect in make_graph the graph atom index and system atom index (I think that some part are not necessary)
+#TODO Make neighobr cna add to graph computation a parameter
 
 class AtomicEnvironment() :
     """
@@ -256,7 +257,8 @@ class AtomicEnvironment() :
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             for at_idx in noncrist_atom_index : 
                 dist = self.system.get_distances(at_idx, ind, mic=True)
-                neighbors += np.where(dist <= self.atomenv_params['rnei'])[0].tolist()
+                #neighbors += np.where(dist <= self.atomenv_params['rnei'])[0].tolist()
+                neighbors += np.where(dist <= 2.5)[0].tolist()
             noncrist_atom_index += neighbors 
             noncrist_atom_index = list(set(noncrist_atom_index)) #remove duplicate
 
