@@ -234,6 +234,12 @@ class AtomicEnvironment() :
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
+
+        #TEST : add also neighbors of non crystalline atoms : 
+        #gather all positions 
+        positions = lmp.gather_atoms("x", 1, 3)
+
+
         if rank == 0 : 
             #flaten arrays
             global_result = np.concatenate(global_result)
@@ -241,6 +247,24 @@ class AtomicEnvironment() :
             global_result = global_result[global_result[:,0].argsort()]
             #Find non crystalline atoms : 
             noncrist_atom_index = [i for i,e in enumerate(global_result[:,1]) if e == 5]
+
+            #Test : add also neighbors of non crystalline atoms : 
+                #convert ctype positions into a numpy array
+            positions = np.ctypeslib.as_array(positions)
+            positions = np.reshape(positions, (-1, 3))
+            neighbors = [] 
+            ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+            for at_idx in noncrist_atom_index : 
+                dist = self.system.get_distances(at_idx, ind, mic=True)
+                neighbors += np.where(dist <= self.atomenv_params['rnei'])[0].tolist()
+            noncrist_atom_index += neighbors 
+            noncrist_atom_index = list(set(noncrist_atom_index)) #remove duplicate
+
+
+
+
+
+
             #Split index atoms in approximatively even number sublist
             split = np.array_split(noncrist_atom_index, nprocs)
         else : 
