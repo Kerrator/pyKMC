@@ -56,9 +56,12 @@ class PointSetRegistration() :
         run the point set registration
         """ 
         if self.psr_style == 'ira' : 
-            self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
+            rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
+            return rmat, tr, perm, dh
         else : 
-            print(ERROR)
+            print('ERROR')
+            return None
+        
     
     def ira(self, idx_cat, central_atom_index, rcutevent) : 
         """
@@ -88,26 +91,18 @@ class PointSetRegistration() :
         neighbor_list = np.where(dist<rcutevent)[0]
 
         coords1 = self.system.get_positions()[neighbor_list]
-        #pbc problem
-        #alat = self.system.cell[0][0]
-        #for i in range(len(coords1)) : 
-        #    if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > alat/2 : 
-        #        coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*17.6/2  
-        #    if np.linalg.norm(coords1[i][1] - self.system.positions[central_atom_index][1]) > alat/2 : 
-        #        coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*17.6/2  
-        #    if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
-        #        coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*17.6/2  
         nat1 = len(coords1)
         typ1 = typ2
         kmax_factor = 2.0
         rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
 
-        a = [[rmat, tr, perm, dh, central_atom_index, idx_cat, neighbor_list]]
+        a = [[rmat, tr, perm, dh]]
         results = pd.DataFrame(a, columns=['R', 
                                         'T', 
                                         'P', 
-                                        'dh', 'central atom index', 'n event', 'neighbor_list'])
+                                        'dh'])
         results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
+        return rmat, tr, perm, dh
 
 
 

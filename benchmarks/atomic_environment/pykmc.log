@@ -7,6 +7,9 @@
 
 reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
 
-DEBUG: Atomic environment n° 0 : 12 atoms
-DEBUG: Atomic environment n° 1 : 2035 atoms
+DEBUG: Atomic environment n° 0 : 24 atoms
+DEBUG: Atomic environment n° 1 : 1993 atoms
+DEBUG: Atomic environment n° 2 : 12 atoms
+DEBUG: Atomic environment n° 3 : 6 atoms
+DEBUG: Atomic environment n° 4 : 12 atoms
 

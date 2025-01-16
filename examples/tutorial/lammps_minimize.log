@@ -3,21 +3,17 @@ units metal
 atom_style atomic
 dimension 3
 boundary p p p
-read_data initial_config_minimization_tosee.lmp
+read_data initial_config_minimization.lmp
 Reading data file ...
   orthogonal box = (0 0 0) to (28.16 28.16 28.16)
   1 by 1 by 1 MPI processor grid
   reading atoms ...
   2047 atoms
-  read_data CPU = 0.004 seconds
-atom_modify sort 0 1
+  read_data CPU = 0.007 seconds
 pair_style eam/alloy
-pair_coeff * * ./Ni_v6_2.0_LKBeland2016.eam Ni
-plugin load /root/programs/artn-plugin/lib/libartn-lmp.so
-Loading plugin: ARTn plugin fix style v1.0 by Nicolas Salles (nsalles33@gmail.com)
-fix 10 all artn dmax 8.0
-min_style fire
-minimize 1e-3 1e-3 1000 1000
+pair_coeff * * ../Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni
+min_style cg
+minimize 1.0e-6 1.0e-8 100 1000
 
 CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE
 
@@ -49,46 +45,32 @@ Neighbor list info ...
       pair build: half/bin/atomonly/newton
       stencil: half/bin/3d
       bin: standard
-  Parameters for fire:
-    dmax  delaystep dtgrow dtshrink alpha0 alphashrink tmax tmin   integrator   halfstepback   abcfire  
-     0.1     20      1.1     0.5     0.25     0.99      10  0.02 eulerimplicit      yes          no     
- * FIX/ARTn::CHANGE PARAM...
-  Parameters for fire:
-    dmax  delaystep dtgrow dtshrink alpha0 alphashrink tmax tmin   integrator   halfstepback   abcfire  
-      8       5      1.1     0.5     0.1      0.99      10  0.02 eulerimplicit       no          no     
- * alpha0 ->    0.1
- * dt0 ->  0.001
- * dtmin -> 2e-05
- * dtmax -> 0.02
- * ftm2v -> 9648.53
- * dmax ->    8
- * delaystep ->         5
-Per MPI rank memory allocation (min/avg/max) = 4.214 | 4.214 | 4.214 Mbytes
+Per MPI rank memory allocation (min/avg/max) = 5.466 | 5.466 | 5.466 Mbytes
    Step          Temp          E_pair         E_mol          TotEng         Press     
-         0   0             -9107.5762      0             -9107.5762     -151.33082    
-       278   0.0041769624  -9107.5762      0             -9107.5751     -151.27799    
-Loop time of 1.83369 on 1 procs for 55 steps with 2047 atoms
+         0   0             -9107.5289      0             -9107.5289     -98.963913    
+         2   0             -9107.5762      0             -9107.5762     -151.33082    
+Loop time of 0.0216442 on 1 procs for 2 steps with 2047 atoms
 
 100.0% CPU use with 1 MPI tasks x no OpenMP threads
 
 Minimization stats:
   Stopping criterion = energy tolerance
   Energy initial, next-to-last, final = 
-     -9107.57615883997  -9107.57410136473  -9107.57615883997
-  Force two-norm initial, final = 0.16791908 0
-  Force max component initial, final = 0.014855709 0
-  Final line search alpha, max atom move = 0 0
-  Iterations, force evaluations = 55 60
+     -9107.52891973159  -9107.56996236989  -9107.57615883755
+  Force two-norm initial, final = 1.0266971 0.16791908
+  Force max component initial, final = 0.20103783 0.014855709
+  Final line search alpha, max atom move = 1 0.014855709
+  Iterations, force evaluations = 2 4
 
 MPI task timing breakdown:
 Section |  min time  |  avg time  |  max time  |%varavg| %total
 ---------------------------------------------------------------
-Pair    | 1.1907     | 1.1907     | 1.1907     |   0.0 | 64.94
-Neigh   | 0.021589   | 0.021589   | 0.021589   |   0.0 |  1.18
-Comm    | 0.005987   | 0.005987   | 0.005987   |   0.0 |  0.33
+Pair    | 0.021102   | 0.021102   | 0.021102   |   0.0 | 97.50
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.000197   | 0.000197   | 0.000197   |   0.0 |  0.91
 Output  | 0          | 0          | 0          |   0.0 |  0.00
-Modify  | 0.60901    | 0.60901    | 0.60901    |   0.0 | 33.21
-Other   |            | 0.006368   |            |       |  0.35
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.0003451  |            |       |  1.59
 
 Nlocal:           2047 ave        2047 max        2047 min
 Histogram: 1 0 0 0 0 0 0 0 0 0
@@ -99,6 +81,6 @@ Histogram: 1 0 0 0 0 0 0 0 0 0
 
 Total # of neighbors = 229152
 Ave neighs/atom = 111.94529
-Neighbor list builds = 5
+Neighbor list builds = 0
 Dangerous builds = 0
-Total wall time: 0:00:01
+Total wall time: 0:00:00

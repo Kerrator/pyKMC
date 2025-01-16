@@ -86,7 +86,9 @@ class System(Atoms):
                                                  'saddle_positions', 
                                                  'final_positions', 
                                                  'energy_barrier', 
-                                                 'k'])
+                                                 'k', 
+                                                 'move_atom_idx', 
+                                                 'id_saddle'])
         else : #Read previous catalog DataFrame
             self.logger.logger.info('reading {} catalog file'.format(catalog))
             self.catalog = pd.read_pickle(catalog) #for restart
@@ -212,7 +214,8 @@ class System(Atoms):
         """
         from .point_set_registration import PointSetRegistration 
         psr = PointSetRegistration(self, psr_style, idx_cat,central_atom_index, rcutevent, dimension, nprocs, backend)
-        psr.run()
+        rmat, tr, perm, dh = psr.run()
+        return rmat, tr, perm, dh
 
     def kmc(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension=3, backend='local') :
         """

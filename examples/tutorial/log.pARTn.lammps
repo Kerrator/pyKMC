@@ -12,7 +12,7 @@ Reading data file ...
   read_data CPU = 0.004 seconds
 atom_modify sort 0 1
 pair_style eam/alloy
-pair_coeff * * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni
+pair_coeff * * ../Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni
 plugin load /root/programs/artn-plugin/lib/libartn-lmp.so
 Loading plugin: ARTn plugin fix style v1.0 by Nicolas Salles (nsalles33@gmail.com)
 fix 10 all artn dmax 2.0
@@ -63,32 +63,32 @@ Neighbor list info ...
  * ftm2v -> 9648.53
  * dmax ->    2
  * delaystep ->         5
-Per MPI rank memory allocation (min/avg/max) = 4.216 | 4.216 | 4.216 Mbytes
+Per MPI rank memory allocation (min/avg/max) = 4.214 | 4.214 | 4.214 Mbytes
    Step          Temp          E_pair         E_mol          TotEng         Press     
          0   0             -9107.5762      0             -9107.5762     -151.33082    
-       347   0.012822222   -9107.5762      0             -9107.5728     -151.16862    
-Loop time of 2.51596 on 1 procs for 59 steps with 2047 atoms
+       398   0.0010186874  -9107.5762      0             -9107.5759     -151.31794    
+Loop time of 3.04449 on 1 procs for 61 steps with 2047 atoms
 
-99.7% CPU use with 1 MPI tasks x no OpenMP threads
+100.0% CPU use with 1 MPI tasks x no OpenMP threads
 
 Minimization stats:
   Stopping criterion = energy tolerance
   Energy initial, next-to-last, final = 
-     -9107.57615883995  -9107.57735167046  -9107.57615883995
+     -9107.57615884018  -9107.57730399847  -9107.57615884018
   Force two-norm initial, final = 0.16791908 0
   Force max component initial, final = 0.014855709 0
   Final line search alpha, max atom move = 0 0
-  Iterations, force evaluations = 59 63
+  Iterations, force evaluations = 61 66
 
 MPI task timing breakdown:
 Section |  min time  |  avg time  |  max time  |%varavg| %total
 ---------------------------------------------------------------
-Pair    | 1.6424     | 1.6424     | 1.6424     |   0.0 | 65.28
-Neigh   | 0.021656   | 0.021656   | 0.021656   |   0.0 |  0.86
-Comm    | 0.010062   | 0.010062   | 0.010062   |   0.0 |  0.40
+Pair    | 2.0424     | 2.0424     | 2.0424     |   0.0 | 67.09
+Neigh   | 0.02341    | 0.02341    | 0.02341    |   0.0 |  0.77
+Comm    | 0.011999   | 0.011999   | 0.011999   |   0.0 |  0.39
 Output  | 0          | 0          | 0          |   0.0 |  0.00
-Modify  | 0.83215    | 0.83215    | 0.83215    |   0.0 | 33.07
-Other   |            | 0.009716   |            |       |  0.39
+Modify  | 0.95469    | 0.95469    | 0.95469    |   0.0 | 31.36
+Other   |            | 0.01198    |            |       |  0.39
 
 Nlocal:           2047 ave        2047 max        2047 min
 Histogram: 1 0 0 0 0 0 0 0 0 0
@@ -101,4 +101,4 @@ Total # of neighbors = 229152
 Ave neighs/atom = 111.94529
 Neighbor list builds = 5
 Dangerous builds = 0
-Total wall time: 0:00:02
+Total wall time: 0:00:03

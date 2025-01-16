@@ -35,7 +35,8 @@ import logging
 #TODO find a way to not print in terminal ira errors (we log them)
 #TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
 #TODO Clean fixme atoms moving sphere min1 min2 saddle
-
+#TODO See wich atoms moves the more during the event search --> central atom that we give can be different from the one that move --> problem when checking topo saddle point
+#TODO Don't forget to readd reverse event
 
 class EventSearch() : 
     """
@@ -97,28 +98,34 @@ class EventSearch() :
                 #run event search
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
-                if fs.result() is not None :
-                    #upper and lower limit : 
-                    if fs.result()[3] > 0.1 and fs.result()[3] < 5.0 :  
-                        dfevent = pd.Series({'event_id' : id , 
-                                    'initial_positions' : fs.result()[0], 
-                                    'saddle_positions': fs.result()[1], 
-                                    'final_positions': fs.result()[2], 
-                                    'energy_barrier': fs.result()[3], 
-                                    'k' : 1})
+                    if fs.result() is not None :
+                        #upper and lower limit : 
+                        if fs.result()[3] > 0.1 and fs.result()[3] < 5.0 : 
+                            dfevent = pd.Series({'event_id' : id , 
+                                        'initial_positions' : fs.result()[0], 
+                                        'saddle_positions': fs.result()[1], 
+                                        'final_positions': fs.result()[2], 
+                                        'energy_barrier': fs.result()[3], 
+                                        'k' : 1, 
+                                        'move_atom_idx' : fs.result()[4],
+                                        'id_saddle' : fs.result()[5]})
 
-                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                            self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+
+
                         #Add reverse event : 
                         #compute finale positions ID : 
-                        g = make_graph(self.system, [fs.result()[4]], 3.0, 7.0 )
-                        reverse_id = pynauty.certificate(g[0])
-                        dfevent = pd.Series({'event_id' : reverse_id, 
-                                    'initial_positions' : fs.result()[2], 
-                                    'saddle_positions': fs.result()[1], 
-                                    'final_positions': fs.result()[1], 
-                                    'energy_barrier': fs.result()[3], 
-                                    'k' : 1})
-                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                        #g = make_graph(self.system, [fs.result()[4]], 3.0, 5.0 )
+                        #reverse_id = pynauty.certificate(g[0])
+                        #dfevent = pd.Series({'event_id' : reverse_id, 
+                        #            'initial_positions' : fs.result()[2], 
+                        #            'saddle_positions': fs.result()[1], 
+                        #            'final_positions': fs.result()[0], 
+                        #            'energy_barrier': fs.result()[3], 
+                        #            'k' : 1, 
+                        #            'central_atom' : fs.result()[4], 
+                        #            'from_id' : id})
+                        #self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
 
@@ -133,6 +140,7 @@ class EventSearch() :
         except ValueError:
             pass
         l_new_environments = [ids for ids in ids_current if ids not in ids_catalog]
+        self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
         return l_new_environments 
     
     def pARTn_search(self, atom_index, potential) : 
@@ -161,17 +169,6 @@ class EventSearch() :
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #TEST search on subsystem        
-        #Create a subsystem base on central atom neighbor lsh z ist 
-        #rcutevent = self.system.cell[0][0]
-        #rcutevent = 8.0
-        #ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-        #dist = self.system.get_distances(atom_index, ind, mic=True)
-        #neighbor_list = np.where(dist<rcutevent)[0]
-        #subsystem = Atoms(positions=self.system.get_positions()[neighbor_list], cell=self.system.get_cell(), pbc=True)
-        #atom_index = np.where((subsystem.get_positions() == (self.system.positions[atom_index][0], self.system.positions[atom_index][1], self.system.positions[atom_index][2])).all(axis=1))[0][0]
-
-
         #TEST put atom_index at the center of the cell to fix pbc problems : 
         #New Atoms
         cell = self.system.get_cell()
@@ -198,12 +195,12 @@ class EventSearch() :
         lmp.command("dimension 3")
         lmp.command("boundary p p p")
         lmp.command("read_data {}".format(lammps_data_file))
-        lmp.command('atom_modify sort 0 1')
+        lmp.command('atom_modify sort 40000000 0.0')
             #Potential : 
         for key, val in potential.items() : 
             lmp.command("{} {}".format(key, val))
         lmp.command("plugin load {}".format(self.search_params['path_artnso']))
-        lmp.command("fix 10 all artn dmax 8.0")
+        lmp.command("fix 10 all artn dmax 2.0")
         lmp.command("min_style fire")
         #SETUP ARTN
         artn.set('engine_units', 'lammps/metal')
@@ -212,9 +209,9 @@ class EventSearch() :
         artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
         artn.set("ninit", 2)
         artn.set("forc_thr", 0.01)
-        artn.set('push_mode', 'list')
-        #artn.set('push_mode', 'rad')
-        #artn.set('push_dist_thr', 3.0)
+        #artn.set('push_mode', 'list')
+        artn.set('push_mode', 'rad')
+        artn.set('push_dist_thr', 3.0)
         artn.set("push_step_size",  0.4)
         artn.set("push_ids", [atom_index])
         artn.set('eigen_step_size', 0.2)
@@ -239,124 +236,65 @@ class EventSearch() :
             min1positions = artn.extract("tau_min1")
             min2positions = artn.extract("tau_min2")
             saddlepositions = artn.extract("tau_sad")
+            
 
-            #save only atoms in rcutenv of atom_index
+
+            #eigenvec = artn.extract("eigen_sad")
+            #print(eigenvec)
+            
+            
+            #TEST Find Atoms that move the most == > for graph topo saddle point : 
+            dist = (min1positions-saddlepositions)**2
+            dist = dist.sum(axis=-1)
+            dist = np.sqrt(dist)
+            index_move = np.argmax(dist)
+            #graph saddle point index_move :
+            tmp_pos = saddlepositions 
+            tmp_pos[tmp_pos < 0] = 0
+            atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True) 
+            g_saddle = make_graph(atoms_saddle, [index_move], 3.0, 5.0)[0]
+            id_saddle = pynauty.certificate(g_saddle)
+            
+            
+
+            #save only atom in rcutenv of atom_index
             rcutevent = 7.0
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             dist = self.system.get_distances(atom_index, ind, mic=True)
 
-
-
-
-
-
-
-
-
-
-            #TEST fix pbc
-            #dist = atoms.get_distances(atom_index, ind, mic=True)
-
             neighbor_list = np.where(dist<rcutevent)[0]
-            #neighbor_list = neighbor_list
-            
-
-            #TEST ugly just to see if it is the problem
-            #from ase.geometry import wrap_positions
-            
-            #atoms = Atoms(positions=min1positions)
-            #atoms.set_pbc(True)
-            #atoms.set_cell([17.6, 17.6, 17.6])
-            #atoms.set_positions(atoms.get_positions(wrap=True))
-            #min1positions = atoms.get_positions()
-            #neighbor_list1 = []
-            #for i in range(len(min1positions)) : 
-            #    diff = np.subtract(min1positions[i], np.array([ax/2, ay/2, az/2]))
-            #    dist = np.sum(np.power(diff, 2))
-            #    if dist < rcutevent**2 : 
-            #        neighbor_list1.append(i)
-            
-            #atoms = Atoms(positions=saddlepositions)
-            #atoms.set_pbc(True)
-            #atoms.set_cell([17.6, 17.6, 17.6])
-            #atoms.set_positions(atoms.get_positions(wrap=True))
-            #saddlepositions = atoms.get_positions()
-            #neighbor_list2 = []
-            #for i in range(len(saddlepositions)) : 
-            #    diff = np.subtract(np.array([saddlepositions[i][0], saddlepositions[i][1], saddlepositions[i][2]]), np.array([ax/2, ay/2, az/2]))
-            #    dist = np.sum(np.power(diff, 2))
-            #    if dist < rcutevent**2 : 
-            #        neighbor_list2.append(i)
-            
-            #atoms = Atoms(positions=min2positions)
-            #atoms.set_pbc(True)
-            #atoms.set_cell([17.6, 17.6, 17.6])
-            #atoms.set_positions(atoms.get_positions(wrap=True))
-            #min2positions = atoms.get_positions()
-            #neighbor_list3 = []
-            #for i in range(len(min2positions)) : 
-            #    diff = np.subtract(np.array([min2positions[i][0], min2positions[i][1], min2positions[i][2]]), np.array([ax/2, ay/2, az/2]))
-            #    dist = np.sum(np.power(diff, 2))
-            #    if dist < rcutevent**2 : 
-            #        neighbor_list3.append(i)
 
 
-            #print(len(neighbor_list1))
-            #print(len(neighbor_list2))
-            #print(len(neighbor_list3))
-
-            #newtry, translate for each positions array
-#            atoms = Atoms(positions=min1positions)
-#            dx, dy, dz = ax/2 - min1positions[atom_index][0], ay/2 - min1positions[atom_index][1], az/2 - min1positions[atom_index][2]
-#            atoms.translate(np.array([dx, dy, dz]))
-#            dist = atoms.get_distances(atom_index, ind, mic=True)
-#            neighbor_list1 = np.where(dist<rcutevent)[0]
-#
-#            atoms = Atoms(positions=saddlepositions)
-#            dx, dy, dz = ax/2 - saddlepositions[atom_index][0], ay/2 - saddlepositions[atom_index][1], az/2 - saddlepositions[atom_index][2]
-#            atoms.translate(np.array([dx, dy, dz]))
-#            dist = atoms.get_distances(atom_index, ind, mic=True)
-#            neighbor_list2 = np.where(dist<rcutevent)[0]
-#
-#            atoms = Atoms(positions=min2positions)
-#            dx, dy, dz = ax/2 - min2positions[atom_index][0], ay/2 - min2positions[atom_index][1], az/2 - min2positions[atom_index][2]
-#            atoms.translate(np.array([dx, dy, dz]))
-#            dist = atoms.get_distances(atom_index, ind, mic=True)
-#            neighbor_list3 = np.where(dist<rcutevent)[0]
-#
-
-            #Newtry, use np.mean to center positions : 
             min1positions = min1positions[neighbor_list]
             min2positions = min2positions[neighbor_list]
             saddlepositions = saddlepositions[neighbor_list]
 
-            #center of the sphère : 
-            center_min1 = np.mean(min1positions, axis=0)
-            center_min2 = np.mean(min2positions, axis=0)
-            center_saddle = np.mean(saddlepositions, axis=0)
+            np.save('min1', min1positions)
+            np.save('min2', min2positions)
+            np.save('saddle', saddlepositions)
 
-            #check if there is a translation
-            shift_min2 = center_min2 - center_min1
-            shift_saddle = center_saddle - center_min1
-            print("Shift min2:", shift_min2)
-            print("Shift saddle:", shift_saddle)
-
-            #Correct translation if needed 
-            min2positions = min2positions - shift_min2
-            saddlepositions = saddlepositions - shift_saddle
-
+            #TEST Find Atoms that move the most == > for graph topo saddle point : 
+            dist = (min1positions-saddlepositions)**2
+            dist = dist.sum(axis=-1)
+            dist = np.sqrt(dist)
+            index_move = np.argmax(dist)
+            
 
             #Check if min1 or min2 close to the original configuration
             if delr1 < 0.2 or delr2 < 0.2 : 
                 #if len(neighbor_list1) == len(neighbor_list2) and len(neighbor_list1) == len(neighbor_list3)  :
                     if delr1 < delr2 :
                         self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
-                        return min1positions, saddlepositions, min2positions, dE_forward, atom_index 
+                        #return min1positions, saddlepositions, min2positions, dE_forward, np.where(neighbor_list == atom_index)[0][0], atom_index 
+                        #return min1positions, saddlepositions, min2positions, dE_forward, index_move, atom_index, index_move_prev
+                        return min1positions, saddlepositions, min2positions, dE_forward, index_move, id_saddle 
                         #return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
                     else : 
                         #return min2positions, saddlepositions, min1positions, dE_forward
                         self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
-                        return min2positions, saddlepositions, min1positions, dE_backward, atom_index
+                        #return min2positions, saddlepositions, min1positions, dE_backward, np.where(neighbor_list == atom_index)[0][0], atom_index
+                        #return min2positions, saddlepositions, min1positions, dE_backward, index_move, atom_index, index_move_prev
+                        return min2positions, saddlepositions, min1positions, dE_backward, index_move, id_saddle
                         #return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
                 #else : 
                     #print('len not consistent')

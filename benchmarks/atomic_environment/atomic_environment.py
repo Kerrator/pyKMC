@@ -11,7 +11,7 @@ import yaml
 init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 8.0}
+                    'rcut'  : 5.0}
 nprocs = 1 
 backend = 'local'
 style = 'cna/graph'

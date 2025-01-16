@@ -88,7 +88,7 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #Initialize lammps :
-        lmp = lammps(comm=comm,cmdargs=['-log', 'log_minimize.lammps', '-screen', 'none'])
+        lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log', '-screen', 'none'])
 
         #For the moment default parameters 
         lmp.command('units metal')

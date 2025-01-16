@@ -22,7 +22,6 @@ from subprocess import run
 #TODO Better gather results
 #TODO use cell/verlet list for graphs
 #TODO See if we can improve the way I connect in make_graph the graph atom index and system atom index (I think that some part are not necessary)
-#TODO Make neighobr cna add to graph computation a parameter
 
 class AtomicEnvironment() :
     """
@@ -318,6 +317,7 @@ def make_graph(atoms, list_id, rnei, rcut) :
     positions = atoms.get_positions(wrap=True) 
     cell = atoms.get_cell()
     alat = cell[0][0]
+    positions[positions<0] = 0
     tree = cKDTree(positions, boxsize=[alat]*3)
     
     # Creat graph for each atoms
