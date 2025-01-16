@@ -258,7 +258,7 @@ class AtomicEnvironment() :
             for at_idx in noncrist_atom_index : 
                 dist = self.system.get_distances(at_idx, ind, mic=True)
                 #neighbors += np.where(dist <= self.atomenv_params['rnei'])[0].tolist()
-                neighbors += np.where(dist <= 2.5)[0].tolist()
+                neighbors += np.where(dist <= self.atomenv_params['radd_cna'])[0].tolist()
             noncrist_atom_index += neighbors 
             noncrist_atom_index = list(set(noncrist_atom_index)) #remove duplicate
 
