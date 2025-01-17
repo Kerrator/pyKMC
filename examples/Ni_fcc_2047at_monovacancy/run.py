@@ -26,7 +26,7 @@ search_params = {'nsearch' : 10,
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
-kmc_parameters = {'nkmc_steps' : 100}
+kmc_parameters = {'nkmc_steps' : 200}
 #1-Initialize the system : 
 system = System(init_config_file, catalog='catalog.pickle')
 #system = System(init_config_file)

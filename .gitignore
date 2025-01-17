@@ -24,3 +24,5 @@
 *log.calc_energy.lammps
 *catalog.csv
 *event_*.xyz
+*trajkmc.xsf
+*catalog.pickle

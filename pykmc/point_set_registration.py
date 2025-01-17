@@ -91,6 +91,17 @@ class PointSetRegistration() :
         neighbor_list = np.where(dist<rcutevent)[0]
 
         coords1 = self.system.get_positions()[neighbor_list]
+
+        #unwrap if close to cell limits :
+        alat = self.system.cell[0][0] 
+        for i in range(len(coords1)) : 
+            if np.linalg.norm(coords1[i][0] - self.system.positions[central_atom_index][0]) > alat/2 : 
+               coords1[i][0] = coords1[i][0] + np.sign(self.system.positions[central_atom_index][0]-coords1[i][0])*alat 
+            if np.linalg.norm(coords1[i][1] - self.system.positions[central_atom_index][1]) > alat/2 : 
+                coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*alat
+            if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
+                coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*alat
+
         nat1 = len(coords1)
         typ1 = typ2
         kmax_factor = 2.0
