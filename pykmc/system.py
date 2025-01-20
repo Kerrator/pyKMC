@@ -201,7 +201,7 @@ class System(Atoms):
         event_search = EventSearch(self, search_style, search_params, potential, dimension, nprocs, backend)
         event_search.run()
     
-    def point_set_registration(self, psr_style, idx_cat,central_atom_index, rcutevent, dimension=3, nprocs=1, backend='local') : 
+    def point_set_registration(self, psr_style, psr_parameters, idx_cat,central_atom_index, rcutevent, dimension=3, nprocs=1, backend='local') : 
         """
         run a point set registration between the central_atom_index in the system and the idx_cat event of the catalog
 
@@ -227,7 +227,7 @@ class System(Atoms):
         >>> system.point_set_registration('ira', 0, 250, 10.0)
         """
         from .point_set_registration import PointSetRegistration 
-        psr = PointSetRegistration(self, psr_style, idx_cat,central_atom_index, rcutevent, dimension, nprocs, backend)
+        psr = PointSetRegistration(self, psr_style, psr_parameters, idx_cat,central_atom_index, rcutevent, dimension, nprocs, backend)
         rmat, tr, perm, dh = psr.run()
         return rmat, tr, perm, dh
 

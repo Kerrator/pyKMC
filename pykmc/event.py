@@ -100,7 +100,7 @@ class EventSearch() :
                     fs = exe.submit(self.pARTn_search, atom_index, self.potential )
                     if fs.result() is not None :
                         #upper and lower limit : 
-                        if fs.result()[3] > 0.1 and fs.result()[3] < 5.0 : 
+                        if fs.result()[3] > self.search_params['emin_event'] and fs.result()[3] < self.search_params['emax_event'] : 
                             dfevent = pd.Series({'event_id' : id , 
                                         'initial_positions' : fs.result()[0], 
                                         'saddle_positions': fs.result()[1], 
@@ -179,7 +179,7 @@ class EventSearch() :
         atoms.translate(np.array([dx, dy, dz]))
 
         #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization_tosee.lmp'
+        lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
             #write_lammps_data(lammps_data_file, self.system, masses=True)
             write_lammps_data(lammps_data_file, atoms, masses=True)
@@ -197,27 +197,29 @@ class EventSearch() :
         lmp.command("read_data {}".format(lammps_data_file))
         lmp.command('atom_modify sort 40000000 0.0')
             #Potential : 
-        for key, val in potential.items() : 
-            lmp.command("{} {}".format(key, val))
+        lmp.command('pair_style {}'.format(self.potential['pair_style']))
+        lmp.command('pair_coeff {}'.format(self.potential['pair_coeff']))
+        #for key, val in potential.items() : 
+        #    lmp.command("{} {}".format(key, val))
         lmp.command("plugin load {}".format(self.search_params['path_artnso']))
-        lmp.command("fix 10 all artn dmax 2.0")
+        lmp.command("fix 10 all artn dmax {}".format(self.search_params['partn_dmax']))
         lmp.command("min_style fire")
         #SETUP ARTN
         artn.set('engine_units', 'lammps/metal')
-        artn.set('verbose',2)
+        artn.set('verbose',self.search_params['partn_verbose'])
         artn.set("lpush_final", True)
         artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
-        artn.set("ninit", 2)
-        artn.set("forc_thr", 0.01)
-        #artn.set('push_mode', 'list')
-        artn.set('push_mode', 'rad')
-        artn.set('push_dist_thr', 3.0)
-        artn.set("push_step_size",  0.4)
+        artn.set("ninit", self.search_params['partn_ninit'])
+        artn.set("forc_thr", self.search_params['partn_forc_thr'])
+        artn.set('push_mode', self.search_params['partn_push_mode'])
+        if self.search_params['partn_push_mode'] == 'rad' : 
+            artn.set('push_dist_thr', self.search_params['partn_push_dist_thr'])
+        artn.set("push_step_size",  self.search_params['partn_push_step_size'])
         artn.set("push_ids", [atom_index])
-        artn.set('eigen_step_size', 0.2)
-        artn.set('lanczos_disp', 0.0005)
-        artn.set('nsmooth',  3)
-        artn.set('nperp', 5)
+        artn.set('eigen_step_size', self.search_params['partn_eigen_step_size'])
+        artn.set('lanczos_disp', self.search_params['partn_lanczos_disp'])
+        artn.set('nsmooth',  self.search_params['partn_nsmooth'])
+        artn.set('nperp', self.search_params['partn_nperp'])
         #Run
         lmp.command("minimize 1e-3 1e-3 1000 1000")
 
@@ -258,7 +260,7 @@ class EventSearch() :
             
 
             #save only atom in rcutenv of atom_index
-            rcutevent = 7.0
+            rcutevent = self.search_params['rcutenv']
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             dist = self.system.get_distances(atom_index, ind, mic=True)
 

@@ -15,3 +15,18 @@ etol = 1.0e-6
 ftol = 1.0e-8
 maxiter = 1000
 maxeval = 1000
+
+[AtomicEnvironment] 
+style = cna/graph
+rnei = 3.0 
+rcut = 5.0 
+
+[EventSearch] 
+style = pARTn 
+rcutenv = 7.0 
+nsearch = 10 
+path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+
+[PSR] 
+style = ira 
+kmax_factor = 2.0

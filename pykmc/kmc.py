@@ -26,6 +26,26 @@ class KMC() :
         self.control = self.system.inputs['Control']
         self.potential = self.system.inputs['Potential']
         self.minimization = self.system.inputs['Minimization']
+        self.atomicenvironment_parameters = self.system.inputs['AtomicEnvironment']
+        self.event_parameters = self.system.inputs['EventSearch']
+        self.psr_parameters = self.system.inputs['PSR']
+
+        catalog = self.control['catalog']
+        if catalog == None : 
+        #Create empty DataFrame
+            self.system.catalog = pd.DataFrame(columns=['event_id', 
+                                                 'initial_positions', 
+                                                 'saddle_positions', 
+                                                 'final_positions', 
+                                                 'energy_barrier', 
+                                                 'k', 
+                                                 'move_atom_idx', 
+                                                 'id_saddle'])
+        else : #Read previous catalog DataFrame
+            self.logger.logger.info('reading {} catalog file'.format(catalog))
+            self.system.catalog = pd.read_pickle(catalog) #for restart
+
+
 
     def run(self) : 
         """
@@ -46,7 +66,31 @@ class KMC() :
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
             #Searching atomic environments : 
-             
+            self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
+            #Searching Events : 
+            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential)
+
+            #If at leas one event in the catalog : 
+            if len(self.system.catalog) > 0 : 
+                #Select an event in the catalog : 
+                idx_cat = self.select_event() 
+
+            if idx_cat is not None : #In case we have all atomic environments that do not have event
+                #Select a central atom on which we will reconstruct the event : 
+                central_atom_index = self.select_central_atom(idx_cat)
+
+                if central_atom_index is not None : #Shoudl not happen ? 
+                    #Shape Matching
+                    rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
+                    #Update positions of the system if recontruction success
+                    self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                    #Minimize
+                    self.system.minimize(self.minimization['style'], self.minimization, self.potential)
+                    #Append new cong to trajectory file
+                    write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
+                                                         positions=self.system.get_positions(), 
+                                                         cell = self.system.get_cell(),
+                                                         pbc=self.system.get_pbc()), append=True)
 #        traj = [Atoms(symbols=self.system.get_chemical_symbols(),
 #                         positions=self.system.get_positions(),
 #                         cell=self.system.get_cell(),

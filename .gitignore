@@ -26,3 +26,5 @@
 *event_*.xyz
 *trajkmc.xsf
 *catalog.pickle
+*.npy
+*log.pARTn*
