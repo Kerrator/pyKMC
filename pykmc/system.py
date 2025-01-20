@@ -2,6 +2,7 @@ from ase import Atoms
 from ase.io import read
 import pandas as pd
 from .log import Logger
+from .config import SystemConfig
 import os
 
 
@@ -63,37 +64,50 @@ class System(Atoms):
     >>> system.kmc(kmc_parameters, minimization_parameters, search_parameters, potential)
     """
 
-    def __init__(self, file_path, catalog=None, kmc_traj=None):
+    def __init__(self, input_path=None, config_file=None):
         #Setup logfile
         try : 
             os.remove('pykmc.log')
         except OSError : 
             pass 
         self.logger = self._initialize_log()
+        self.logger.logger.info('= SYSTEM INITIALIZATION')
+
+        if input_path == None and config_file == None : 
+            raise Exception("Need input file or configuration file to initialize the system")
+
+        #Read input file : 
+        if input_path is not None : 
+            self.inputs = SystemConfig.from_file(input_path)
+            config_file = self.inputs['Control'].get('config_file')
 
         #Read initial config file
-        self.logger.logger.info('reading {} configuration file'.format(file_path))
-        atoms = read(file_path)  # Load configurations from file 
+        self.logger.logger.info('reading {} configuration file'.format(config_file))
+        atoms = read(config_file)  # Load configurations from file 
         super().__init__(symbols=atoms.get_chemical_symbols(),
                          positions=atoms.get_positions(),
                          cell=atoms.get_cell(),
                          pbc=atoms.get_pbc())
 
-        self.environment = None 
-        if catalog == None : #Create empty DataFrame
-            self.catalog = pd.DataFrame(columns=['event_id', 
-                                                 'initial_positions', 
-                                                 'saddle_positions', 
-                                                 'final_positions', 
-                                                 'energy_barrier', 
-                                                 'k', 
-                                                 'move_atom_idx', 
-                                                 'id_saddle'])
-        else : #Read previous catalog DataFrame
-            self.logger.logger.info('reading {} catalog file'.format(catalog))
-            self.catalog = pd.read_pickle(catalog) #for restart
-        
-        self.kmc_traj = kmc_traj 
+
+
+        self.environment = None
+        self.catalog = None
+        self.kmc_traj = None
+#        if catalog == None : #Create empty DataFrame
+#            self.catalog = pd.DataFrame(columns=['event_id', 
+#                                                 'initial_positions', 
+#                                                 'saddle_positions', 
+#                                                 'final_positions', 
+#                                                 'energy_barrier', 
+#                                                 'k', 
+#                                                 'move_atom_idx', 
+#                                                 'id_saddle'])
+#        else : #Read previous catalog DataFrame
+#            self.logger.logger.info('reading {} catalog file'.format(catalog))
+#            self.catalog = pd.read_pickle(catalog) #for restart
+#        
+#        self.kmc_traj = kmc_traj 
         self.logger.new_line()
 
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
@@ -217,7 +231,8 @@ class System(Atoms):
         rmat, tr, perm, dh = psr.run()
         return rmat, tr, perm, dh
 
-    def kmc(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension=3, backend='local') :
+    #def kmc(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension=3, backend='local') :
+    def kmc(self)  : 
         """
         Run kinetic monte carlo simulation
 
@@ -255,7 +270,8 @@ class System(Atoms):
         >>> system.kmc(kmc_parameters, minimization,atomenv, search_params, potential)
         """
         from .kmc import KMC 
-        kmc = KMC(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension, backend)
+        #kmc = KMC(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension, backend)
+        kmc = KMC(self)
         kmc.run()
 
     def _initialize_log(self) : 

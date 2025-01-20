@@ -28,11 +28,12 @@ search_params = {'nsearch' : 10,
 
 kmc_parameters = {'nkmc_steps' : 200}
 #1-Initialize the system : 
-system = System(init_config_file, catalog='catalog.pickle')
-#system = System(init_config_file)
+#system = System(init_config_file, catalog='catalog.pickle')
+system = System('input.in')
 #KMC 
-system.kmc(kmc_parameters, minimization,atomenv, search_params, potential )
+system.kmc()
 
-write('kmc_traj.xsf', system.kmc_traj)
-system.catalog.to_pickle('catalog.pickle')
+#write('kmc_traj.xsf', system.kmc_traj)
+
+#system.catalog.to_pickle('catalog.pickle')
 #system.catalog.to_csv('catalog.csv', index=False)

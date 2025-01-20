@@ -14,81 +14,91 @@ import pynauty
 #TODO Comments/Doc
 #TODO should check saddle topo and energy at the same time (some computation are done 2 times)
 #TODO should extract energy system after minimization
-
+#TODO using our own build in function to write outpufile traj file may be less time consuming than creating an Atoms and use ase.io.write
 
 class KMC() : 
     """class to execute kmc simulation 
     """ 
-    def __init__(self, system, kmc_parameters, minimization_params, atomenv_params, eventsearch_params,  potential, dimension, backend) : 
-        """ 
-         
+    def __init__(self, system) :
+        """
         """
         self.system = system
-        self.potential = potential
-        self.kmc_parameters = kmc_parameters 
-        self.minimization_params = minimization_params 
-        self.atomenv_params = atomenv_params
-        self.eventsearch_params = eventsearch_params
-        self.dimension = dimension
-        self.backend = backend 
+        self.control = self.system.inputs['Control']
+        self.potential = self.system.inputs['Potential']
+        self.minimization = self.system.inputs['Minimization']
 
     def run(self) : 
         """
         Execute nkmc steps
         """
-        nkmc_steps = self.kmc_parameters["nkmc_steps"]
-        traj = [Atoms(symbols=self.system.get_chemical_symbols(),
-                         positions=self.system.get_positions(),
-                         cell=self.system.get_cell(),
-                         pbc=self.system.get_pbc())]
-        for step in range(nkmc_steps) :
+        nkmc_steps = self.system.inputs['Control']['nkmc_steps']
+
+        self.system.logger.logger.info('= Starting KMC simulation')
+        for step in range(nkmc_steps) : 
+            #Initialization
+            if step == 0 : 
+                self.system.logger.logger.info('Minimization of the system')
+                self.system.minimize(self.minimization['style'], self.minimization, self.potential)
+                self.system.logger.new_line()
+                self.system.logger.logger.info('{:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s}'.format('Step', 'Time', 'Etot', 'Ndiff_env', 'N_event', 'n_select_event', 'cputime'))
+                write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
+                                                         positions=self.system.get_positions(), 
+                                                         cell = self.system.get_cell(),
+                                                         pbc=self.system.get_pbc()), append=True)
+            #Searching atomic environments : 
+             
+#        traj = [Atoms(symbols=self.system.get_chemical_symbols(),
+#                         positions=self.system.get_positions(),
+#                         cell=self.system.get_cell(),
+#                         pbc=self.system.get_pbc())]
+#        for step in range(nkmc_steps) :
             
-            self.system.logger.logger.info('===============================')
-            self.system.logger.logger.info('======== NEW STEP N°{} ========'.format(step))
-            self.system.logger.logger.info('===============================')
-
-            if step == 0 :  
-                self.system.logger.logger.info(':> Minimization of the system')
-                self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
-
-            self.system.logger.logger.info(":> Searching atoms's atomic environments")
-            self.system.find_environment('cna/graph', self.atomenv_params, dimension=3, nprocs=1)
-
-            self.system.event_search('pARTn', self.eventsearch_params, self.potential)
-            if len(self.system.catalog)>0 : 
-
-
-
-                self.system.logger.logger.info('Applying Event')
-                idx_cat = self.select_event() 
-
-
-
-                if idx_cat != None : 
-
-
-                    self.system.logger.logger.info('event n° {} has been chosen'.format(idx_cat))
-                    central_atom_index = self.select_central_atom(idx_cat)
-
-
-                    if central_atom_index != None : 
-                        rmat, tr, perm, dh = self.system.point_set_registration('ira', idx_cat, central_atom_index, 7.0)
-
-
-                        self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
-
-                        #read psr_event file 
-                        self.system.logger.logger.info(':> Minimization of the system')
-                        self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
-                else :
-                    self.system.logger.logger.info('at id not in catalog')
-            traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
-                         positions=self.system.get_positions(),
-                         cell=self.system.get_cell(),
-                         pbc=self.system.get_pbc()))
-            write('trajkmc.xsf', traj) 
-
-        self.system.kmc_traj = traj
+#            self.system.logger.logger.info('===============================')
+#            self.system.logger.logger.info('======== NEW STEP N°{} ========'.format(step))
+#            self.system.logger.logger.info('===============================')
+#
+#            if step == 0 :  
+#                self.system.logger.logger.info(':> Minimization of the system')
+#                self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
+#
+#            self.system.logger.logger.info(":> Searching atoms's atomic environments")
+#            self.system.find_environment('cna/graph', self.atomenv_params, dimension=3, nprocs=1)
+#
+#            self.system.event_search('pARTn', self.eventsearch_params, self.potential)
+#            if len(self.system.catalog)>0 : 
+#
+#
+#
+#                self.system.logger.logger.info('Applying Event')
+#                idx_cat = self.select_event() 
+#
+#
+#
+#                if idx_cat != None : 
+#
+#
+#                    self.system.logger.logger.info('event n° {} has been chosen'.format(idx_cat))
+#                    central_atom_index = self.select_central_atom(idx_cat)
+#
+#
+#                    if central_atom_index != None : 
+#                        rmat, tr, perm, dh = self.system.point_set_registration('ira', idx_cat, central_atom_index, 7.0)
+#
+#
+#                        self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+#
+#                        #read psr_event file 
+#                        self.system.logger.logger.info(':> Minimization of the system')
+#                        self.system.minimize('lammps', self.minimization_params, self.potential, nprocs=1, backend='local')
+#                else :
+#                    self.system.logger.logger.info('at id not in catalog')
+#            traj.append(Atoms(symbols=self.system.get_chemical_symbols(),
+#                         positions=self.system.get_positions(),
+#                         cell=self.system.get_cell(),
+#                         pbc=self.system.get_pbc()))
+#            write('trajkmc.xsf', traj) 
+#
+#       self.system.kmc_traj = traj
 
     def select_event(self) : 
         """ 

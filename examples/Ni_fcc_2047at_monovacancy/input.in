@@ -1,0 +1,17 @@
+[Control] 
+config_file = ./initial_config.xyz 
+output_file = ./trajkmc.xsf
+nkmc_steps = 1
+
+[Potential] 
+file = ./Ni_v6_2.0_LKBeland2016.eam
+pair_style = eam/alloy 
+pair_coeff = * * ${file} Ni
+
+[Minimization] 
+style = lammps
+min_style = cg
+etol = 1.0e-6
+ftol = 1.0e-8
+maxiter = 1000
+maxeval = 1000

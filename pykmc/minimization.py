@@ -9,7 +9,7 @@ from executorlib import Executor
 #TODO see doc convention when attributes and parameters are the same
 #TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
 #TODO check create_atoms lammps command: https://docs.lammps.org/Python_module.html#lammps.lammps, could be use instead of writing a .lmp config file (see latter depending if I find a solution to always have a lammps instance to run calculations) 
-#TODO should add posibility to use watherver parameters, same lammps command are hardcoded
+#TODO see how to handle potential when other than pair_style (ie bond, angles)
 
 class Minimization:
     """
@@ -97,11 +97,15 @@ class Minimization:
         lmp.command('boundary p p p')
         lmp.command('read_data {}'.format(lammps_data_file))
             #Potential
-        for key, val in self.potential.items() : 
-            lmp.command('{} {}'.format(key, val))
+        lmp.command('pair_style {}'.format(self.potential['pair_style']))
+        lmp.command('pair_coeff {}'.format(self.potential['pair_coeff']))
+#        for key, val in self.potential.items() : 
+#            lmp.command('{} {}'.format(key, val))
             #Minimization 
-        for key, val in self.minimization_params.items() :
-            lmp.command('{} {}'.format(key, val)) 
+        lmp.command('min_style {}'.format(self.minimization_params['min_style']))
+        lmp.command('minimize {} {} {} {}'.format(self.minimization_params['etol'], self.minimization_params['ftol'], self.minimization_params['maxiter'], self.minimization_params['maxeval']))
+#        for key, val in self.minimization_params.items() :
+#            lmp.command('{} {}'.format(key, val)) 
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 

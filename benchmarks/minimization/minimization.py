@@ -11,14 +11,17 @@ from pstats import Stats
 init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 minimization_params = {'min_style' : 'cg',
-                       'minimize'  : '1.0e-6 1.0e-8 100 1000'} 
+                       'etol' : 1.0e-6, 
+                       'ftol' : 1.0e-8,
+                       'maxiter' : 1000,
+                       'maxeval' : 1000}
 potential = {'pair_style' : 'eam/alloy', 
              'pair_coeff' : '* * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni'}
 nprocs = 1
 backend = 'local'
 
 #Initialization 
-system = System(init_config_file) 
+system = System(config_file = init_config_file) 
 traj = [Atoms(positions = system.positions, cell = system.cell, symbols = system.symbols)]
 #Minimization 
 with cProfile.Profile() as profile : 
