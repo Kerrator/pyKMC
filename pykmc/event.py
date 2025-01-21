@@ -93,7 +93,7 @@ class EventSearch() :
             #extract list of atoms in system.environment having the id 
             l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0] 
             #list of atoms on which we gonna do the search
-            self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
+            #self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
             l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
             #then we do a pART search and put the result of each search in self.system.catalog
             for atom_index in l_atoms_search : 
@@ -142,7 +142,7 @@ class EventSearch() :
         except ValueError:
             pass
         l_new_environments = [ids for ids in ids_current if ids not in ids_catalog]
-        self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
+        #self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
         return l_new_environments 
     
     def compute_rate_Eyring(self, dE) : 
@@ -150,7 +150,6 @@ class EventSearch() :
         Compute the rate constant based on eq 11 of https://www.frontiersin.org/journals/chemistry/articles/10.3389/fchem.2019.00202/full 
         """
         p = Parameters() 
-        print(self.search_params)
         T = self.search_params['T'] 
         k0 = self.search_params['k0'] 
         return k0*((p.kb*T)/p.h)*m.exp(-dE/(p.kb*T))
@@ -175,7 +174,7 @@ class EventSearch() :
         """
         #Logs
         logging.basicConfig(filename='pykmc.log', filemode='a', level=logging.DEBUG, format='%(message)s')
-        self.system.logger.logger.info('> Launching pARTn search')
+        #self.system.logger.logger.info('> Launching pARTn search')
 
         #MPI
         comm = MPI.COMM_WORLD
@@ -299,14 +298,14 @@ class EventSearch() :
             if delr1 < 0.2 or delr2 < 0.2 : 
                 #if len(neighbor_list1) == len(neighbor_list2) and len(neighbor_list1) == len(neighbor_list3)  :
                     if delr1 < delr2 :
-                        self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
+                        #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
                         #return min1positions, saddlepositions, min2positions, dE_forward, np.where(neighbor_list == atom_index)[0][0], atom_index 
                         #return min1positions, saddlepositions, min2positions, dE_forward, index_move, atom_index, index_move_prev
                         return min1positions, saddlepositions, min2positions, dE_forward, index_move, id_saddle 
                         #return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
                     else : 
                         #return min2positions, saddlepositions, min1positions, dE_forward
-                        self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
+                        #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
                         #return min2positions, saddlepositions, min1positions, dE_backward, np.where(neighbor_list == atom_index)[0][0], atom_index
                         #return min2positions, saddlepositions, min1positions, dE_backward, index_move, atom_index, index_move_prev
                         return min2positions, saddlepositions, min1positions, dE_backward, index_move, id_saddle
@@ -314,10 +313,10 @@ class EventSearch() :
                 #else : 
                     #print('len not consistent')
             else :
-                self.system.logger.logger.error('ERROR: minima too far away from initial configuration')
+                #self.system.logger.logger.error('ERROR: minima too far away from initial configuration')
                 return None
         else : 
-            self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
+            #self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
             return None
 #    def dimer_search(self, atom_index, potential): 
 #        """ 

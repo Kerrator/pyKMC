@@ -6,6 +6,7 @@ from ase.io import write
 from ase.calculators.lammpslib import LAMMPSlib
 from .atomic_environment import make_graph
 import pynauty
+import math as m
 
 #TODO Could add a write_log() file to call at each steps
 #TODO Add kmc algo
@@ -29,6 +30,7 @@ class KMC() :
         self.atomicenvironment_parameters = self.system.inputs['AtomicEnvironment']
         self.event_parameters = self.system.inputs['EventSearch']
         self.psr_parameters = self.system.inputs['PSR']
+        self.time = None
 
         catalog = self.control['catalog']
         if catalog == None : 
@@ -54,13 +56,14 @@ class KMC() :
         nkmc_steps = self.system.inputs['Control']['nkmc_steps']
 
         self.system.logger.logger.info('= Starting KMC simulation')
+        self.time = 0
         for step in range(nkmc_steps) : 
             #Initialization
             if step == 0 : 
                 self.system.logger.logger.info('Minimization of the system')
                 self.system.minimize(self.minimization['style'], self.minimization, self.potential)
                 self.system.logger.new_line()
-                self.system.logger.logger.info('{:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s}'.format('Step', 'Time', 'Etot', 'Ndiff_env', 'N_event', 'n_select_event', 'cputime'))
+                self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<10s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'Recontruction'))
                 write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
@@ -73,7 +76,7 @@ class KMC() :
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
                 #Select an event in the catalog : 
-                idx_cat = self.select_event() 
+                idx_cat, delta_t = self.select_event_rejection_free() 
 
             if idx_cat is not None : #In case we have all atomic environments that do not have event
                 #Select a central atom on which we will reconstruct the event : 
@@ -83,7 +86,9 @@ class KMC() :
                     #Shape Matching
                     rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
                     #Update positions of the system if recontruction success
-                    self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                    reconstruction = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                    if reconstruction : 
+                        self.time += delta_t
                     #Minimize
                     self.system.minimize(self.minimization['style'], self.minimization, self.potential)
                     #Append new cong to trajectory file
@@ -91,12 +96,12 @@ class KMC() :
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
+            self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<10n} {:<10s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, str(reconstruction)))
 
-    def select_event(self) : 
+    def select_event_random(self) : 
         """ 
-        return index in system.catalog
+        return index in system.catalog of a random possible event
         """  
-        #TODO Algo : pour le moment random
         #find list of event in catalog that have id in system.environment : 
         l_env = [dict['ID'] for dict in self.system.environment]
         l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
@@ -104,6 +109,25 @@ class KMC() :
             return random.choice(l_catalog)
         else : 
             return None
+        
+    def select_event_rejection_free(self) : 
+        """
+        Select an event and return its catalog id based on the rejection free KMC algorithm
+        """
+        #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
+        l_env = [dict['ID'] for dict in self.system.environment]
+        l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
+        #2-Get constant rate of possible events
+        k = np.array([self.system.catalog.loc[l_catalog[i]].at['k'] for i in range(len(l_catalog))])
+        #3-Compute constant rate cummulative sum
+        k_cumulative = [np.sum(k[:i]) for i in range(1,len(k)+1)]
+        #4-Get random number [0,1[
+        rand1 = random.random() 
+        #5-Find event index satisfy ki-1<rand1ktot<ki
+        idx_selected_event = np.searchsorted(k_cumulative, rand1*k_cumulative[-1], side = 'left')
+        #6-Compute associated delta_t
+        delta_t = -m.log(random.random())/k_cumulative[-1]
+        return idx_selected_event, delta_t 
 
     def select_central_atom(self, idx_cat) : 
         """ 
@@ -181,6 +205,7 @@ class KMC() :
             
             if not is_energy_saddle_ok or not is_topo_saddle_ok : 
                 self.system.set_positions(current_positions)
+                return False
             else : 
                 #move to final positions 
                 coords = np.zeros((len(self.system.catalog.loc[idx_cat].at['final_positions']),3))
@@ -193,6 +218,7 @@ class KMC() :
                         newpos[i] = coords[c]
                         c+=1 
                 self.system.set_positions(newpos)
+                return True
 
 
 
@@ -234,8 +260,8 @@ class KMC() :
            #     self.system.set_positions(self.system.get_positions(wrap=True))
            # else : 
            #     self.system.logger.logger.info('Energy barrier or topo not consistent')
-        else : 
-            self.system.logger.logger.info('PSR: dh distance > {}, could not update positions '.format(0.2))
+        #else : 
+            #self.system.logger.logger.info('PSR: dh distance > {}, could not update positions '.format(0.2))
 
 
 
@@ -253,7 +279,7 @@ class KMC() :
         #Current potential energy of the system 
         E_sad = atoms.get_potential_energy()
         dE = E_sad-E_ini
-        self.system.logger.logger.info('Checking barrier energy = {} '.format(dE))
+        #self.system.logger.logger.info('Checking barrier energy = {} '.format(dE))
 
         return abs(dE-self.system.catalog.loc[idx_cat].at['energy_barrier']) < 0.5
 
@@ -267,7 +293,7 @@ class KMC() :
         topo_saddle = pynauty.certificate(g_saddle)
 
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']
-        self.system.logger.logger.info('Topo saddle reconstruction = {}'.format(check))
+        #self.system.logger.logger.info('Topo saddle reconstruction = {}'.format(check))
         return check 
 
 

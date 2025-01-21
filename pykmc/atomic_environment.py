@@ -100,9 +100,9 @@ class AtomicEnvironment() :
         self.system.environment = dict_env
 
         #Add if debug  
-        for i, e in enumerate(self.system.environment) : 
-            self.system.logger.logger.debug("DEBUG: Atomic environment n° {} : {} atoms".format(i, len(e['atom index'])))
-        self.system.logger.new_line()
+        #for i, e in enumerate(self.system.environment) : 
+        #    self.system.logger.logger.debug("DEBUG: Atomic environment n° {} : {} atoms".format(i, len(e['atom index'])))
+        #self.system.logger.new_line()
 
 
     def write_to_file(self) : 
