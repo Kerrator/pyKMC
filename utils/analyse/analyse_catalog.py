@@ -20,7 +20,7 @@ def write_event_traj(catalog,index) :
 
     write('event_'+str(index)+'.xyz', traj)
 
-catalog = pd.read_pickle('catalog.pickle') 
+catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/catalog.pickle') 
 for i in range(len(catalog)):
     write_event_traj(catalog, i)
     print('Energy of event {} is {}'.format(i, catalog.loc[i].at['energy_barrier']))

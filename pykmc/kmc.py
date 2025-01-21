@@ -188,8 +188,10 @@ class KMC() :
         if dh < 0.05 :
             #Compute energy of the system : 
             cmds = []
-            for key, val in self.potential.items() : 
-                 cmds.append('{} {}'.format(key,val))
+            cmds.append('pair_style {}'.format(self.potential['pair_style']))
+            cmds.append('pair_coeff {}'.format(self.potential['pair_coeff']))
+#            for key, val in self.potential.items() : 
+#                 cmds.append('{} {}'.format(key,val))
             lammps = LAMMPSlib(lmpcmds=cmds, log_file='log.calc_energy.lammps')
             atoms = Atoms(self.system.get_global_number_of_atoms()*['Ni'], positions=self.system.get_positions(), cell=self.system.cell, pbc=True) 
             atoms.calc = lammps 
@@ -293,8 +295,10 @@ class KMC() :
     def check_saddle_energy(self, idx_cat, E_ini) : 
         #get energy system at saddle point : 
         cmds = []
-        for key, val in self.potential.items() : 
-            cmds.append('{} {}'.format(key,val))
+        cmds.append('pair_style {}'.format(self.potential['pair_style']))
+        cmds.append('pair_coeff {}'.format(self.potential['pair_coeff']))
+#        for key, val in self.potential.items() : 
+#            cmds.append('{} {}'.format(key,val))
         lammps = LAMMPSlib(lmpcmds=cmds, log_file='log.calc_energy.lammps')
         atoms = Atoms(self.system.get_global_number_of_atoms()*['Ni'], positions=self.system.get_positions(), cell=self.system.cell, pbc=True) 
         atoms.calc = lammps 
