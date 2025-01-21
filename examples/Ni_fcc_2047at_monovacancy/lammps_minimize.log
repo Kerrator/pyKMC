@@ -47,34 +47,34 @@ Neighbor list info ...
       bin: standard
 Per MPI rank memory allocation (min/avg/max) = 5.466 | 5.466 | 5.466 Mbytes
    Step          Temp          E_pair         E_mol          TotEng         Press     
-         0   0             -9107.5745      0             -9107.5745     -156.75804    
-         1   0             -9107.5758      0             -9107.5758     -157.05333    
-Loop time of 0.0130459 on 1 procs for 1 steps with 2047 atoms
+         0   0             -9107.5778      0             -9107.5778     -157.14867    
+         1   0             -9107.5779      0             -9107.5779     -157.16475    
+Loop time of 0.010324 on 1 procs for 1 steps with 2047 atoms
 
 100.0% CPU use with 1 MPI tasks x no OpenMP threads
 
 Minimization stats:
   Stopping criterion = energy tolerance
   Energy initial, next-to-last, final = 
-     -9107.57452468705  -9107.57452468705  -9107.57576238171
-  Force two-norm initial, final = 0.16562861 0.12632183
-  Force max component initial, final = 0.020030205 0.013157045
-  Final line search alpha, max atom move = 1 0.013157045
+     -9107.57781711891  -9107.57781711891  -9107.57791096925
+  Force two-norm initial, final = 0.047940566 0.041357516
+  Force max component initial, final = 0.0060516996 0.0045683702
+  Final line search alpha, max atom move = 1 0.0045683702
   Iterations, force evaluations = 1 2
 
 MPI task timing breakdown:
 Section |  min time  |  avg time  |  max time  |%varavg| %total
 ---------------------------------------------------------------
-Pair    | 0.012875   | 0.012875   | 0.012875   |   0.0 | 98.69
+Pair    | 0.010187   | 0.010187   | 0.010187   |   0.0 | 98.67
 Neigh   | 0          | 0          | 0          |   0.0 |  0.00
-Comm    | 5.8542e-05 | 5.8542e-05 | 5.8542e-05 |   0.0 |  0.45
+Comm    | 5.4167e-05 | 5.4167e-05 | 5.4167e-05 |   0.0 |  0.52
 Output  | 0          | 0          | 0          |   0.0 |  0.00
 Modify  | 0          | 0          | 0          |   0.0 |  0.00
-Other   |            | 0.0001121  |            |       |  0.86
+Other   |            | 8.308e-05  |            |       |  0.80
 
 Nlocal:           2047 ave        2047 max        2047 min
 Histogram: 1 0 0 0 0 0 0 0 0 0
-Nghost:           5762 ave        5762 max        5762 min
+Nghost:           5764 ave        5764 max        5764 min
 Histogram: 1 0 0 0 0 0 0 0 0 0
 Neighs:         229152 ave      229152 max      229152 min
 Histogram: 1 0 0 0 0 0 0 0 0 0
