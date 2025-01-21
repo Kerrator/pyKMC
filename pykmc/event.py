@@ -15,6 +15,8 @@ import pandas as pd
 import pynauty
 from .atomic_environment import make_graph 
 import logging
+from .config import Parameters
+import math as m
 
 #TODO Parallelization. Depending on nprocs launch searches in parallel
 #TODO Change hardcoded upper/lower dE barrier limit selection
@@ -106,7 +108,7 @@ class EventSearch() :
                                         'saddle_positions': fs.result()[1], 
                                         'final_positions': fs.result()[2], 
                                         'energy_barrier': fs.result()[3], 
-                                        'k' : 1, 
+                                        'k' : self.compute_rate_Eyring(fs.result()[3]), 
                                         'move_atom_idx' : fs.result()[4],
                                         'id_saddle' : fs.result()[5]})
 
@@ -143,6 +145,17 @@ class EventSearch() :
         self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
         return l_new_environments 
     
+    def compute_rate_Eyring(self, dE) : 
+        """ 
+        Compute the rate constant based on eq 11 of https://www.frontiersin.org/journals/chemistry/articles/10.3389/fchem.2019.00202/full 
+        """
+        p = Parameters() 
+        print(self.search_params)
+        T = self.search_params['T'] 
+        k0 = self.search_params['k0'] 
+        return k0*((p.kb*T)/p.h)*m.exp(-dE/(p.kb*T))
+
+
     def pARTn_search(self, atom_index, potential) : 
         """
         Use pARTn with Lammps to find new event

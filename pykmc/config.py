@@ -1,6 +1,17 @@
 from dataclasses import dataclass
 import configparser
 
+@dataclass 
+class Parameters : 
+   """
+   Physical parameters in lammps metal units
+   """ 
+   #Boltzmann constant
+   kb = 8.6173303e-05 #eV.K^-1
+   #Planck constant 
+   h = 6.582119e-03 #eV.ps 
+
+
 
 DEFAULT = {
     'Control' : {
@@ -26,7 +37,8 @@ DEFAULT = {
         'partn_eigen_step_size' : 0.2, 
         'partn_lanczos_disp' : 0.0005,
         'partn_nsmooth' : 3, 
-        'partn_nperp' : 5
+        'partn_nperp' : 5,
+        'k0' : 1
     }, 
     'PSR' : {
         'kmax_factor' : 1.8
@@ -47,6 +59,7 @@ class SystemConfig :
 
         
         config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation()) 
+        config.optionxform = str #Enable uppercase variable
         try : 
             with open(config_file) as f : #So we can raise an exception
                 config.read(config_file)
@@ -60,6 +73,12 @@ class SystemConfig :
             raise Exception('Potential section in configuration file is mandatory')
         if not config.has_section('Minimization') : 
             raise Exception('Minimization section in configuration file is mandatory')
+        if not config.has_section('EventSearch') : 
+            raise Exception('EventSearch section in configuration file is mandatory')
+        if not config.has_section('PSR') : 
+            raise Exception('PSR section in configuration file is mandatory')
+
+
         
         #Convert ConfigParser in a dictionaries of dictionary and convert values 
             #Initialize with default values 

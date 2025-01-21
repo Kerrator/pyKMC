@@ -35,5 +35,5 @@ system.kmc()
 
 #write('kmc_traj.xsf', system.kmc_traj)
 
-#system.catalog.to_pickle('catalog.pickle')
+system.catalog.to_pickle('catalog.pickle')
 #system.catalog.to_csv('catalog.csv', index=False)

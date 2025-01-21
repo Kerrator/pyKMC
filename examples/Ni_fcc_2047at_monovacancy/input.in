@@ -26,6 +26,9 @@ style = pARTn
 rcutenv = 7.0 
 nsearch = 10 
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+emax_event = 5.0
+k0 = 1
+T = 300.0
 
 [PSR] 
 style = ira 
