@@ -26,23 +26,14 @@ search_params = {'nsearch' : 10,
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
                 # 'path_artnso' :'/home/hmoison/programs/artn-plugin/lib/libartn-lmp.so' }
 
-kmc_parameters = {'nkmc_steps' : 100}
+kmc_parameters = {'nkmc_steps' : 200}
 #1-Initialize the system : 
-system = System(init_config_file)
+#system = System(init_config_file, catalog='catalog.pickle')
+system = System('input.in')
 #KMC 
-system.kmc(kmc_parameters, minimization,atomenv, search_params, potential )
+system.kmc()
 
-write('test5.xsf', system.kmc_traj)
+#write('kmc_traj.xsf', system.kmc_traj)
+
 system.catalog.to_pickle('catalog.pickle')
-
-#2-Minimize the system : 
-#system.minimize('lammps', minimization, potential, nprocs=1, backend='local')
-#3-find atomic environement
-#system.find_environment('cna', atomenv, nprocs=1)
-#system.find_environment('graph', atomenv, nprocs=1)
-#system.find_environment('cna/graph', atomenv, nprocs=1, backend='local')
-
-#4-Generate catalog
-#system.event_search('pARTn', search_params, potential, nprocs=1, backend='local')
-#print("CATALOG")
-#print(system.catalog)
+#system.catalog.to_csv('catalog.csv', index=False)

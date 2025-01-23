@@ -312,14 +312,12 @@ def make_graph(atoms, list_id, rnei, rcut) :
     List[pynauty.Graph]
         list of pynauty graphs
     """    
-
     list_g = [] 
     positions = atoms.get_positions(wrap=True) 
     cell = atoms.get_cell()
     alat = cell[0][0]
     positions[positions<0] = 0
     tree = cKDTree(positions, boxsize=[alat]*3)
-    
     # Creat graph for each atoms
     for atom_idx in list_id:
         #Find atoms index inside rcut

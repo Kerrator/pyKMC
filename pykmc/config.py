@@ -15,7 +15,10 @@ class Parameters :
 
 DEFAULT = {
     'Control' : {
-        'catalog' : None
+        'catalog' : None,
+        'dimension' : 3,
+        'nprocs' : 1, 
+        'backend' : 'local'
 
     }, 
     'Minimization' : {

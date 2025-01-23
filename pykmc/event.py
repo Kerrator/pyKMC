@@ -19,25 +19,15 @@ from .config import Parameters
 import math as m
 
 #TODO Parallelization. Depending on nprocs launch searches in parallel
-#TODO Change hardcoded upper/lower dE barrier limit selection
-#TODO Add graph ID to saddle_position (to check event reconstruction)
-#TODO Add Compute k, for the moment k=1 for all event
 #TODO Don't understand why inside executor I need to add logging.basicConfig. Otherwise it does not print to log 
 #TODO Add different event search style 
 #TODO Add option to do the search on a subsystem (--> will be usefull for large systems)
-#TODO pARTn commands should not be hardcoded
-#TODO rcutevent should not be hardcoded
 #TODO What is the value that we should use for the condition delr1 < 0.2 or delr2 < 0.2
 #TODO Since now we add the backward reaction to the catalog, it is not needed to check if min1 or min2 is close to the initial configuration and return the corresponding positions
-#TODO Better logs 
 #TODO See if we can append artn logs, could be usefull while debugging
 #TODO Should think of a better way to compute graph, certificate for the backward reaction
-#TODO Add logs number of event found/fail
-#TODO parameter for backward reaction graph
 #TODO find a way to not print in terminal ira errors (we log them)
 #TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
-#TODO Clean fixme atoms moving sphere min1 min2 saddle
-#TODO See wich atoms moves the more during the event search --> central atom that we give can be different from the one that move --> problem when checking topo saddle point
 #TODO Don't forget to readd reverse event
 
 class EventSearch() : 
@@ -96,6 +86,7 @@ class EventSearch() :
             #self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
             l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
             #then we do a pART search and put the result of each search in self.system.catalog
+            #TODO Remplacer par executor list fonction
             for atom_index in l_atoms_search : 
                 #run event search
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
@@ -266,7 +257,7 @@ class EventSearch() :
             tmp_pos = saddlepositions 
             tmp_pos[tmp_pos < 0] = 0
             atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True) 
-            g_saddle = make_graph(atoms_saddle, [index_move], 3.0, 5.0)[0]
+            g_saddle = make_graph(atoms_saddle, [index_move], self.system.inputs['AtomicEnvironment']['rnei'], self.system.inputs['AtomicEnvironment']['rcut'])[0]
             id_saddle = pynauty.certificate(g_saddle)
             
             

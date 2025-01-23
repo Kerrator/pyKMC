@@ -9,7 +9,7 @@ Reading data file ...
   1 by 1 by 1 MPI processor grid
   reading atoms ...
   2047 atoms
-  read_data CPU = 0.004 seconds
+  read_data CPU = 0.005 seconds
 pair_style eam/alloy
 pair_coeff * * ./Ni_v6_2.0_LKBeland2016.eam Ni
 min_style cg
@@ -47,30 +47,30 @@ Neighbor list info ...
       bin: standard
 Per MPI rank memory allocation (min/avg/max) = 5.466 | 5.466 | 5.466 Mbytes
    Step          Temp          E_pair         E_mol          TotEng         Press     
-         0   0             -9107.5772      0             -9107.5772     -157.07312    
-         1   0             -9107.5776      0             -9107.5776     -157.02502    
-Loop time of 0.0102552 on 1 procs for 1 steps with 2047 atoms
+         0   0             -9107.5289      0             -9107.5289     -98.963913    
+         2   0             -9107.5762      0             -9107.5762     -151.33082    
+Loop time of 0.0150155 on 1 procs for 2 steps with 2047 atoms
 
 100.0% CPU use with 1 MPI tasks x no OpenMP threads
 
 Minimization stats:
   Stopping criterion = energy tolerance
   Energy initial, next-to-last, final = 
-     -9107.57717813902  -9107.57717813902  -9107.57762209709
-  Force two-norm initial, final = 0.10960558 0.07223404
-  Force max component initial, final = 0.013798431 0.009574343
-  Final line search alpha, max atom move = 1 0.009574343
-  Iterations, force evaluations = 1 2
+     -9107.52891973159  -9107.56996236989  -9107.57615883755
+  Force two-norm initial, final = 1.0266971 0.16791908
+  Force max component initial, final = 0.20103783 0.014855709
+  Final line search alpha, max atom move = 1 0.014855709
+  Iterations, force evaluations = 2 4
 
 MPI task timing breakdown:
 Section |  min time  |  avg time  |  max time  |%varavg| %total
 ---------------------------------------------------------------
-Pair    | 0.010144   | 0.010144   | 0.010144   |   0.0 | 98.92
+Pair    | 0.01481    | 0.01481    | 0.01481    |   0.0 | 98.63
 Neigh   | 0          | 0          | 0          |   0.0 |  0.00
-Comm    | 4.7207e-05 | 4.7207e-05 | 4.7207e-05 |   0.0 |  0.46
+Comm    | 7.8375e-05 | 7.8375e-05 | 7.8375e-05 |   0.0 |  0.52
 Output  | 0          | 0          | 0          |   0.0 |  0.00
 Modify  | 0          | 0          | 0          |   0.0 |  0.00
-Other   |            | 6.354e-05  |            |       |  0.62
+Other   |            | 0.0001271  |            |       |  0.85
 
 Nlocal:           2047 ave        2047 max        2047 min
 Histogram: 1 0 0 0 0 0 0 0 0 0

@@ -29,3 +29,7 @@
 *.npy
 *log.pARTn*
 *trajkmc.xyz
+*tmp
+*log
+*traj*.xyz
+catalog*.pickle

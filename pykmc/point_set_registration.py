@@ -7,8 +7,8 @@ import pandas as pd
 #TODO Check if pbc problem is really fixed, and find better solution
 #TODO style = 'ira' should not be hardcoded
 #TODO typ = 'Ni' should not be hardcoded
-#TODO deal with IRA parameters
-#FIXME PBC problem (when choosing atoms with atomic environment that goes outside cell)
+#TODO deal with nat1 > nat2
+#TODO deal with ira error ---> if error pass new step
 
 class PointSetRegistration() : 
     """

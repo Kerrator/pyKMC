@@ -57,13 +57,14 @@ class KMC() :
 
         self.system.logger.logger.info('= Starting KMC simulation')
         self.time = 0
+        self.system.kmc_traj = []
         for step in range(nkmc_steps) : 
             #Initialization
             if step == 0 : 
                 self.system.logger.logger.info('Minimization of the system')
-                self.system.minimize(self.minimization['style'], self.minimization, self.potential)
+                self.system.minimize(self.minimization['style'], self.minimization, self.potential, self.control['dimension'], self.control['nprocs'], self.control['backend'])
                 self.system.logger.new_line()
-                self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<10s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'Recontruction'))
+                self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s} {:<10s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
                 write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
@@ -86,8 +87,8 @@ class KMC() :
                     #Shape Matching
                     rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
                     #Update positions of the system if recontruction success
-                    reconstruction = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
-                    if reconstruction : 
+                    reconstruction_de, reconstruction_topo = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                    if reconstruction_de and reconstruction_topo : 
                         self.time += delta_t
                     #Minimize
                     self.system.minimize(self.minimization['style'], self.minimization, self.potential)
@@ -96,7 +97,7 @@ class KMC() :
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
-            self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<10n} {:<10s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, str(reconstruction)))
+                    self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e} {:<10e} {:<18s} {:<18s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier'], dh, str(reconstruction_de), str(reconstruction_topo)))
 
     def select_event_random(self) : 
         """ 
@@ -183,7 +184,7 @@ class KMC() :
                 coords[i] = np.matmul(rmat, self.system.catalog.loc[idx_cat].at['saddle_positions'][i]) + tr 
             coords[:] = coords[perm]
                 #modify positions system 
-            rcutevent = 7.0 
+            rcutevent = self.event_parameters['rcutenv']
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             dist = self.system.get_distances(central_atom_index, ind, mic=True)
             neighbor_list = np.where(dist<rcutevent)[0]
@@ -205,7 +206,6 @@ class KMC() :
             
             if not is_energy_saddle_ok or not is_topo_saddle_ok : 
                 self.system.set_positions(current_positions)
-                return False
             else : 
                 #move to final positions 
                 coords = np.zeros((len(self.system.catalog.loc[idx_cat].at['final_positions']),3))
@@ -218,8 +218,7 @@ class KMC() :
                         newpos[i] = coords[c]
                         c+=1 
                 self.system.set_positions(newpos)
-                return True
-
+            return is_energy_saddle_ok, is_topo_saddle_ok
 
 
 
@@ -286,15 +285,16 @@ class KMC() :
     def check_saddle_topo(self, idx_cat, move_atomsys_idx) : 
         #compute topo of moving atom in system : 
         atoms = Atoms(positions=self.system.get_positions(), cell = self.system.get_cell(), pbc=True)
-        pos = atoms.get_positions()
-        pos[pos < 0] = 0
-        atoms.set_positions(pos)
-        g_saddle = make_graph(atoms, [move_atomsys_idx], 3.0, 5.0)[0]
+#        pos = atoms.get_positions()
+#        pos[pos < 0] = 0
+#        atoms.set_positions(pos)
+        g_saddle = make_graph(atoms, [move_atomsys_idx], self.atomicenvironment_parameters['rnei'], self.atomicenvironment_parameters['rcut'])[0]
         topo_saddle = pynauty.certificate(g_saddle)
 
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']
         #self.system.logger.logger.info('Topo saddle reconstruction = {}'.format(check))
         return check 
+        #return True
 
 
 #    def check_saddle_energy(self, idx_cat, central_atom_index) :
