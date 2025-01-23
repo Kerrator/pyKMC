@@ -2,7 +2,7 @@
 config_file = ./initial_config.xyz 
 output_file = ./trajkmc.xyz
 nkmc_steps = 100
-catalog = ./catalog.pickle
+#catalog = ./catalog.pickle
 nprocs = 1
 
 [Potential] 
@@ -20,13 +20,13 @@ maxeval = 1000
 
 [AtomicEnvironment] 
 style = cna/graph
-radd_cna = 2.6
+#radd_cna = 2.6
 rnei = 3.0
-rcut = 10.0 
+rcut = 5.0
 
 [EventSearch] 
 style = pARTn 
-rcutenv = 10.0
+rcutenv = 13.0
 nsearch = 10
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0

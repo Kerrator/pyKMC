@@ -90,7 +90,7 @@ class EventSearch() :
             for atom_index in l_atoms_search : 
                 #run event search
                 with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-                    fs = exe.submit(self.pARTn_search, atom_index, self.potential )
+                    fs = exe.submit(self.pARTn_search, atom_index )
                     if fs.result() is not None :
                         #upper and lower limit : 
                         if fs.result()[3] > self.search_params['emin_event'] and fs.result()[3] < self.search_params['emax_event'] : 
@@ -125,6 +125,7 @@ class EventSearch() :
     def new_environment(self) : 
         """ 
         Return list of atomic environements id of the current step that are not in the catalog
+        and not have been visited
         """
         ids_catalog = self.system.catalog['event_id'].tolist()
         ids_current = [element['ID'] for element in self.system.environment]
@@ -133,6 +134,8 @@ class EventSearch() :
         except ValueError:
             pass
         l_new_environments = [ids for ids in ids_current if ids not in ids_catalog]
+        #remove ids if in visited environment 
+        l_new_environments = list(set(l_new_environments).difference(self.system.visited_environment))
         #self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
         return l_new_environments 
     
@@ -146,7 +149,7 @@ class EventSearch() :
         return k0*((p.kb*T)/p.h)*m.exp(-dE/(p.kb*T))
 
 
-    def pARTn_search(self, atom_index, potential) : 
+    def pARTn_search(self, atom_index) : 
         """
         Use pARTn with Lammps to find new event
 

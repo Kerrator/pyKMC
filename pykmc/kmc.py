@@ -74,10 +74,16 @@ class KMC() :
             #Searching Events : 
             self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential)
 
+            #add visited environment : 
+            lids = [d['ID'] for d in self.system.environment]
+            self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
+
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
                 #Select an event in the catalog : 
                 idx_cat, delta_t = self.select_event_rejection_free() 
+            else : 
+                idx_cat = None
 
             if idx_cat is not None : #In case we have all atomic environments that do not have event
                 #Select a central atom on which we will reconstruct the event : 

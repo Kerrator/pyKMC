@@ -92,6 +92,7 @@ class System(Atoms):
 
 
         self.environment = None
+        self.visited_environment = set()
         self.catalog = None
         self.kmc_traj = None
 #        if catalog == None : #Create empty DataFrame
