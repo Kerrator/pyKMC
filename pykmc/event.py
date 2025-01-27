@@ -106,19 +106,19 @@ class EventSearch() :
                             self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
-                        #Add reverse event : 
-                        #compute finale positions ID : 
-                        #g = make_graph(self.system, [fs.result()[4]], 3.0, 5.0 )
-                        #reverse_id = pynauty.certificate(g[0])
-                        #dfevent = pd.Series({'event_id' : reverse_id, 
-                        #            'initial_positions' : fs.result()[2], 
-                        #            'saddle_positions': fs.result()[1], 
-                        #            'final_positions': fs.result()[0], 
-                        #            'energy_barrier': fs.result()[3], 
-                        #            'k' : 1, 
-                        #            'central_atom' : fs.result()[4], 
-                        #            'from_id' : id})
-                        #self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                            #Add reverse event : 
+                            #compute finale positions ID : 
+                            #g = make_graph(self.system, [fs.result()[4]], 3.0, 5.0 )
+                            #reverse_id = pynauty.certificate(g[0])
+                            #dfevent = pd.Series({'event_id' : id, 
+                            #            'initial_positions' : fs.result()[2], 
+                            #            'saddle_positions': fs.result()[1], 
+                            #            'final_positions': fs.result()[0], 
+                            #            'energy_barrier': fs.result()[3], 
+                            #            'k' : 1, 
+                            #            'central_atom' : fs.result()[4], 
+                            #            'from_id' : id})
+                            #self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
 
