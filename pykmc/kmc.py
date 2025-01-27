@@ -32,20 +32,29 @@ class KMC() :
         self.psr_parameters = self.system.inputs['PSR']
         self.time = None
 
+        #Initialize catalog
         catalog = self.control['catalog']
-        if catalog == None : 
-        #Create empty DataFrame
-            self.system.catalog = pd.DataFrame(columns=['event_id', 
-                                                 'initial_positions', 
-                                                 'saddle_positions', 
-                                                 'final_positions', 
-                                                 'energy_barrier', 
-                                                 'k', 
-                                                 'move_atom_idx', 
-                                                 'id_saddle'])
-        else : #Read previous catalog DataFrame
-            self.system.logger.logger.info('reading {} catalog file'.format(catalog))
-            self.system.catalog = pd.read_pickle(catalog) #for restart
+        if self.control['reconstruction'] == True : 
+            if catalog == None : 
+            #Create empty DataFrame
+                self.system.catalog = pd.DataFrame(columns=['event_id', 
+                                                     'initial_positions', 
+                                                     'saddle_positions', 
+                                                     'final_positions', 
+                                                     'energy_barrier', 
+                                                     'k', 
+                                                     'move_atom_idx', 
+                                                     'id_saddle'])
+            else : #Read previous catalog DataFrame
+                self.system.logger.logger.info('reading {} catalog file'.format(catalog))
+                self.system.catalog = pd.read_pickle(catalog) #for restart
+        elif self.control['reconstruction'] == False : 
+            if catalog == None : 
+                self.system.catalog = pd.DataFrame(columns = ['atom_index', 
+                                                              'final_positions',
+                                                              'k'])
+            else : 
+                raise Exception("If reconstruction is set to False can't use catalog from previous simulations")
 
 
 

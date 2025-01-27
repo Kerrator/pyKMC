@@ -99,8 +99,11 @@ class SystemConfig :
         return config_dict
     
     def _convert_value(value) : 
-        try : 
-            bool(value)
+        try :
+            if value == 'True' : 
+                return True 
+            if value == 'False' :  
+                return False
         except ValueError : 
             pass
         try : 

@@ -29,6 +29,7 @@ import math as m
 #TODO find a way to not print in terminal ira errors (we log them)
 #TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
 #TODO Don't forget to readd reverse event
+#TODO search_without_reconstruction should be already parallized but need to be checked on local(non docker) and slurm
 
 class EventSearch() : 
     """
@@ -76,6 +77,23 @@ class EventSearch() :
         Execute new event searches 
         """
 
+        print(self.system.inputs['Control']['reconstruction'])
+        print(type(self.system.inputs['Control']['reconstruction']))
+        #Check if we want reconstruction or not : 
+        match self.system.inputs['Control']['reconstruction'] : 
+            case True : 
+                self.search_with_reconstruction()
+            case False : 
+                if self.system.inputs['AtomicEnvironment']['style'] == 'cna' : 
+                    self.search_without_reconstruction()
+                else : 
+                    raise Exception("reconstruction = False is made to be used with AtomicEnvironment style = 'cna'")
+            case _: 
+                raise Exception("Wrong reconstruction value in 'Control', must be True or False")
+
+
+    def search_with_reconstruction(self) : 
+
         #Check if new atomic environment that are not in the catalog, if yes extract the environement id: 
         l_new_environement = self.new_environment()
         #For each id in l_new_environment, we will select randomly one atom with the corresponding ID (does this nsearch time)
@@ -120,6 +138,25 @@ class EventSearch() :
                             #            'from_id' : id})
                             #self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
+    def search_without_reconstruction(self) : 
+        """ 
+        Search when reconstruction input is set to False.
+        Made to be use with atomic environment style = 'cna' 
+        For each non cristalline atom we launch nsearch event search
+        """
+        #List of atoms that have non cristalline environement 
+        l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == 'noncrystal'][0]
+        #for each atom in l_atoms we launch nsearch event searches 
+
+        with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
+            l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
+        #Loop over list results and add event to the catalog : 
+        for i,fs in enumerate(l_fs) : 
+            if fs.result() is not None : 
+                dfevent = pd.Series({'atom_index' : i , 
+                                     'final_positions' : fs.result()[2], 
+                                     'k' : self.compute_rate_Eyring(fs.result()[3])})
+                self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
     def new_environment(self) : 
