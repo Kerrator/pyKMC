@@ -147,14 +147,14 @@ class EventSearch() :
         #List of atoms that have non cristalline environement 
         l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == 'noncrystal'][0]
         #for each atom in l_atoms we launch nsearch event searches 
-
         with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
             l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
         #Loop over list results and add event to the catalog : 
         for i,fs in enumerate(l_fs) : 
             if fs.result() is not None : 
-                dfevent = pd.Series({'atom_index' : i , 
+                dfevent = pd.Series({'atom_index' : l_atoms[i] , 
                                      'final_positions' : fs.result()[2], 
+                                     'energy_barrier' : fs.result()[3],
                                      'k' : self.compute_rate_Eyring(fs.result()[3])})
                 self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
@@ -217,9 +217,10 @@ class EventSearch() :
         cell = self.system.get_cell()
         positions = self.system.get_positions()
         atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
-        ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
-        dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
-        atoms.translate(np.array([dx, dy, dz]))
+        if self.system.inputs['Control']['reconstruction'] : 
+            ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
+            dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
+            atoms.translate(np.array([dx, dy, dz]))
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
@@ -308,6 +309,7 @@ class EventSearch() :
             dist = self.system.get_distances(atom_index, ind, mic=True)
 
             neighbor_list = np.where(dist<rcutevent)[0]
+            print(len(neighbor_list))
 
 
             min1positions = min1positions[neighbor_list]

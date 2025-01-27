@@ -52,6 +52,7 @@ class KMC() :
             if catalog == None : 
                 self.system.catalog = pd.DataFrame(columns = ['atom_index', 
                                                               'final_positions',
+                                                              'energy_barrier',
                                                               'k'])
             else : 
                 raise Exception("If reconstruction is set to False can't use catalog from previous simulations")
@@ -63,6 +64,7 @@ class KMC() :
         Execute nkmc steps
         """
         nkmc_steps = self.system.inputs['Control']['nkmc_steps']
+        reconstruction = self.system.inputs['Control']['reconstruction']
 
         self.system.logger.logger.info('= Starting KMC simulation')
         self.time = 0
@@ -84,27 +86,59 @@ class KMC() :
             self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential)
 
             #add visited environment : 
-            lids = [d['ID'] for d in self.system.environment]
-            self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
+            if reconstruction : 
+                lids = [d['ID'] for d in self.system.environment]
+                self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
 
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
                 #Select an event in the catalog : 
-                idx_cat, delta_t = self.select_event_rejection_free() 
+                idx_cat, delta_t = self.select_event_rejection_free(reconstruction) 
             else : 
                 idx_cat = None
 
             if idx_cat is not None : #In case we have all atomic environments that do not have event
+                if reconstruction : 
                 #Select a central atom on which we will reconstruct the event : 
-                central_atom_index = self.select_central_atom(idx_cat)
+                    central_atom_index = self.select_central_atom(idx_cat)
+                else : 
+                    central_atom_index = self.system.catalog.loc[idx_cat].at['atom_index']
 
                 if central_atom_index is not None : #Shoudl not happen ? 
-                    #Shape Matching
-                    rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
-                    #Update positions of the system if recontruction success
-                    reconstruction_de, reconstruction_topo = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
-                    if reconstruction_de and reconstruction_topo : 
+                    if reconstruction : 
+                        #Shape Matching
+                        rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
+                        #Update positions of the system if recontruction success
+                        reconstruction_de, reconstruction_topo = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                        if reconstruction_de and reconstruction_topo : 
+                            self.time += delta_t
+                        self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e} {:<10e} {:<18s} {:<18s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier'], dh, str(reconstruction_de), str(reconstruction_topo)))
+                    else : 
+                        #directly go to final position
+                        rcutevent = self.event_parameters['rcutenv']
+                        coords = self.system.catalog.loc[idx_cat].at['final_positions']
+                        print(len(coords))
+                        ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+                        dist = self.system.get_distances(central_atom_index, ind, mic=True)
+                        neighbor_list = np.where(dist<rcutevent)[0]
+                        print(len(neighbor_list))
+                        #ugly
+                        c = 0 
+                        newpos = self.system.get_positions()
+                        for i in range(len(newpos)) : 
+                            if i in neighbor_list : 
+                                newpos[i] = coords[c]
+                                c +=1
+                        self.system.set_positions(newpos)
                         self.time += delta_t
+                        self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier']))
+                        #Destroy the catalog/initialize a new one: 
+                        print("lencatalog = ", len(self.system.catalog))
+                        self.system.catalog = pd.DataFrame(columns = ['atom_index', 
+                                                                      'final_positions',
+                                                                      'energy_barrier',
+                                                                      'k'])
+                        print("lencatalog = ", len(self.system.catalog))
                     #Minimize
                     self.system.minimize(self.minimization['style'], self.minimization, self.potential)
                     #Append new cong to trajectory file
@@ -112,7 +146,6 @@ class KMC() :
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
-                    self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e} {:<10e} {:<18s} {:<18s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier'], dh, str(reconstruction_de), str(reconstruction_topo)))
 
     def select_event_random(self) : 
         """ 
@@ -126,13 +159,17 @@ class KMC() :
         else : 
             return None
         
-    def select_event_rejection_free(self) : 
+    def select_event_rejection_free(self, reconstruction) : 
         """
         Select an event and return its catalog id based on the rejection free KMC algorithm
         """
+        if reconstruction : 
         #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
-        l_env = [dict['ID'] for dict in self.system.environment]
-        l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
+            l_env = [dict['ID'] for dict in self.system.environment]
+            l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
+        else : 
+        #1- if reconstruction = False all events are possible : 
+            l_catalog = [i for i in range(len(self.system.catalog))]
         #2-Get constant rate of possible events
         k = np.array([self.system.catalog.loc[l_catalog[i]].at['k'] for i in range(len(l_catalog))])
         #3-Compute constant rate cummulative sum
