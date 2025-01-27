@@ -18,7 +18,8 @@ DEFAULT = {
         'catalog' : None,
         'dimension' : 3,
         'nprocs' : 1, 
-        'backend' : 'local'
+        'backend' : 'local',
+        'reconstruction' : True
 
     }, 
     'Minimization' : {
@@ -98,6 +99,10 @@ class SystemConfig :
         return config_dict
     
     def _convert_value(value) : 
+        try : 
+            bool(value)
+        except ValueError : 
+            pass
         try : 
             return int(value)
         except ValueError : 
