@@ -41,7 +41,7 @@ class PointSetRegistration() :
         use IRA to find the transformation matrix between the positions of the event and the central_atom_index environement
     """
 
-    def __init__(self,  system, psr_style, psr_parameters, idx_cat, central_atom_index, rcutevent, dimension, nprocs, backend) : 
+    def __init__(self,  system, psr_style, psr_parameters, idx_cat, central_atom_index, rcutevent, dimension, nprocs, backend, save) : 
         self.psr_style = psr_style
         self.system = system
         self.psr_parameters = psr_parameters
@@ -51,6 +51,7 @@ class PointSetRegistration() :
         self.dimension = dimension
         self.backend = backend
         self.nprocs = nprocs 
+        self.save = save
 
     def run(self) : 
         """ 
@@ -113,7 +114,8 @@ class PointSetRegistration() :
                                         'T', 
                                         'P', 
                                         'dh'])
-        results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
+        if self.save : 
+            results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
         return rmat, tr, perm, dh
 
 

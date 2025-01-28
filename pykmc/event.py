@@ -306,7 +306,6 @@ class EventSearch() :
             dist = self.system.get_distances(atom_index, ind, mic=True)
 
             neighbor_list = np.where(dist<rcutevent)[0]
-            print(len(neighbor_list))
 
 
             min1positions = min1positions[neighbor_list]
