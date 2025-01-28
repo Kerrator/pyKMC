@@ -33,3 +33,4 @@
 *log
 *traj*.xyz
 catalog*.pickle
+*log.minimize_lammps

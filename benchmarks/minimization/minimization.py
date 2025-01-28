@@ -17,7 +17,7 @@ minimization_params = {'min_style' : 'cg',
                        'maxeval' : 1000}
 potential = {'pair_style' : 'eam/alloy', 
              'pair_coeff' : '* * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni'}
-nprocs = 1
+nprocs = 8
 backend = 'local'
 
 #Initialization 

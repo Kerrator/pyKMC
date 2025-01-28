@@ -2,7 +2,6 @@ from lammps import lammps
 from ase.io.lammpsdata import write_lammps_data
 import numpy as np 
 from subprocess import run
-from mpi4py import MPI
 from .utilities import modify_lammps_data_2D
 from executorlib import Executor
 
@@ -61,7 +60,10 @@ class Minimization:
                     self.system.logger.logger.error('ERROR:Minimization style not known')
                     raise Exception("Minimization style not known")
         #Set new positions : 
-        positions = fs.result()
+        if self.nprocs == 1 : 
+            positions = fs.result()
+        else : 
+            positions = fs.result()[0]
         positions[positions < 0] = 0
         self.system.set_positions(positions)
 
@@ -75,11 +77,13 @@ class Minimization:
             positions after the minimization
         """        
 
+        from mpi4py import MPI
         #MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
+        print(rank, nprocs)
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
@@ -88,7 +92,9 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #Initialize lammps :
-        lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log', '-screen', 'none'])
+        #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log', '-screen', 'none'])
+        #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log'])
+        lmp = lammps()
 
         #For the moment default parameters 
         lmp.command('units metal')
@@ -102,6 +108,7 @@ class Minimization:
 #        for key, val in self.potential.items() : 
 #            lmp.command('{} {}'.format(key, val))
             #Minimization 
+        lmp.command('print OUIOUI"{}"'.format(comm.Get_rank()))
         lmp.command('min_style {}'.format(self.minimization_params['min_style']))
         lmp.command('minimize {} {} {} {}'.format(self.minimization_params['etol'], self.minimization_params['ftol'], self.minimization_params['maxiter'], self.minimization_params['maxeval']))
 #        for key, val in self.minimization_params.items() :
@@ -109,12 +116,11 @@ class Minimization:
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 
-        #Close lammps/MPI
-        lmp.close()
         if rank == 0 : 
             #convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
             #clean files
             run('rm {}'.format(lammps_data_file), shell=True)
+            run('mv log.lammps log.minimize_lammps', shell=True)
             return positions 

@@ -1,6 +1,5 @@
 import random
 from lammps import lammps
-from mpi4py import MPI 
 from .utilities import modify_lammps_data_2D
 from ase.io.lammpsdata import write_lammps_data
 from ase.mep import DimerControl, MinModeAtoms, MinModeTranslate
@@ -204,6 +203,7 @@ class EventSearch() :
         logging.basicConfig(filename='pykmc.log', filemode='a', level=logging.DEBUG, format='%(message)s')
         #self.system.logger.logger.info('> Launching pARTn search')
 
+        from mpi4py import MPI 
         #MPI
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()

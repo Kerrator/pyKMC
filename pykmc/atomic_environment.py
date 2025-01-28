@@ -1,7 +1,6 @@
 from .utilities import modify_lammps_data_2D
 from ase.io.lammpsdata import write_lammps_data
 import numpy as np
-from mpi4py import MPI
 from lammps import lammps
 from executorlib import Executor
 import pynauty
@@ -116,6 +115,8 @@ class AtomicEnvironment() :
         return a list of ID : "crystal" if the atom has a crystalline environement (ie CNA = 1,2,3 or 4) and "noncrystal" if not (ie CNA=5)  
         """
 
+        from mpi4py import MPI
+
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
@@ -176,6 +177,7 @@ class AtomicEnvironment() :
         rnei = self.atomenv_params['rnei']
         rcut = self.atomenv_params['rcut']
 
+        from mpi4py import MPI
         #MPI
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
@@ -200,6 +202,7 @@ class AtomicEnvironment() :
         Compute CNA, and for non crystalline environement, compute the graph certificate
         """
 
+        from mpi4py import MPI
         #for MPI : 
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
