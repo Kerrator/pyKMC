@@ -170,7 +170,7 @@ class System(Atoms):
         atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs, backend)
         atomic_environment.run()
 
-    def event_search(self, search_style, search_params, potential, dimension=3, nprocs=1, backend='local') : 
+    def event_search(self, search_style, search_params, potential, reconstruction, dimension=3, nprocs=1, backend='local') : 
         """
         For each atomic environment ID that are not in catalog (except 'crist') launch 'nsearch' event search 
         and add new events to the catalog
@@ -199,7 +199,7 @@ class System(Atoms):
         >>> system.event_search('pARTn', search_params, potential)
         """        
         from .event import EventSearch 
-        event_search = EventSearch(self, search_style, search_params, potential, dimension, nprocs, backend)
+        event_search = EventSearch(self, search_style, search_params, potential, reconstruction, dimension, nprocs, backend)
         event_search.run()
     
     def point_set_registration(self, psr_style, psr_parameters, idx_cat,central_atom_index, rcutevent, dimension=3, nprocs=1, backend='local') : 

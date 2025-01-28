@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 import configparser
 
+#TODO add method to generate documentation parameters
+#TODO add check if parameters don't clash
+
 @dataclass 
 class Parameters : 
    """

@@ -62,11 +62,12 @@ class EventSearch() :
         run an event search using pARTn with atom_index as the central atom
     """
 
-    def __init__(self, system, search_style, search_params, potential, dimension, nprocs, backend) -> None:
+    def __init__(self, system, search_style, search_params, potential, reconstruction, dimension, nprocs, backend) -> None:
         self.system = system 
         self.search_style = search_style
         self.search_params = search_params 
         self.potential = potential
+        self.reconstruction = reconstruction
         self.dimension = dimension 
         self.nprocs = nprocs 
         self.backend = backend
@@ -77,17 +78,12 @@ class EventSearch() :
         Execute new event searches 
         """
 
-        print(self.system.inputs['Control']['reconstruction'])
-        print(type(self.system.inputs['Control']['reconstruction']))
         #Check if we want reconstruction or not : 
-        match self.system.inputs['Control']['reconstruction'] : 
+        match self.reconstruction : 
             case True : 
                 self.search_with_reconstruction()
             case False : 
-                if self.system.inputs['AtomicEnvironment']['style'] == 'cna' : 
-                    self.search_without_reconstruction()
-                else : 
-                    raise Exception("reconstruction = False is made to be used with AtomicEnvironment style = 'cna'")
+                self.search_without_reconstruction()
             case _: 
                 raise Exception("Wrong reconstruction value in 'Control', must be True or False")
 

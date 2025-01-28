@@ -83,7 +83,7 @@ class KMC() :
             #Searching atomic environments : 
             self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
             #Searching Events : 
-            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential)
+            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential, reconstruction)
 
             #add visited environment : 
             if reconstruction : 
@@ -133,12 +133,10 @@ class KMC() :
                         self.time += delta_t
                         self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier']))
                         #Destroy the catalog/initialize a new one: 
-                        print("lencatalog = ", len(self.system.catalog))
                         self.system.catalog = pd.DataFrame(columns = ['atom_index', 
                                                                       'final_positions',
                                                                       'energy_barrier',
                                                                       'k'])
-                        print("lencatalog = ", len(self.system.catalog))
                     #Minimize
                     self.system.minimize(self.minimization['style'], self.minimization, self.potential)
                     #Append new cong to trajectory file
