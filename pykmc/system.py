@@ -64,7 +64,7 @@ class System(Atoms):
     >>> system.kmc(kmc_parameters, minimization_parameters, search_parameters, potential)
     """
 
-    def __init__(self, input_path=None, config_file=None):
+    def __init__(self, input_path=None, config_file=None, catalog_path=None):
         #Setup logfile
         try : 
             os.remove('pykmc.log')
@@ -93,20 +93,19 @@ class System(Atoms):
 
         self.environment = None
         self.visited_environment = set()
-        self.catalog = None
         self.kmc_traj = None
-#        if catalog == None : #Create empty DataFrame
-#            self.catalog = pd.DataFrame(columns=['event_id', 
-#                                                 'initial_positions', 
-#                                                 'saddle_positions', 
-#                                                 'final_positions', 
-#                                                 'energy_barrier', 
-#                                                 'k', 
-#                                                 'move_atom_idx', 
-#                                                 'id_saddle'])
-#        else : #Read previous catalog DataFrame
-#            self.logger.logger.info('reading {} catalog file'.format(catalog))
-#            self.catalog = pd.read_pickle(catalog) #for restart
+        if catalog_path == None : #Create empty DataFrame
+            self.catalog = pd.DataFrame(columns=['event_id', 
+                                                 'initial_positions', 
+                                                 'saddle_positions', 
+                                                 'final_positions', 
+                                                 'energy_barrier', 
+                                                 'k', 
+                                                 'move_atom_idx', 
+                                                 'id_saddle'])
+        else : #Read previous catalog DataFrame
+            self.logger.logger.info('reading {} catalog file'.format(catalog_path))
+            self.catalog = pd.read_pickle(catalog_path) #for restart
 #        
 #        self.kmc_traj = kmc_traj 
         self.logger.new_line()
@@ -170,7 +169,7 @@ class System(Atoms):
         atomic_environment = AtomicEnvironment(self, environment_style, environement_params, dimension, nprocs, backend)
         atomic_environment.run()
 
-    def event_search(self, search_style, search_params, potential, reconstruction, dimension=3, nprocs=1, backend='local') : 
+    def event_search(self, search_style, search_params, environment_params, potential, reconstruction, dimension=3, nprocs=1, backend='local') : 
         """
         For each atomic environment ID that are not in catalog (except 'crist') launch 'nsearch' event search 
         and add new events to the catalog
@@ -199,7 +198,7 @@ class System(Atoms):
         >>> system.event_search('pARTn', search_params, potential)
         """        
         from .event import EventSearch 
-        event_search = EventSearch(self, search_style, search_params, potential, reconstruction, dimension, nprocs, backend)
+        event_search = EventSearch(self, search_style, search_params, environment_params,  potential, reconstruction, dimension, nprocs, backend)
         event_search.run()
     
     def point_set_registration(self, psr_style, psr_parameters, idx_cat,central_atom_index, rcutevent, dimension=3, nprocs=1, backend='local') : 

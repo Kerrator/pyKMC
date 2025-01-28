@@ -62,10 +62,11 @@ class EventSearch() :
         run an event search using pARTn with atom_index as the central atom
     """
 
-    def __init__(self, system, search_style, search_params, potential, reconstruction, dimension, nprocs, backend) -> None:
+    def __init__(self, system, search_style, search_params, atomenv_params, potential, reconstruction, dimension, nprocs, backend) -> None:
         self.system = system 
         self.search_style = search_style
         self.search_params = search_params 
+        self.atomenv_params = atomenv_params
         self.potential = potential
         self.reconstruction = reconstruction
         self.dimension = dimension 
@@ -213,7 +214,7 @@ class EventSearch() :
         cell = self.system.get_cell()
         positions = self.system.get_positions()
         atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
-        if self.system.inputs['Control']['reconstruction'] : 
+        if self.reconstruction : 
             ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
             dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
             atoms.translate(np.array([dx, dy, dz]))
@@ -294,7 +295,7 @@ class EventSearch() :
             tmp_pos = saddlepositions 
             tmp_pos[tmp_pos < 0] = 0
             atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True) 
-            g_saddle = make_graph(atoms_saddle, [index_move], self.system.inputs['AtomicEnvironment']['rnei'], self.system.inputs['AtomicEnvironment']['rcut'])[0]
+            g_saddle = make_graph(atoms_saddle, [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0]
             id_saddle = pynauty.certificate(g_saddle)
             
             

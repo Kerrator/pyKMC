@@ -11,13 +11,14 @@ import yaml
 init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 5.0}
+                    'rcut'  : 5.0, 
+                    'radd_cna' : 0.0}
 nprocs = 1 
 backend = 'local'
 style = 'cna/graph'
 
 #Initialization 
-system = System(init_config_file) 
+system = System(config_file = init_config_file) 
 #Minimization 
 with cProfile.Profile() as profile : 
     system.find_environment(style, atomicenv_params, nprocs = nprocs, backend=backend)

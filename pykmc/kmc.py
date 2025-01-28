@@ -83,7 +83,7 @@ class KMC() :
             #Searching atomic environments : 
             self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
             #Searching Events : 
-            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.potential, reconstruction)
+            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, reconstruction)
 
             #add visited environment : 
             if reconstruction : 
