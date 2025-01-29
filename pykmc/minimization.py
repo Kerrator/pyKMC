@@ -83,7 +83,6 @@ class Minimization:
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        print(rank, nprocs)
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
         if rank == 0 :
@@ -94,7 +93,7 @@ class Minimization:
         #Initialize lammps :
         #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log', '-screen', 'none'])
         #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log'])
-        lmp = lammps()
+        lmp = lammps(cmdargs=['-screen', 'none'])
 
         #For the moment default parameters 
         lmp.command('units metal')
