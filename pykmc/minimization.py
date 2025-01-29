@@ -91,8 +91,6 @@ class Minimization:
                 modify_lammps_data_2D(lammps_data_file)
 
         #Initialize lammps :
-        #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log', '-screen', 'none'])
-        #lmp = lammps(comm=comm,cmdargs=['-log', 'lammps_minimize.log'])
         lmp = lammps(cmdargs=['-screen', 'none'])
 
         #For the moment default parameters 
