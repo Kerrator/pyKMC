@@ -83,7 +83,10 @@ class AtomicEnvironment() :
                     raise Exception("Atomic environment style unknown")
 
         #Get results
-        list_env = fs.result()
+        if self.nprocs == 1 : 
+            list_env = fs.result()
+        else : 
+            list_env = fs.result()[0]
         #From list of atomic environment we create a dictionary, and update system.environment
         diff_env = set(list_env)
         diff_env = list(diff_env) 
@@ -130,7 +133,7 @@ class AtomicEnvironment() :
                 modify_lammps_data_2D(lammps_data_file)
 
         #Lammps: 
-        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
+        lmp = lammps(cmdargs=['-screen', 'none']) 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension 3') 
@@ -164,6 +167,7 @@ class AtomicEnvironment() :
                     list_topo.append('crystal')
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
+            run('mv log.lammps log.atomicenvironment_lammps', shell=True)
             lmp.close()
             return list_topo
     
@@ -217,7 +221,7 @@ class AtomicEnvironment() :
                 modify_lammps_data_2D(lammps_data_file)
 
         #lammps: 
-        lmp = lammps(comm=comm, cmdargs=['-log', 'log_cna.lammps', '-screen', 'none']) 
+        lmp = lammps(cmdargs=['-screen', 'none']) 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension 3') 
@@ -292,6 +296,7 @@ class AtomicEnvironment() :
                     list_topo.append('crystal')
             #Clean input file
             run('rm {}'.format(lammps_data_file), shell=True)
+            run('mv log.lammps log.atomicenvironment_lammps', shell=True)
             lmp.close()
             return list_topo
         

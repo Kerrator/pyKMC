@@ -34,3 +34,5 @@
 *traj*.xyz
 catalog*.pickle
 *log.minimize_lammps
+*atomic_environment.yml
+*log.atomicenvironment_lammps
