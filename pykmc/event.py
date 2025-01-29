@@ -29,6 +29,8 @@ import math as m
 #TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
 #TODO Don't forget to readd reverse event
 #TODO search_without_reconstruction should be already parallized but need to be checked on local(non docker) and slurm
+#TODO Check if for reconstruction == False, atol and rtol used in add_event_without_reconstruction() are ok
+
 
 class EventSearch() : 
     """
@@ -158,11 +160,17 @@ class EventSearch() :
         #Loop over list results and add event to the catalog : 
         for i,fs in enumerate(l_fs) : 
             if fs.result() is not None : 
-                dfevent = pd.Series({'atom_index' : l_atoms[i] , 
-                                     'final_positions' : fs.result()[2], 
-                                     'energy_barrier' : fs.result()[3],
-                                     'k' : self.compute_rate_Eyring(fs.result()[3])})
-                self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                energy_barrier = fs.result()[3] 
+                if self.search_params['emin_event'] < energy_barrier < self.search_params['emax_event'] : 
+                    dfevent = pd.Series({'atom_index' : l_atoms[i] , 
+                                         'final_positions' : fs.result()[2], 
+                                         'energy_barrier' : fs.result()[3],
+                                         'k' : self.compute_rate_Eyring(fs.result()[3])})
+                    #Check if event already in catalog : 
+                    if len(self.system.catalog) > 0 : 
+                        self.add_event_without_reconstruction(dfevent)
+                    else : 
+                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
     def new_environment(self) : 
@@ -190,6 +198,22 @@ class EventSearch() :
         T = self.search_params['T'] 
         k0 = self.search_params['k0'] 
         return k0*((p.kb*T)/p.h)*m.exp(-dE/(p.kb*T))
+    
+    def add_event_without_reconstruction(self, dfevent) : 
+        """ 
+        Search if event is already in the catalog, if not, add the event to the catalog
+        """
+        atol = 1e-3 
+        rtol = 1e-3 
+
+        #Only select rows with same atom index 
+        subset = self.system.catalog[self.system.catalog["atom_index"] == dfevent['atom_index']]
+
+        #Check if we have final positions of the event close to at least one final positions in the subset 
+        if not subset["final_positions"].apply(lambda pos : np.allclose(pos, dfevent["final_positions"], atol=atol, rtol=rtol)).any() : 
+            #if not add event to the catalog : 
+            self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+            
 
 
     def pARTn_search(self, atom_index) : 
@@ -257,6 +281,7 @@ class EventSearch() :
         #SETUP ARTN
         artn.set('engine_units', 'lammps/metal')
         artn.set('verbose',self.search_params['partn_verbose'])
+        artn.set('struc_format_out', 'none')
         artn.set("lpush_final", True)
         artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
         artn.set("ninit", self.search_params['partn_ninit'])

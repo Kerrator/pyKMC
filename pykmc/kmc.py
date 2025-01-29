@@ -75,7 +75,10 @@ class KMC() :
                 self.system.logger.logger.info('Minimization of the system')
                 self.system.minimize(self.minimization['style'], self.minimization, self.potential, self.control['dimension'], self.control['nprocs'], self.control['backend'])
                 self.system.logger.new_line()
-                self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s} {:<10s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
+                if reconstruction : 
+                    self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s} {:<10s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
+                else : 
+                    self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
                 write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
