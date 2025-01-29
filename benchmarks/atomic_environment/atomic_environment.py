@@ -15,7 +15,7 @@ atomicenv_params = {'rnei': 3.01,
                     'radd_cna' : 0.0}
 nprocs = 8
 backend = 'local'
-style = 'graph'
+style = 'cna/graph'
 
 #Initialization 
 system = System(config_file = init_config_file) 

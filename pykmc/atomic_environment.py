@@ -249,7 +249,6 @@ class AtomicEnvironment() :
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
 
-        #TEST : add also neighbors of non crystalline atoms : 
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 
@@ -262,23 +261,17 @@ class AtomicEnvironment() :
             #Find non crystalline atoms : 
             noncrist_atom_index = [i for i,e in enumerate(global_result[:,1]) if e == 5]
 
-            #Test : add also neighbors of non crystalline atoms : 
-                #convert ctype positions into a numpy array
+            #convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
             neighbors = [] 
             ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
             for at_idx in noncrist_atom_index : 
                 dist = self.system.get_distances(at_idx, ind, mic=True)
-                #neighbors += np.where(dist <= self.atomenv_params['rnei'])[0].tolist()
+                #IF we want to add atoms at distance < radd_cna from non crystalline atoms
                 neighbors += np.where(dist <= self.atomenv_params['radd_cna'])[0].tolist()
             noncrist_atom_index += neighbors 
             noncrist_atom_index = list(set(noncrist_atom_index)) #remove duplicate
-
-
-
-
-
 
             #Split index atoms in approximatively even number sublist
             split = np.array_split(noncrist_atom_index, nprocs)
@@ -288,11 +281,13 @@ class AtomicEnvironment() :
         split = comm.bcast(split, root=0)
         #local index
         local_index = split[rank]
+        #graph for each rank
         list_g = make_graph(self.system, local_index, self.atomenv_params['rnei'], self.atomenv_params['rcut'])
         #gather graphs : 
         result = np.column_stack((local_index, np.array(list_g)))
         graphs = comm.gather(result, root=0)
         if rank == 0 : 
+            #make list_topo
             graphs = np.concatenate(graphs)
             list_topo = [] 
             for i in range(self.system.get_global_number_of_atoms()) : 
@@ -306,6 +301,8 @@ class AtomicEnvironment() :
             run('mv log.lammps log.atomicenvironment_lammps', shell=True)
             lmp.close()
             return list_topo
+        else : 
+            return None
         
 
 def make_graph(atoms, list_id, rnei, rcut) : 
