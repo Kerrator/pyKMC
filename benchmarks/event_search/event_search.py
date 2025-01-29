@@ -21,7 +21,7 @@ potential = {'pair_style' : 'eam/alloy',
 atomicenv_params = {'rnei': 3.01,
                     'rcut'  : 5.0, 
                     'radd_cna' : 0.0}
-search_params = {'nsearch' : 1,
+search_params = {'nsearch' : 10,
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so', 
                  'rcutenv' : 7.0, 
                  'emax_event' : 5.0, 
@@ -40,10 +40,11 @@ search_params = {'nsearch' : 1,
                  'k0' : 1, 
                  'T' : 300.0, 
                  }
-nprocs = 1
+nprocs = 8
 backend = 'local'
-style_atomenv = 'cna/graph'
+style_atomenv = 'cna'
 style_event = 'pARTn'
+reconstruction = False
 
 catalog = pd.DataFrame(columns=['event_id', 
                                                      'initial_positions', 
@@ -62,7 +63,7 @@ system.minimize('lammps', minimization_params, potential, nprocs = nprocs, backe
 system.find_environment(style_atomenv, atomicenv_params, nprocs = nprocs, backend=backend)
 #Event Search
 with cProfile.Profile() as profile : 
-    system.event_search(style_event, search_params, atomicenv_params,potential, reconstruction = True, nprocs=nprocs, backend=backend)
+    system.event_search(style_event, search_params, atomicenv_params,potential, reconstruction = reconstruction, nprocs=nprocs, backend=backend)
 stats = Stats(profile)
 print("Profiling Event Search with style = : ", style_event)
 stats.print_stats(0)

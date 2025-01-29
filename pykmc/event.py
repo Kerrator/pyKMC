@@ -89,6 +89,10 @@ class EventSearch() :
 
 
     def search_with_reconstruction(self) : 
+        
+        #TEMPORARY FIX write config file here so no problem parallelization
+        lammps_data_file = 'initial_config_minimization.lmp'
+        write_lammps_data(lammps_data_file, self.system, masses=True)
 
         #Check if new atomic environment that are not in the catalog, if yes extract the environement id: 
         l_new_environement = self.new_environment()
@@ -143,6 +147,12 @@ class EventSearch() :
         #List of atoms that have non cristalline environement 
         l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == 'noncrystal'][0]
         #for each atom in l_atoms we launch nsearch event searches 
+        l_atoms *= self.search_params['nsearch']
+
+        #TEMPORARY FIX write config file here so no problem parallelization
+        lammps_data_file = 'initial_config_minimization.lmp'
+        write_lammps_data(lammps_data_file, self.system, masses=True)
+
         with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
             l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
         #Loop over list results and add event to the catalog : 
@@ -221,15 +231,14 @@ class EventSearch() :
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
-        if rank == 0 :
+        #if rank == 0 :
             #write_lammps_data(lammps_data_file, self.system, masses=True)
-            write_lammps_data(lammps_data_file, atoms, masses=True)
+            #write_lammps_data(lammps_data_file, atoms, masses=True)
             #write_lammps_data(lammps_data_file, subsystem, masses=True)
-            if self.dimension == 2 : 
-                modify_lammps_data_2D(lammps_data_file)
-
+            #if self.dimension == 2 : 
+            #    modify_lammps_data_2D(lammps_data_file)
         #Setup Lammps : 
-        lmp = lammps(comm=comm,cmdargs=['-log', 'log.pARTn.lammps', '-screen', 'none'])
+        lmp = lammps(comm=comm,cmdargs=['-screen', 'none'])
         artn = pypARTn2.artn(engine='lmp')
         lmp.command("units metal")
         lmp.command('atom_style atomic')
@@ -347,6 +356,9 @@ class EventSearch() :
         else : 
             #self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
             return None
+        
+
+
 #    def dimer_search(self, atom_index, potential): 
 #        """ 
 #        Use Dimer search with ASE and lammps

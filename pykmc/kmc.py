@@ -83,7 +83,7 @@ class KMC() :
             #Searching atomic environments : 
             self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
             #Searching Events : 
-            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, reconstruction)
+            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, reconstruction, self.control['dimension'], self.control['nprocs'], self.control['backend'])
 
             #add visited environment : 
             if reconstruction : 
@@ -117,11 +117,9 @@ class KMC() :
                         #directly go to final position
                         rcutevent = self.event_parameters['rcutenv']
                         coords = self.system.catalog.loc[idx_cat].at['final_positions']
-                        print(len(coords))
                         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
                         dist = self.system.get_distances(central_atom_index, ind, mic=True)
                         neighbor_list = np.where(dist<rcutevent)[0]
-                        print(len(neighbor_list))
                         #ugly
                         c = 0 
                         newpos = self.system.get_positions()

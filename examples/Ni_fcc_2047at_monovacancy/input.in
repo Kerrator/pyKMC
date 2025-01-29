@@ -3,8 +3,8 @@ config_file = ./initial_config.xyz
 output_file = ./trajkmc.xyz
 nkmc_steps = 10
 #catalog = ./catalog.pickle
-nprocs = 1
-reconstruction = True
+nprocs = 8
+reconstruction = False
 
 [Potential] 
 file = ./Ni_v6_2.0_LKBeland2016.eam
