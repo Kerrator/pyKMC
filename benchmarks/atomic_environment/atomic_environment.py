@@ -11,11 +11,11 @@ import yaml
 init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
 
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 5.0, 
+                    'rcut'  : 4.0, 
                     'radd_cna' : 0.0}
-nprocs = 8 
+nprocs = 8
 backend = 'local'
-style = 'cna'
+style = 'graph'
 
 #Initialization 
 system = System(config_file = init_config_file) 

@@ -198,7 +198,14 @@ class AtomicEnvironment() :
         for g in list_g : 
             #compute certificate
             list_topo.append(pynauty.certificate(g))
-        return list_topo
+        #gather list_topo : 
+        list_topo = comm.gather(list_topo, root=0)
+        #flatten list_topo : 
+        if rank == 0 : 
+            list_topo = [gcertificate for e in list_topo for gcertificate in e]
+            return list_topo
+        else : 
+            return None
     
 
     def cna_graph_nauty(self) : 
