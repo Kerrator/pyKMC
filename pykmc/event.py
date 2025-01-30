@@ -119,14 +119,15 @@ class EventSearch() :
             if fs.result() is not None : 
                 energy_barrier = fs.result()[3] 
                 if self.search_params['emin_event'] < energy_barrier < self.search_params['emax_event'] : 
-                    dfevent = pd.Series({'event_id' : id , 
+                    dfevent = pd.Series({'event_id' : fs.result()[4] , 
                                         'initial_positions' : fs.result()[0], 
                                         'saddle_positions': fs.result()[1], 
                                         'final_positions': fs.result()[2], 
                                         'energy_barrier': fs.result()[3], 
                                         'k' : self.compute_rate_Eyring(fs.result()[3]), 
-                                        'move_atom_idx' : fs.result()[4],
-                                        'id_saddle' : fs.result()[5]})
+                                        'id_saddle' : fs.result()[5], 
+                                        'id_final': fs.result()[6], 
+                                        'move_atom_idx': fs.result()[7]})
                     self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
@@ -281,13 +282,13 @@ class EventSearch() :
 
         #TEST put atom_index at the center of the cell to fix pbc problems : 
         #New Atoms
-        cell = self.system.get_cell()
-        positions = self.system.get_positions()
-        atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
-        if self.reconstruction : 
-            ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
-            dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
-            atoms.translate(np.array([dx, dy, dz]))
+        #cell = self.system.get_cell()
+        #positions = self.system.get_positions()
+        #atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
+        #if self.reconstruction : 
+        #    ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
+        #    dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
+        #    atoms.translate(np.array([dx, dy, dz]))
 
         #Write lammps data file : 
         lammps_data_file = 'initial_config_minimization.lmp'
@@ -355,42 +356,103 @@ class EventSearch() :
             #eigenvec = artn.extract("eigen_sad")
             #print(eigenvec)
             
-            
-            #TEST Find Atoms that move the most == > for graph topo saddle point : 
-            dist = (min1positions-saddlepositions)**2
-            dist = dist.sum(axis=-1)
-            dist = np.sqrt(dist)
-            index_move = np.argmax(dist)
-            #graph saddle point index_move :
-            tmp_pos = saddlepositions 
-            tmp_pos[tmp_pos < 0] = 0
-            atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True)
-            g_saddle = make_graph(atoms_saddle, [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0]
-            id_saddle = pynauty.certificate(g_saddle)
+
+            #TEST Find Atoms that move the most  : 
+            #dist = (min1positions-saddlepositions)**2
+            #dist = dist.sum(axis=-1)
+            #dist = np.sqrt(dist)
+            #index_move = np.argmax(dist)
+
+            rcutevent = self.search_params['rcutenv']
+            ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+
+            if self.reconstruction : 
+                cell = self.system.get_cell()
+                #put event in event_traj en translate move atom at the center to prevent pbc problems
+                ppositions = [min1positions, saddlepositions, min2positions]
+                event_traj = [] 
+                ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
+                #put event in traj_event
+                for pp in ppositions : 
+                    atoms = Atoms(positions=pp, cell=self.system.get_cell(), pbc=True)
+#                    atoms.set_positions(atoms.get_positions(wrap=True))
+                    event_traj.append(atoms)
+                #find atom that move the most
+                    #prevent lammps cell travel 
+                    #neighbor of central atom
+                dist = self.system.get_distances(atom_index, ind, mic=True)
+                neighbor_list = np.where(dist<rcutevent)[0]
+                min1positions_cent = min1positions[neighbor_list]
+                saddlepositions_cent = saddlepositions[neighbor_list]
+                min2positions_cent = min2positions[neighbor_list]
+                if delr1 < delr2 : 
+                    dist = (min1positions_cent-saddlepositions_cent)**2
+                else : 
+                    dist = (min2positions_cent-saddlepositions_cent)**2
+                dist = dist.sum(axis=-1)
+                dist = np.sqrt(dist)
+                local_index_move = np.argmax(dist)
+                index_move = neighbor_list[local_index_move]
+                #translate atoms  : 
+                if delr1 < delr2 : 
+                    dx, dy, dz = ax/2 - event_traj[0].get_positions()[index_move][0], ay/2 - event_traj[0].get_positions()[index_move][1], az/2 - event_traj[0].get_positions()[index_move][2]
+                else : 
+                    dx, dy, dz = ax/2 - event_traj[2].get_positions()[index_move][0], ay/2 - event_traj[2].get_positions()[index_move][1], az/2 - event_traj[2].get_positions()[index_move][2]
+                for i in range(len(event_traj)) : 
+                    event_traj[i].translate(np.array([dx, dy, dz]))
+                #Compute graph topo, used to check if event already in catalog : 
+                id_event = pynauty.certificate(make_graph(event_traj[0], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+                id_saddle = pynauty.certificate(make_graph(event_traj[1], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+                id_final = pynauty.certificate(make_graph(event_traj[2], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+
+                #find neighbor atom move : 
+                if delr1 < delr2 : 
+                    dist = event_traj[0].get_distances(index_move, ind, mic=True)
+                else : 
+                    dist = event_traj[2].get_distances(index_move, ind, mic=True)
+                neighbor_list = np.where(dist<rcutevent)[0]
+                min1positions = min1positions[neighbor_list]
+                min2positions = min2positions[neighbor_list]
+                saddlepositions = saddlepositions[neighbor_list]
+
+
+            else :  
+                #graph saddle point index_move 
+#                tmp_pos = saddlepositions 
+#                tmp_pos[tmp_pos < 0] = 0
+#                atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True)
+#                g_saddle = make_graph(atoms_saddle, [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0]
+#                id_saddle = pynauty.certificate(g_saddle)
+                dist = self.system.get_distances(atom_index, ind, mic=True)
+                neighbor_list = np.where(dist<rcutevent)[0]
+
+
+                min1positions = min1positions[neighbor_list]
+                min2positions = min2positions[neighbor_list]
+                saddlepositions = saddlepositions[neighbor_list]
+
             
             
 
             #save only atom in rcutenv of atom_index
-            rcutevent = self.search_params['rcutenv']
-            ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-            dist = self.system.get_distances(atom_index, ind, mic=True)
 
-            neighbor_list = np.where(dist<rcutevent)[0]
+  #          if self.reconstruction : 
+  #              dist = self.system.get_distances(index_move, ind, mic=True)
+  #          else : 
+  #              dist = self.system.get_distances(atom_index, ind, mic=True)
+
+  #          neighbor_list = np.where(dist<rcutevent)[0]
 
 
-            min1positions = min1positions[neighbor_list]
-            min2positions = min2positions[neighbor_list]
-            saddlepositions = saddlepositions[neighbor_list]
-
-            np.save('min1', min1positions)
-            np.save('min2', min2positions)
-            np.save('saddle', saddlepositions)
+  #          min1positions = min1positions[neighbor_list]
+  #          min2positions = min2positions[neighbor_list]
+  #          saddlepositions = saddlepositions[neighbor_list]
 
             #TEST Find Atoms that move the most == > for graph topo saddle point : 
-            dist = (min1positions-saddlepositions)**2
-            dist = dist.sum(axis=-1)
-            dist = np.sqrt(dist)
-            index_move = np.argmax(dist)
+            #dist = (min1positions-saddlepositions)**2
+            #dist = dist.sum(axis=-1)
+            #dist = np.sqrt(dist)
+            #index_move = np.argmax(dist)
             
 
             #Check if min1 or min2 close to the original configuration
@@ -400,14 +462,22 @@ class EventSearch() :
                         #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
                         #return min1positions, saddlepositions, min2positions, dE_forward, np.where(neighbor_list == atom_index)[0][0], atom_index 
                         #return min1positions, saddlepositions, min2positions, dE_forward, index_move, atom_index, index_move_prev
-                        return min1positions, saddlepositions, min2positions, dE_forward, index_move, id_saddle 
+                        #return min1positions, saddlepositions, min2positions, dE_forward, index_move, id_saddle
+                        if self.reconstruction : 
+                            return min1positions, saddlepositions, min2positions, dE_forward, id_event, id_saddle, id_final, local_index_move
+                        else : 
+                            return min1positions, saddlepositions, min2positions, dE_forward
                         #return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
                     else : 
                         #return min2positions, saddlepositions, min1positions, dE_forward
                         #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
                         #return min2positions, saddlepositions, min1positions, dE_backward, np.where(neighbor_list == atom_index)[0][0], atom_index
                         #return min2positions, saddlepositions, min1positions, dE_backward, index_move, atom_index, index_move_prev
-                        return min2positions, saddlepositions, min1positions, dE_backward, index_move, id_saddle
+                        #return min2positions, saddlepositions, min1positions, dE_backward, index_move, id_saddle
+                        if self.reconstruction : 
+                            return min2positions, saddlepositions, min1positions, dE_backward, id_event, id_saddle, id_final, local_index_move
+                        else : 
+                            return min2positions, saddlepositions, min1positions, dE_backward
                         #return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
                 #else : 
                     #print('len not consistent')

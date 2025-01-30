@@ -43,8 +43,9 @@ class KMC() :
                                                      'final_positions', 
                                                      'energy_barrier', 
                                                      'k', 
-                                                     'move_atom_idx', 
-                                                     'id_saddle'])
+                                                     'id_saddle',
+                                                     'id_final', 
+                                                     'move_atom_idx'])
             else : #Read previous catalog DataFrame
                 self.system.logger.logger.info('reading {} catalog file'.format(catalog))
                 self.system.catalog = pd.read_pickle(catalog) #for restart
@@ -111,11 +112,12 @@ class KMC() :
                     if reconstruction : 
                         #Shape Matching
                         rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
+                        if rmat is not None : #in case ira did not find a match 
                         #Update positions of the system if recontruction success
-                        reconstruction_de, reconstruction_topo = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
-                        if reconstruction_de and reconstruction_topo : 
-                            self.time += delta_t
-                        self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e} {:<10e} {:<18s} {:<18s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier'], dh, str(reconstruction_de), str(reconstruction_topo)))
+                            reconstruction_de, reconstruction_topo = self.update_positions(idx_cat, central_atom_index, rmat, tr, perm, dh)
+                            if reconstruction_de and reconstruction_topo : 
+                                self.time += delta_t
+                            self.system.logger.logger.info('{:<10n} {:<10e} {:<10n} {:<10n} {:<13n} {:<10e} {:<10e} {:<18s} {:<18s}'.format(step, self.time, len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier'], dh, str(reconstruction_de), str(reconstruction_topo)))
                     else : 
                         #directly go to final position
                         rcutevent = self.event_parameters['rcutenv']
@@ -166,6 +168,7 @@ class KMC() :
         #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
             l_env = [dict['ID'] for dict in self.system.environment]
             l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
+            print(len(l_catalog))
         else : 
         #1- if reconstruction = False all events are possible : 
             l_catalog = [i for i in range(len(self.system.catalog))]
@@ -252,6 +255,15 @@ class KMC() :
             self.system.set_positions(newpos)
 
             #Check energy barrier :
+            #print(move_atomsys_idx)
+            #TEST : 
+            print('STEP')
+            print(move_atomsys_idx)
+            dist = (current_positions-newpos)**2  
+            dist = dist.sum(axis=-1)
+            dist = np.sqrt(dist)
+            move_atomsys_idx = np.argmax(dist)
+            print(move_atomsys_idx)
             is_energy_saddle_ok = self.check_saddle_energy(idx_cat, Eini)
             is_topo_saddle_ok = self.check_saddle_topo(idx_cat, move_atomsys_idx) 
             
@@ -271,7 +283,8 @@ class KMC() :
                 self.system.set_positions(newpos)
             return is_energy_saddle_ok, is_topo_saddle_ok
 
-
+        else : 
+            return None, None
 
            
 

@@ -107,16 +107,20 @@ class PointSetRegistration() :
         nat1 = len(coords1)
         typ1 = typ2
         kmax_factor = self.psr_parameters['kmax_factor']
-        rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
+        try : 
+            rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
+             
 
-        a = [[rmat, tr, perm, dh]]
-        results = pd.DataFrame(a, columns=['R', 
-                                        'T', 
-                                        'P', 
-                                        'dh'])
-        if self.save : 
-            results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
-        return rmat, tr, perm, dh
+            a = [[rmat, tr, perm, dh]]
+            results = pd.DataFrame(a, columns=['R', 
+                                            'T', 
+                                            'P', 
+                                            'dh'])
+            if self.save : 
+                results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
+            return rmat, tr, perm, dh
+        except : 
+            return None, None, None, None
 
 
 

@@ -19,9 +19,9 @@ minimization_params = {'min_style' : 'cg',
 potential = {'pair_style' : 'eam/alloy', 
              'pair_coeff' : '* * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni'}
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 5.0, 
+                    'rcut'  : 7.0, 
                     'radd_cna' : 0.0}
-search_params = {'nsearch' : 1,
+search_params = {'nsearch' : 5,
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so', 
                  'rcutenv' : 7.0, 
                  'emax_event' : 5.0, 
@@ -42,18 +42,18 @@ search_params = {'nsearch' : 1,
                  }
 nprocs = 8
 backend = 'local'
-style_atomenv = 'cna'
+style_atomenv = 'graph'
 style_event = 'pARTn'
-reconstruction = False
+reconstruction = True
 
-catalog = pd.DataFrame(columns=['event_id', 
-                                                     'initial_positions', 
-                                                     'saddle_positions', 
-                                                     'final_positions', 
-                                                     'energy_barrier', 
-                                                     'k', 
-                                                     'move_atom_idx', 
-                                                     'id_saddle'])
+#catalog = pd.DataFrame(columns=['event_id', 
+#                                                     'initial_positions', 
+#                                                     'saddle_positions', 
+#                                                     'final_positions', 
+#                                                     'energy_barrier', 
+#                                                     'k', 
+#                                                     'move_atom_idx', 
+#                                                     'id_saddle'])
 
 #Initialization 
 system = System(config_file = init_config_file)

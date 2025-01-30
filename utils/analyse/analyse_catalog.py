@@ -9,20 +9,20 @@ def write_event_traj(catalog,index) :
     """ 
     traj = [] 
     col = ['initial_positions', 'saddle_positions', 'final_positions'] 
-    move_atom_idx = catalog.loc[index].at['move_atom_idx']
+    #move_atom_idx = catalog.loc[index].at['move_atom_idx']
     for c in col : 
         positions = catalog.loc[index].at[c]
         atoms = Atoms(positions = positions)
-        z = atoms.get_global_number_of_atoms()*[30]
-        z[move_atom_idx] = 35
-        atoms.set_atomic_numbers(z)
+    #    z = atoms.get_global_number_of_atoms()*[30]
+    #    z[move_atom_idx] = 35
+    #    atoms.set_atomic_numbers(z)
         traj.append(atoms) 
 
     write('event_'+str(index)+'.xyz', traj)
-#catalog = pd.read_pickle('/root/pyKMC/benchmarks/event_search/catalog.pickle')
-catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/catalog.pickle') 
+catalog = pd.read_pickle('/root/pyKMC/benchmarks/event_search/catalog.pickle')
+#catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/catalog.pickle') 
 for i in range(len(catalog)):
-    #write_event_traj(catalog, i)
+    write_event_traj(catalog, i)
     print('Energy of event {} is {} with constant rate = {}'.format(i, catalog.loc[i].at['energy_barrier'], catalog.loc[i].at['k']))
 
 

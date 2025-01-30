@@ -3,7 +3,7 @@ config_file = ./initial_config.xyz
 output_file = ./trajkmc.xyz
 nkmc_steps = 500
 catalog = ./catalog.pickle
-nprocs = 1
+nprocs = 8
 
 [Potential] 
 file = ./Ni_v6_2.0_LKBeland2016.eam
@@ -21,12 +21,13 @@ maxeval = 1000
 [AtomicEnvironment] 
 style = cna/graph
 rnei = 3.0 
-rcut = 7.0 
+rcut = 5.0 
+radd_cna = 3.0
 
 [EventSearch] 
 style = pARTn 
-rcutenv = 7.0
-nsearch = 50 
+rcutenv = 5.0
+nsearch = 10 
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 k0 = 1
