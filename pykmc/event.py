@@ -99,22 +99,27 @@ class EventSearch() :
         #Check if new atomic environment that are not in the catalog, if yes extract the environement id: 
         l_new_environement = self.new_environment()
         #For each id in l_new_environment, we will select randomly one atom with the corresponding ID (does this nsearch time)
-        for id in l_new_environement : 
-            #extract list of atoms in system.environment having the id 
-            l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0] 
-            #list of atoms on which we gonna do the search
-            #self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
-            l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
-            #then we do a pART search and put the result of each search in self.system.catalog
-            #TODO Remplacer par executor list fonction
-            for atom_index in l_atoms_search : 
-                #run event search
-                with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-                    fs = exe.submit(self.pARTn_search, atom_index )
-                    if fs.result() is not None :
-                        #upper and lower limit : 
-                        if fs.result()[3] > self.search_params['emin_event'] and fs.result()[3] < self.search_params['emax_event'] : 
-                            dfevent = pd.Series({'event_id' : id , 
+        #TODO Remplacer par executor list fonction
+
+        l_atoms = []
+        for id in l_new_environement :
+            #list of atoms that have id in l_new_environment : 
+            atom_idx =  [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0]
+            #We select nsearch atoms randomly in this atom_idx 
+            atom_idx = [random.choice(atom_idx) for _i in range(self.search_params['nsearch'])]
+            #extend total list of atoms on which we gonna do an event search
+            l_atoms.extend(atom_idx)
+
+        #For each atoms in atom_idx we do an event search 
+        with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
+            l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
+        #For each results, we add the event to the catalog 
+        
+        for fs in l_fs : 
+            if fs.result() is not None : 
+                energy_barrier = fs.result()[3] 
+                if self.search_params['emin_event'] < energy_barrier < self.search_params['emax_event'] : 
+                    dfevent = pd.Series({'event_id' : id , 
                                         'initial_positions' : fs.result()[0], 
                                         'saddle_positions': fs.result()[1], 
                                         'final_positions': fs.result()[2], 
@@ -122,11 +127,42 @@ class EventSearch() :
                                         'k' : self.compute_rate_Eyring(fs.result()[3]), 
                                         'move_atom_idx' : fs.result()[4],
                                         'id_saddle' : fs.result()[5]})
+                    self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
-                            self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
 
 
-                            #Add reverse event : 
+
+
+
+
+    #    for id in l_new_environement : 
+    #        #extract list of atoms in system.environment having the id 
+    #        l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0] 
+    #        #list of atoms on which we gonna do the search
+    #        #self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
+    #        l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
+    #        #then we do a pART search and put the result of each search in self.system.catalog
+
+    #        for atom_index in l_atoms_search : 
+    #            #run event search
+    #            with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
+    #                fs = exe.submit(self.pARTn_search, atom_index )
+    #                if fs.result() is not None :
+    #                    #upper and lower limit : 
+    #                    if fs.result()[3] > self.search_params['emin_event'] and fs.result()[3] < self.search_params['emax_event'] : 
+    #                        dfevent = pd.Series({'event_id' : id , 
+    #                                    'initial_positions' : fs.result()[0], 
+    #                                    'saddle_positions': fs.result()[1], 
+    #                                    'final_positions': fs.result()[2], 
+    #                                    'energy_barrier': fs.result()[3], 
+    #                                    'k' : self.compute_rate_Eyring(fs.result()[3]), 
+    #                                    'move_atom_idx' : fs.result()[4],
+    #                                    'id_saddle' : fs.result()[5]})
+
+    #                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+
+
+    #                        #Add reverse event : 
                             #compute finale positions ID : 
                             #g = make_graph(self.system, [fs.result()[4]], 3.0, 5.0 )
                             #reverse_id = pynauty.certificate(g[0])
@@ -328,7 +364,7 @@ class EventSearch() :
             #graph saddle point index_move :
             tmp_pos = saddlepositions 
             tmp_pos[tmp_pos < 0] = 0
-            atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True) 
+            atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True)
             g_saddle = make_graph(atoms_saddle, [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0]
             id_saddle = pynauty.certificate(g_saddle)
             

@@ -1,10 +1,10 @@
 [Control] 
 config_file = ./initial_config.xyz 
 output_file = ./trajkmc.xyz
-nkmc_steps = 10
+nkmc_steps = 1
 #catalog = ./catalog.pickle
 nprocs = 8
-reconstruction = False
+reconstruction = True
 
 [Potential] 
 file = ./Ni_v6_2.0_LKBeland2016.eam
@@ -20,7 +20,7 @@ maxiter = 1000
 maxeval = 1000
 
 [AtomicEnvironment] 
-style = cna
+style = cna/graph
 #radd_cna = 2.6
 rnei = 3.0
 rcut = 5.0
