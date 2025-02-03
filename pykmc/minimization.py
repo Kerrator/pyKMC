@@ -5,9 +5,6 @@ from subprocess import run
 from .utilities import modify_lammps_data_2D
 from executorlib import Executor
 
-#TODO see doc convention when attributes and parameters are the same
-#TODO Need to find a solution for small negative numbers (ie Lammps can gives wrapped positions like 1.0e-10). It mess up with the k-d tree (could replicate positions and not use the box_size option in kdtree)
-#TODO check create_atoms lammps command: https://docs.lammps.org/Python_module.html#lammps.lammps, could be use instead of writing a .lmp config file (see latter depending if I find a solution to always have a lammps instance to run calculations) 
 #TODO see how to handle potential when other than pair_style (ie bond, angles)
 
 class Minimization:
@@ -64,7 +61,7 @@ class Minimization:
             positions = fs.result()
         else : 
             positions = fs.result()[0]
-        positions[positions < 0] = 0
+        positions[positions < 0] = 0 #This is because I can have small negative number and it messes up with kdtree
         self.system.set_positions(positions)
 
     def minimize_lammps(self) : 
@@ -93,23 +90,18 @@ class Minimization:
         #Initialize lammps :
         lmp = lammps(cmdargs=['-screen', 'none'])
 
-        #For the moment default parameters 
+        #Default parameters 
         lmp.command('units metal')
         lmp.command('atom_style atomic')
         lmp.command('dimension {}'.format(self.dimension))
         lmp.command('boundary p p p')
         lmp.command('read_data {}'.format(lammps_data_file))
-            #Potential
+        #Potential
         lmp.command('pair_style {}'.format(self.potential['pair_style']))
         lmp.command('pair_coeff {}'.format(self.potential['pair_coeff']))
-#        for key, val in self.potential.items() : 
-#            lmp.command('{} {}'.format(key, val))
-            #Minimization 
-        lmp.command('print OUIOUI"{}"'.format(comm.Get_rank()))
+        #Minimization 
         lmp.command('min_style {}'.format(self.minimization_params['min_style']))
         lmp.command('minimize {} {} {} {}'.format(self.minimization_params['etol'], self.minimization_params['ftol'], self.minimization_params['maxiter'], self.minimization_params['maxeval']))
-#        for key, val in self.minimization_params.items() :
-#            lmp.command('{} {}'.format(key, val)) 
         #gather all positions 
         positions = lmp.gather_atoms("x", 1, 3)
 
@@ -121,3 +113,5 @@ class Minimization:
             run('rm {}'.format(lammps_data_file), shell=True)
             run('mv log.lammps log.minimize_lammps', shell=True)
             return positions 
+        else : 
+            return None

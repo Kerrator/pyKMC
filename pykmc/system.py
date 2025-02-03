@@ -274,8 +274,8 @@ class System(Atoms):
         save : boolean, optional 
             if we save to a .xyz file the reconstruction of event, usefull to debug, by default False
 
-        Return 
-        ______ 
+        Returns
+        -------
         rmat, tr, perm, dh : np.array, np.array, np.array, float 
             rotation, translation, permutation matrices and dh distance parameters
 
