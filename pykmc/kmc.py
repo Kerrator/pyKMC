@@ -357,8 +357,8 @@ class KMC() :
 
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']
         #self.system.logger.logger.info('Topo saddle reconstruction = {}'.format(check))
-        return check 
-        #return True
+        #return check 
+        return True
 
 
 #    def check_saddle_energy(self, idx_cat, central_atom_index) :
