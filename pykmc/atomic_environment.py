@@ -1,4 +1,4 @@
-from .utilities import modify_lammps_data_2D
+from .utilities import modify_lammps_data_2D, initialize_default_lammps
 from ase.io.lammpsdata import write_lammps_data
 import numpy as np
 from lammps import lammps
@@ -25,8 +25,7 @@ class AtomicEnvironment() :
     atomenv_style : str
         style use for the atomic environment search, can be 'cna', 'graph, 'cna/graph'
     atomenv_params : dict of str: float
-        dictionaty of radius parameters defining the environment, 'rnei' : radius cutoff to define
-        neirest neighbors, 'rcut' : radius cutoff to define the environment (for 'graph')
+        dictionaty of radius parameters defining the environment 
     dimension : int
         dimension of the system
     nprocs : int
@@ -57,9 +56,13 @@ class AtomicEnvironment() :
 
     def run(self): 
         """
-        Run similar atomic environment search based on topology_style
-        """
+        Run similar atomic environment search based on topology_style and update the system.environment
 
+        Raises
+        ------
+        Exception
+            if unknown atomic environment style
+        """
         #Run the atomic environment search using executorlib for the parallelization 
         with Executor(backend =self.backend) as exe : 
             #Check the atomic environment style
@@ -71,7 +74,7 @@ class AtomicEnvironment() :
                 case "cna/graph" : 
                     fs = exe.submit(self.cna_graph_nauty, resource_dict={"cores": self.nprocs})
                 case _:
-                    self.system.logger.logger.error('ERROR:Atomic environment style not known')
+                    self.system.logger.logger.error('ERROR:Atomic environment style unknown')
                     raise Exception("Atomic environment style unknown")
 
         #Get results
@@ -95,11 +98,13 @@ class AtomicEnvironment() :
         self.system.environment = dict_env
 
     def cna(self) : 
-        """ 
-        compute CNA using lammps. 
-        return a list of ID : "crystal" if the atom has a crystalline environement (ie CNA = 1,2,3 or 4) and "noncrystal" if not (ie CNA=5)  
-        """
+        """Compute atomic environment ID based on CNA results. 
 
+        Returns
+        -------
+        List[str]
+            list of ID, "crystal" if the atom has a crystalline environment and "noncrystal" if not
+        """
         from mpi4py import MPI
 
         #for MPI : 
@@ -107,35 +112,13 @@ class AtomicEnvironment() :
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #Write lammps data file : 
-        lammps_data_file = 'initial_config_cna.lmp'
-        if rank == 0 :
-            write_lammps_data(lammps_data_file, self.system, masses=True)
-            if self.dimension == 2 : 
-                modify_lammps_data_2D(lammps_data_file)
-
-        #Lammps: 
-        lmp = lammps(cmdargs=['-screen', 'none']) 
-        lmp.command('units metal')
-        lmp.command('atom_style atomic')
-        lmp.command('dimension 3') 
-        lmp.command('boundary p p p')
-        lmp.command('atom_modify sort 0 1')
-        lmp.command('read_data {}'.format(lammps_data_file))
-        lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (I guess it is for the neighborlist)
-        lmp.command('pair_coeff * *')
-        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
-        lmp.command('run 0')
-        #Extract cna
-        cna_array = lmp.numpy.extract_compute("c1", 1,1)
-
-        #Lammps does not sort by atom index so we extract them too
-        id = lmp.numpy.extract_atom("id")
-        id = id-1 #Lammps index start at 1
+        #compute cna 
+        id, cna_array, _  = self._lammps_cna(comm=comm)
 
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
+
         if rank == 0 : 
             #flaten arrays 
             global_result = np.concatenate(global_result)
@@ -147,10 +130,8 @@ class AtomicEnvironment() :
                     list_topo.append('noncrystal') 
                 else : 
                     list_topo.append('crystal')
-            #Clean input file
-            run('rm {}'.format(lammps_data_file), shell=True)
+            #Deal with log file
             run('mv log.lammps log.atomicenvironment_lammps', shell=True)
-            lmp.close()
             return list_topo
         else : 
             return None
@@ -194,9 +175,14 @@ class AtomicEnvironment() :
     
 
     def cna_graph_nauty(self) : 
-        """
-        Compute CNA, and for non crystalline environement, compute the graph certificate
-        """
+        """Compute atomic environment ID based on CNA results, for non crystalline atoms, compute the graph certificate
+
+        Returns
+        -------
+        list_topo : List of str or None
+            List of atomic environment ID if `rank == 0`, else `None`
+
+        """        
 
         from mpi4py import MPI
         #for MPI : 
@@ -204,39 +190,11 @@ class AtomicEnvironment() :
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #Compute CNA : 
-        #Write lammps data file : 
-        lammps_data_file = 'initial_config_cna.lmp'
-        if rank == 0 :
-            write_lammps_data(lammps_data_file, self.system, masses=True)
-            if self.dimension == 2 : 
-                modify_lammps_data_2D(lammps_data_file)
-
-        #lammps: 
-        lmp = lammps(cmdargs=['-screen', 'none']) 
-        lmp.command('units metal')
-        lmp.command('atom_style atomic')
-        lmp.command('dimension 3') 
-        lmp.command('boundary p p p')
-        lmp.command('read_data {}'.format(lammps_data_file))
-        lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (i guess is for the neighborlist)
-        lmp.command('pair_coeff * *')
-        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
-        lmp.command('run 0')
-        #Extract cna
-        cna_array = lmp.numpy.extract_compute("c1", 1,1)
-
-        #Lammps does not sort by atom index so we extract them too
-        id = lmp.numpy.extract_atom("id")
-        id = id-1 #Lammps index start at 1
-
+        #Compute CNA
+        id, cna_array, positions  = self._lammps_cna(comm=comm)
         #Gather values
         result = np.column_stack((id, cna_array)) 
         global_result = comm.gather(result, root=0)
-
-        #gather all positions 
-        positions = lmp.gather_atoms("x", 1, 3)
-
 
         if rank == 0 : 
             #flaten arrays
@@ -266,6 +224,8 @@ class AtomicEnvironment() :
         split = comm.bcast(split, root=0)
         #local index
         local_index = split[rank]
+
+        #Compute Graph
         #graph for each rank
         list_g = make_graph(self.system, local_index, self.atomenv_params['rnei'], self.atomenv_params['rcut'])
         #gather graphs : 
@@ -282,13 +242,51 @@ class AtomicEnvironment() :
                 else : 
                     list_topo.append('crystal')
             #Clean input file
-            run('rm {}'.format(lammps_data_file), shell=True)
             run('mv log.lammps log.atomicenvironment_lammps', shell=True)
-            lmp.close()
             return list_topo
         else : 
             return None
         
+
+    def _lammps_cna(self, comm) : 
+        """Compute CNA using Lammps
+
+        Parameters
+        ----------
+        comm : MPI_Comm
+            MPI Communicator provided by mpi4py 
+
+        Returns
+        -------
+        id : (N,) ndarray of int
+            1D array of atomic index 
+        cna_array : (N,) ndarray of int
+            1D array of lammps CNA value 
+        positions : (N,3) ndarray of float
+            coordinates of atoms
+        """         
+        #lammps: 
+        lmp = lammps(comm=comm, cmdargs=['-screen', 'none']) 
+        #initialization of lammps with default settings
+        initialize_default_lammps(self.system, lmp)
+
+        #CNA
+        lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (i guess it is for the neighborlist)
+        lmp.command('pair_coeff * *')
+        lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
+        lmp.command('run 0')
+
+        #Extract cna
+        cna_array = lmp.numpy.extract_compute("c1", 1,1)
+
+        #Lammps does not sort by atom index so we extract them too
+        id = lmp.numpy.extract_atom("id")
+        id = id-1 #Lammps index start at 1
+
+        #Get positions, when using cna and graph
+        positions = lmp.gather_atoms("x", 1, 3)
+
+        return id, cna_array, positions
 
 def make_graph(atoms, list_id, rnei, rcut) : 
     """
@@ -342,6 +340,21 @@ def make_graph(atoms, list_id, rnei, rcut) :
         
         list_g.append(graph)
     return list_g
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #    def cna_graph_nauty2(self) : 
@@ -752,3 +765,29 @@ def make_graph(atoms, list_id, rnei, rcut) :
 #
 #
 #
+#OLD CNA STUFF
+##Write lammps data file : 
+        #lammps_data_file = 'initial_config_cna.lmp'
+        #if rank == 0 :
+        #    write_lammps_data(lammps_data_file, self.system, masses=True)
+        #    if self.dimension == 2 : 
+        #        modify_lammps_data_2D(lammps_data_file)
+
+        ##Lammps: 
+        #lmp = lammps(cmdargs=['-screen', 'none']) 
+        #lmp.command('units metal')
+        #lmp.command('atom_style atomic')
+        #lmp.command('dimension 3') 
+        #lmp.command('boundary p p p')
+        #lmp.command('atom_modify sort 0 1')
+        #lmp.command('read_data {}'.format(lammps_data_file))
+        #lmp.command('pair_style zero {} full'.format(self.atomenv_params['rcut'])) #CNA need a potential (I guess it is for the neighborlist)
+        #lmp.command('pair_coeff * *')
+        #lmp.command('compute c1 all cna/atom {}'.format(self.atomenv_params['rnei']))
+        #lmp.command('run 0')
+        ##Extract cna
+        #cna_array = lmp.numpy.extract_compute("c1", 1,1)
+
+        ##Lammps does not sort by atom index so we extract them too
+        #id = lmp.numpy.extract_atom("id")
+        #id = id-1 #Lammps index start at 1
