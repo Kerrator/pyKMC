@@ -33,30 +33,30 @@ class KMC() :
         self.time = None
 
         #Initialize catalog
-        catalog = self.control['catalog']
-        if self.control['reconstruction'] == True : 
-            if catalog == None : 
-            #Create empty DataFrame
-                self.system.catalog = pd.DataFrame(columns=['event_id', 
-                                                     'initial_positions', 
-                                                     'saddle_positions', 
-                                                     'final_positions', 
-                                                     'energy_barrier', 
-                                                     'k', 
-                                                     'id_saddle',
-                                                     'id_final', 
-                                                     'move_atom_idx'])
-            else : #Read previous catalog DataFrame
-                self.system.logger.logger.info('reading {} catalog file'.format(catalog))
-                self.system.catalog = pd.read_pickle(catalog) #for restart
-        elif self.control['reconstruction'] == False : 
-            if catalog == None : 
-                self.system.catalog = pd.DataFrame(columns = ['atom_index', 
-                                                              'final_positions',
-                                                              'energy_barrier',
-                                                              'k'])
-            else : 
-                raise Exception("If reconstruction is set to False can't use catalog from previous simulations")
+        #catalog = self.control['catalog']
+        #if self.control['reconstruction'] == True : 
+        #    if catalog == None : 
+        #    #Create empty DataFrame
+        #        self.system.catalog = pd.DataFrame(columns=['event_id', 
+        #                                             'initial_positions', 
+        #                                             'saddle_positions', 
+        #                                             'final_positions', 
+        #                                             'energy_barrier', 
+        #                                             'k', 
+        #                                             'id_saddle',
+        #                                             'id_final', 
+        #                                             'move_atom_idx'])
+        #    else : #Read previous catalog DataFrame
+        #        self.system.logger.logger.info('reading {} catalog file'.format(catalog))
+        #        self.system.catalog = pd.read_pickle(catalog) #for restart
+        #elif self.control['reconstruction'] == False : 
+        #    if catalog == None : 
+        #        self.system.catalog = pd.DataFrame(columns = ['atom_index', 
+        #                                                      'final_positions',
+        #                                                      'energy_barrier',
+        #                                                      'k'])
+        #    else : 
+        #        raise Exception("If reconstruction is set to False can't use catalog from previous simulations")
 
 
 
@@ -65,11 +65,12 @@ class KMC() :
         Execute nkmc steps
         """
         nkmc_steps = self.system.inputs['Control']['nkmc_steps']
-        reconstruction = self.system.inputs['Control']['reconstruction']
+        #reconstruction = self.system.inputs['Control']['reconstruction']
+        reconstruction = self.system.reconstruction
 
         self.system.logger.logger.info('= Starting KMC simulation')
         self.time = 0
-        self.system.kmc_traj = []
+        #self.system.kmc_traj = []
         for step in range(nkmc_steps) : 
             #Initialization
             if step == 0 : 
@@ -80,7 +81,7 @@ class KMC() :
                     self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s} {:<10s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
                 else : 
                     self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
-                write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
+                write(self.system.kmc_traj, Atoms(self.system.get_chemical_symbols(), 
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
@@ -143,7 +144,7 @@ class KMC() :
                     #Minimize
                     self.system.minimize(self.minimization['style'], self.minimization, self.potential)
                     #Append new cong to trajectory file
-                    write(self.control['output_file'], Atoms(self.system.get_chemical_symbols(), 
+                    write(self.system.kmc_traj, Atoms(self.system.get_chemical_symbols(), 
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)

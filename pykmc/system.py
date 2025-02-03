@@ -6,23 +6,24 @@ from .config import SystemConfig
 import os
 
 
-#TODO : Could get rid of the attributes symboles, positions, cell and pbc, and only use the corresponding ASE methods 
-#TODO : Could use a configfile/configfileparser to initialize the minimization, psr, atomic environment and event search parameters
-
 class System(Atoms):
     """
     Extension of the Atoms Ase object with methods to run each needed steps of a kinetic monte carlo simulation 
 
-    The object can use all Atoms Ase object methods and is initialized by using a config file and a catalog file (optional)
+    The object can use all Atoms Ase object methods and is initialized by using an input file or with an initial configuration file with a catalog file (optional)
 
     Parameters
     ----------
-    file_path : str
-        path to the configuration file (format should be readable by the ase.io.read() method)
+    input_path : str, optional
+        path to the input file (format should be readable by configparser), by default None
+    config_path : str, optional
+        path to the configuration file (format should be readable by the ase.io.read() method), not used if input_path is given, by default None
     catalog : str, optional
-        path to the catalog pickle file from a previous simulation, by default None
-    kmc_traj : List[Ase Atoms Object], optional
-        trajectory from a previous simulation (for restart), by default None
+        path to the catalog pickle file from a previous simulation, not used if input_path is given, by default None
+    reconstruction : boolean, optional 
+        if reconstruction of events is used, used to initialize the catalog, not used if input_path is given, by default is True
+    kmc_traj : str, optional
+        path to a trajectory from a previous simulation (for restart), not used if input_path is given, by default None
 
     Attributes 
     ----------
@@ -38,8 +39,12 @@ class System(Atoms):
         if periodic boundary conditions are used 
     environment : List[dict] 
         each dictionary contains an environment ID ("ID") and a list of atoms index having that ID ("atom index")
+    visited_environment : set
+        set of all environment that have been visited during the simulation (to prevent searching event on same environment)
     catalog : pandas DataFrame 
         events containing the event ID, initial, saddle point and finale position, the energy barrier and k
+    reconstruction : boolean 
+        if reconstruction of events is used
     kmc_traj : List[Ase Atoms Object]
         configuration of each step of the kinetic monte carlo simulation
 
@@ -60,54 +65,92 @@ class System(Atoms):
 
     Examples 
     -------- 
-    >>> system = System('config.xyz')
-    >>> system.kmc(kmc_parameters, minimization_parameters, search_parameters, potential)
+    >>> #With an input file 
+    >>> system = System('input.in')
+    >>> #With a configuration file 
+    >>> system = System(config_path = 'config.xyz')
     """
 
-    def __init__(self, input_path=None, config_file=None, catalog_path=None):
-        #Setup logfile
+    def __init__(self, input_path=None, config_file=None, catalog_path=None, reconstruction = True, kmc_traj=None):
+        #=============#
+        #Setup logfile#
+        #=============#
         try : 
             os.remove('pykmc.log')
         except OSError : 
             pass 
         self.logger = self._initialize_log()
-        self.logger.logger.info('= SYSTEM INITIALIZATION')
 
+        self.logger.logger.info('=> SYSTEM INITIALIZATION')
+
+        #========================================================================#
+        #Check if an input file or a configuration is used for the initialization#
+        #========================================================================#
         if input_path == None and config_file == None : 
             raise Exception("Need input file or configuration file to initialize the system")
 
-        #Read input file : 
+        #===============#
+        #Read input file# 
+        #===============#
         if input_path is not None : 
+            self.logger.logger.info('Reading {} input file'.format(input_path))
             self.inputs = SystemConfig.from_file(input_path)
             config_file = self.inputs['Control'].get('config_file')
+            catalog_path = self.inputs['Control'].get('catalog')
+            self.reconstruction = self.inputs['Control'].get('reconstruction')
+            self.kmc_traj = self.inputs['Control'].get('output_file')
+        else : 
+            self.reconstruction = reconstruction
+            self.kmc_traj = kmc_traj
 
-        #Read initial config file
-        self.logger.logger.info('reading {} configuration file'.format(config_file))
+        #===============================#
+        #Read initial configuration file#
+        #And initialize Atoms object    #
+        #===============================#
+        self.logger.logger.info('Reading {} configuration file'.format(config_file))
         atoms = read(config_file)  # Load configurations from file 
         super().__init__(symbols=atoms.get_chemical_symbols(),
                          positions=atoms.get_positions(),
                          cell=atoms.get_cell(),
                          pbc=atoms.get_pbc())
 
-
-
+        #======================#
+        #Initialize environment#
+        #======================#
         self.environment = None
-        self.visited_environment = set()
-        self.kmc_traj = None
-        if catalog_path == None : #Create empty DataFrame
-            self.catalog = pd.DataFrame(columns=['event_id', 
-                                                 'initial_positions', 
-                                                 'saddle_positions', 
-                                                 'final_positions', 
-                                                 'energy_barrier', 
-                                                 'k', 
-                                                 'move_atom_idx', 
-                                                 'id_saddle'])
-        else : #Read previous catalog DataFrame
+
+        #=========================================#
+        #Initialization of the catalog            #
+        #And initialization of visited environment#
+        #=========================================#
+        #if no catalog path is given
+        if catalog_path is None : 
+            #if reconstruction of events
+            if self.reconstruction : 
+                self.logger.logger.info('Initializing catalog with reconstruction of events')
+                self.catalog = pd.DataFrame(columns=['event_id', 
+                                                            'initial_positions', 
+                                                            'saddle_positions', 
+                                                            'final_positions', 
+                                                            'energy_barrier', 
+                                                            'k', 
+                                                            'id_saddle',
+                                                            'id_final', 
+                                                            'move_atom_idx'])
+            #if no reconstruction of events
+            else : 
+                self.logger.logger.info('Initializing catalog with no reconstruction of events')
+                self.catalog = pd.DataFrame(columns = ['atom_index', 
+                                                              'final_positions',
+                                                              'energy_barrier',
+                                                              'k'])
+            self.visited_environment = set() #no environment have been visited
+        #If read from previous simulation
+        else : 
             self.logger.logger.info('reading {} catalog file'.format(catalog_path))
             self.catalog = pd.read_pickle(catalog_path) #for restart
-#        
-#        self.kmc_traj = kmc_traj 
+            self.visited_environment = set(self.catalog['event_id'].tolist()) #add catalog event_id to visited environment
+
         self.logger.new_line()
 
     def minimize(self, minimization_style, minimization_params, potential, dimension=3, nprocs=1, backend='local') : 
@@ -180,8 +223,13 @@ class System(Atoms):
             event search style used, can be 'pARTn'
         search_params : dict of str: str
             all commands needed by the program defined by search_style to run an event search
+        environment_params : dict of str: float
+            dictionary of atomic environment parameter (see the find_environment method). 
+            used to compute graph id of events
         potential : dict of str: str
             all commands needed by the program that is used by search_style to compute forces
+        reconstruction : boolean 
+            if reconstruction of events is used
         dimension : int, optional
             dimension of the system, by default 3
         nprocs : int, optional
@@ -209,6 +257,8 @@ class System(Atoms):
         ----------
         psr_style : str
             style used for the point set registration, can be 'ira'
+        psr_parameters : dic of str: str 
+            parameters to the associated psr_style
         idx_cat : int
             index of the event in the catalog
         central_atom_index : int
@@ -221,56 +271,38 @@ class System(Atoms):
             number of procs available, by default 1
         backend : str, optional
             parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
+        save : boolean, optional 
+            if we save to a .xyz file the reconstruction of event, usefull to debug, by default False
+
+        Return 
+        ______ 
+        rmat, tr, perm, dh : np.array, np.array, np.array, float 
+            rotation, translation, permutation matrices and dh distance parameters
 
         Example
         ------- 
-        >>> system.point_set_registration('ira', 0, 250, 10.0)
+        >>> atomicenv_params = {'rnei': 3.01,
+                    'rcut'  : 6.0, 
+                    'radd_cna': 0.0}
+
+        >>> psr_parameters = {'kmax_factor' : 2.0}
+        >>> system.point_set_registration('ira', psr_parameters, atomicenv_params, 0, 250, 10.0)
         """
         from .point_set_registration import PointSetRegistration 
         psr = PointSetRegistration(self, psr_style, psr_parameters, idx_cat,central_atom_index, rcutevent, dimension, nprocs, backend, save)
         rmat, tr, perm, dh = psr.run()
         return rmat, tr, perm, dh
 
-    #def kmc(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension=3, backend='local') :
     def kmc(self)  : 
         """
-        Run kinetic monte carlo simulation
-
-        Parameters
-        ----------
-        kmc_parameters : dict
-            dictionary of parameters related to the kinetic monte carlo simulation
-        minimization_params : dict
-            see the minimize method
-            for the moment kmc use the minimization_style 'lammps'(hardcoded)
-        atomenv_params : dict
-            see the find_environment method 
-            for the moment kmc use the style 'cna/graph' (hardcoded)
-        eventsearch_params : _type_
-            see the event_search method 
-            for the moment kmc use the style 'pARTn' (hardcoded)
-        potential : dict of str: str
-            all commands needed by the program that is used by search_style to compute forces
-        dimension : int, optional
-            dimension of the system, by default 3
-        backend : str, optional
-            parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
+        Run kinetic monte carlo simulation, see KMC Object
 
         Example
         ------- 
-        >>> potential = {'pair_style' : 'eam/alloy', 
-                         'pair_coeff' : '* * ./Ni_v6_2.0_LKBeland2016.eam Ni'} 
-        >>> minimization = {'min_style'     : 'cg', 
-                            'minimize '     : '1.0e-6 1.0e-8 100 1000'}
-        >>> atomenv = {'rnei' : 3.01, 
-                       'rcut' : 5.0}
-        >>> search_params = {'nsearch' : 10, 
-                             'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so'}
-        >>> kmc_parameters = {'nkmc_steps' : 50}
-        >>> system.kmc(kmc_parameters, minimization,atomenv, search_params, potential)
+        >>> system = System('input.in') 
+        >>> system.kmc()
         """
         from .kmc import KMC 
-        #kmc = KMC(self, kmc_parameters, minimization_params, atomenv_params, eventsearch_params, potential,dimension, backend)
         kmc = KMC(self)
         kmc.run()
 
