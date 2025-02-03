@@ -40,4 +40,8 @@
 
         - ```system.minimize(...)```
         - append new configuration to ```system.kmc_traj```
-        
+
+
+# NOTES : 
+- Use lammps metal units
+- When use lammps, atom types in alphabetic order
