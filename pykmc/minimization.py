@@ -5,8 +5,6 @@ from subprocess import run
 from .utilities import modify_lammps_data_2D
 from executorlib import Executor
 
-#TODO see how to handle potential when other than pair_style (ie bond, angles)
-
 class Minimization:
     """
     Define and run the minimization procedure
