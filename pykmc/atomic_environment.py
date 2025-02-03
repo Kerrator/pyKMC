@@ -13,20 +13,12 @@ from scipy.spatial.distance import cdist
 #from decimal import *
 from subprocess import run
 
-#TODO see doc convention when attributes and parameters are the same
-#TODO write to file 
-#TODO Voir comment on gère les paramètres de bases de lammps (meme histoire que minimization)
-#TODO For each run procedure, check if the needed parameters are present
-#TODO for the cna_graph() method should use the cna methods instead of rewriting it, but with executorlib might be problematic
-#TODO Better gather results
-#TODO use cell/verlet list for graphs
-#TODO See if we can improve the way I connect in make_graph the graph atom index and system atom index (I think that some part are not necessary)
 
 class AtomicEnvironment() :
     """
     Define and run the procedure to find the atomic environment of each atoms in the system
 
-    Parameters
+    Attributes
     ----------
     system : System Object
         system on which we perform the atomic environment search
@@ -46,7 +38,6 @@ class AtomicEnvironment() :
     -------
     run() 
         run the atomic environment search procedure and update the system.environment
-    write_to_file() 
     cna() 
         use Lammps to compute the Common Neighbor Analysis and attribute a 'crystal' or 'noncrystal' ID to each atoms
     graph_nauty()
@@ -69,8 +60,9 @@ class AtomicEnvironment() :
         Run similar atomic environment search based on topology_style
         """
 
-        #Run the atomic environment search
+        #Run the atomic environment search using executorlib for the parallelization 
         with Executor(backend =self.backend) as exe : 
+            #Check the atomic environment style
             match self.atomenv_style : 
                 case "cna":
                     fs = exe.submit(self.cna, resource_dict={"cores": self.nprocs})
@@ -87,11 +79,12 @@ class AtomicEnvironment() :
             list_env = fs.result()
         else : 
             list_env = fs.result()[0]
+
         #From list of atomic environment we create a dictionary, and update system.environment
         diff_env = set(list_env)
         diff_env = list(diff_env) 
 
-        ##List of dictionnaries of different Topo ID and 
+        ##List of dictionnaries of different Topo ID 
         dict_env = []
         for ID in diff_env : 
             #index with same ID : 
@@ -100,17 +93,6 @@ class AtomicEnvironment() :
                    "atom index" : indexsame}
             dict_env.append(tmp)
         self.system.environment = dict_env
-
-        #Add if debug  
-        #for i, e in enumerate(self.system.environment) : 
-        #    self.system.logger.logger.debug("DEBUG: Atomic environment n° {} : {} atoms".format(i, len(e['atom index'])))
-        #self.system.logger.new_line()
-
-
-    def write_to_file(self) : 
-        """
-        write similar atomic environment to file as a list of dict using yaml.
-        """
 
     def cna(self) : 
         """ 
@@ -170,6 +152,8 @@ class AtomicEnvironment() :
             run('mv log.lammps log.atomicenvironment_lammps', shell=True)
             lmp.close()
             return list_topo
+        else : 
+            return None
     
 
     def graph_nauty(self) :
@@ -178,6 +162,7 @@ class AtomicEnvironment() :
         need rnei 
         need rcut
         """ 
+        #atomic environment parameters 
         rnei = self.atomenv_params['rnei']
         rcut = self.atomenv_params['rcut']
 
@@ -191,7 +176,7 @@ class AtomicEnvironment() :
         split = np.array_split(range(self.system.get_global_number_of_atoms()), nprocs)
         local_index = split[rank] 
 
-        #Create graphs , can use other commented functions that we tested (see commented make_graph functions) 
+        #Create graphs, can use other commented functions that we tested (see commented make_graph functions) 
         #Here, need diagonal cell for box_size in k-d tree
         list_g = make_graph(self.system, local_index, rnei, rcut)
         list_topo = [] 
