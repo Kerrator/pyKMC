@@ -2,8 +2,8 @@ from lammps import lammps
 from ase.io.lammpsdata import write_lammps_data
 import numpy as np 
 from subprocess import run
-from .utilities import modify_lammps_data_2D
 from executorlib import Executor
+from .utilities import initialize_default_lammps
 
 class Minimization:
     """
@@ -68,8 +68,8 @@ class Minimization:
 
         Returns
         -------
-        np.array
-            positions after the minimization
+        positions : (N,3) np.array of float
+            positions after the minimization if `rank == 0` else `None`
         """        
 
         from mpi4py import MPI
@@ -78,22 +78,10 @@ class Minimization:
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization.lmp'
-        if rank == 0 :
-            write_lammps_data(lammps_data_file, self.system, masses=True)
-            if self.dimension == 2 : 
-                modify_lammps_data_2D(lammps_data_file)
-
         #Initialize lammps :
         lmp = lammps(cmdargs=['-screen', 'none'])
+        initialize_default_lammps(self.system, lmp)
 
-        #Default parameters 
-        lmp.command('units metal')
-        lmp.command('atom_style atomic')
-        lmp.command('dimension {}'.format(self.dimension))
-        lmp.command('boundary p p p')
-        lmp.command('read_data {}'.format(lammps_data_file))
         #Potential
         lmp.command('pair_style {}'.format(self.potential['pair_style']))
         lmp.command('pair_coeff {}'.format(self.potential['pair_coeff']))
@@ -108,7 +96,6 @@ class Minimization:
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
             #clean files
-            run('rm {}'.format(lammps_data_file), shell=True)
             run('mv log.lammps log.minimize_lammps', shell=True)
             return positions 
         else : 
