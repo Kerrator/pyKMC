@@ -32,34 +32,6 @@ class KMC() :
         self.psr_parameters = self.system.inputs['PSR']
         self.time = None
 
-        #Initialize catalog
-        #catalog = self.control['catalog']
-        #if self.control['reconstruction'] == True : 
-        #    if catalog == None : 
-        #    #Create empty DataFrame
-        #        self.system.catalog = pd.DataFrame(columns=['event_id', 
-        #                                             'initial_positions', 
-        #                                             'saddle_positions', 
-        #                                             'final_positions', 
-        #                                             'energy_barrier', 
-        #                                             'k', 
-        #                                             'id_saddle',
-        #                                             'id_final', 
-        #                                             'move_atom_idx'])
-        #    else : #Read previous catalog DataFrame
-        #        self.system.logger.logger.info('reading {} catalog file'.format(catalog))
-        #        self.system.catalog = pd.read_pickle(catalog) #for restart
-        #elif self.control['reconstruction'] == False : 
-        #    if catalog == None : 
-        #        self.system.catalog = pd.DataFrame(columns = ['atom_index', 
-        #                                                      'final_positions',
-        #                                                      'energy_barrier',
-        #                                                      'k'])
-        #    else : 
-        #        raise Exception("If reconstruction is set to False can't use catalog from previous simulations")
-
-
-
     def run(self) : 
         """
         Execute nkmc steps
@@ -358,8 +330,8 @@ class KMC() :
 
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']
         #self.system.logger.logger.info('Topo saddle reconstruction = {}'.format(check))
-        #return check 
-        return True
+        return check 
+        #return True
 
 
 #    def check_saddle_energy(self, idx_cat, central_atom_index) :

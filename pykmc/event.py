@@ -1,7 +1,5 @@
 import random
 from lammps import lammps
-from .utilities import modify_lammps_data_2D
-from ase.io.lammpsdata import write_lammps_data
 from ase.mep import DimerControl, MinModeAtoms, MinModeTranslate
 from ase.calculators.lammpsrun import LAMMPS
 from ase import Atoms
@@ -16,20 +14,7 @@ from .atomic_environment import make_graph
 import logging
 from .config import Parameters
 import math as m
-
-#TODO Parallelization. Depending on nprocs launch searches in parallel
-#TODO Don't understand why inside executor I need to add logging.basicConfig. Otherwise it does not print to log 
-#TODO Add different event search style 
-#TODO Add option to do the search on a subsystem (--> will be usefull for large systems)
-#TODO What is the value that we should use for the condition delr1 < 0.2 or delr2 < 0.2
-#TODO Since now we add the backward reaction to the catalog, it is not needed to check if min1 or min2 is close to the initial configuration and return the corresponding positions
-#TODO See if we can append artn logs, could be usefull while debugging
-#TODO Should think of a better way to compute graph, certificate for the backward reaction
-#TODO find a way to not print in terminal ira errors (we log them)
-#TODO Should put loop over nsearch in the serach_ira function to not compute multiple times the same things 
-#TODO Don't forget to readd reverse event
-#TODO search_without_reconstruction should be already parallized but need to be checked on local(non docker) and slurm
-#TODO Check if for reconstruction == False, atol and rtol used in add_event_without_reconstruction() are ok
+from .utilities import initialize_default_lammps
 
 
 class EventSearch() : 
@@ -44,8 +29,12 @@ class EventSearch() :
         style use for the event search, can be 'pARTn', 'dimer'
     search_params : dict 
         parameter needed by the style used to perform the event search
+    atomenv_params : dict 
+        dictionaty of radius parameters defining the environment 
     potential : dict of str: str
         commands to define the potential used by the program defined by minimization_style
+    reconstruction : boolean, optional 
+        if we use events from previous searches and reconstruct them, by default 'True'
     dimension : int, optional
         dimension of the system, by default 3
     nprocs : int, optional
@@ -56,11 +45,26 @@ class EventSearch() :
     Methods 
     ------- 
     run() 
-        run the event search and update the catalog 
+        run the event search 
+    search_with_reconstruction() 
+        event search procedure when `reconstruction == True`
+    search_without_reconstruction()
+        event search procedure when `reconstruction == False`
     new_environment() 
         find list of environment ID of the current system that are not in the catalog
-    pARTn_search(atom_index, potential)
-        run an event search using pARTn with atom_index as the central atom
+    compute_rate_Eyring(dE) 
+        compute the rate constant 
+    add_event_with_reconstruction(dfevent_forward, dfevent_backward)
+        procedure to add event to the catalog when `reconstruction == True`
+    add_event_without_reconstruction(dfevent)
+        procedure to add event to the catalog when `reconstruction == False`
+    event_series_with_reconstruction(min1_positions, saddle_positions, min2_positions, index_move, dE_forward, dE_backward)
+        create event pandas.Series from event search when `reconstruction == True`
+    event_series_without_reconstruction(atom_index, final_positions, dE)
+        create event pandas.Series from event search when `reconstruction == False`
+    pARTn_search(atom_index)
+        run an event search using pARTn 
+    
     """
 
     def __init__(self, system, search_style, search_params, atomenv_params, potential, reconstruction, dimension, nprocs, backend) -> None:
@@ -80,7 +84,9 @@ class EventSearch() :
         Execute new event searches 
         """
 
-        #Check if we want reconstruction or not : 
+        #======================================#
+        #Check if we want reconstruction or not# 
+        #======================================#
         match self.reconstruction : 
             case True : 
                 self.search_with_reconstruction()
@@ -91,16 +97,19 @@ class EventSearch() :
 
 
     def search_with_reconstruction(self) : 
-        
-        #TEMPORARY FIX write config file here so no problem parallelization
-        lammps_data_file = 'initial_config_minimization.lmp'
-        write_lammps_data(lammps_data_file, self.system, masses=True)
+        """
+        Event search procedure when `reconstruction == True` 
+        For each new topology ID, perform `nsearch` event searches
+        """        
 
-        #Check if new atomic environment that are not in the catalog, if yes extract the environement id: 
+        #==========================================================# 
+        #Check if new atomic environment that have not been visited# 
+        #==========================================================# 
         l_new_environement = self.new_environment()
-        #For each id in l_new_environment, we will select randomly one atom with the corresponding ID (does this nsearch time)
-        #TODO Remplacer par executor list fonction
 
+        #===========================================================#
+        #List of atom index on witch we will perform an event search#
+        #===========================================================#
         l_atoms = []
         for id in l_new_environement :
             #list of atoms that have id in l_new_environment : 
@@ -110,99 +119,53 @@ class EventSearch() :
             #extend total list of atoms on which we gonna do an event search
             l_atoms.extend(atom_idx)
 
-        #For each atoms in atom_idx we do an event search 
+        #================================================#
+        #For each atoms in atom_idx we do an event search#
+        #================================================#
         with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
             l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
-        #For each results, we add the event to the catalog 
-        
+
+        #=================================================# 
+        #For each results, we add the event to the catalog#
+        #=================================================# 
         for fs in l_fs : 
             if fs.result() is not None : 
-                energy_barrier = fs.result()[3] 
+                dfevent_forward = fs.result()[0]
+                dfevent_backward = fs.result()[1]
+                energy_barrier = min(dfevent_forward['energy_barrier'], dfevent_backward['energy_barrier'])
                 if self.search_params['emin_event'] < energy_barrier < self.search_params['emax_event'] : 
-                    dfevent = pd.Series({'event_id' : fs.result()[4] , 
-                                        'initial_positions' : fs.result()[0], 
-                                        'saddle_positions': fs.result()[1], 
-                                        'final_positions': fs.result()[2], 
-                                        'energy_barrier': fs.result()[3], 
-                                        'k' : self.compute_rate_Eyring(fs.result()[3]), 
-                                        'id_saddle' : fs.result()[5], 
-                                        'id_final': fs.result()[6], 
-                                        'move_atom_idx': fs.result()[7]})
-                    self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
-
-
-
-
-
-
-
-    #    for id in l_new_environement : 
-    #        #extract list of atoms in system.environment having the id 
-    #        l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == id][0] 
-    #        #list of atoms on which we gonna do the search
-    #        #self.system.logger.logger.info(':> Launching {} event searches'.format(self.search_params['nsearch']))
-    #        l_atoms_search = [random.choice(l_atoms) for _i in range(self.search_params['nsearch'])]
-    #        #then we do a pART search and put the result of each search in self.system.catalog
-
-    #        for atom_index in l_atoms_search : 
-    #            #run event search
-    #            with Executor(backend=self.backend, max_cores=self.nprocs) as exe : 
-    #                fs = exe.submit(self.pARTn_search, atom_index )
-    #                if fs.result() is not None :
-    #                    #upper and lower limit : 
-    #                    if fs.result()[3] > self.search_params['emin_event'] and fs.result()[3] < self.search_params['emax_event'] : 
-    #                        dfevent = pd.Series({'event_id' : id , 
-    #                                    'initial_positions' : fs.result()[0], 
-    #                                    'saddle_positions': fs.result()[1], 
-    #                                    'final_positions': fs.result()[2], 
-    #                                    'energy_barrier': fs.result()[3], 
-    #                                    'k' : self.compute_rate_Eyring(fs.result()[3]), 
-    #                                    'move_atom_idx' : fs.result()[4],
-    #                                    'id_saddle' : fs.result()[5]})
-
-    #                        self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
-
-
-    #                        #Add reverse event : 
-                            #compute finale positions ID : 
-                            #g = make_graph(self.system, [fs.result()[4]], 3.0, 5.0 )
-                            #reverse_id = pynauty.certificate(g[0])
-                            #dfevent = pd.Series({'event_id' : id, 
-                            #            'initial_positions' : fs.result()[2], 
-                            #            'saddle_positions': fs.result()[1], 
-                            #            'final_positions': fs.result()[0], 
-                            #            'energy_barrier': fs.result()[3], 
-                            #            'k' : 1, 
-                            #            'central_atom' : fs.result()[4], 
-                            #            'from_id' : id})
-                            #self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
+                    #Check if already in catalog : 
+                    self.add_event_with_reconstruction(dfevent_forward, dfevent_backward)
 
     def search_without_reconstruction(self) : 
         """ 
-        Search when reconstruction input is set to False.
+        Event search procedure when `reconstruction == False`
         Made to be use with atomic environment style = 'cna' 
         For each non cristalline atom we launch nsearch event search
         """
+
+        #============================================# 
+        #List of atoms on which we do an event search# 
+        #============================================# 
+
         #List of atoms that have non cristalline environement 
         l_atoms = [dict['atom index'] for dict in self.system.environment if dict['ID'] == 'noncrystal'][0]
         #for each atom in l_atoms we launch nsearch event searches 
         l_atoms *= self.search_params['nsearch']
 
-        #TEMPORARY FIX write config file here so no problem parallelization
-        lammps_data_file = 'initial_config_minimization.lmp'
-        write_lammps_data(lammps_data_file, self.system, masses=True)
-
+        #==================================#
+        #Launch len(l_atoms) event searches#
+        #==================================#
         with Executor(backend=self.backend, max_workers=self.nprocs) as exe : 
             l_fs = [exe.submit(self.pARTn_search, atom_index, resource_dict={"cores" : 1}) for atom_index in l_atoms]
-        #Loop over list results and add event to the catalog : 
+
+        #===================================================# 
+        #Loop over list results and add event to the catalog#
+        #===================================================# 
         for i,fs in enumerate(l_fs) : 
             if fs.result() is not None : 
-                energy_barrier = fs.result()[3] 
-                if self.search_params['emin_event'] < energy_barrier < self.search_params['emax_event'] : 
-                    dfevent = pd.Series({'atom_index' : l_atoms[i] , 
-                                         'final_positions' : fs.result()[2], 
-                                         'energy_barrier' : fs.result()[3],
-                                         'k' : self.compute_rate_Eyring(fs.result()[3])})
+                dfevent = fs.result()
+                if self.search_params['emin_event'] < dfevent['energy_barrier'] < self.search_params['emax_event'] : 
                     #Check if event already in catalog : 
                     if len(self.system.catalog) > 0 : 
                         self.add_event_without_reconstruction(dfevent)
@@ -211,34 +174,80 @@ class EventSearch() :
 
 
     def new_environment(self) : 
-        """ 
-        Return list of atomic environements id of the current step that are not in the catalog
-        and not have been visited
         """
-        ids_catalog = self.system.catalog['event_id'].tolist()
+        Find atomic environments id of the current step that have not been previously visited 
+
+        Returns
+        -------
+        l_new_environment : list of str
+            List of atomic environment ID of the current step that are new
+        """
+        #ID in the current system.environment 
         ids_current = [element['ID'] for element in self.system.environment]
+        #remove 'crystal' environment
         try:
             ids_current.remove('crystal') #remove cystalline environment
         except ValueError:
             pass
-        l_new_environments = [ids for ids in ids_current if ids not in ids_catalog]
-        #remove ids if in visited environment 
-        l_new_environments = list(set(l_new_environments).difference(self.system.visited_environment))
-        #self.system.logger.logger.info('> Found {} new environments'.format(len(l_new_environments)))
+        #Only select ID in ids_current that are not in visited_environment from previous step
+        l_new_environments = [ids for ids in ids_current if ids not in list(self.system.visited_environment)]
         return l_new_environments 
     
     def compute_rate_Eyring(self, dE) : 
-        """ 
+        """
         Compute the rate constant based on eq 11 of https://www.frontiersin.org/journals/chemistry/articles/10.3389/fchem.2019.00202/full 
+
+        Parameters
+        ----------
+        dE : float
+            activation energy
+
+        Returns
+        -------
+        float
+            rate constant
         """
         p = Parameters() 
         T = self.search_params['T'] 
         k0 = self.search_params['k0'] 
         return k0*((p.kb*T)/p.h)*m.exp(-dE/(p.kb*T))
     
+    def add_event_with_reconstruction(self, dfevent_forward, dfevent_backward) : 
+        """
+        Search if dfevent_forward event is already in the catalog by checking topolgy ids 
+        if not, add the event to the catalog, and the dfevent_backward event if it's not the same as the forward one 
+
+        Parameters
+        ----------
+        dfevent_forward : pandas.Series
+            Series with the forward event informations 
+        dfevent_backward : pandas.Series
+            Series with the backward event informations 
+        """        
+
+        #Only select rows with same event_id as dfenvent : 
+        subset = self.system.catalog[self.system.catalog["event_id"] == dfevent_forward["event_id"]] 
+        #subset of subset with rows with the same saddle_id : 
+        subset = subset[subset["id_saddle"] == dfevent_forward["id_saddle"]]
+        #subset of subset of subset with rows with the same final_id : 
+        subset = subset[subset["id_final"] == dfevent_forward["id_final"]]
+        #if there is no event with same IDs
+        if len(subset) == 0 : 
+            #add to the catalog foward reaction  
+            self.system.catalog = pd.concat([self.system.catalog, dfevent_forward.to_frame().T], ignore_index=True)
+            #Check if backward reaction is not the same as the forward one    
+            if dfevent_forward["event_id"] != dfevent_forward["id_final"] :  
+                self.system.catalog = pd.concat([self.system.catalog, dfevent_backward.to_frame().T], ignore_index=True)
+            
     def add_event_without_reconstruction(self, dfevent) : 
-        """ 
-        Search if event is already in the catalog, if not, add the event to the catalog
+        """
+        Search if event is already in the catalog by checking, for a same atomic index, if the final positions are close.
+        If not, add the event to the catalog.
+
+        Parameters
+        ----------
+        dfevent : pandas.Series
+            A pandas.Series with event informations
         """
         atol = 1e-3 
         rtol = 1e-3 
@@ -251,7 +260,133 @@ class EventSearch() :
             #if not add event to the catalog : 
             self.system.catalog = pd.concat([self.system.catalog, dfevent.to_frame().T], ignore_index=True)
             
+    def event_series_with_reconstruction(self, min1_positions, saddle_positions, min2_positions, index_move, dE_forward, dE_backward) : 
+        """
+        Create forward and backward event pandas Series from an event search when `reconstruction == Truee`
 
+        Parameters
+        ----------
+        min1_positions : (N,3) numpy.array of float
+            positions of the first minimum
+        saddle_positions : (N,3) numpy.array of float
+            positions of at the saddle point
+        min2_positions : (N,3) numpy.array of float
+            positions of the second minimum
+        index_move : int
+            index of the atom that move the most
+        dE_forward : float
+            energy barrier of the forward reaction
+        dE_backward : flat
+            energy barrier of the backward reaction
+
+        Returns
+        -------
+        dfevent_forward, dfevent_backward : (pandas.Series, pandas.Series)
+            Series with : 
+            - `'event_id'` : str 
+                Topology id of the event 
+            - `'initial_positions'` : (N,3) numpy.array of float 
+                initial positions of the event 
+            - `'saddle_positions'` : (N, 3) numpy.array of float 
+                positions of the saddle point 
+            - `'final_positions'` : (N,3) numpy.array of float 
+                final positions of the event 
+            - `'dE'` : float 
+                activation energy of the event
+            - `'k'`: float  
+                rate constante 
+            - `'id_saddle'`: str 
+                Topology id of the saddle point 
+            - `'id_final'`: str 
+                Topology id of the final positions
+            - '`move_atom_index'`
+                index in `'initial_positions'`, `'saddle_positions'` and `'final_positions'`of the atom that move the most 
+        """
+
+        positions = [min1_positions, saddle_positions, min2_positions]
+        cell = self.system.get_cell()
+        #Create Needed event trajectory (for translation) 
+        event_traj = [Atoms(positions=pos, cell=cell, pbc=True) for pos in positions]
+
+        #Compute all needed topology ID : 
+        id_min1 = pynauty.certificate(make_graph(event_traj[0], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+        id_saddle = pynauty.certificate(make_graph(event_traj[1], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+        id_min2 = pynauty.certificate(make_graph(event_traj[2], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+
+        #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
+        ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
+        dx, dy, dz = ax/2 - min1_positions[index_move][0], ay/2 - min1_positions[index_move][1], az/2 - min1_positions[index_move][2]
+        for atoms in event_traj : 
+            atoms.translate(np.array([dx, dy, dz]))
+        
+        #neighbors lists around atom that move the most 
+        ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+        rcutevent = self.search_params['rcutenv']
+
+        dist = event_traj[0].get_distances(index_move, ind, mic=True)
+        neighbor_list_forwward = np.where(dist<rcutevent)[0]
+        dist = event_traj[2].get_distances(index_move, ind, mic=True)
+        neighbor_list_backward = np.where(dist<rcutevent)[0]
+
+        #Create event Series
+        min1_positions = event_traj[0].get_positions() 
+        saddle_positions = event_traj[1].get_positions() 
+        min2_positions = event_traj[2].get_positions()
+
+        dfevent_forward = pd.Series({'event_id' : id_min1 , 
+                                     'initial_positions' : min1_positions[neighbor_list_forwward], 
+                                     'saddle_positions': saddle_positions[neighbor_list_forwward], 
+                                     'final_positions': min2_positions[neighbor_list_forwward], 
+                                     'energy_barrier': dE_forward, 
+                                     'k' : self.compute_rate_Eyring(dE_forward), 
+                                     'id_saddle' : id_saddle, 
+                                     'id_final': id_min2, 
+                                     'move_atom_idx': np.where(neighbor_list_forwward == index_move)[0] })
+        dfevent_backward = pd.Series({'event_id' : id_min2 , 
+                                     'initial_positions' : min2_positions[neighbor_list_backward], 
+                                     'saddle_positions': saddle_positions[neighbor_list_backward], 
+                                     'final_positions': min1_positions[neighbor_list_backward], 
+                                     'energy_barrier': dE_backward, 
+                                     'k' : self.compute_rate_Eyring(dE_backward), 
+                                     'id_saddle' : id_saddle, 
+                                     'id_final': id_min1, 
+                                     'move_atom_idx': np.where(neighbor_list_backward == index_move)[0] })
+        
+        return dfevent_forward, dfevent_backward
+        
+
+
+    def event_series_without_reconstruction(self, atom_index, final_positions, dE) : 
+        """
+        Create event pandas Series from an event search when `reconstruction == False`
+
+        Parameters
+        ----------
+        atom_index : int
+            atom index on which the event search have been made
+        final_positions : (N,3) numpy.array of float 
+            final positions of the event
+        dE : float
+            Energy barrier of the event
+
+        Returns
+        -------
+        dfevent : pandas.Series 
+            Series with : 
+            - `'atom_index'` : atom index of the atom 
+            - `'final_positions'` : final positions 
+            - `'energy_barrier'` : energy barrier 
+            - `'k'`: rate constant
+
+        Notes
+        ----- 
+        The rate constant is calculated using the `compute_rate_Eyring(dE)` method 
+        """         
+        dfevent = pd.Series({'atom_index' : atom_index, 
+                            'final_positions' : final_positions, 
+                            'energy_barrier' : dE,
+                            'k' : self.compute_rate_Eyring(dE)})
+        return dfevent
 
     def pARTn_search(self, atom_index) : 
         """
@@ -261,60 +396,63 @@ class EventSearch() :
         ----------
         atom_index : int
             index of the central atom on which we perform the event search
-        potential : dict of str:str
-            commands to define the potential used by the program defined by minimization_style
 
         Returns
         -------
-        (np.array, np.array, np.array, float, int)
-            positions of the initial minimum, saddle point, final minimum, the energy barrier and central atom_index
-            None if no event have been found
+        pandas.Series or tuple or None 
+            if pARTn error or if `delr1` or `delr2` are both greater than 0.2, return `None`
+            if `reconstruction == False` return : 
+                dfevent : pandas.Series 
+                    Series with : 
+                    - `'atom_index'` : atom index of the atom 
+                    - `'final_positions'` : final positions 
+                    - `'energy_barrier'` : energy barrier 
+                    - `'k'`: rate constant
+            else return : 
+                dfevent_forward, dfevent_backward : (pandas.Series, pandas.Series)
+                    Series with : 
+                    - `'event_id'` : str 
+                        Topology id of the event 
+                    - `'initial_positions'` : (N,3) numpy.array of float 
+                        initial positions of the event 
+                    - `'saddle_positions'` : (N, 3) numpy.array of float 
+                        positions of the saddle point 
+                    - `'final_positions'` : (N,3) numpy.array of float 
+                        final positions of the event 
+                    - `'dE'` : float 
+                        activation energy of the event
+                    - `'k'`: float  
+                        rate constante 
+                    - `'id_saddle'`: str 
+                        Topology id of the saddle point 
+                    - `'id_final'`: str 
+                        Topology id of the final positions
+                    - '`move_atom_index'`
+                        index in `'initial_positions'`, `'saddle_positions'` and `'final_positions'`of the atom that move the most 
         """
         #Logs
         logging.basicConfig(filename='pykmc.log', filemode='a', level=logging.DEBUG, format='%(message)s')
-        #self.system.logger.logger.info('> Launching pARTn search')
 
         from mpi4py import MPI 
+
         #MPI
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
 
-        #TEST put atom_index at the center of the cell to fix pbc problems : 
-        #New Atoms
-        #cell = self.system.get_cell()
-        #positions = self.system.get_positions()
-        #atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions = positions, cell = cell, pbc=True)
-        #if self.reconstruction : 
-        #    ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
-        #    dx, dy, dz = ax/2 - positions[atom_index][0], ay/2 - positions[atom_index][1], az/2 - positions[atom_index][2]
-        #    atoms.translate(np.array([dx, dy, dz]))
-
-        #Write lammps data file : 
-        lammps_data_file = 'initial_config_minimization.lmp'
-        #if rank == 0 :
-            #write_lammps_data(lammps_data_file, self.system, masses=True)
-            #write_lammps_data(lammps_data_file, atoms, masses=True)
-            #write_lammps_data(lammps_data_file, subsystem, masses=True)
-            #if self.dimension == 2 : 
-            #    modify_lammps_data_2D(lammps_data_file)
         #Setup Lammps : 
         lmp = lammps(comm=comm,cmdargs=['-screen', 'none'])
         artn = pypARTn2.artn(engine='lmp')
-        lmp.command("units metal")
-        lmp.command('atom_style atomic')
-        lmp.command("dimension 3")
-        lmp.command("boundary p p p")
-        lmp.command("read_data {}".format(lammps_data_file))
-        lmp.command('atom_modify sort 40000000 0.0')
+        initialize_default_lammps(self.system, lmp)
+
             #Potential : 
         lmp.command('pair_style {}'.format(self.potential['pair_style']))
         lmp.command('pair_coeff {}'.format(self.potential['pair_coeff']))
-        #for key, val in potential.items() : 
-        #    lmp.command("{} {}".format(key, val))
+        
         lmp.command("plugin load {}".format(self.search_params['path_artnso']))
         lmp.command("fix 10 all artn dmax {}".format(self.search_params['partn_dmax']))
         lmp.command("min_style fire")
+
         #SETUP ARTN
         artn.set('engine_units', 'lammps/metal')
         artn.set('verbose',self.search_params['partn_verbose'])
@@ -332,160 +470,62 @@ class EventSearch() :
         artn.set('lanczos_disp', self.search_params['partn_lanczos_disp'])
         artn.set('nsmooth',  self.search_params['partn_nsmooth'])
         artn.set('nperp', self.search_params['partn_nperp'])
+
         #Run
         lmp.command("minimize 1e-3 1e-3 1000 1000")
 
         #Need to extract min 1, min 2, saddle positions and energy barrier
         err = artn.get_runparam("error_message")
-        if not err : 
+        if not err :
+            #Results 
             delr1 = artn.extract('delr_min1') 
             delr2 = artn.extract('delr_min2')
 
-            E_sad = artn.extract("etot_sad")
-            E_min1 = artn.extract("etot_min1")
-            E_min2 = artn.extract("etot_min2")
-            dE_forward = E_sad - E_min1 
-            dE_backward = E_sad - E_min2 
- 
-            min1positions = artn.extract("tau_min1")
-            min2positions = artn.extract("tau_min2")
-            saddlepositions = artn.extract("tau_sad")
-            
-
-
-            #eigenvec = artn.extract("eigen_sad")
-            #print(eigenvec)
-            
-
-            #TEST Find Atoms that move the most  : 
-            #dist = (min1positions-saddlepositions)**2
-            #dist = dist.sum(axis=-1)
-            #dist = np.sqrt(dist)
-            #index_move = np.argmax(dist)
-
-            rcutevent = self.search_params['rcutenv']
-            ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-
-            if self.reconstruction : 
-                cell = self.system.get_cell()
-                #put event in event_traj en translate move atom at the center to prevent pbc problems
-                ppositions = [min1positions, saddlepositions, min2positions]
-                event_traj = [] 
-                ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
-                #put event in traj_event
-                for pp in ppositions : 
-                    atoms = Atoms(positions=pp, cell=self.system.get_cell(), pbc=True)
-#                    atoms.set_positions(atoms.get_positions(wrap=True))
-                    event_traj.append(atoms)
-                #find atom that move the most
-                    #prevent lammps cell travel 
-                    #neighbor of central atom
-                dist = self.system.get_distances(atom_index, ind, mic=True)
-                neighbor_list = np.where(dist<rcutevent)[0]
-                min1positions_cent = min1positions[neighbor_list]
-                saddlepositions_cent = saddlepositions[neighbor_list]
-                min2positions_cent = min2positions[neighbor_list]
-                if delr1 < delr2 : 
-                    dist = (min1positions_cent-saddlepositions_cent)**2
-                else : 
-                    dist = (min2positions_cent-saddlepositions_cent)**2
-                dist = dist.sum(axis=-1)
-                dist = np.sqrt(dist)
-                local_index_move = np.argmax(dist)
-                index_move = neighbor_list[local_index_move]
-                #translate atoms  : 
-                if delr1 < delr2 : 
-                    dx, dy, dz = ax/2 - event_traj[0].get_positions()[index_move][0], ay/2 - event_traj[0].get_positions()[index_move][1], az/2 - event_traj[0].get_positions()[index_move][2]
-                else : 
-                    dx, dy, dz = ax/2 - event_traj[2].get_positions()[index_move][0], ay/2 - event_traj[2].get_positions()[index_move][1], az/2 - event_traj[2].get_positions()[index_move][2]
-                for i in range(len(event_traj)) : 
-                    event_traj[i].translate(np.array([dx, dy, dz]))
-                #Compute graph topo, used to check if event already in catalog : 
-                id_event = pynauty.certificate(make_graph(event_traj[0], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
-                id_saddle = pynauty.certificate(make_graph(event_traj[1], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
-                id_final = pynauty.certificate(make_graph(event_traj[2], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
-
-                #find neighbor atom move : 
-                if delr1 < delr2 : 
-                    dist = event_traj[0].get_distances(index_move, ind, mic=True)
-                else : 
-                    dist = event_traj[2].get_distances(index_move, ind, mic=True)
-                neighbor_list = np.where(dist<rcutevent)[0]
-                min1positions = min1positions[neighbor_list]
-                min2positions = min2positions[neighbor_list]
-                saddlepositions = saddlepositions[neighbor_list]
-
-
-            else :  
-                #graph saddle point index_move 
-#                tmp_pos = saddlepositions 
-#                tmp_pos[tmp_pos < 0] = 0
-#                atoms_saddle = Atoms(positions=tmp_pos, cell=self.system.get_cell(), pbc=True)
-#                g_saddle = make_graph(atoms_saddle, [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0]
-#                id_saddle = pynauty.certificate(g_saddle)
-                dist = self.system.get_distances(atom_index, ind, mic=True)
-                neighbor_list = np.where(dist<rcutevent)[0]
-
-
-                min1positions = min1positions[neighbor_list]
-                min2positions = min2positions[neighbor_list]
-                saddlepositions = saddlepositions[neighbor_list]
-
-            
-            
-
-            #save only atom in rcutenv of atom_index
-
-  #          if self.reconstruction : 
-  #              dist = self.system.get_distances(index_move, ind, mic=True)
-  #          else : 
-  #              dist = self.system.get_distances(atom_index, ind, mic=True)
-
-  #          neighbor_list = np.where(dist<rcutevent)[0]
-
-
-  #          min1positions = min1positions[neighbor_list]
-  #          min2positions = min2positions[neighbor_list]
-  #          saddlepositions = saddlepositions[neighbor_list]
-
-            #TEST Find Atoms that move the most == > for graph topo saddle point : 
-            #dist = (min1positions-saddlepositions)**2
-            #dist = dist.sum(axis=-1)
-            #dist = np.sqrt(dist)
-            #index_move = np.argmax(dist)
-            
-
-            #Check if min1 or min2 close to the original configuration
+            #Checks if one minimum is close to the original configuration 
             if delr1 < 0.2 or delr2 < 0.2 : 
-                #if len(neighbor_list1) == len(neighbor_list2) and len(neighbor_list1) == len(neighbor_list3)  :
-                    if delr1 < delr2 :
-                        #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_forward))
-                        #return min1positions, saddlepositions, min2positions, dE_forward, np.where(neighbor_list == atom_index)[0][0], atom_index 
-                        #return min1positions, saddlepositions, min2positions, dE_forward, index_move, atom_index, index_move_prev
-                        #return min1positions, saddlepositions, min2positions, dE_forward, index_move, id_saddle
-                        if self.reconstruction : 
-                            return min1positions, saddlepositions, min2positions, dE_forward, id_event, id_saddle, id_final, local_index_move
-                        else : 
-                            return min1positions, saddlepositions, min2positions, dE_forward
-                        #return min1positions[neighbor_list], saddlepositions[neighbor_list], min2positions[neighbor_list], dE_forward, atom_index 
-                    else : 
-                        #return min2positions, saddlepositions, min1positions, dE_forward
-                        #self.system.logger.logger.info('Find one event with dE barrier = {} eV'.format(dE_backward))
-                        #return min2positions, saddlepositions, min1positions, dE_backward, np.where(neighbor_list == atom_index)[0][0], atom_index
-                        #return min2positions, saddlepositions, min1positions, dE_backward, index_move, atom_index, index_move_prev
-                        #return min2positions, saddlepositions, min1positions, dE_backward, index_move, id_saddle
-                        if self.reconstruction : 
-                            return min2positions, saddlepositions, min1positions, dE_backward, id_event, id_saddle, id_final, local_index_move
-                        else : 
-                            return min2positions, saddlepositions, min1positions, dE_backward
-                        #return min2positions[neighbor_list], saddlepositions[neighbor_list], min1positions[neighbor_list], dE_backward, atom_index
-                #else : 
-                    #print('len not consistent')
+
+                E_sad = artn.extract("etot_sad")
+                E_min1 = artn.extract("etot_min1")
+                E_min2 = artn.extract("etot_min2")
+
+                dE_forward = E_sad - E_min1 
+                dE_backward = E_sad - E_min2 
+    
+                min1positions = artn.extract("tau_min1")
+                min2positions = artn.extract("tau_min2")
+                saddlepositions = artn.extract("tau_sad")
+
+                #Generate event pandas Series
+                rcutevent = self.search_params['rcutenv']
+                ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
+                if self.reconstruction :
+                    #Find atoms that move the most 
+                    dist = (min1positions-saddlepositions)**2
+                    dist = dist.sum(axis=-1)
+                    dist = np.sqrt(dist)
+                    dist[dist > rcutevent] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
+                    index_move = np.argmax(dist)
+
+                    dfevent_forward, dfevent_backward = self.event_series_with_reconstruction(min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward)
+
+                    return dfevent_forward, dfevent_backward
+                else :  
+                    #Find neighbors of atom_index
+                    dist = self.system.get_distances(atom_index, ind, mic=True)
+                    neighbor_list = np.where(dist<rcutevent)[0]
+
+                    #Create event Series 
+                    if delr1 < delr2 : #meaning min1 close to initial coordinates : 
+                        final_positions = min2positions[neighbor_list]
+                        dE = dE_forward
+                    else : #min2 close to initial coordinates
+                        final_positions = min1positions[neighbor_list]
+                        dE = dE_backward 
+
+                    return self.event_series_without_reconstruction(atom_index, final_positions, dE)
             else :
-                #self.system.logger.logger.error('ERROR: minima too far away from initial configuration')
                 return None
         else : 
-            #self.system.logger.logger.error('ERROR: pARTn error : {} '.format(err))
             return None
         
 
