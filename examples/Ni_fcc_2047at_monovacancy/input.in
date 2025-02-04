@@ -1,8 +1,8 @@
 [Control] 
 config_file = ./initial_config.xyz 
 output_file = ./trajkmc.xyz
-nkmc_steps = 1
-catalog = ./catalog.pickle
+nkmc_steps = 10
+#catalog = ./catalog.pickle
 nprocs = 8
 reconstruction = True
 
@@ -21,7 +21,7 @@ maxeval = 1000
 
 [AtomicEnvironment] 
 style = cna/graph
-#radd_cna = 3.0
+radd_cna = 3.0
 rnei = 3.01
 rcut = 7.0
 

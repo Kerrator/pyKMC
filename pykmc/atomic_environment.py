@@ -63,7 +63,10 @@ class AtomicEnvironment() :
         Exception
             if unknown atomic environment style
         """
-        #Run the atomic environment search using executorlib for the parallelization 
+
+        #==================================================================#
+        #Run the atomic environment search base on atomic_environment style# 
+        #==================================================================#
         with Executor(backend =self.backend) as exe : 
             #Check the atomic environment style
             match self.atomenv_style : 
@@ -77,7 +80,9 @@ class AtomicEnvironment() :
                     self.system.logger.logger.error('ERROR:Atomic environment style unknown')
                     raise Exception("Atomic environment style unknown")
 
-        #Get results
+        #=========================================#
+        #Get results and update system.environment#
+        #=========================================#
         if self.nprocs == 1 : 
             list_env = fs.result()
         else : 
@@ -87,7 +92,7 @@ class AtomicEnvironment() :
         diff_env = set(list_env)
         diff_env = list(diff_env) 
 
-        ##List of dictionnaries of different Topo ID 
+        #List of dictionnaries of different Topo ID 
         dict_env = []
         for ID in diff_env : 
             #index with same ID : 

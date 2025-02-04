@@ -47,6 +47,10 @@ class Minimization:
         """
         Execute minimization based on minimization_style
         """
+
+        #============================================#
+        #Run minimization based on minimization_style#
+        #============================================#
         with Executor(backend=self.backend) as exe :
             match self.minimization_style : 
                 case "lammps":
@@ -54,7 +58,10 @@ class Minimization:
                 case _:
                     self.system.logger.logger.error('ERROR:Minimization style not known')
                     raise Exception("Minimization style not known")
-        #Set new positions : 
+
+        #======================================#
+        #Get result and update system.positions#
+        #======================================#
         if self.nprocs == 1 : 
             positions = fs.result()
         else : 
