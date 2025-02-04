@@ -57,12 +57,12 @@ class PointSetRegistration() :
         """ 
         run the point set registration
         """ 
-        if self.psr_style == 'ira' : 
-            rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
-            return rmat, tr, perm, dh
-        else : 
-            print('ERROR')
-            return None
+        match self.psr_style : 
+            case 'ira' : 
+                rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
+                return rmat, tr, perm, dh
+            case _: 
+                raise Exception('Point set registration style unknown')
         
     
     def ira(self, idx_cat, central_atom_index, rcutevent) : 
@@ -77,15 +77,27 @@ class PointSetRegistration() :
            index of the system's central atom 
         rcutevent : float
             radial cutoff used in the event_search
+
+        Returns 
+        ------- 
+        if did not find transformation matrices return (None, None, None, None)
+        else 
+            rmat : (3,3) numpy.array of float
+                rotation matrix 
+            tr : (3,) numpy.array of float
+                translation matrix 
+            perm : list of int 
+                list of permutation index
+            dh : float 
+                Hausdorff distance value of the match
+
         """
         #Initialize IRA
         ira = ira_mod.IRA() 
 
         #Event informations : 
-        id = self.system.catalog.loc[idx_cat].at['event_id']
         coords2 = self.system.catalog.loc[idx_cat].at["initial_positions"] 
         nat2 = len(coords2)
-        typ2 = nat2*['Ni']
 
         #atom in the rcutevent around the central atom
         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
@@ -93,6 +105,9 @@ class PointSetRegistration() :
         neighbor_list = np.where(dist<rcutevent)[0]
 
         coords1 = self.system.get_positions()[neighbor_list]
+        typ1 = np.array(self.system.get_chemical_symbols())[neighbor_list]
+
+        typ2 = typ1 #If they have same topology id should be always true ?
 
         #unwrap if close to cell limits :
         alat = self.system.cell[0][0] 
@@ -103,10 +118,10 @@ class PointSetRegistration() :
                 coords1[i][1] = coords1[i][1] + np.sign(self.system.positions[central_atom_index][1]-coords1[i][1])*alat
             if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
                 coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*alat
-
         nat1 = len(coords1)
-        typ1 = typ2
         kmax_factor = self.psr_parameters['kmax_factor']
+        
+        #Run ira to find transformation matrices
         try : 
             rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
              
