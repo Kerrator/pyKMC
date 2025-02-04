@@ -139,10 +139,13 @@ class AtomicEnvironment() :
 
     def graph_nauty(self) :
         """
-        Compute pynauty certificate based on graph canonical form
-        need rnei 
-        need rcut
-        """ 
+        Compute atomic environment ID using pynauty certificate based on graph canonical form
+
+        Returns
+        -------
+        list_topo : List of str or None
+            List of atomic environment ID if `rank == 0`, else `None`
+        """
         #atomic environment parameters 
         rnei = self.atomenv_params['rnei']
         rcut = self.atomenv_params['rcut']
