@@ -13,10 +13,33 @@ import math as m
 
 class KMC() : 
     """class to execute kmc simulation 
+         
+    Parameters
+    ----------
+    system : System Object
+        the KMC system
+
+    Attributes
+    ----------
+    system : System Object 
+        the KMC system 
+    control : dict 
+        dictionnary with the 'Control' parameters from the input file
+    potentiel : dict 
+        dictionnary with the 'Potential' parameters from the input file
+    minimization : dict 
+        dictionnary with the 'Minimization' parameters from the input file
+    atomicenvironment_parameters : dict 
+        dictionnary with the 'AtomicEnvironment' parameters from the input file
+    event_parameters : dict
+        dictionnary with the 'EventSearch' parameters from the input file
+    psr_parameters : dict 
+        dictionnary with the 'PSR' parameters from the input file
+    time : float 
+        the current time of the simulation
     """ 
+    
     def __init__(self, system) :
-        """
-        """
         self.system = system
         self.control = self.system.inputs['Control']
         self.potential = self.system.inputs['Potential']
@@ -178,10 +201,19 @@ class KMC() :
 
         Returns
         ------- 
+        if no event corresponding to the atomic environments return 'select atom failed' 
+        if shape matching failed return 'psr failed' 
+        else return : 
         idx_cat : int 
             index of the event in the catalog that have been chosen 
         delta_t : float 
             time associated to the event
+        dh : float 
+            Hausdorff distance value of the match
+        reconstruction_de : boolean 
+            `True`if energy barrier from the reconstruction match the one in the catalog, else `False`
+        recontruction_topo : boolean 
+            `True` if the topology at the saddle point after the reconstruction match the on in the catalog, else `False`
         """
         #==================================================================#
         #Updatate system.visited_environment (comes after the event_search)#
@@ -220,6 +252,10 @@ class KMC() :
     def select_event_random(self) : 
         """ 
         return index in system.catalog of a random possible event
+
+        Returns 
+        ------- 
+        atom index having a topology of an event in the catalog 
         """  
         #find list of event in catalog that have id in system.environment : 
         l_env = [dict['ID'] for dict in self.system.environment]
@@ -232,6 +268,13 @@ class KMC() :
     def select_event_rejection_free(self, reconstruction) : 
         """
         Select an event and return its catalog id based on the rejection free KMC algorithm
+
+        Returns 
+        ------- 
+        idx_selected_event : int 
+            index in the catalog of the selected event 
+        delta_t : float 
+            time associated to the rate constante of the selected event
         """
         if reconstruction : 
         #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
@@ -255,6 +298,16 @@ class KMC() :
     def select_central_atom(self, idx_cat) : 
         """ 
         Find a central atom with same ID than the event at idx_cat in catalog
+
+        Parameters
+        ---------- 
+        idx_cat : int 
+            index in the catalog of an event
+
+        Returns
+        ------- 
+        central_atom_index : int 
+            index of an atom having the same topology than the event at idx_cat in the catalog
         """ 
         id = self.system.catalog.loc[idx_cat].at['event_id'] 
         atom_index_list = []
@@ -271,9 +324,32 @@ class KMC() :
 
  
     def update_positions(self, idx_cat, central_atom_index, rmat, tr, perm, dh) : 
-        """ 
-        update positions based on selected event, used in a KMC simulation when `reconstrution == True` 
-        """ 
+        """_summary_
+
+        Parameters
+        ----------
+        idx_cat : int
+            index in the catalog of an event
+        central_atom_index : int
+            index of the atom on the system on which we apply the event
+        rmat : (3,3) numpy.array of float
+            rotation matrix from point set registration 
+        tr : (3,) numpy.array of float
+            translation matrix from point set registration
+        perm : list of int
+            permutation matrix from point set registration
+        dh : float 
+            Hausdorff distance value of the match
+
+        Returns
+        -------
+        if dh > 0.5 return `None`, `None`
+        else return 
+            is_energy_saddle_ok : boolean 
+                `True`if energy barrier from the reconstruction match the one in the catalog, else `False`
+            is_topo_saddle_ok : boolean
+                `True` if the topology at the saddle point after the reconstruction match the on in the catalog, else `False`
+        """
 
         if dh < 0.05 :
 
@@ -317,6 +393,10 @@ class KMC() :
     def compute_energy_lammps(self) : 
         """ 
         Use ASE to compute the energy of the system 
+
+        Returns
+        ------- 
+        Energy of the current system
         """
         #Setup the potential
         cmds = []
@@ -332,16 +412,55 @@ class KMC() :
 
     def apply_ira_psr(self,coords, idx_cat, rmat, tr, perm, which_pos)  : 
         """
-        Apply shape matching to coords 
-        """
+        Apply point set registration to coords
+
+        Parameters
+        ----------
+        coords : (N,3) numpy.array of float
+            positions on which we apply the point set registration
+        idx_cat : int
+            index in the catalog of the event from which we apply the point set registration
+        rmat : (3,3) numpy.array of float
+            rotation matrix from point set registration 
+        tr : (3,) numpy.array of float
+            translation matrix from point set registration
+        perm : list of int
+            permutation matrix from point set registration
+        which_pos : str
+            should be 'saddle_positions' or 'final_positions' : from which positions of the event we apply the point set registration
+
+        Returns
+        -------
+        coords : (N,3) numpy.array of float 
+            coords after the point set registration
+        """            
         for i in range(len(coords)) : 
             coords[i] = np.matmul(rmat, self.system.catalog.loc[idx_cat].at[which_pos][i]) + tr 
         coords[:] = coords[perm]
         return coords
     
     def change_neighbors_coords(self, neighbor_list, coords, idx_cat, perm, find_saddle_atom ) : 
-        """ 
+        """
         Change positions of atoms in the system in the neighbors to the central atom of the event by coords
+
+        Parameters
+        ----------
+        neighbor_list : (N,) numpy.array of int
+            atom indices of atoms to which we change coordinates
+        coords : (N,3) numpy.array of float
+            new coordinates of the neighbor atoms
+        idx_cat : int
+            index of the event in the catalog
+        perm : list of int
+            permutation matrix from the point set registration
+        find_saddle_atom : boolean
+            if we whan to find the atomic index of that atom that move the most
+
+        Returns
+        -------
+        if `find_saddle_atom == True` 
+            move_atomsys_idx : int 
+                atomic index of the atom that move the most after the change of coordinates
         """
         c = 0 
         newpos = self.system.get_positions()
@@ -358,13 +477,39 @@ class KMC() :
 
     def check_saddle_energy(self, idx_cat, E_ini) : 
         """ 
+        Check if the barrier energy is consistent with the one in the catalog after the reconstruction
+
+        Parameters 
+        ---------- 
+        idx_cat : int 
+            index of the event in the catalog 
+        E_ini : float 
+            energy of the system before going to the saddle point
+
+        Returns
+        ------- 
+        `True` if the barrier energy is consistent with the one in the catalog after the reconstruction, else `False`
         """
         E_sad = self.compute_energy_lammps()
         dE = E_sad-E_ini
         return abs(dE-self.system.catalog.loc[idx_cat].at['energy_barrier']) < 0.5
 
     def check_saddle_topo(self, idx_cat, move_atomsys_idx) : 
+        """ 
+        Check if the topology of the saddle point is consistent with the one in the catalog after the reconstruction 
 
+        Parameters 
+        ---------- 
+        idx_cat : int 
+            index of the event in the catalog 
+        move_atomsys_idx : int
+            atomic index of the atom at the saddle point
+
+        Returns
+        ------- 
+        `True` if the topology of the saddle opint is consistent with the one in the catalog after the reconstruction, else `False`
+
+        """
         atoms = Atoms(positions=self.system.get_positions(), cell = self.system.get_cell(), pbc=True)
         g_saddle = make_graph(atoms, [move_atomsys_idx], self.atomicenvironment_parameters['rnei'], self.atomicenvironment_parameters['rcut'])[0]
         topo_saddle = pynauty.certificate(g_saddle)
