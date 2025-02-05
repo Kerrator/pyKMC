@@ -3,6 +3,7 @@ Logger class to handle log file and log parameters
 """
 import logging 
 from logging import handlers 
+from itertools import zip_longest
 
 class Logger() : 
     def __init__ (self, logfile_name) : 
@@ -35,6 +36,14 @@ class Logger() :
             self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<12s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
         else : 
             self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
+
+    def table_line_info_kmc(self, *args) : 
+        """
+        Print info of a kmc step in the log 
+        """ 
+        formats = ['{:<10n}', '{:<10e}', '{:<10n}', '{:<10n}', '{:<13n}', '{:<10e}', '{:<10e}', '{:<18}', '{:<18}']
+        formatted_values = [fmt.format(e) if e is not None else " "*10 for fmt, e in zip_longest(formats, args, fillvalue=None)]
+        self.logger.info(" ".join(formatted_values))
 
     def new_line(self) : 
         """ 
