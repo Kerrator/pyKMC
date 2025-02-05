@@ -125,27 +125,11 @@ class System(Atoms):
         #=========================================#
         #if no catalog path is given
         if catalog_path is None : 
-            #if reconstruction of events
-            if self.reconstruction : 
-                self.logger.logger.info('Initializing catalog with reconstruction of events')
-                self.catalog = pd.DataFrame(columns=['event_id', 
-                                                            'initial_positions', 
-                                                            'saddle_positions', 
-                                                            'final_positions', 
-                                                            'energy_barrier', 
-                                                            'k', 
-                                                            'id_saddle',
-                                                            'id_final', 
-                                                            'move_atom_idx'])
-            #if no reconstruction of events
-            else : 
-                self.logger.logger.info('Initializing catalog with no reconstruction of events')
-                self.catalog = pd.DataFrame(columns = ['atom_index', 
-                                                              'final_positions',
-                                                              'energy_barrier',
-                                                              'k'])
+            self.logger.logger.info('Initializing catalog with reconstruction of events = {}'.format(self.reconstruction))
+            self._initialize_catalog()
+           
             self.visited_environment = set() #no environment have been visited
-        #If read from previous simulation
+        #else read from previous simulation
         else : 
             self.logger.logger.info('reading {} catalog file'.format(catalog_path))
             self.catalog = pd.read_pickle(catalog_path) #for restart
@@ -313,5 +297,26 @@ class System(Atoms):
         logger = Logger('pykmc.log')
         logger.title()
         return logger 
+    
+    def _initialize_catalog(self) : 
+        """ 
+        Initialize the catalog based
+        """
+        if self.reconstruction : 
+            self.catalog = pd.DataFrame(columns=['event_id', 
+                                                 'initial_positions', 
+                                                 'saddle_positions', 
+                                                 'final_positions', 
+                                                 'energy_barrier', 
+                                                 'k', 
+                                                 'id_saddle',
+                                                 'id_final', 
+                                                 'move_atom_idx'])
+        else : 
+            self.catalog = pd.DataFrame(columns = ['atom_index', 
+                                                   'final_positions',
+                                                   'energy_barrier',
+                                                   'k'])
+
 
     

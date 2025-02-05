@@ -91,10 +91,7 @@ class KMC() :
                     #write to log 
                     self.system.logger.table_line_info_kmc(step, self.time,len(self.system.environment), len(self.system.catalog), idx_cat, self.system.catalog.loc[idx_cat].at['energy_barrier']) 
                     #Detroy catalog#
-                    self.system.catalog = pd.DataFrame(columns = ['atom_index', 
-                                                      'final_positions',
-                                                      'energy_barrier',
-                                                      'k'])
+                    self.system._initialize_catalog()
 
             else : 
                 self.system.logger.logger.info("WARNING: At step {}, emtpy catalog after event searches, try to modify EventSearch parameters".format(step))
