@@ -58,14 +58,29 @@ DEFAULT = {
 @dataclass 
 class SystemConfig : 
     """ 
+    Class to manage input parameters
     """ 
-    #Default values : 
-
     @staticmethod 
     def from_file(config_file: str): 
+        """
+        Read input parameters from file
 
-        
+        Parameters
+        ----------
+        config_file : str
+            path to the input file
+        Returns
+        -------
+        config_dict : dict 
+            dictionary of input parameters
+
+        Raises
+        ------
+        Exception
+            if wrong section in input file
+        """
         config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation()) 
+
         config.optionxform = str #Enable uppercase variable
         try : 
             with open(config_file) as f : #So we can raise an exception
@@ -102,6 +117,19 @@ class SystemConfig :
         return config_dict
     
     def _convert_value(value) : 
+        """ 
+        Convert str value from the input file to int, float, boolean or str
+
+        Parameters
+        ---------- 
+        value : 
+            value to be converted 
+
+        Returns
+        ------- 
+        value : 
+            the value after the conversion
+        """
         try :
             if value == 'True' : 
                 return True 

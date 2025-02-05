@@ -6,6 +6,8 @@ from logging import handlers
 from itertools import zip_longest
 
 class Logger() : 
+    """A logger to manage log informations
+    """
     def __init__ (self, logfile_name) : 
         #Could use different logger for different level 
         #See https://dev.to/luca1iu/using-the-logger-class-in-python-for-effective-logging-4ghc#:~:text=The%20Logger%20class%20provides%20several,warning%2C%20error%2C%20crit).
