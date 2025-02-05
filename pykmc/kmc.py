@@ -67,8 +67,6 @@ class KMC() :
             #======================================================================#
             if self.system.reconstruction : 
                 self.update_visited_environment()
-                #lids = [d['ID'] for d in self.system.environment]
-                #self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
 
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
