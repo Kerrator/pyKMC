@@ -8,12 +8,6 @@ from .atomic_environment import make_graph
 import pynauty
 import math as m
 
-#TODO Could add a write_log() file to call at each steps
-#TODO Add kmc algo
-#TODO Check saddle point topo consistency
-#TODO Logs
-#TODO Comments/Doc
-#TODO should check saddle topo and energy at the same time (some computation are done 2 times)
 #TODO should extract energy system after minimization
 #TODO using our own build in function to write outpufile traj file may be less time consuming than creating an Atoms and use ase.io.write
 
@@ -36,53 +30,52 @@ class KMC() :
         """
         Execute nkmc steps
         """
-        nkmc_steps = self.system.inputs['Control']['nkmc_steps']
-        #reconstruction = self.system.inputs['Control']['reconstruction']
-        reconstruction = self.system.reconstruction
 
-        self.system.logger.logger.info('= Starting KMC simulation')
+        #=====#
+        #Start#
+        #=====#
+        self.system.logger.logger.info('===========================')
+        self.system.logger.logger.info('= Starting KMC simulation =')
+        self.system.logger.logger.info('===========================')
+
+        nkmc_steps = self.system.inputs['Control']['nkmc_steps']
         self.time = 0
-        #self.system.kmc_traj = []
-        for step in range(nkmc_steps) : 
-            #Initialization
+
+        #====================#
+        #Loop over nkmc_steps#
+        #====================#
+        for step in range(nkmc_steps) :
+            #==============# 
+            #Initialization#
+            #==============# 
             if step == 0 : 
-                self.system.logger.logger.info('Minimization of the system')
-                self.system.minimize(self.minimization['style'], self.minimization, self.potential, self.control['dimension'], self.control['nprocs'], self.control['backend'])
-                self.system.logger.new_line()
-                if reconstruction : 
-                    self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s} {:<10s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
-                else : 
-                    self.system.logger.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
-                write(self.system.kmc_traj, Atoms(self.system.get_chemical_symbols(), 
-                                                         positions=self.system.get_positions(), 
-                                                         cell = self.system.get_cell(),
-                                                         pbc=self.system.get_pbc()), append=True)
+                self.initial_step_kmc()
             #Searching atomic environments : 
             self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
             #Searching Events : 
-            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, reconstruction, self.control['dimension'], self.control['nprocs'], self.control['backend'])
+            self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, self.system.reconstruction, self.control['dimension'], self.control['nprocs'], self.control['backend'])
 
             #add visited environment : 
-            if reconstruction : 
+            if self.system.reconstruction : 
                 lids = [d['ID'] for d in self.system.environment]
                 self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
 
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
                 #Select an event in the catalog : 
-                idx_cat, delta_t = self.select_event_rejection_free(reconstruction) 
+                idx_cat, delta_t = self.select_event_rejection_free(self.system.reconstruction) 
             else : 
                 idx_cat = None
 
             if idx_cat is not None : #In case we have all atomic environments that do not have event
-                if reconstruction : 
+                if self.system.reconstruction : 
                 #Select a central atom on which we will reconstruct the event : 
                     central_atom_index = self.select_central_atom(idx_cat)
                 else : 
                     central_atom_index = self.system.catalog.loc[idx_cat].at['atom_index']
 
                 if central_atom_index is not None : #Shoudl not happen ? 
-                    if reconstruction : 
+                    if self.system.reconstruction : 
                         #Shape Matching
                         rmat, tr, perm, dh = self.system.point_set_registration(self.psr_parameters['style'], self.psr_parameters, idx_cat, central_atom_index, self.event_parameters['rcutenv'])
                         if rmat is not None : #in case ira did not find a match 
@@ -120,6 +113,24 @@ class KMC() :
                                                          positions=self.system.get_positions(), 
                                                          cell = self.system.get_cell(),
                                                          pbc=self.system.get_pbc()), append=True)
+                    
+    def initial_step_kmc(self) : 
+        """
+        Procedure done at the start of the first step of a KMC simulation
+        """
+        #Minimization
+        self.system.logger.logger.info(':> Minimization of the system')
+        self.system.logger.new_line()
+        self.system.minimize(self.minimization['style'], self.minimization, self.potential, self.control['dimension'], self.control['nprocs'], self.control['backend'])
+
+        #First log table line 
+        self.system.logger.first_line_table(self.system.reconstruction) 
+
+        #Write first configuration to output file
+        write(self.system.kmc_traj, Atoms(self.system.get_chemical_symbols(), 
+                                          positions=self.system.get_positions(), 
+                                          cell = self.system.get_cell(),
+                                          pbc=self.system.get_pbc()), append=True)
 
     def select_event_random(self) : 
         """ 
