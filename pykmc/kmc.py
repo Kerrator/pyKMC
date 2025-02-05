@@ -45,20 +45,30 @@ class KMC() :
         #Loop over nkmc_steps#
         #====================#
         for step in range(nkmc_steps) :
+
             #==============# 
             #Initialization#
             #==============# 
             if step == 0 : 
                 self.initial_step_kmc()
-            #Searching atomic environments : 
+            
+            #=================================#
+            #Update atomic system.environments#
+            #=================================#
             self.system.find_environment(self.atomicenvironment_parameters['style'], self.atomicenvironment_parameters)
-            #Searching Events : 
+
+            #==========================================#
+            #Searching Events and update system.catalog#
+            #==========================================#
             self.system.event_search(self.event_parameters['style'], self.event_parameters, self.atomicenvironment_parameters, self.potential, self.system.reconstruction, self.control['dimension'], self.control['nprocs'], self.control['backend'])
 
-            #add visited environment : 
+            #======================================================================#
+            #Updatate system.visited_environment (only when reconstruction == True)#
+            #======================================================================#
             if self.system.reconstruction : 
-                lids = [d['ID'] for d in self.system.environment]
-                self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
+                self.update_visited_environment()
+                #lids = [d['ID'] for d in self.system.environment]
+                #self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
 
             #If at leas one event in the catalog : 
             if len(self.system.catalog) > 0 : 
@@ -132,6 +142,13 @@ class KMC() :
                                           cell = self.system.get_cell(),
                                           pbc=self.system.get_pbc()), append=True)
 
+    def update_visited_environment(self) : 
+        """
+        Update visited environment 
+        """
+        lids = [d['ID'] for d in self.system.environment]
+        self.system.visited_environment.update(set(lids).difference(self.system.visited_environment)) 
+    
     def select_event_random(self) : 
         """ 
         return index in system.catalog of a random possible event
