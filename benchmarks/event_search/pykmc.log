@@ -5,6 +5,7 @@
 |    `---              
 
 
-= SYSTEM INITIALIZATION
-reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
+=> SYSTEM INITIALIZATION
+Reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
+Initializing catalog with reconstruction of events
 
