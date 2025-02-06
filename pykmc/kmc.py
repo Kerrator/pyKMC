@@ -280,7 +280,6 @@ class KMC() :
         #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
             l_env = [dict['ID'] for dict in self.system.environment]
             l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
-            print(l_catalog)
         else : 
         #1- if reconstruction = False all events are possible : 
             l_catalog = [i for i in range(len(self.system.catalog))]
@@ -291,14 +290,10 @@ class KMC() :
         #4-Get random number [0,1[
         rand1 = random.random() 
         #5-Find event index satisfy ki-1<rand1ktot<ki
-        print(k_cumulative)
         idx_selected_event = np.searchsorted(k_cumulative, rand1*k_cumulative[-1], side = 'left')
-        print(idx_selected_event)
-        print(l_catalog[idx_selected_event])
         #6-Compute associated delta_t
         delta_t = -m.log(random.random())/k_cumulative[-1]
         return l_catalog[idx_selected_event] ,delta_t
-        #return idx_selected_event, delta_t 
 
     def select_central_atom(self, idx_cat) : 
         """ 
