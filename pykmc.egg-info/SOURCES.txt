@@ -13,4 +13,5 @@ pykmc/utilities.py
 pykmc.egg-info/PKG-INFO
 pykmc.egg-info/SOURCES.txt
 pykmc.egg-info/dependency_links.txt
+pykmc.egg-info/requires.txt
 pykmc.egg-info/top_level.txt
