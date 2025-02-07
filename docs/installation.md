@@ -2,18 +2,19 @@
 
 ## Python Environment 
 
-It is recommended to use a python environment, with a version of python >= 3.9, dedicated to the use of pyKMC to avoid python packages conflict.
-Using the virtual environment tool `venv` to create a new python environment : 
-```bash 
-python3 -m venv /path_to_environment/pykmc_env 
-``` 
-and to activate the newly created environment : 
-```bash 
+It is recommended to use a dedicated Python environment for pyKMC to prevent package conflicts. Ensure you have Python >= 3.9 installed.
+
+To create a new virtual environment using venv:
+```bash
+python3 -m venv /path_to_environment/pykmc_env
+```
+Then, activate the newly created environment:
+```bash
 source /path_to_environment/pykmc_env/bin/activate
 ```
-Then, to install pyKMC with all his depedencies : 
+Finally, install pyKMC along with its dependencies:
 ```bash 
-cd path_to/pyKMC
+cd /path_to/pyKMC
 pip install -e .
 ```
 
