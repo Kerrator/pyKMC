@@ -1,0 +1,26 @@
+site_name: pyKMC
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Troubleshooting: troubleshooting.md
+  - Tutorial: tutorial.md
+  - API Reference: reference.md
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            heading_level: 2
+            members_order: alphabetical
+            separate_signature: true
+            show_docstring_examples: true
+            show_root_heading: true
+
+site_url: https://hugomoison.github.io/pyKMC/
