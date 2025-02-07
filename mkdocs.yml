@@ -1,13 +1,18 @@
 site_name: pyKMC
 theme:
   name: material
+  features:
+  - content.code.copy  # Ajoute un bouton "Copier" sur les blocs de code
+  - content.code.annotate  # Active le surlignage de syntaxe
+  - content.code.highlight  # Améliore le rendu du code
 
 nav:
   - Home: index.md
   - Getting Started:
       - Installation: installation.md
-      - Troubleshooting: troubleshooting.md
-  - Tutorial: tutorial.md
+  - Troubleshooting: troubleshooting.md
+  - Tutorial: 
+      - pyKMC Workflow : 0-pyKMC-workflow.md 
   - API Reference: reference.md
 
 plugins:
