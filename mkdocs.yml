@@ -11,6 +11,7 @@ nav:
   - Getting Started:
       - Installation: installation.md
   - Troubleshooting: troubleshooting.md
+  - KMC Parameters : parameters.md
   - Tutorial: 
       - pyKMC Workflow : 0-pyKMC-workflow.md 
   - API Reference: reference.md

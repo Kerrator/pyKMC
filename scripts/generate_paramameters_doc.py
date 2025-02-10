@@ -21,8 +21,8 @@ def generate_parameters_md(output_file = "../docs/parameters.md") :
             for param in params : 
                 default = DEFAULT.get(section, {}).get(param, "**MANDATORY**") #write Mandatory if no default value
                 description = DESCRIPTIONS.get(section, {}).get(param, "No description available")
-                f.write(f"**{param}** \n")
-                f.write(f"- **Default**: `{default}` \n")
+                f.write(f"**{param}** \n\n")
+                f.write(f"- **Default**: `{default}` \n\n")
                 f.write(f"- **Description**: {description} \n\n")
 
 if __name__ == "__main__" : 
