@@ -38,9 +38,8 @@ def initialize_default_lammps(atoms, lmp_instance) :
 
     #map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
     map_type = {atom_type: {'ref' :i+1, 'mass' : atomic_masses[atomic_numbers[atom_type]]} for i, atom_type in enumerate(sorted(set(type)))}
-    type = [map_type[element]['ref'] for element in type]
+    type = [map_type[element]['ref'] for element in type] #map to integer
     x = atoms.get_positions().flatten()
-    
 
     #lammps command
     lmp_instance.command('units metal')
@@ -49,7 +48,13 @@ def initialize_default_lammps(atoms, lmp_instance) :
     lmp_instance.command('boundary p p p')
     lmp_instance.command('atom_modify sort 0 0.0')
     lmp_instance.command('region box block 0.0 {} 0.0 {} 0.0 {}'.format(xhi, yhi, zhi))
-    lmp_instance.command('create_box 1 box')
+    lmp_instance.command('create_box {} box'.format(len(map_type)))
     lmp_instance.create_atoms(natoms, ind,type, x)
+    #Set masses
     for key in map_type.keys() : 
         lmp_instance.command('mass {} {}'.format(map_type[key]['ref'], map_type[key]['mass']))
+    #Label atoms name to type : 
+    #print('labelmap atom '+ " ".join(f"{e['ref']} {key}" for key, e in map_type.items()))
+#    for key in map_type.keys() : 
+    lmp_instance.command('labelmap atom '+ " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items()))
+    
