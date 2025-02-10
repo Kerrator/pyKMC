@@ -52,7 +52,12 @@ DEFAULT = {
     }
 }
 
+MANDATORY = {"Control" : ['nkmc_steps']}
 
+DESCRIPTIONS = {
+    "Control" : {"config_file" : "Path to the initial configuration file", 
+                 "nkmc_steps" : "number of KMC steps"}
+}
 
 
 @dataclass 
