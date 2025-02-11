@@ -32,7 +32,7 @@ nsearch = 10
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 emin_event = 0.5
-k0 = 1
+k0 = 1.0e-12
 T = 300.0
 
 [PSR] 

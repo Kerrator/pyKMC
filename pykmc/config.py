@@ -27,8 +27,16 @@ DEFAULT = {
         'reconstruction' : True
 
     }, 
+    'Potential' : { 
+        'file' : None
+    },
     'Minimization' : {
-        'style' : 'lammps'
+        'style' : 'lammps', 
+        'min_style': 'cg', 
+        'etol': 1.0e-6, 
+        'ftol': 1.0e-8, 
+        'maxiter' : 100, 
+        'maxeval' : 1000
     }, 
     'AtomicEnvironment' : {
         'radd_cna' : 0
@@ -47,7 +55,7 @@ DEFAULT = {
         'partn_lanczos_disp' : 0.0005,
         'partn_nsmooth' : 3, 
         'partn_nperp' : 5,
-        'k0' : 1
+        'k0' : 1.0e-12
     }, 
     'PSR' : {
         'kmax_factor' : 1.8
@@ -65,7 +73,41 @@ DESCRIPTIONS = {
                  "nprocs" : "number of MPI process to use",
                  "backend" : "if running the simulation locally (`'local'`), or on a cluster (`'slurm_allocation'`)", 
                  "reconstruction" : "if a new catalog is generated at each step or reused"
-    }
+    },
+    "Potential" : {"__description__" : ("The potential section deals with the description of the potential in the format of the E/F engine used, for lammps :"), 
+                   "file" : "path to the potential file if needed", 
+                   "pair_style" : "lammps pair style command", 
+                   "pair_coeff" : "lammps pair coeff command"
+                   }, 
+    "Minimization" : {"__description__" : ("Parameters used for the minimization of the system"), 
+                      "style" : "E/F engine used", 
+                      "min_style" : "lammps minimization style", 
+                      "etol" : "lammps stopping tolerance for energy",
+                      "ftol" : "lammps stopping tolerance for force", 
+                      "maxiter" : "lammps max iterations of minimizer", 
+                      "maxeval" : "lammps max number of force/energy evaluations"
+                      },
+    "AtomicEnvironment" : {"__description__" : ("Parameters used to attribute an atomic environment to each atoms"), 
+                           "style" : "style used, `cna`, `graph` or `cna/graph`", 
+                           "rnei" : "maximal distance to consider that two atoms are connected when `graph` and `cna/graph` is used",
+                           "rcut" : "radial cuttoff defining the environment around an atom, used when `graph` and `cna/graph`",
+                           "radd_cna" : "when `cna/graph` is used, graph for atoms at a distance inferior to radd_cna to a atom having a non crystalline environment is also computed"
+
+    }, 
+    "EventSearch" : {"__description__" : ("Parameters related to the search of transition paths"),
+                     "style" : "which method used, `'pARTn'` for ARTn method", 
+                     "rcutenv" : "radius of the sphere defining the positions of atoms, around the central atom, that are saved in the catalog",
+                     "nsearch" : "number of event search for each different atomic environments",
+                     "path_artnso" : "path to the partn library file",
+                     "emax_event" : "event found having a higher barrier energy value are not saved to the catalog",
+                     "emin_event" : "event found having a lower barrier energy value are not saved to the catalog",
+                     "k0" : "value of k0 when computing the rate constant with $k0 \frac{k_{b}T}{h}e^{-\frac{dE}{k_{b}T}}",
+                     "T" : "Temperature of the simulation"
+                     },
+    "PSR" : {"__description__" : ("Parameters controlling point set registration (shape matching)"), 
+             "style" : "which method is used, `'ira'` for IterativeRotationsAssignments", 
+             "kmax_factor" : "factor for multiplication of search radius"
+             }
 }
 
 
