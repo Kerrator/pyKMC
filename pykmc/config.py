@@ -18,6 +18,8 @@ class Parameters :
 
 DEFAULT = {
     'Control' : {
+        'config_file' : None, 
+        'output_file' : 'trajkmc.xyz',
         'catalog' : None,
         'dimension' : 3,
         'nprocs' : 1, 
@@ -55,8 +57,16 @@ DEFAULT = {
 MANDATORY = {"Control" : ['nkmc_steps']}
 
 DESCRIPTIONS = {
-    "Control" : {"config_file" : "Path to the initial configuration file", 
-                 "nkmc_steps" : "number of KMC steps"}
+    "Control" : {"__description__" : ("The following parameters are general parameters that control the KMC simulations and resources used."),
+                 "nkmc_steps" : "number of KMC steps",
+                 "config_file" : "Path to the initial configuration file",
+                 "output_file" : "Path to the file where the trajectory is written, format must be recognized by ase.io.write()", 
+                 "catalog" : "Path to a catalog to reuse from a previous simulation",
+                 "dimension" : "Dimension of the system",
+                 "nprocs" : "number of MPI process to use",
+                 "backend" : "if running the simulation locally (`'local'`), or on a cluster (`'slurm_allocation'`)", 
+                 "reconstruction" : "if a new catalog is generated at each step or reused"
+    }
 }
 
 
