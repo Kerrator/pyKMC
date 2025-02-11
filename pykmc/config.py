@@ -54,7 +54,6 @@ DEFAULT = {
     }
 }
 
-MANDATORY = {"Control" : ['nkmc_steps']}
 
 DESCRIPTIONS = {
     "Control" : {"__description__" : ("The following parameters are general parameters that control the KMC simulations and resources used."),

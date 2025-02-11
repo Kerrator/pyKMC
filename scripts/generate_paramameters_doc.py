@@ -3,7 +3,7 @@ import sys
 
 # Import DEFAULT, MANDATORY and DESCRIPTIONS from config.py
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
-from pykmc.config import DEFAULT, MANDATORY, DESCRIPTIONS
+from pykmc.config import DEFAULT, DESCRIPTIONS
 
 def generate_parameters_md(output_file = "../docs/parameters.md") : 
     """Generate a Markdown file listing parameters, their default values and descriptions
@@ -16,7 +16,7 @@ def generate_parameters_md(output_file = "../docs/parameters.md") :
     with open(output_file, 'w') as f : 
         f.write('# Inputs Parameters \n \n')
 
-        for section, params in {**DEFAULT, **MANDATORY}.items() : 
+        for section, params in {**DEFAULT}.items() : 
             f.write(f"## {section}\n \n")
 
             #Description of the section 
