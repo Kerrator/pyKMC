@@ -9,7 +9,7 @@ from pstats import Stats
 import pandas as pd
 
 #Parameters : 
-init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
+init_config_file = '../../examples/Ni_fcc_4001at_sia/initial_config.xyz' 
 
 minimization_params = {'min_style' : 'cg',
                        'etol' : 1.0e-6,
@@ -19,11 +19,11 @@ minimization_params = {'min_style' : 'cg',
 potential = {'pair_style' : 'eam/alloy', 
              'pair_coeff' : '* * ../../examples/Ni_fcc_499at_monovacancy/Ni_v6_2.0_LKBeland2016.eam Ni'}
 atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 7.0, 
+                    'rcut'  : 10.0, 
                     'radd_cna' : 0.0}
-search_params = {'nsearch' : 5,
+search_params = {'nsearch' : 1,
                  'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so', 
-                 'rcutenv' : 7.0, 
+                 'rcutenv' : 10.0, 
                  'emax_event' : 5.0, 
                  'emin_event' : 0.2,
                  'partn_dmax' : 6.0, 

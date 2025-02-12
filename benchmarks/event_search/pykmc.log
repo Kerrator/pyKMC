@@ -6,6 +6,6 @@
 
 
 => SYSTEM INITIALIZATION
-Reading ../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz configuration file
-Initializing catalog with reconstruction of events
+Reading ../../examples/Ni_fcc_4001at_sia/initial_config.xyz configuration file
+Initializing catalog with reconstruction of events = True
 
