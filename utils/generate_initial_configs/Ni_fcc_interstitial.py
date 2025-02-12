@@ -9,7 +9,7 @@ output = './initial_config.xyz'
 #Ni fcc
 alat = 3.52
 atoms = bulk('Ni', crystalstructure='fcc', a=alat, cubic=True)
-atoms = atoms.repeat((8,8,8))
+atoms = atoms.repeat((10,10,10))
 print("Number of atoms = ",atoms.get_global_number_of_atoms())
 print("Cell is : ",atoms.get_cell())
 
@@ -34,10 +34,10 @@ for i in range(0,8):
 
 
 #Choose a site :
-chosen_site = all_octahedral_sites[1100]
+chosen_site = all_octahedral_sites[1240]
 print("SI site at : ", chosen_site)
 #Add atom in site
-atoms.extend(Atoms('Fe', positions=[chosen_site]))
+atoms.extend(Atoms('Ni', positions=[chosen_site]))
 
 #save to file
 atoms.write(output)
