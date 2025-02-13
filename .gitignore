@@ -36,3 +36,5 @@ catalog*.pickle
 *log.minimize_lammps
 *atomic_environment.yml
 *log.atomicenvironment_lammps
+examples/tutorial/Ni_v6_2.0_LKBeland2016.eam
+examples/tutorial/input.in
