@@ -234,33 +234,6 @@ Step       Time         Ndiff_env  N_event    n_selected_event dE_event    dh   
 
 It is then possible to open the `trajkmc.xyz` file in your favorite visualization tool (e.g. Ovito, VMD, ASE)
 
-If you don't want to manually activate your Python environment and set the `$PYTHONPATH` for external libraries every time, or if you're working on a cluster, you can simply create a Python script, `run.py`:
-
-
-```python 
-from pykmc.system import System 
-system = System('input.in')
-system.kmc() 
-``` 
-
-and a bash (sbatch) file : 
-
-```bash 
-#!/bash 
-
-#activate python environment : 
-source /path_to_your_python_environment/bin/activate 
-
-#export needed paths : 
-export PYTHONPATH=/your/path/to/artn-plugin/interface:$PYTHONPATH 
-export PYTHONPATH=$PYTHONPATH:/your/path/to/IRA/interface 
-
-#run the simulation 
-python run.py 
-```
-
-and then run the bash script.
-
 If you don’t want to manually activate your Python environment and set the `$PYTHONPATH` for external libraries every time, or if you are working on a cluster, you can simply create a Python script, **`run.py`**:  
 
 ```python
