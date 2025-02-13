@@ -211,29 +211,6 @@ system = System('./input.in')
 system.kmc()
 ```
 
-This should takes a couple of minutes. 
-
-During the simulation, different log files are created as well as an trajectory file with positions of your system during your simulation (by default this file is name `trajkmc.xyz`). 
-
-The pykmc.log file gives you information about the evolution of the system, in the following form : 
-
-```bash 
-Step       Time         Ndiff_env  N_event    n_select_event dE_event    dh           Recontruction dE   Reconstruction Topo
-0          7.435022e+19 5          1          0             1.188492e+00 6.027361e-03 1                  1
-1          7.449341e+19 5          1          0             1.188492e+00 4.027686e-03 1                  1
-2          8.528835e+19 5          1          0             1.188492e+00 3.941497e-03 1 
-``` 
-
-- Step : Step of the simulation 
-- Time : Time of the simulatoin (in ps) 
-- Ndiff_env : Number of different atomic environments at the current step 
-- N_event : Number of events in the catalog 
-- n_selected_event : The index in the catalog of the event selected 
-- dE_event : The energy barrier of the event (in eV)
-- dh : The hasudorff distance for the shape matching 
-- Reconstruction dE : if after applying the event on the system the energy barrier at the saddle point match the one in the catalog 
-- Reconstruction Topo : if after applying the event on the system, the topology of the atom that moves the most matches the one in the catalog
-
 The simulation should take a few minutes to complete.  
 
 During the run, several log files are generated, along with a trajectory file containing the atomic positions at each step. By default, this file is named **`trajkmc.xyz`**.  
@@ -257,7 +234,8 @@ Step       Time         Ndiff_env  N_event    n_selected_event dE_event    dh   
 
 It is then possible to open the `trajkmc.xyz` file in your favorite visualization tool (e.g. Ovito, VMD, ASE)
 
-If you don't want to activate your python environment and add to your `$PYTHONPATH` the paths to external library at each time, or if you work on a cluster, you could simple create a python file `run.py` 
+If you don't want to manually activate your Python environment and set the `$PYTHONPATH` for external libraries every time, or if you're working on a cluster, you can simply create a Python script, `run.py`:
+
 
 ```python 
 from pykmc.system import System 
