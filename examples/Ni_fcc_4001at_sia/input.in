@@ -23,11 +23,11 @@ maxeval = 1000
 style = cna/graph
 radd_cna = 3.0
 rnei = 3.01
-rcut = 12.5
+rcut = 10.0
 
 [EventSearch] 
 style = pARTn 
-rcutenv = 12.5
+rcutenv = 10
 nsearch = 10
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
