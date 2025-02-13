@@ -52,6 +52,22 @@ view(atoms, viewer='ngl')
 
 ```
 
+    Number of atoms = 2047
+    Cell is : 
+     Cell([28.16, 28.16, 28.16])
+
+
+
+    
+
+
+
+
+
+    HBox(children=(NGLWidget(), VBox(children=(Dropdown(description='Show', options=('All', 'Ni'), value='All'), D…
+
+
+
 ## Parts of the KMC algorithm 
 
 pyKMC uses the ```System```class on which each part of the algorithm is build. 
@@ -178,6 +194,13 @@ atoms.set_atomic_numbers(z)
 view(atoms, viewer='ngl')
 ```
 
+
+
+
+    HBox(children=(NGLWidget(), VBox(children=(Dropdown(description='Show', options=('All', 'Ga', 'H'), value='All…
+
+
+
 ### Event Search 
 
 We will use pARTn to find event and use the option 'reconstruction' = True. 
@@ -213,6 +236,43 @@ search_params = {'nsearch' : 10,
 system.event_search('pARTn', search_params, atomic_environment_parameters, potential, reconstruction=True)
 ```
 
+    ============================================================
+    ::>> Output from err_write() subroutine:
+    ::>> ERROR in pARTn, ierr value: -99
+    ::>> Message  : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth
+    ::>> Source   : block_finalize.f90 line: 48
+    ::>> Last caller : artn.f90 line: 603
+    ============================================================
+    ============================================================
+    ::>> Output from err_write() subroutine:
+    ::>> ERROR in pARTn, ierr value: -99
+    ::>> Message  : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth
+    ::>> Source   : block_finalize.f90 line: 48
+    ::>> Last caller : artn.f90 line: 603
+    ============================================================
+    ============================================================
+    ::>> Output from err_write() subroutine:
+    ::>> ERROR in pARTn, ierr value: -99
+    ::>> Message  : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth
+    ::>> Source   : block_finalize.f90 line: 48
+    ::>> Last caller : artn.f90 line: 603
+    ============================================================
+    ============================================================
+    ::>> Output from err_write() subroutine:
+    ::>> ERROR in pARTn, ierr value: -99
+    ::>> Message  : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth
+    ::>> Source   : block_finalize.f90 line: 48
+    ::>> Last caller : artn.f90 line: 603
+    ============================================================
+    ============================================================
+    ::>> Output from err_write() subroutine:
+    ::>> ERROR in pARTn, ierr value: -99
+    ::>> Message  : STOPPING DUE TO ERROR:EIGENVALUE LOST, try to increase nnewchance or nsmooth
+    ::>> Source   : block_finalize.f90 line: 48
+    ::>> Last caller : artn.f90 line: 603
+    ============================================================
+
+
 To see what we obtain, we can save the catalog (also usefull if we want to restart a simulation).
 
 
@@ -230,6 +290,51 @@ catalog = system.catalog[['event_id', 'energy_barrier', 'k']]
 catalog
 ```
 
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>event_id</th>
+      <th>energy_barrier</th>
+      <th>k</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>b'\x02\x00\x00\x03\x00\x03\x00 \x00\x00\x00\x0...</td>
+      <td>1.190599</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>b'\x02\x00\x00\x03\x00\x03\x00 \x00\x00\x00\x0...</td>
+      <td>1.191314</td>
+      <td>0.0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
 and we can see the event : 
 
 
@@ -246,6 +351,13 @@ for e in c :
     event_traj.append(atoms)
 view(event_traj, viewer='ngl')
 ```
+
+
+
+
+    HBox(children=(NGLWidget(max_frame=2), VBox(children=(Dropdown(description='Show', options=('All', 'Zn', 'Br')…
+
+
 
 ### Point Set Registration : 
 
@@ -274,6 +386,28 @@ at_idx = random.choice(l_atoms)
 
 system.point_set_registration('ira', psr_parameters, idx_cat, at_idx, 7.0, save=True)
 ```
+
+
+
+
+    (array([[ 9.99999999e-01, -2.81417734e-05,  1.96675688e-05],
+            [ 2.81413948e-05,  9.99999999e-01,  1.92467965e-05],
+            [ 1.96681104e-05,  1.92462430e-05, -1.00000000e+00]]),
+     array([ 3.50327971,  1.74205704, 26.39949026]),
+     array([  1,   0,   5,   3,   6,   2,   4,  10,   8,  11,   7,   9,  20,
+             21,  23,  19,  16,  17,  22,  15,  12,  13,  18,  14,  35,  32,
+             33,  36,  31,  29,  34,  28,  25,  26,  30,  24,  27,  49,  46,
+             47,  50,  45,  42,  43,  48,  41,  38,  39,  44,  37,  40,  55,
+             54,  53,  52,  51,  64,  65,  67,  63,  60,  61,  66,  59,  56,
+             57,  62,  58,  80,  77,  78,  81,  76,  73,  74,  79,  72,  69,
+             70,  75,  68,  71,  94,  91,  92,  95,  90,  87,  88,  93,  86,
+             83,  84,  89,  82,  85, 100,  99,  98,  97,  96, 106, 105, 103,
+            107, 102, 101, 104, 119, 116, 117, 115, 112, 113, 118, 111, 109,
+            110, 114, 108, 131, 128, 129, 127, 124, 125, 130, 123, 121, 122,
+            126, 120, 133, 132]),
+     0.00510513880942386)
+
+
 
 And finaly we can see the reconstruction 
 
@@ -318,3 +452,10 @@ traj.append(Atoms(at_name, positions=pos))
 view(traj, viewer='ngl')
 
 ```
+
+
+
+
+    HBox(children=(NGLWidget(max_frame=1), VBox(children=(Dropdown(description='Show', options=('All', 'Ni', 'Cu')…
+
+

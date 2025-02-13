@@ -14,6 +14,7 @@ nav:
   - KMC Parameters : parameters.md
   - Tutorial: 
       - pyKMC Workflow : 0-pyKMC-workflow.md 
+      - Simple example : 1-pyKMC-simple.md
   - API Reference: reference.md
 
 plugins:
@@ -28,5 +29,7 @@ plugins:
             separate_signature: true
             show_docstring_examples: true
             show_root_heading: true
+  - search:
+  - mkdocs-jupyter:
 
 site_url: https://hugomoison.github.io/pyKMC/

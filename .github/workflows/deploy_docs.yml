@@ -1,2 +1,2 @@
 - name : Generate parameters documentation 
-  run : python scripts/generate_parameters_doc.py
+  run : python scripts/generate_parameters_and_tutorial_doc.py
