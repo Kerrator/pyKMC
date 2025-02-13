@@ -11,6 +11,8 @@
 - En fait je crois que c'est stupide de check la topologie a la reconstruction puisque comme je prends les positions final de l'evenement, applique transformation matrices, et remplace ces positions dans le system, si apres je recalcul la topologie baaaah c'est deux fois le meme calcul. Avec IRA, la reconstruction est pas fait de la meme manière qu'avec kart. A la limite calculer dE ok, si on a lors de la reconstructoin les positions dans rcutevent sont legerement deplacé mais meme ça, si dh de ira est vriament faible, ça devrait pas être nécessaire, puisque, encore une fois, on va calculer la meme chose. 
 - Comme on utilise les positions finales données par partn qui sont relaxées, est ce qu'on a besoin de relaxé ? j'imagine que ça dépend de dh 
 - Add restart option --> if yes not use configuration file first step
+- Could think of a when to reuse a catalog with different temperature, meaning need to recompute k
+- Topo reconstruction pourrait devenir un chekc warning pour dire qu'il faut augmenter rcut
 
 
 ##### config
@@ -32,3 +34,5 @@
 
 ###### KMC : 
 - if restart dont save first configuration at step = 0
+- voir check_topo (pour le moment changer en return True)
+- reconstruction avec pARTn
