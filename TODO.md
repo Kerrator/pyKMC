@@ -13,6 +13,7 @@
 - Add restart option --> if yes not use configuration file first step
 - Could think of a when to reuse a catalog with different temperature, meaning need to recompute k
 - Topo reconstruction pourrait devenir un chekc warning pour dire qu'il faut augmenter rcut
+- Quand SIA va dans VAC, tous les ID deviennent "crystal" et donc le code crash parce y'a plus d'environement ID dans le catalog (crash a la fonction selected event rejection free, cad que len(k) == 0 ) -> il faut faire une sortie de la boucle ici avec un message dans le log
 
 
 ##### config
