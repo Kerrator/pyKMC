@@ -7,6 +7,7 @@ from ase.calculators.lammpslib import LAMMPSlib
 from .atomic_environment import make_graph
 import pynauty
 import math as m
+import sys
 
 #TODO should extract energy system after minimization
 #TODO using our own build in function to write outpufile traj file may be less time consuming than creating an Atoms and use ase.io.write
@@ -279,6 +280,9 @@ class KMC() :
         if reconstruction : 
         #1-Find index list of all possible event in the catalog, ie events having IDs that are in the current system.environment
             l_env = [dict['ID'] for dict in self.system.environment]
+            if l_env == ['crystal'] : 
+                self.system.logger.logger.info('Only atoms with crystalline environment')
+                self.close()
             l_catalog = [i for i in range(len(self.system.catalog)) if self.system.catalog.loc[i].at['event_id'] in l_env ]
         else : 
         #1- if reconstruction = False all events are possible : 
@@ -517,3 +521,8 @@ class KMC() :
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']
 #        return check 
         return True
+    
+
+    def close(self) : 
+        self.system.logger.logger.info(':> Quit KMC simulation')
+        sys.exit()

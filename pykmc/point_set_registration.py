@@ -92,6 +92,9 @@ class PointSetRegistration() :
                 Hausdorff distance value of the match
 
         """
+        print('IRA')
+        print('idx_cat ', idx_cat)
+        print('central_atom_index ', central_atom_index)
         #Initialize IRA
         ira = ira_mod.IRA() 
 
