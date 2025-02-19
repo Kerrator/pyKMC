@@ -1,3 +1,11 @@
+Priority : 
+- [ ] Make check distance dh in update position a parameter. 
+- [ ] Check what happen when dh distance is high 
+- [ ] Topology graph with different chemical elements (add vertex coloring)
+- [ ] Deal with symmetries 
+- [ ] Debug log and put pARTn fails in file
+
+
 ##### General
 - Pour le moment, psr utilise que IRA et retourne rmat, tr, perm et dh. Si un jour on veut utiliser autre chose, il faut faire des modifications pour que �a soit plus g�n�ral (surtout sur le Return de la fonction system.psr())
 - Voir comment g�rer les potentiels Lammps si on a autre chose que des pair_style (eg pair_bonds) -> peut être créer une fonction dans utilities
