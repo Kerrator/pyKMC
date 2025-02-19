@@ -8,10 +8,10 @@ from pstats import Stats
 import yaml
 
 #Parameters : 
-init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
+init_config_file = '/root/pyKMC/examples/Ni_fcc_4000at_monovacancy+sia/config_bug.xyz' 
 
-atomicenv_params = {'rnei': 3.01,
-                    'rcut'  : 4.0, 
+atomicenv_params = {'rnei': 2.8,
+                    'rcut'  : 7.0, 
                     'radd_cna' : 0.0}
 nprocs = 8
 backend = 'local'
