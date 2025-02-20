@@ -104,7 +104,8 @@ class KMC() :
                         self.system.logger.logger.info("WARNING: At step {}, no event found for the current configuration, try to modify EventSearch parameters".format(step))
                     else : 
                        #update time 
-                       self.time += results[1] 
+                       if results[3] and results[4] : 
+                           self.time += results[1] 
                        self.system.logger.table_line_info_kmc(step, self.time, len(self.system.environment), len(self.system.catalog), results[0], self.system.catalog.loc[results[0]].at['energy_barrier'], results[2], results[3], results[4]) 
                        
 
