@@ -1,5 +1,5 @@
 Priority : 
-- [ ] FIX : When reconstruction = False, should not upadate time (change add if condition line 107 kmc.py)
+- [x] FIX : When reconstruction = False, should not upadate time (change add if condition line 107 kmc.py)
 - [x] Make check distance dh in update position a parameter. 
 - [x] Check what happen when dh distance is high 
     - looks like a pbc problem when translating before register in the catalog
