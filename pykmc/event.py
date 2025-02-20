@@ -318,6 +318,7 @@ class EventSearch() :
         dx, dy, dz = ax/2 - min1_positions[index_move][0], ay/2 - min1_positions[index_move][1], az/2 - min1_positions[index_move][2]
         for atoms in event_traj : 
             atoms.translate(np.array([dx, dy, dz]))
+            atoms.set_positions(atoms.get_positions(wrap=True))
         
         #neighbors lists around atom that move the most 
         ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)

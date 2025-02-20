@@ -58,7 +58,8 @@ DEFAULT = {
         'k0' : 1.0e-12
     }, 
     'PSR' : {
-        'kmax_factor' : 1.8
+        'kmax_factor' : 1.8,
+        'hausdorff_dist_thr' : 0.1,
     }
 }
 
@@ -106,7 +107,8 @@ DESCRIPTIONS = {
                      },
     "PSR" : {"__description__" : ("Parameters controlling point set registration (shape matching)"), 
              "style" : "which method is used, `'ira'` for IterativeRotationsAssignments", 
-             "kmax_factor" : "factor for multiplication of search radius"
+             "kmax_factor" : "factor for multiplication of search radius", 
+             "hausdorff_dist_thr" : "Hausdorff distance threshold representing the largest displacement of any atom from the reference structure after IRA point set registration"
              }
 }
 

@@ -92,9 +92,6 @@ class PointSetRegistration() :
                 Hausdorff distance value of the match
 
         """
-        print('IRA')
-        print('idx_cat ', idx_cat)
-        print('central_atom_index ', central_atom_index)
         #Initialize IRA
         ira = ira_mod.IRA() 
 
@@ -134,7 +131,7 @@ class PointSetRegistration() :
                                             'T', 
                                             'P', 
                                             'dh'])
-            if self.save : 
+            if self.save :
                 results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
             return rmat, tr, perm, dh
         except : 
