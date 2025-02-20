@@ -1,9 +1,17 @@
 Priority : 
-- [ ] Make check distance dh in update position a parameter. 
-- [ ] Check what happen when dh distance is high 
+- [ ] FIX : When reconstruction = False, should not upadate time (change add if condition line 107 kmc.py)
+- [x] Make check distance dh in update position a parameter. 
+- [x] Check what happen when dh distance is high 
+    - looks like a pbc problem when translating before register in the catalog
+    - [x] Fix it
 - [ ] Topology graph with different chemical elements (add vertex coloring)
+- [ ] Deal with pair_style hybrid/overlay (ie multiple pair_coeff definition (test with zbl https://www.ctcms.nist.gov/potentials/entry/2016--Beland-L-K-Lu-C-Osetskiy-Y-N-et-al--Ni-Co/))
 - [ ] Deal with symmetries 
 - [ ] Debug log and put pARTn fails in file
+- [ ] add restart parameter in config, if true dont write first config in kmc loop
+- [ ] Reconstruction with pARTn
+- [ ] Lammps instances reused for event search (some benchmark before doing to see the improvment)
+- [ ] Clean all Atoms usage and neighboring
 
 
 ##### General
@@ -21,8 +29,7 @@ Priority :
 - Add restart option --> if yes not use configuration file first step
 - Could think of a when to reuse a catalog with different temperature, meaning need to recompute k
 - Topo reconstruction pourrait devenir un chekc warning pour dire qu'il faut augmenter rcut
-- Quand SIA va dans VAC, tous les ID deviennent "crystal" et donc le code crash parce y'a plus d'environement ID dans le catalog (crash a la fonction selected event rejection free, cad que len(k) == 0 ) -> il faut faire une sortie de la boucle ici avec un message dans le log
-
+- could think of a clean close by hand (like ipi)
 
 ##### config
 - Dans config, on devrait checker si les param�tres de inputs sont coh�rents

@@ -4,13 +4,14 @@ from ase import Atoms
 import numpy as np 
 
 #Read input system 
-init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz'
+#init_config_file = '../../examples/Ni_fcc_2047at_monovacancy/initial_config.xyz'
+init_config_file = '.recoproblem.xyz'
 system = read(init_config_file) 
 #Read catalog 
 catalog = pd.read_pickle('catalog.pickle')
 
 #psr
-psr = pd.read_pickle('psr_event_0.pickle') 
+psr = pd.read_pickle('psr_event_97.pickle') 
 
 #Read event : 
 idx_cat = psr['n event'][0]
