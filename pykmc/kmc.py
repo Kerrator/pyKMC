@@ -355,7 +355,7 @@ class KMC() :
                 `True` if the topology at the saddle point after the reconstruction match the on in the catalog, else `False`
         """
 
-        if dh < 0.05 :
+        if dh < self.psr_parameters['hausdorff_dist_thr'] :
 
             #Compute energy of the system : 
             Eini = self.compute_energy_lammps()
@@ -525,4 +525,5 @@ class KMC() :
 
     def close(self) : 
         self.system.logger.logger.info(':> Quit KMC simulation')
+        self.system.catalog.to_pickle('catalog.pickle')
         sys.exit()
