@@ -34,9 +34,9 @@ Priority :
 ##### config
 - Dans config, on devrait checker si les param�tres de inputs sont coh�rents
 ##### Atomic environment 
-- dans cna_graph, il faudrait adapter pour utiliser cna puis graph, et pas tous reecrire.
 - better gather results 
 - See if we can improve the way I connect in make_graph the graph atom index and system atom index (I think that some part are not necessary)
+- Also not necessary to recompute all atomic env, the problem is that it means that we need to track atomic index after Lammps and shape matching (for this we have the permutation matrix)
 ##### Event search 
 - could add dimer and neb (with ASE)
 - for pARTn parameter, should search every items in config that start with 'ira' and set them, else default partn parameter
