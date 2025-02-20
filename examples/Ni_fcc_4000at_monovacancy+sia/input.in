@@ -1,5 +1,5 @@
 [Control] 
-config_file = ./beforeallcrystal.xyz
+config_file = ./initial_config.xyz
 output_file = ./trajkmc.xyz
 nkmc_steps = 200
 #catalog = ./catalog.pickle
