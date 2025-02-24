@@ -484,7 +484,7 @@ class EventSearch() :
             delr2 = artn.extract('delr_min2')
             print('delr', delr1, delr2)
             #Checks if one minimum is close to the original configuration 
-            if delr1 < 0.5 or delr2 < 0.5 : 
+            if delr1 < self.search_params['partn_delr_threshold'] or delr2 < self.search_params['partn_delr_threshold'] : 
 
                 E_sad = artn.extract("etot_sad")
                 E_min1 = artn.extract("etot_min1")
