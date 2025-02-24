@@ -4,7 +4,7 @@ from ase.io.lammpsdata import write_lammps_data
 import random
 
 #Parameters : 
-output = '/root/pyKMC/examples/NiCo_fcc_2047at_monovacancy/initial_config'
+output = '/root/pyKMC/examples/NiFe_fcc_2047at_monovacancy/initial_config'
 #Ni fcc
 atoms = bulk('Ni', crystalstructure='fcc', a=3.52, cubic=True)
 atoms = atoms.repeat((8,8,8))
@@ -24,7 +24,7 @@ for i in range(number):
     indices_ni = [i for i, elem in enumerate(atomlist) if elem == 'Ni']
     #randomly choose an indice
     index_choisi = random.choice(indices_ni)
-    atomlist[index_choisi] = 'Co' 
+    atomlist[index_choisi] = 'Fe' 
 
 atoms.set_chemical_symbols(atomlist)
 

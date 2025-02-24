@@ -306,12 +306,13 @@ class EventSearch() :
         positions = [min1_positions, saddle_positions, min2_positions]
         cell = self.system.get_cell()
         #Create Needed event trajectory (for translation) 
-        event_traj = [Atoms(positions=pos, cell=cell, pbc=True) for pos in positions]
+        diff_elements = list(sorted(set(self.system.get_chemical_symbols())))
+        event_traj = [Atoms(symbols= self.system.get_chemical_symbols(), positions=pos, cell=cell, pbc=True) for pos in positions]
 
-        #Compute all needed topology ID : 
-        id_min1 = pynauty.certificate(make_graph(event_traj[0], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
-        id_saddle = pynauty.certificate(make_graph(event_traj[1], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
-        id_min2 = pynauty.certificate(make_graph(event_traj[2], [index_move], self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+        #Compute all needed topology ID :  
+        id_min1 = pynauty.certificate(make_graph(event_traj[0], [index_move], diff_elements, self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+        id_saddle = pynauty.certificate(make_graph(event_traj[1], [index_move], diff_elements, self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
+        id_min2 = pynauty.certificate(make_graph(event_traj[2], [index_move], diff_elements, self.atomenv_params['rnei'], self.atomenv_params['rcut'])[0])
 
         #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
         ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
@@ -481,9 +482,9 @@ class EventSearch() :
             #Results 
             delr1 = artn.extract('delr_min1') 
             delr2 = artn.extract('delr_min2')
-
+            print('delr', delr1, delr2)
             #Checks if one minimum is close to the original configuration 
-            if delr1 < 0.2 or delr2 < 0.2 : 
+            if delr1 < 0.5 or delr2 < 0.5 : 
 
                 E_sad = artn.extract("etot_sad")
                 E_min1 = artn.extract("etot_min1")

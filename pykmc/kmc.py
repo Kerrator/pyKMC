@@ -515,8 +515,10 @@ class KMC() :
         `True` if the topology of the saddle opint is consistent with the one in the catalog after the reconstruction, else `False`
 
         """
-        atoms = Atoms(positions=self.system.get_positions(), cell = self.system.get_cell(), pbc=True)
-        g_saddle = make_graph(atoms, [move_atomsys_idx], self.atomicenvironment_parameters['rnei'], self.atomicenvironment_parameters['rcut'])[0]
+        atoms = Atoms(symbols=self.system.get_chemical_symbols(), positions=self.system.get_positions(), cell = self.system.get_cell(), pbc=True)
+
+        diff_elements = list(sorted(set(self.system.get_chemical_symbols())))
+        g_saddle = make_graph(atoms, [move_atomsys_idx], diff_elements, self.atomicenvironment_parameters['rnei'], self.atomicenvironment_parameters['rcut'])[0]
         topo_saddle = pynauty.certificate(g_saddle)
 
         check = topo_saddle == self.system.catalog.loc[idx_cat].at['id_saddle']

@@ -12,6 +12,9 @@ Priority :
 - [ ] Reconstruction with pARTn
 - [ ] Lammps instances reused for event search (some benchmark before doing to see the improvment)
 - [ ] Clean all Atoms usage and neighboring
+- [ ] Fix : When Error minimization reading potentiel file (file not found) lammps close but the code is still running (should exit)
+- [ ] Think of a way do deal with randomly distributed alloy to not search events even if they are the "same" 
+- [ ] Add possibility to dump/save pARTn info during the search.
 
 
 ##### General

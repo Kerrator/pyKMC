@@ -166,8 +166,10 @@ class AtomicEnvironment() :
         local_index = split[rank] 
 
         #Create graphs, can use other commented functions that we tested (see commented make_graph functions) 
+        #list of different elements, stupid to do it every time, could be a System attribute
+        diff_elements = list(sorted(set(self.system.get_chemical_symbols())))
         #Here, need diagonal cell for box_size in k-d tree
-        list_g = make_graph(self.system, local_index, rnei, rcut)
+        list_g = make_graph(self.system, local_index, diff_elements, rnei, rcut)
         list_topo = [] 
         for g in list_g : 
             #compute certificate
@@ -234,8 +236,10 @@ class AtomicEnvironment() :
         local_index = split[rank]
 
         #Compute Graph
+            #list of different elements, stupid to do it every time, could be a System attribute
+        diff_elements = list(sorted(set(self.system.get_chemical_symbols())))
         #graph for each rank
-        list_g = make_graph(self.system, local_index, self.atomenv_params['rnei'], self.atomenv_params['rcut'])
+        list_g = make_graph(self.system, local_index, diff_elements, self.atomenv_params['rnei'], self.atomenv_params['rcut'])
         #gather graphs : 
         result = np.column_stack((local_index, np.array(list_g)))
         graphs = comm.gather(result, root=0)
@@ -296,7 +300,7 @@ class AtomicEnvironment() :
 
         return id, cna_array, positions
 
-def make_graph(atoms, list_id, rnei, rcut) : 
+def make_graph(atoms, list_id, list_diff_elements, rnei, rcut) : 
     """
     Create graph, using scipy cKDTree, with boxsize to find neighbors 
 
@@ -306,6 +310,8 @@ def make_graph(atoms, list_id, rnei, rcut) :
         current system with positions
     list_id : List[int]
         list of atoms index for which we create a graph
+    list_diff_elements : List[str]
+        list of different elements in the system, must be sorted to avoid same topology for different geometries
     rnei : float
         radial cutoff distance to define nearest neighbors
     rcut : float
@@ -339,10 +345,24 @@ def make_graph(atoms, list_id, rnei, rcut) :
                 if neighbor != ind and neighbor in atominenv_idx:  #not have an atom that has itself as a neighbour
                     adjacency_dict[i].append(global_to_local[neighbor])  #Map 
 
+        #Coloring vertex 
+        vertex = []
+        list_symbols = atoms.get_chemical_symbols()
+            #for each different element 
+        #could try to use counting module
+        for element in list_diff_elements : 
+            tmp = [] 
+            for ind in atominenv_idx : 
+                if list_symbols[ind] == element : 
+                    tmp.append(global_to_local[ind]) 
+            vertex.append(set(tmp))
+                
+
         #Create graph 
         graph = pynauty.Graph(
             number_of_vertices=len(atominenv_idx),
             adjacency_dict=adjacency_dict,
+            vertex_coloring=vertex,
             directed=False
         )
         
