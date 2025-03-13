@@ -477,6 +477,18 @@ class KMC() :
                 newpos[i] = coords[c]
                 c +=1
         self.system.set_positions(newpos)
+        #TEST need change atoms symbols based on perm 
+        #find symbols for atoms in neighbor_list : 
+        neighbor_symbols = [self.system.get_chemical_symbols()[i] for i in neighbor_list]
+        #permute symbols using perm : 
+        permuted_symbols = [neighbor_symbols[i] for i in perm] 
+        #Change symbols all system : 
+        new_symbols = self.system.get_chemical_symbols() 
+        for idx, new_symbol in zip(neighbor_list, permuted_symbols) : 
+            new_symbols[idx] = new_symbol 
+        self.system.set_chemical_symbols(new_symbols)
+        #END TEST 
+
         if find_saddle_atom : 
             return move_atomsys_idx
 
@@ -498,6 +510,7 @@ class KMC() :
         E_sad = self.compute_energy_lammps()
         dE = E_sad-E_ini
         return abs(dE-self.system.catalog.loc[idx_cat].at['energy_barrier']) < 0.5
+        #return True
 
     def check_saddle_topo(self, idx_cat, move_atomsys_idx) : 
         """ 

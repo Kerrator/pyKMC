@@ -4,17 +4,18 @@ Priority :
 - [x] Check what happen when dh distance is high 
     - looks like a pbc problem when translating before register in the catalog
     - [x] Fix it
-- [ ] Topology graph with different chemical elements (add vertex coloring)
+- [x] Topology graph with different chemical elements (add vertex coloring)
 - [ ] Deal with pair_style hybrid/overlay (ie multiple pair_coeff definition (test with zbl https://www.ctcms.nist.gov/potentials/entry/2016--Beland-L-K-Lu-C-Osetskiy-Y-N-et-al--Ni-Co/))
 - [ ] Deal with symmetries 
 - [ ] Debug log and put pARTn fails in file
-- [ ] add restart parameter in config, if true dont write first config in kmc loop
+- [ ] add restart parameter in config, if true dont write first config in kmc loop/ also see what's happening with using previous catalog, looks like it's not reading previous events
 - [ ] Reconstruction with pARTn
 - [ ] Lammps instances reused for event search (some benchmark before doing to see the improvment)
 - [ ] Clean all Atoms usage and neighboring
 - [ ] Fix : When Error minimization reading potentiel file (file not found) lammps close but the code is still running (should exit)
 - [ ] Think of a way do deal with randomly distributed alloy to not search events even if they are the "same" 
 - [ ] Add possibility to dump/save pARTn info during the search.
+- [ ] Reorganise code, put pARTn, Lammps, IRA in dedicated scripts.
 
 
 ##### General

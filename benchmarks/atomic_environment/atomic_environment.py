@@ -9,8 +9,8 @@ import yaml
 
 #Parameters : 
 #init_config_file = '/root/pyKMC/examples/Ni_fcc_4000at_monovacancy+sia/initial_config.xyz' 
-init_config_file = '/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
-
+#init_config_file = '/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/initial_config.xyz' 
+init_config_file = '/root/tests/LiamCu/initial_config_minimized.xyz' 
 atomicenv_params = {'rnei': 3.0,
                     'rcut'  : 7.0, 
                     'radd_cna' : 0.0}

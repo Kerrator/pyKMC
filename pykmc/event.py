@@ -474,7 +474,7 @@ class EventSearch() :
         artn.set('nperp', self.search_params['partn_nperp'])
 
         #Run
-        lmp.command("minimize 1e-3 1e-3 1000 1000")
+        lmp.command("minimize 1e-6 1e-8 1000 1000")
 
         #Need to extract min 1, min 2, saddle positions and energy barrier
         err = artn.get_runparam("error_message")
@@ -482,7 +482,6 @@ class EventSearch() :
             #Results 
             delr1 = artn.extract('delr_min1') 
             delr2 = artn.extract('delr_min2')
-            print('delr', delr1, delr2)
             #Checks if one minimum is close to the original configuration 
             if delr1 < self.search_params['partn_delr_threshold'] or delr2 < self.search_params['partn_delr_threshold'] : 
 

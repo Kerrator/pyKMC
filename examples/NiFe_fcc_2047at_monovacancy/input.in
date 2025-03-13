@@ -1,7 +1,7 @@
 [Control] 
 config_file = ./initial_config.xyz
 output_file = ./trajkmc.xyz
-nkmc_steps = 10
+nkmc_steps = 500
 #catalog = ./catalog.pickle
 nprocs = 8
 reconstruction = True
@@ -28,10 +28,11 @@ rcut = 7.0
 [EventSearch] 
 style = pARTn 
 rcutenv = 7.0
-nsearch = 1
+nsearch = 10
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 emin_event = 0.2
+partn_delr_threshold = 0.5
 k0 = 1.0e-12
 T = 300.0
 
