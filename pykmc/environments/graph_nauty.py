@@ -2,7 +2,7 @@ import pynauty
 import numpy as np
 
 
-def graph(neighbors_list, environment_list) : 
+def graph(neighbors_list, environment_list, atom_idx= None) : 
     """ 
     """
     from mpi4py import MPI
@@ -12,7 +12,10 @@ def graph(neighbors_list, environment_list) :
     nprocs = comm.Get_size()
 
     #Split index atoms in approximatively even number sublist
-    split = np.array_split(range(len(neighbors_list)), nprocs)
+    if atom_idx == None : #graph for all atoms in system
+        split = np.array_split(range(len(neighbors_list)), nprocs)
+    else : 
+        split = np.array_split(atom_idx, nprocs) #when using cna/graph
     local_index = split[rank] 
 
     list_g = make_graph(local_index, neighbors_list, environment_list)
