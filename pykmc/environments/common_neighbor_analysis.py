@@ -6,6 +6,6 @@ def cna(neighbors_list) :
             hash.append('crystal')
         else : 
             hash.append('noncrystal')
-    return cna
+    return hash
 
 

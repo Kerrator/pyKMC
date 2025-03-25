@@ -21,7 +21,7 @@ maxiter = 1000
 maxeval = 1000
 
 [AtomicEnvironment] 
-style = cna
+style = graph
 radd_cna = 3.0
 rnei = 3.01
 rcut = 6.5

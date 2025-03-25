@@ -18,7 +18,9 @@ system.update_positions(new_positions)
 nl = NeighborsList(system, config)
 
 #AtomicEnvironment
-ae = AtomicEnvironment(config, nl.neighbors_list['rnei'])
-print(ae.atomic_environment_list)
-
+ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
+print(len(set(ae.atomic_environment_list)))
+values, counts = np.unique(ae.atomic_environment_list, return_counts=True)
+print(values)
+print(counts)
 
