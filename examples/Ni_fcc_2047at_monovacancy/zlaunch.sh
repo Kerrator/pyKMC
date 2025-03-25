@@ -9,4 +9,4 @@ export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 
 
 export PYTHONFAULTHANDLER=1
-python3 run.py
+time python3 run.py

@@ -115,7 +115,7 @@ DESCRIPTIONS = {
 
 
 @dataclass 
-class Config : 
+class SystemConfig : 
     """ 
     Class to manage input parameters
     """ 
@@ -169,7 +169,7 @@ class Config :
             if section not in config_dict: 
                 config_dict[section] = {}
             config_dict[section].update({
-                    key : Config._convert_value(config.get(section,key))
+                    key : SystemConfig._convert_value(config.get(section,key))
                     for key, _ in config.items(section)
             })
 
