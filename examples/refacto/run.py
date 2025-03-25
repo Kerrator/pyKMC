@@ -1,4 +1,4 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment
+from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog
 from ase.io import write
 from ase import Atoms
 import numpy as np
@@ -20,11 +20,7 @@ nl = NeighborsList(system, config)
 #AtomicEnvironment
 ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
 
-from collections import Counter
+#Catalog : 
+catalog = Catalog(config) 
 
 
-# Compter les occurrences
-compteur = Counter(ae.atomic_environment_list)
-
-# Afficher les résultats
-print(compteur)

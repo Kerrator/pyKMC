@@ -2,7 +2,6 @@
 config_file = ./initial_config.xyz 
 output_file = ./trajkmc.xyz
 nkmc_steps = 1
-#catalog = ./catalog.pickle
 nprocs = 8
 reconstruction = True
 engine = lammps
