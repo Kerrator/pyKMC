@@ -1,5 +1,6 @@
 import argparse 
-from pykmc import KMC, Config
+from .kmc import KMC
+from .config import Config
 
 def main() : 
     parser = argparse.ArgumentParser() 
