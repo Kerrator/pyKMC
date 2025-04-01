@@ -3,13 +3,15 @@ import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from lammps import lammps
 from pykmc.config import Config
+from .partn import pARTn_search
 
 class LammpsEngine(BaseEngine) : 
 
-    def __init__(self, config: Config) : 
+    def __init__(self, config: Config) :
+        self.config_control = config.get('Control') 
         self.config_potential = config.get('Potential')
         self.config_minimization = config.get('Minimization')
-
+        self.config_event_search = config.get('EventSearch')
 
 
     def _initialize_default(self,system, lmp_instance) : 
@@ -84,6 +86,18 @@ class LammpsEngine(BaseEngine) :
             return positions
         else : 
             return None
+        
+    def pARTn(self, system, central_atom) : 
+        #Parameters
+
+        lmp = lammps()
+        #Lammps default parameters : 
+        self._initialize_default(system, lmp)
+        #Initialize potential 
+        self._initialize_potential(lmp)
+        #pARTn search : 
+        pARTn_search(lmp, self.config_event_search, central_atom)
+
     def compute_distances(self, system) : 
         pass
     def neighbors(self, system) :
