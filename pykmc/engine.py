@@ -1,5 +1,4 @@
 from .lammpsengine import LammpsEngine
-from .config import Config
 
 class Engine : 
 
@@ -15,6 +14,13 @@ class Engine :
     def minimize(self, system) : 
         result = self.engine.minimize(system)
         return result
+
+    def search_event(self, system, central_atom_idx:int ) : 
+        match self.engine.config_event_search['style'] :
+            case 'pARTn' : 
+                self.engine.pARTn(system, central_atom_idx)
+            case _ : 
+                raise Exception('Event Search style unknown')
 
     def compute_distances(self, system) : 
         self.engine.compute_distances(system)
