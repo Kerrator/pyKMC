@@ -59,7 +59,10 @@ def pARTn_search(lmp, config_event_search, central_atom_idx) :
             dist = np.sqrt(dist)
             dist[dist > rcutenv] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
             index_move = np.argmax(dist)
-            return min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward
+            if delr1 < delr2 : #necessary for no reconstruction option
+                return min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward
+            else : 
+                return min2positions, saddlepositions, min1positions, index_move, dE_backward, dE_forward
         else :
             return None
     else :
