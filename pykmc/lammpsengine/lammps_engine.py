@@ -96,7 +96,8 @@ class LammpsEngine(BaseEngine) :
         #Initialize potential 
         self._initialize_potential(lmp)
         #pARTn search : 
-        pARTn_search(lmp, self.config_event_search, central_atom)
+        result = pARTn_search(lmp, self.config_event_search, central_atom)
+        return result
 
     def compute_distances(self, system) : 
         pass

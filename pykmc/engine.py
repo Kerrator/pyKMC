@@ -18,10 +18,10 @@ class Engine :
     def search_event(self, system, central_atom_idx:int ) : 
         match self.engine.config_event_search['style'] :
             case 'pARTn' : 
-                self.engine.pARTn(system, central_atom_idx)
+                result =  self.engine.pARTn(system, central_atom_idx)
             case _ : 
                 raise Exception('Event Search style unknown')
-
+        return result 
     def compute_distances(self, system) : 
         self.engine.compute_distances(system)
 
