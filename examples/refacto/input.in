@@ -20,7 +20,7 @@ maxiter = 1000
 maxeval = 1000
 
 [AtomicEnvironment] 
-style = cna/graph
+style = cna
 #radd_cna = 1
 rnei = 3.01
 rcut = 6.5
@@ -28,7 +28,7 @@ rcut = 6.5
 [EventSearch] 
 style = pARTn 
 rcutenv = 6.5
-nsearch = 1
+nsearch = 5
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 emin_event = 0.5

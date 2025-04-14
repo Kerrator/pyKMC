@@ -35,7 +35,6 @@ class KMC() :
 
             #List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self._central_atoms_research(new_environment, nsearch)
-
             #Count number of tentative to prevent empty catalog : 
             MAX_TRIES = 5
             tries = 0 
@@ -43,14 +42,15 @@ class KMC() :
             while tries < MAX_TRIES : 
                 #Fro all idx in central_atom_research_list
                 fails = 0 #to count the number of event search fails
+                
                 for idx in central_atom_research_list : 
 
                     #do an event search 
-                    results = self.engine.search_event(self.system, central_atom_research_list[-1])
+                    results = self.engine.search_event(self.system, idx)
 
                     if results != None : 
                     #add results in catalog 
-                        is_new = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'])
+                        is_new, in_e_bounds = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'])
                     else : #failed 
                         fails += 1
                 
@@ -68,7 +68,6 @@ class KMC() :
             idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
             self._apply_event(idx_atom_apply_event, idx_event_catalog)
 
-
             #update time : 
             time += delta_t
             #write config to file 
@@ -76,6 +75,13 @@ class KMC() :
             #if no reconstruction, new catalog
             if not self.config['Control']['reconstruction'] : 
                 self.catalog = Catalog(self.config)
+            else : #update visited environments 
+                pass
+
+            #update neighborlist : 
+            self.neighbors_list = NeighborsList(self.system, self.config) 
+            #update atomic environment 
+            self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
 
 
     def _central_atoms_research(self, new_environment, nsearch) : 

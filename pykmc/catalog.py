@@ -16,14 +16,22 @@ class Catalog :
     def add_event(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, neighbors_list_environment) : 
         """ 
         """
+        #Energy bounds 
+        emin = self.config['EventSearch']['emin_event']
+        emax = self.config['EventSearch']['emax_event']
         #Get environment of move_atom_idx 
         neighbors = neighbors_list_environment[move_atom_idx]
         if self.config['Control']['reconstruction'] : 
             self._add_event_with_reconstruction(min1positions[neighbors], saddlepositions[neighbors], min2positions[neighbors], move_atom_idx, dE_forward, dE_backward)
             pass 
         else : 
-            is_new = self._add_event_no_reconstruction(min2positions[neighbors], move_atom_idx, dE_forward)
-            return is_new
+            if emin < dE_forward < emax : 
+                is_new = self._add_event_no_reconstruction(min2positions[neighbors], move_atom_idx, dE_forward)
+                in_e_bounds = True 
+            else : 
+                is_new = True
+                in_e_bounds = False  
+            return is_new, in_e_bounds
 
 
     def _add_event_with_reconstruction(self, min1positions, saddlepositions, min2positions )  :
