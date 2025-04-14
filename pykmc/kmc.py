@@ -33,6 +33,10 @@ class KMC() :
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
+            if len(new_environment) == 0 : 
+                print('only cristalline atoms') 
+                self._close()
+
             #List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self._central_atoms_research(new_environment, nsearch)
             #Count number of tentative to prevent empty catalog : 
