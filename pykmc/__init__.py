@@ -1,4 +1,3 @@
-from .minimization import *
 from .environments import *
 from .atomic_environment import *
 from .system import *
