@@ -29,7 +29,7 @@ class KMC() :
         #Write initial step to file : 
         self._append_snapshot_to_trajectory()
         ####### KMC Loop ########
-        for step in range(1) :
+        for step in range(nkmc_steps) :
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
@@ -55,15 +55,28 @@ class KMC() :
                         fails += 1
                 
                 if len(self.catalog.catalog) > 0 : 
-                    self._select_event() 
+                    idx_event_catalog, delta_t = self._select_event() 
                     break #end while loop
                 else : 
                     tries += 1 
                     print('retry event searches, empty catalog')
-            else : #if not breack uncounter : 
+            else : #if not breack encounter : 
                 print('emtpy catalog avec {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
+
+            #Select central atom having same atomic environment as the event
+            idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
+            self._apply_event(idx_atom_apply_event, idx_event_catalog)
+
+
+            #update time : 
+            time += delta_t
+            #write config to file 
             self._append_snapshot_to_trajectory()
+            #if no reconstruction, new catalog
+            if not self.config['Control']['reconstruction'] : 
+                self.catalog = Catalog(self.config)
+
 
     def _central_atoms_research(self, new_environment, nsearch) : 
         """ 
@@ -92,6 +105,26 @@ class KMC() :
         #Apply algorithm select event : 
         idx_selected_event, delta_t = rejection_free(l_k)
         return l_catalog[idx_selected_event], delta_t 
+
+    def _select_central_atom_idx(self, idx_event_catalog) : 
+        """ 
+        """
+        if self.config['Control']['reconstruction'] : 
+            pass 
+        else : 
+            return self.catalog.catalog.loc[idx_event_catalog].at['atom_index'] 
+
+    def _apply_event(self, idx_atom_apply_event, idx_event_catalog) : 
+        """ 
+        """
+        if self.config['Control']['reconstruction'] : 
+            pass 
+        else : 
+            #neigbors of central atoms : 
+            neighbors = self.neighbors_list.neighbors_list['rcut'][idx_atom_apply_event]
+            final_positions = self.catalog.catalog.loc[idx_event_catalog].at['final_positions'] 
+            #updat positions : 
+            self.system.update_positions(final_positions, atom_idx = neighbors)
 
     def _initialize(self) : 
         self.system = System.create_from_file(self.config['Control']['config_file'])

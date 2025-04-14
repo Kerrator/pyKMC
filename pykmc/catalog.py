@@ -22,9 +22,12 @@ class Catalog :
             self._add_event_with_reconstruction(min1positions[neighbors], saddlepositions[neighbors], min2positions[neighbors], move_atom_idx, dE_forward, dE_backward)
             pass 
         else : 
-            is_new = self._add_event_no_reconstruction(min1positions[neighbors], move_atom_idx, dE_forward)
+            is_new = self._add_event_no_reconstruction(min2positions[neighbors], move_atom_idx, dE_forward)
             return is_new
-    
+
+
+    def _add_event_with_reconstruction(self, min1positions, saddlepositions, min2positions )  :
+        pass
     def _add_event_no_reconstruction(self, final_positions, move_atom_idx, dE) :
 
 
