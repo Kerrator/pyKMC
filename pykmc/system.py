@@ -24,6 +24,7 @@ class System():
         new_system.types = atoms.get_chemical_symbols() 
         new_system.positions = atoms.get_positions() 
         new_system.cell = atoms.get_cell()
+        new_system.pbc = atoms.get_pbc()
 
         return new_system
 
