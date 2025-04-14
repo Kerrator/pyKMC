@@ -1,5 +1,8 @@
 from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog
 import random 
+import numpy as np
+from ase.io import write
+from ase import Atoms
 
 
 class KMC() : 
@@ -21,17 +24,34 @@ class KMC() :
         time = 0
         nsearch = self.config['EventSearch']['nsearch']
 
-        ####### KMC Loop ####
+        #Write initial step to file : 
+        self._append_snapshot_to_trajectory()
+        ####### KMC Loop ########
         for step in range(1) :
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
+
             #List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
-            #results = self.engine.search_event(self.system, a)
-            #print(results[-1]) 
+
+            #Fro all idx in central_atom_research_list
+            fails = 0 #to count the number of event search fails
+            for idx in central_atom_research_list : 
+
+                #do an event search 
+                results = self.engine.search_event(self.system, central_atom_research_list[-1])
+                
+                if results != None : 
+                #add results in catalog 
+                    is_new = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'])
+                else : #failed 
+                    fails += 1
+        
+            self._append_snapshot_to_trajectory()
 
     def central_atoms_research(self, new_environment, nsearch) : 
         """ 
+        return list of central atom having new_environment * nsearch
         """
         central_atom_research_list = []
         #for each atomic environment hash in new_environment 
@@ -52,3 +72,8 @@ class KMC() :
         self.neighbors_list = NeighborsList(self.system, self.config) 
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
         self.catalog = Catalog(self.config)
+
+    def _append_snapshot_to_trajectory(self) : 
+        output = self.config['Control']['output_file']
+        atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
+        write(output, atoms, append=True)
