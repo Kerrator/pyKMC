@@ -33,6 +33,7 @@ class System():
             self.positions = new_positions
         else : 
             self.positions[atom_idx] = new_positions
+            self.positions[self.positions < 0] = 0 #This is because I can have small negative number and it messes up with kdtree
     
     def wrap_positions(self) : 
         pass
