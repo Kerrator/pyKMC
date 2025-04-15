@@ -1,4 +1,4 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog
+from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration
 import random 
 import numpy as np
 from ase.io import write
@@ -139,10 +139,10 @@ class KMC() :
         """ 
         """
         if self.config['Control']['reconstruction'] :
+            PointSetRegistration(self.config, self.system, self.catalog, self.neighbors_list, idx_event_catalog, idx_atom_apply_event).run()
             #psr try 
             #reconstruction 
                 #energy 
-            pass 
         else : 
             #neigbors of central atoms : 
             neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)

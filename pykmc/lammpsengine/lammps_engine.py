@@ -12,6 +12,7 @@ class LammpsEngine(BaseEngine) :
         self.config_potential = config.get('Potential')
         self.config_minimization = config.get('Minimization')
         self.config_event_search = config.get('EventSearch')
+        self.config_atomic_environment = config.get('AtomicEnvironment')
 
 
     def _initialize_default(self,system, lmp_instance) : 
@@ -96,7 +97,7 @@ class LammpsEngine(BaseEngine) :
         #Initialize potential 
         self._initialize_potential(lmp)
         #pARTn search : 
-        result = pARTn_search(lmp, self.config_event_search, central_atom)
+        result = pARTn_search(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
         return result
 
     def compute_distances(self, system) : 

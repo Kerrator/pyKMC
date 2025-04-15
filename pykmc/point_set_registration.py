@@ -12,27 +12,6 @@ import pandas as pd
 
 class PointSetRegistration() : 
     """
-    Define and run the point set registration procedure
-
-    Attributes
-    ----------
-    system : System Object
-        the system
-    psr_style : str
-        the point set registration style used, can be 'ira'
-    idx_cat : int
-        index of the event in the catalog on which we gonna perform the point set registration
-    central_atom_index : int
-        atom index of the system on which we gonna perform the point set registration
-    rcutevent : float
-        radial cutoff corresponding to the one use in the event search corresponding to en environment around the central atom that have been saved 
-    dimension : int
-        dimension of the system, by default 3
-    nprocs : int, optional
-        number of procs available, by default 1
-    backend : str, optional
-        parameter used by Executorlib, can be 'local', 'slurm_allocation', 'slurm_submission', by default 'local'
-
     Methods 
     -------
     run() 
@@ -41,17 +20,17 @@ class PointSetRegistration() :
         use IRA to find the transformation matrix between the positions of the event and the central_atom_index environement
     """
 
-    def __init__(self,  system, psr_style, psr_parameters, idx_cat, central_atom_index, rcutevent, dimension, nprocs, backend, save) : 
-        self.psr_style = psr_style
-        self.system = system
-        self.psr_parameters = psr_parameters
+    def __init__(self,  config, system, catalog, neighbors_list, idx_cat, central_atom_index, save=False) : 
+
+        self.system = system 
+        self.config = config        
+        self.catalog = catalog
+        self.neighbors_list = neighbors_list
         self.idx_cat = idx_cat
         self.central_atom_index = central_atom_index
-        self.rcutevent = rcutevent
-        self.dimension = dimension
-        self.backend = backend
-        self.nprocs = nprocs 
+        self.psr_style = self.config['PSR']['style']
         self.save = save
+
 
     def run(self) : 
         """ 
@@ -59,13 +38,13 @@ class PointSetRegistration() :
         """ 
         match self.psr_style : 
             case 'ira' : 
-                rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index, self.rcutevent)
+                rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index)
                 return rmat, tr, perm, dh
             case _: 
                 raise Exception('Point set registration style unknown')
         
     
-    def ira(self, idx_cat, central_atom_index, rcutevent) : 
+    def ira(self, idx_cat, central_atom_index) : 
         """
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
 
@@ -96,16 +75,14 @@ class PointSetRegistration() :
         ira = ira_mod.IRA() 
 
         #Event informations : 
-        coords2 = self.system.catalog.loc[idx_cat].at["initial_positions"] 
+        coords2 = self.catalog.catalog.loc[idx_cat].at["initial_positions"] 
         nat2 = len(coords2)
 
         #atom in the rcutevent around the central atom
-        ind = np.linspace(0, self.system.get_global_number_of_atoms()-1, self.system.get_global_number_of_atoms()).astype(int)
-        dist = self.system.get_distances(central_atom_index, ind, mic=True)
-        neighbor_list = np.where(dist<rcutevent)[0]
+        neighbor_list = self.neighbors_list.get_neighbors('rcut', central_atom_index) 
 
-        coords1 = self.system.get_positions()[neighbor_list]
-        typ1 = np.array(self.system.get_chemical_symbols())[neighbor_list]
+        coords1 = self.system.positions[neighbor_list]
+        typ1 = np.array(self.system.types)[neighbor_list]
 
         typ2 = typ1 #If they have same topology id should be always true ?
 
@@ -119,9 +96,10 @@ class PointSetRegistration() :
             if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
                 coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*alat
         nat1 = len(coords1)
-        kmax_factor = self.psr_parameters['kmax_factor']
+        kmax_factor = self.config['PSR']['kmax_factor']
         
         #Run ira to find transformation matrices
+        print('OUIOUIOUI')
         try : 
             rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
              
@@ -133,6 +111,9 @@ class PointSetRegistration() :
                                             'dh'])
             if self.save :
                 results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
+            print(rmat, tr, perm, dh)
+            import sys
+            sys.exit()
             return rmat, tr, perm, dh
         except : 
             return None, None, None, None

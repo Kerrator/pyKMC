@@ -2,9 +2,7 @@ import pypARTn2
 import numpy as np
 
 
-def pARTn_search(lmp, config_event_search, central_atom_idx) : 
-    #Parameters : 
-    rcutenv = config_event_search['rcutenv']
+def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) : 
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 
