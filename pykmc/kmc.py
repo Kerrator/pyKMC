@@ -3,6 +3,7 @@ import random
 import numpy as np
 from ase.io import write
 from ase import Atoms
+import ase.geometry
 from .algorithms import * 
 import sys
 
@@ -55,7 +56,10 @@ class KMC() :
 
                     if results != None : 
                     #add results in catalog 
-                        is_new, in_e_bounds = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'])
+                        if self.config['Control']['reconstruction'] : #if reconstruction, need to center event to prevent pbc problem
+                            results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
+                        is_new, in_e_bounds = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+
                     else : #failed 
                         fails += 1
                 
@@ -108,7 +112,11 @@ class KMC() :
         """
         #Find all possible event
         if self.config['Control']['reconstruction'] : 
-            pass 
+            l_env = list(set(self.atomic_environment.atomic_environment_list))
+            if l_env == ['crystal'] : 
+                print('only crystal atoms')
+                self._close()
+            l_catalog = [i for i in range(len(self.catalog.catalog)) if self.catalog.catalog.loc[i].at['event_id'] in l_env ]
         else  : # all events in catalog are possible 
             l_catalog = [i for i in range(len(self.catalog.catalog))]
         #Get constant rate of possible events
@@ -121,21 +129,45 @@ class KMC() :
         """ 
         """
         if self.config['Control']['reconstruction'] : 
-            pass 
+            id_hash = self.catalog.catalog.loc[idx_event_catalog].at['event_id'] 
+            possible = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == id_hash]
+            return random.choice(possible) 
         else : 
             return self.catalog.catalog.loc[idx_event_catalog].at['atom_index'] 
 
     def _apply_event(self, idx_atom_apply_event, idx_event_catalog) : 
         """ 
         """
-        if self.config['Control']['reconstruction'] : 
+        if self.config['Control']['reconstruction'] :
+            #psr try 
+            #reconstruction 
+                #energy 
             pass 
         else : 
             #neigbors of central atoms : 
-            neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)+[int(idx_atom_apply_event)]
+            neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
             final_positions = self.catalog.catalog.loc[idx_event_catalog].at['final_positions'] 
             #updat positions : 
             self.system.update_positions(final_positions, atom_idx = neighbors)
+
+
+    def _center_event_positions(self, min1positions, saddlepositions, min2positions, move_atom_idx) : 
+        #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
+        cell = self.system.cell
+        ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
+        dx, dy, dz = ax/2 - min1positions[move_atom_idx][0], ay/2 - min1positions[move_atom_idx][1], az/2 - min1positions[move_atom_idx][2]
+        displacement = np.array([dx, dy, dz])
+        min1positions = self._center_positions(min1positions, displacement, cell)
+        saddlepositions = self._center_positions(saddlepositions, displacement, cell)
+        min2positions = self._center_positions(min2positions, displacement, cell)
+        return min1positions, saddlepositions, min2positions
+    
+
+    def _center_positions(self, positions, displacement, cell) : 
+        positions += displacement 
+        positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
+        positions[positions < 0 ] = 0
+        return positions
 
     def _initialize(self) : 
         self.system = System.create_from_file(self.config['Control']['config_file'])
