@@ -34,11 +34,6 @@ class KMC() :
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
-            #If only atoms with cristalline environment, close kmc simulation
-            if len(new_environment) == 0 : 
-                print('only cristalline atoms') 
-                self._close()
-
             #List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self._central_atoms_research(new_environment, nsearch)
             #Count number of tentative to prevent empty catalog : 
@@ -73,6 +68,7 @@ class KMC() :
                 print('emtpy catalog avec {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
 
+
             #Select central atom having same atomic environment as the event
             idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
             self._apply_event(idx_atom_apply_event, idx_event_catalog)
@@ -85,6 +81,8 @@ class KMC() :
             if not self.config['Control']['reconstruction'] : 
                 self.catalog = Catalog(self.config)
             else : #update visited environments 
+                l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
+                self.visited_environment.update(set(l_ids).difference(self.visited_environment))
                 pass
 
             #update neighborlist : 
@@ -139,8 +137,16 @@ class KMC() :
         """ 
         """
         if self.config['Control']['reconstruction'] :
-            PointSetRegistration(self.config, self.system, self.catalog, self.neighbors_list, idx_event_catalog, idx_atom_apply_event).run()
-            #psr try 
+            rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.catalog, self.neighbors_list, idx_event_catalog, idx_atom_apply_event).run()
+            if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
+                return None 
+            else : 
+                new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['final_positions']), 3))
+                for i in range(len(new_positions)) : 
+                    new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['final_positions'][i]) + tr 
+                new_positions[:] = new_positions[perm]
+                neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
+                self.system.update_positions(new_positions, atom_idx = neighbors)
             #reconstruction 
                 #energy 
         else : 

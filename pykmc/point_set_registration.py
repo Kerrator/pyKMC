@@ -99,7 +99,6 @@ class PointSetRegistration() :
         kmax_factor = self.config['PSR']['kmax_factor']
         
         #Run ira to find transformation matrices
-        print('OUIOUIOUI')
         try : 
             rmat, tr, perm, dh = ira.match( nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor )
              
@@ -111,9 +110,6 @@ class PointSetRegistration() :
                                             'dh'])
             if self.save :
                 results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
-            print(rmat, tr, perm, dh)
-            import sys
-            sys.exit()
             return rmat, tr, perm, dh
         except : 
             return None, None, None, None
