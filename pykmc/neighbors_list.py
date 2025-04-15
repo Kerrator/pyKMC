@@ -24,7 +24,6 @@ class NeighborsList :
             neighbors.remove(i)
             self.neighbors_list['rnei'].append(neighbors)
             neighbors = tree.query_ball_point(positions[i], self.rcut)
-            neighbors.remove(i)
             self.neighbors_list['rcut'].append(neighbors)
 
     def get_neighbors(self, rcut, idx) : 
