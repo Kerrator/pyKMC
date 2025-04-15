@@ -1,5 +1,5 @@
 from ase.io import read
-
+import ase.geometry
 
 class System():
     """ 
@@ -33,7 +33,8 @@ class System():
             self.positions = new_positions
         else : 
             self.positions[atom_idx] = new_positions
+            self.positions = self.wrap_positions(self.positions, cell = self.cell, pbc=self.pbc)
             self.positions[self.positions < 0] = 0 #This is because I can have small negative number and it messes up with kdtree
     
-    def wrap_positions(self) : 
-        pass
+    def wrap_positions(self, positions, cell, pbc=True) : 
+        return ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=pbc)
