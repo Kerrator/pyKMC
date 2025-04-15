@@ -20,10 +20,10 @@ class Catalog :
         emin = self.config['EventSearch']['emin_event']
         emax = self.config['EventSearch']['emax_event']
         #Get environment of move_atom_idx 
-        neighbors = neighbors_list_environment[move_atom_idx]
+        neighbors = neighbors_list_environment[move_atom_idx]+[int(move_atom_idx)]
+
         if self.config['Control']['reconstruction'] : 
             self._add_event_with_reconstruction(min1positions[neighbors], saddlepositions[neighbors], min2positions[neighbors], move_atom_idx, dE_forward, dE_backward)
-            pass 
         else : 
             if emin < dE_forward < emax : 
                 is_new = self._add_event_no_reconstruction(min2positions[neighbors], move_atom_idx, dE_forward)

@@ -33,6 +33,7 @@ class KMC() :
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
+            #If only atoms with cristalline environment, close kmc simulation
             if len(new_environment) == 0 : 
                 print('only cristalline atoms') 
                 self._close()
@@ -131,7 +132,7 @@ class KMC() :
             pass 
         else : 
             #neigbors of central atoms : 
-            neighbors = self.neighbors_list.neighbors_list['rcut'][idx_atom_apply_event]
+            neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)+[int(idx_atom_apply_event)]
             final_positions = self.catalog.catalog.loc[idx_event_catalog].at['final_positions'] 
             #updat positions : 
             self.system.update_positions(final_positions, atom_idx = neighbors)
