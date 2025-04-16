@@ -71,10 +71,11 @@ class KMC() :
 
             #Select central atom having same atomic environment as the event
             idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
-            self._apply_event(idx_atom_apply_event, idx_event_catalog)
+            is_reconstruction = self._apply_event(idx_atom_apply_event, idx_event_catalog)
 
             #update time : 
-            time += delta_t
+            if is_reconstruction : 
+                time += delta_t
             #write config to file 
             self._append_snapshot_to_trajectory()
             #if no reconstruction, new catalog
@@ -83,7 +84,6 @@ class KMC() :
             else : #update visited environments 
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
                 self.visited_environment.update(set(l_ids).difference(self.visited_environment))
-                pass
 
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config) 
@@ -139,16 +139,35 @@ class KMC() :
         if self.config['Control']['reconstruction'] :
             rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.catalog, self.neighbors_list, idx_event_catalog, idx_atom_apply_event).run()
             if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
-                return None 
-            else : 
-                new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['final_positions']), 3))
-                for i in range(len(new_positions)) : 
-                    new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['final_positions'][i]) + tr 
-                new_positions[:] = new_positions[perm]
+                return False 
+            else :
+                current_positions = self.system.positions.copy()
+                #initial potential energy
+                Eini = self.engine.compute_potential_energy(self.system)
+                #go to saddle point 
                 neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
+                new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['saddle_positions']), 3))
+                for i in range(len(new_positions)) : 
+                    new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['saddle_positions'][i]) + tr 
+                new_positions[:] = new_positions[perm]
                 self.system.update_positions(new_positions, atom_idx = neighbors)
-            #reconstruction 
-                #energy 
+                #saddle potential energy 
+                Esad = self.engine.compute_potential_energy(self.system)
+                #check if energy barrier consistent : 
+                dE = Esad-Eini
+                if abs(dE-self.catalog.catalog.loc[idx_event_catalog]['energy_barrier']) < 0.5 : 
+
+                    new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['final_positions']), 3))
+                    for i in range(len(new_positions)) : 
+                        new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['final_positions'][i]) + tr 
+                    new_positions[:] = new_positions[perm]
+                    self.system.update_positions(new_positions, atom_idx = neighbors)
+                    return True
+                else : 
+                    #back to current positions
+                    self.system.update_positions(current_positions)
+                    return False
+
         else : 
             #neigbors of central atoms : 
             neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
@@ -174,7 +193,7 @@ class KMC() :
         positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
         positions[positions < 0 ] = 0
         return positions
-
+    
     def _initialize(self) : 
         self.system = System.create_from_file(self.config['Control']['config_file'])
         self.engine = Engine(self.config)

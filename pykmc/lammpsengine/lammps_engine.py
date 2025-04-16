@@ -100,6 +100,18 @@ class LammpsEngine(BaseEngine) :
         result = pARTn_search(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
         return result
 
+    def compute_potential_energy(self, system) : 
+        """ 
+        compute total potential energy
+        """
+        lmp = lammps() 
+        self._initialize_default(system, lmp)
+        self._initialize_potential(lmp)
+
+        lmp.command('compute c1 all pe')
+        lmp.command('run 0')
+        potential_energy = lmp.extract_compute("c1", 0,0)
+        return potential_energy
     def compute_distances(self, system) : 
         pass
     def neighbors(self, system) :

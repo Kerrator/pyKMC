@@ -22,6 +22,9 @@ class Engine :
             case _ : 
                 raise Exception('Event Search style unknown')
         return result 
+    def compute_potential_energy(self, system) : 
+        potential_energy = self.engine.compute_potential_energy(system)
+        return potential_energy
     def compute_distances(self, system) : 
         self.engine.compute_distances(system)
 
