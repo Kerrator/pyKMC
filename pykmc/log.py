@@ -43,7 +43,7 @@ class Logger() :
         self.logger.info('not implemented')
         self.new_line()
 
-    def first_line_table(self, reconstruction) : 
+    def first_line_table(self) : 
         """
         First line of the log table
 
@@ -51,9 +51,10 @@ class Logger() :
         ----------
         reconstruction : boolean
             if we use the reconstruction of event during the KMC simulation or not
-        """        
+        """       
+        reconstruction = self.config['Control']['reconstruction'] 
         if reconstruction : 
-            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<12s} {:<18s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'dh', 'Recontruction dE', 'Reconstruction Topo'))
+            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'Recontruction dE'))
         else : 
             self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
 

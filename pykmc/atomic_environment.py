@@ -1,7 +1,6 @@
 import numpy as np
 from .environments import cna, graph
 
-
 #TODO modif in config radd_cna ==> now it s number of neighbors
 class AtomicEnvironment() :
 

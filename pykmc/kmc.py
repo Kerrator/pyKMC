@@ -38,6 +38,7 @@ class KMC() :
         self.logger.logger.info('===========================')
         ####### KMC Loop ########
         for step in range(nkmc_steps) :
+            self.logger.first_line_table()
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
@@ -92,6 +93,7 @@ class KMC() :
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
                 self.visited_environment.update(set(l_ids).difference(self.visited_environment))
 
+                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
