@@ -38,6 +38,11 @@ class Logger() :
         self.logger.info("|    `---              ")
         self.logger.info("\n")
 
+    def write_parameter(self) : 
+        self.logger.info('=:> PARAMETERS')
+        self.logger.info('not implemented')
+        self.new_line()
+
     def first_line_table(self, reconstruction) : 
         """
         First line of the log table

@@ -23,18 +23,19 @@ class KMC() :
         
         ###### START ###### 
         self._initialize()
-        self.logger.title()
+
         nkmc_steps = self.config['Control']['nkmc_steps']
         time = 0
         nsearch = self.config['EventSearch']['nsearch']
 
-        self.logger.logger.error('error')
-        self.logger.logger.warning('warning')
-        self.logger.logger.info('info')
-        self.logger.logger.debug('debug')
 
         #Write initial step to file : 
         self._append_snapshot_to_trajectory()
+
+
+        self.logger.logger.info('===========================')
+        self.logger.logger.info('= Starting KMC simulation =')
+        self.logger.logger.info('===========================')
         ####### KMC Loop ########
         for step in range(nkmc_steps) :
             #Find new atomic environments that have not been visited
@@ -201,15 +202,25 @@ class KMC() :
         return positions
     
     def _initialize(self) : 
+        self.logger = Logger(self.config) 
+        self.logger.title()
+        self.logger.write_parameter()
+        self.logger.logger.info('=> Reading configuration file : {}'.format(self.config['Control']['config_file']))
         self.system = System.create_from_file(self.config['Control']['config_file'])
+        self.logger.logger.info('=> Initializing E/F {} Engine'.format(self.config['Control']['engine']))
         self.engine = Engine(self.config)
         #minimize 
+        self.logger.logger.info('=> Minimizing the system')
         new_positions = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
         self.neighbors_list = NeighborsList(self.system, self.config) 
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
+        if self.config['Control']['catalog'] is not None : 
+            self.logger.logger.info('=> Reading catalog file {}'.format(self.config['Control']['catalog']))
+        else : 
+            self.logger.logger.info('=> Initilizing Catalog')
         self.catalog = Catalog(self.config)
-        self.logger = Logger(self.config) 
+        self.logger.new_line()
 
     def _append_snapshot_to_trajectory(self) : 
         output = self.config['Control']['output_file']
