@@ -1,4 +1,5 @@
 from ase.io import read
+import numpy as np
 import ase.geometry
 
 class System():
@@ -9,6 +10,7 @@ class System():
         self.positions = None 
         self.cell = None
         self.pbc = None
+        self.index = None
 
     @classmethod
     def create_from_file(cls, file_path: str) : 
@@ -25,6 +27,7 @@ class System():
         new_system.positions = atoms.get_positions() 
         new_system.cell = atoms.get_cell()
         new_system.pbc = atoms.get_pbc()
+        new_system.index = np.linspace(0, len(new_system.types)-1, len(new_system.types)).astype(int)
 
         return new_system
 
