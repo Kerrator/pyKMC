@@ -1,4 +1,4 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration
+from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration, Logger
 import random 
 import numpy as np
 from ase.io import write
@@ -23,9 +23,15 @@ class KMC() :
         
         ###### START ###### 
         self._initialize()
+        self.logger.title()
         nkmc_steps = self.config['Control']['nkmc_steps']
         time = 0
         nsearch = self.config['EventSearch']['nsearch']
+
+        self.logger.logger.error('error')
+        self.logger.logger.warning('warning')
+        self.logger.logger.info('info')
+        self.logger.logger.debug('debug')
 
         #Write initial step to file : 
         self._append_snapshot_to_trajectory()
@@ -203,6 +209,7 @@ class KMC() :
         self.neighbors_list = NeighborsList(self.system, self.config) 
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
         self.catalog = Catalog(self.config)
+        self.logger = Logger(self.config) 
 
     def _append_snapshot_to_trajectory(self) : 
         output = self.config['Control']['output_file']

@@ -8,11 +8,24 @@ from itertools import zip_longest
 class Logger() : 
     """A logger to manage log informations
     """
-    def __init__ (self, logfile_name) : 
-        #Could use different logger for different level 
-        #See https://dev.to/luca1iu/using-the-logger-class-in-python-for-effective-logging-4ghc#:~:text=The%20Logger%20class%20provides%20several,warning%2C%20error%2C%20crit).
+    def __init__ (self, config) : 
+        self.config = config
         self.logger = logging.getLogger('pykmc')
-        logging.basicConfig(filename=logfile_name, filemode='a', level=logging.DEBUG, format='%(message)s')
+        #logging.basicConfig(filename=self.config['Control']['log_file_name'], filemode='a', level=logging.DEBUG, format='%(message)s')
+
+        #Configuration : 
+        self.logger.setLevel(logging.DEBUG) 
+        formatter = CustomFormatter()
+        level_map = {
+            0: logging.WARNING,
+            1: logging.INFO,
+            2: logging.DEBUG
+        }
+        log_level = level_map.get(self.config['Control']['verbosity'], logging.INFO)
+        file_handler = logging.FileHandler(self.config['Control']['log_file_name'], mode='a')
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
     def title(self) : 
         """ 
@@ -53,3 +66,15 @@ class Logger() :
         """ 
         self.logger.info("")
 
+
+
+class CustomFormatter(logging.Formatter):
+    def format(self, record):
+        """ 
+        Rewrite format function of Formatter, change _fmt when writing
+        """
+        if record.levelno == logging.INFO:
+            self._style._fmt = "%(message)s"
+        else:
+            self._style._fmt = "%(levelname)-12s | %(message)s"
+        return super().format(record)

@@ -20,11 +20,13 @@ DEFAULT = {
     'Control' : {
         'config_file' : None, 
         'output_file' : 'trajkmc.xyz',
+        'log_file_name' : 'pykmc.log',
         'catalog' : None,
         'dimension' : 3,
         'nprocs' : 1, 
         'backend' : 'local',
-        'reconstruction' : True
+        'reconstruction' : True,
+        'verbosity' : 1
 
     }, 
     'Potential' : { 
