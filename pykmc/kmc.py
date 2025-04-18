@@ -12,6 +12,7 @@ class KMC() :
 
     def __init__(self, config) : 
         self.config = config 
+        self.logger = None
         self.system = None 
         self.engine = None 
         self.neighbors_list = None 
@@ -71,9 +72,9 @@ class KMC() :
                     break #end while loop
                 else : 
                     tries += 1 
-                    print('retry event searches, empty catalog')
+                    self.logger.logger.debug('Empty catalog after {} searches, retrying'.format(len(central_atom_research_list)))
             else : #if not breack encounter : 
-                print('emtpy catalog avec {} tries, closing simulation'.format(MAX_TRIES))
+                self.logger.logger.debug('Emtpy catalog after {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
 
 
@@ -230,4 +231,5 @@ class KMC() :
         write(output, atoms, append=True)
 
     def _close(self) : 
+        self.logger.logger.info('End of simulation')
         sys.exit()
