@@ -15,6 +15,10 @@
 *min*.xyz
 *sad*.xyz
 *test*
+!tests/
+!tests/**/*
+__pycache__/
+*.py[cod]
 *log_minimize.lammps
 *psr_event_*.pickle
 *atomic_environment.yml
