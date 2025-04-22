@@ -32,8 +32,11 @@ class System():
         return new_system
 
     def update_positions(self, new_positions, atom_idx=None) : 
-        if atom_idx == None : 
+        if atom_idx is None : 
             self.positions = new_positions
+            self.positions = self.wrap_positions(self.positions, cell= self.cell, pbc=self.pbc)
+            self.positions[self.positions < 0] = 0 #This is because I can have small negative number and it messes up with kdtree
+
         else : 
             self.positions[atom_idx] = new_positions
             self.positions = self.wrap_positions(self.positions, cell = self.cell, pbc=self.pbc)
