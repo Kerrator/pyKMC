@@ -1,6 +1,7 @@
 import pytest 
 from pykmc import System
 import numpy as np 
+from copy import deepcopy
 # System Fixtures 
 
 
@@ -9,7 +10,8 @@ def config_system_single_type():
     return {
         'AtomicEnvironment': {
             'rnei': 3.01,   
-            'rcut': 6.5
+            'rcut': 3.5, 
+            'radd_cna' : 0,
         }
     }
 
@@ -45,5 +47,16 @@ def system_single_type_fcc() -> System:
     ])
     system.pbc = np.array([True, True, True])
     system.index = np.arange(len(system.positions))
+
+    return system
+
+@pytest.fixture
+def system_single_type_fcc_vacancy(system_single_type_fcc: System) -> System:
+
+    system = deepcopy(system_single_type_fcc)
+    #remove atom 
+    system.positions = np.delete(system.positions, 0, axis=0)
+    system.types = np.delete(system.types, 0, axis=0)
+    system.index = np.delete(system.index, 0, axis=0)
 
     return system
