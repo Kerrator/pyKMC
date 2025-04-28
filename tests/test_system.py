@@ -29,13 +29,13 @@ Ni 1.0 1.0 1.0
         np.testing.assert_array_equal(system.pbc, np.array([True, True, True]))
         np.testing.assert_array_equal(system.index, np.array([0,1,2,3]))
 
-    @pytest.mark.parametrize("system", [lf("system_single_type")])
+    @pytest.mark.parametrize("system", [lf("system_single_type_fcc")])
     def test_update_all_positions_nowrap(self, system: System) : 
         new_positions = np.array([[1.0, 1.0, 0.0], [1.5, 3.4, 2.4], [2.3, 0.3, 0.8 ], [2.6, 1.4, 1.4]])
         system.update_positions(new_positions)
         np.testing.assert_allclose(system.positions, new_positions, rtol=1e-6)
     
-    @pytest.mark.parametrize("system", [lf("system_single_type")])
+    @pytest.mark.parametrize("system", [lf("system_single_type_fcc")])
     def test_update_all_positions_wrap(self, system: System) : 
         cell = np.diag(system.cell)
         half_cell = cell / 2.0 
@@ -43,12 +43,11 @@ Ni 1.0 1.0 1.0
                              [-half_cell[0], -half_cell[1], -half_cell[2]],
                              [cell[0] + half_cell[0], cell[1] + half_cell[1], cell[2] + half_cell[2]],   
                              [1.0, -1.0, cell[2] + 1.0]])
-        print(new_positions)
         system.update_positions(new_positions) 
         expected_positions = new_positions % cell 
         np.testing.assert_allclose(system.positions, expected_positions, rtol=1e-6, atol=1e-6)
 
-    @pytest.mark.parametrize("system", [lf("system_single_type")])
+    @pytest.mark.parametrize("system", [lf("system_single_type_fcc")])
     def test_update_index_positions(self, system: System) : 
         new_positions = np.array([1.5, 3.4, 2.4])
         system.update_positions(new_positions, atom_idx=np.array([1]))
