@@ -5,6 +5,7 @@ from ase import Atoms
 from .environments.graph_nauty import graph
 from .system import System
 from .neighbors_list import NeighborsList
+from .symmetries import unique_symmetries
 import sys
 
 class Catalog : 
@@ -117,6 +118,9 @@ class Catalog :
         
         neighbor_list_forwward = min1neighbors_list.neighbors_list['rcut'][index_move]
         neighbor_list_backward = min2neighbors_list.neighbors_list['rcut'][index_move]
+
+        #Symmetries : 
+        sym_matrix, sym_perm = unique_symmetries(min1_positions[neighbor_list_forwward],min2_positions[neighbor_list_forwward], self.config['EventSearch']['sym_thr'])
         dfevent_forward = pd.Series({'event_id' : id_min1 , 
                                      'initial_positions' : min1_positions[neighbor_list_forwward], 
                                      'saddle_positions': saddle_positions[neighbor_list_forwward], 
@@ -125,7 +129,11 @@ class Catalog :
                                      'k' : compute_rate_Eyring(dE_forward, self.config), 
                                      'id_saddle' : id_saddle, 
                                      'id_final': id_min2, 
-                                     'move_atom_idx': np.where(neighbor_list_forwward == index_move)[0][0] })
+                                     'move_atom_idx': np.where(neighbor_list_forwward == index_move)[0][0], 
+                                     'sym_matrix' : sym_matrix, 
+                                     'sym_perm' : sym_perm})
+
+        sym_matrix, sym_perm = unique_symmetries(min2_positions[neighbor_list_backward], min1_positions[neighbor_list_backward], self.config['EventSearch']['sym_thr'])
         dfevent_backward = pd.Series({'event_id' : id_min2 , 
                                      'initial_positions' : min2_positions[neighbor_list_backward], 
                                      'saddle_positions': saddle_positions[neighbor_list_backward], 
@@ -148,7 +156,9 @@ class Catalog :
                                                  'k', 
                                                  'id_saddle',
                                                  'id_final', 
-                                                 'move_atom_idx'])
+                                                 'move_atom_idx', 
+                                                 'sym_matrix', 
+                                                 'sym_perm'])
         else : 
             self.catalog = pd.DataFrame(columns = ['atom_index', 
                                                    'final_positions',

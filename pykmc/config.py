@@ -58,7 +58,8 @@ DEFAULT = {
         'partn_nsmooth' : 3, 
         'partn_nperp' : 5,
         'partn_delr_threshold' : 0.5,
-        'k0' : 1.0e-12
+        'k0' : 1.0e-12,
+        'sym_thr' : 0.1
     }, 
     'PSR' : {
         'kmax_factor' : 1.8,
