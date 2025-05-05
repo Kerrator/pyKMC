@@ -8,3 +8,4 @@ from .neighbors_list import *
 from .catalog import *
 from .point_set_registration import *
 from .log import *
+from .kmc import *

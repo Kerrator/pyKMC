@@ -99,9 +99,11 @@ class KMC() :
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
             self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
+        
+        self.catalog.catalog.to_pickle('catalog.pickle')
 
 
-    def _central_atoms_research(self, new_environment, nsearch) : 
+    def central_atoms_research(self, new_environment, nsearch) : 
         """ 
         return list of central atom having new_environment * nsearch
         """
@@ -204,7 +206,7 @@ class KMC() :
         positions[positions < 0 ] = 0
         return positions
     
-    def _initialize(self) : 
+    def initialize(self) : 
         self.logger = Logger(self.config) 
         self.logger.title()
         self.logger.write_parameter()
