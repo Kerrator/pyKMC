@@ -3,7 +3,7 @@ import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from lammps import lammps
 from pykmc.config import Config
-from .partn import pARTn_search
+from .partn import pARTn_search, pARTn_refine_event
 
 class LammpsEngine(BaseEngine) : 
 
@@ -98,6 +98,13 @@ class LammpsEngine(BaseEngine) :
         self._initialize_potential(lmp)
         #pARTn search : 
         result = pARTn_search(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
+        return result
+    
+    def pARTn_refine_event(self, system, central_atom) : 
+        lmp = lammps() 
+        self._initialize_default(system, lmp)
+        self._initialize_potential(lmp)
+        result = pARTn_refine_event(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
         return result
 
     def compute_potential_energy(self, system) : 
