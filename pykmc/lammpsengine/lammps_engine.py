@@ -91,7 +91,7 @@ class LammpsEngine(BaseEngine) :
     def pARTn(self, system, central_atom) : 
         #Parameters
 
-        lmp = lammps()
+        lmp = lammps(cmdargs=['-screen', 'none'])
         #Lammps default parameters : 
         self._initialize_default(system, lmp)
         #Initialize potential 
@@ -101,10 +101,10 @@ class LammpsEngine(BaseEngine) :
         return result
     
     def pARTn_refine_event(self, system, central_atom) : 
-        lmp = lammps() 
+        lmp = lammps(cmdargs=['-screen', 'none']) 
         self._initialize_default(system, lmp)
         self._initialize_potential(lmp)
-        result = pARTn_refine_event(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
+        result = pARTn_refine_event(lmp, self.config_event_search, central_atom)
         return result
 
     def compute_potential_energy(self, system) : 
