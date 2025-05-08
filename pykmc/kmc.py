@@ -276,28 +276,6 @@ class KMC() :
                     if results is not None : 
                     #Generate dfevent series from refine event results 
                         dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
-                    ##Find if min1 or min2 is initial positions 
-                    #    #To deal with pbc problem and lammps slighlty over/under box positions 
-                    #    dr1_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - results[0][at_idx],cell=self.system.cell,pbc=self.system.pbc)
-                    #    dr2_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - results[2][at_idx],cell=self.system.cell,pbc=self.system.pbc)
-                    #    #compare only atom that move 
-                    #    dr1 = np.sum(np.abs(dr1_vec))
-                    #    dr2 = np.sum(np.abs(dr2_vec))
-                    #    if dr1 < dr2 : 
-                    #        final_positions = results[2]
-                    #        dE = results[3]
-                    #    else : 
-                    #        final_positions = results[0]
-                    #        dE = results[4]
-                    #else : 
-                    #    final_positions = None
-
-                    #if final_positions is not None : 
-                    #    #Add active event refined 
-                    #    dfactive = pd.Series({'atom_index': at_idx, 
-                    #                          'final_positions' : final_positions,
-                    #                          'energy_barrier' : dE, 
-                    #                          'k' :compute_rate_Eyring(dE, self.config)})
                         active_table.add_event(dfactive)
                     else : 
                         print("refine FAILED")
