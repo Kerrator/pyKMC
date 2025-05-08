@@ -1,7 +1,7 @@
 [Control] 
 config_file = ../Ni_fcc_4000at_monovacancy+sia/initial_config.xyz 
 output_file = ./trajkmc.xyz
-nkmc_steps = 1000
+nkmc_steps = 10
 nprocs = 1
 reconstruction = True
 engine = lammps
@@ -28,7 +28,7 @@ rcut = 6.5
 [EventSearch] 
 style = pARTn 
 #rcutenv = 6.5
-nsearch = 10
+nsearch = 5
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 emin_event = 0.1

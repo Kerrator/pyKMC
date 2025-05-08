@@ -26,7 +26,7 @@ class Catalog :
         emax = self.config['EventSearch']['emax_event']
 
         if self.config['Control']['reconstruction'] :
-            if emin < dE_forward < emax : 
+            if (emin < dE_forward < emax) and (emin < dE_backward < emax)  : 
                 is_new = self._add_event_with_reconstruction(min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell)
                 in_e_bounds = True 
             else : 

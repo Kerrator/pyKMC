@@ -5,7 +5,7 @@ import random
 from ase.visualize import view
 
 #Generate fcc Ni 
-output = './initial_config.xyz'
+output = './Ni_sia_octa.xyz'
 #Ni fcc
 alat = 3.52
 atoms = bulk('Ni', crystalstructure='fcc', a=alat, cubic=True)

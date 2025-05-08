@@ -264,11 +264,11 @@ class KMC() :
                 else : 
                     #Go saddle point : 
                         #Apply PSR to generic event
-                    new_positions = self._transform_positions(dfevent.at['saddle_positions'], rmat, tr, perm) 
+                    saddle_positions = self._transform_positions(dfevent.at['saddle_positions'], rmat, tr, perm) 
                         #Get atomic environment atoms
                     neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
                         #Move system to saddle point
-                    self.system.update_positions(new_positions, atom_idx = neighbors)
+                    self.system.update_positions(saddle_positions, atom_idx = neighbors)
 
                     #When at saddle positions refine with partn
                     results = self.engine.refine_event(self.system, at_idx)
@@ -276,21 +276,45 @@ class KMC() :
                     if results is not None : 
                     #Generate dfevent series from refine event results 
                         dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
-                        active_table.add_event(dfactive)
+                        #Check if dE coherent 
+                        if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < 0.1 : 
+                            active_table.add_event(dfactive)
+                        else : 
+                            print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['initial_positions'])
+                            write('refinefail.xyz', atoms, append=True)
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['saddle_positions'])
+                            write('refinefail.xyz', atoms, append=True)
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['final_positions'])
+                            write('refinefail.xyz', atoms, append=True)
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=current_positions[neighbors])
+                            write('refinefail.xyz', atoms, append=True)
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=self.system.positions[neighbors])
+                            write('refinefail.xyz', atoms, append=True)
+                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfactive.at['final_positions'][neighbors])
+                            write('refinefail.xyz', atoms, append=True)
                     else : 
                         print("refine FAILED")
-                    #Back to current positions : 
+                    #Back to current positions :
                     self.system.update_positions(current_positions) 
 
                     #Need to do the same for symetries : 
-                    #for sym_matrix in dfevent.at['sym_matrix']  : 
-                    #    #Displacement between current positions and saddle_positions : 
-                    #    displacements = new_positions-current_positions 
+                    for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
+                        #Displacement between current positions and saddle_positions : 
+                        displacements = saddle_positions-current_positions[neighbors] 
+                        apply_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
+                        new_positions = current_positions[neighbors]+apply_displacements
+                        self.system.update_positions(new_positions, atom_idx = neighbors)
+                        atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
+                        write('test.xyz', atoms, append=True)
+                        self.system.update_positions(current_positions)
+
+
 
 
         return active_table
     
-    def _transform_positions(sefl, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
+    def _transform_positions(self, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
         transform_positions = positions @ transformation_matrix.T + translation_matrix 
         return transform_positions[permutation_matrix]
     
