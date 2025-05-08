@@ -279,12 +279,19 @@ class KMC() :
                         active_table.add_event(dfactive)
                     else : 
                         print("refine FAILED")
-                #Back to current positions : 
-                self.system.update_positions(current_positions) 
+                    #Back to current positions : 
+                    self.system.update_positions(current_positions) 
+
+                    #Need to do the same for symetries : 
+                    #for sym_matrix in dfevent.at['sym_matrix']  : 
+                    #    #Displacement between current positions and saddle_positions : 
+                    #    displacements = new_positions-current_positions 
+
+
         return active_table
     
     def _transform_positions(sefl, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
-        transform_positions = np.dot(positions, transformation_matrix.T) + translation_matrix 
+        transform_positions = positions @ transformation_matrix.T + translation_matrix 
         return transform_positions[permutation_matrix]
     
     def _build_refined_event_series(self, current_positions, at_idx, min1positions, min2positions, dE_forward, dE_backwards) : 
