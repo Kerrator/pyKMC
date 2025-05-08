@@ -1,4 +1,4 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration, Logger
+from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration, Logger, ActiveEventTable
 import random 
 import numpy as np
 from ase.io import write
@@ -6,6 +6,9 @@ from ase import Atoms
 import ase.geometry
 from .algorithms import * 
 import sys
+import pandas as pd
+from .rate_constant import compute_rate_Eyring
+from scipy.spatial import cKDTree
 
 
 class KMC() : 
@@ -23,10 +26,10 @@ class KMC() :
     def run(self) : 
         
         ###### START ###### 
-        self._initialize()
+        self.initialize()
 
         nkmc_steps = self.config['Control']['nkmc_steps']
-        time = 0
+        time = 0.0 #in seconds
         nsearch = self.config['EventSearch']['nsearch']
 
 
@@ -40,11 +43,15 @@ class KMC() :
         ####### KMC Loop ########
         for step in range(nkmc_steps) :
             self.logger.first_line_table()
+
+            #########################################################
+            #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
+            #########################################################
             #Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
             #List of atoms(central) on which we gonna perfom an event search
-            central_atom_research_list = self._central_atoms_research(new_environment, nsearch)
+            central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
             #Count number of tentative to prevent empty catalog : 
             MAX_TRIES = 5
             tries = 0 
@@ -68,7 +75,7 @@ class KMC() :
                         fails += 1
                 
                 if len(self.catalog.catalog) > 0 : 
-                    idx_event_catalog, delta_t = self._select_event() 
+                    #idx_event_catalog, delta_t = self._select_event() 
                     break #end while loop
                 else : 
                     tries += 1 
@@ -77,14 +84,26 @@ class KMC() :
                 self.logger.logger.debug('Emtpy catalog after {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
 
+            ################################
+            #CONTRUCT CURRENT ACTIVE EVENTS#
+            ################################
+            active_table = self.refinement() 
+            ###############################
+            #SELECT EVENT IN ACTIVE TABLE # 
+            ###############################
+            idx_selected_event, delta_t = self._select_event(active_table)
+            self._apply_event(idx_selected_event, active_table)
+            time += delta_t*10**-12 #time is in seconds
 
-            #Select central atom having same atomic environment as the event
-            idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
-            is_reconstruction = self._apply_event(idx_atom_apply_event, idx_event_catalog)
+
+            #idx_event_catalog, delta_t = self._select_event() 
+            ##Select central atom having same atomic environment as the event
+            #idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
+            #is_reconstruction = self._apply_event(idx_atom_apply_event, idx_event_catalog)
 
             #update time : 
-            if is_reconstruction : 
-                time += delta_t
+            #if is_reconstruction : 
+            #    time += delta_t
             #write config to file 
             self._append_snapshot_to_trajectory()
             #if no reconstruction, new catalog
@@ -94,7 +113,8 @@ class KMC() :
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
                 self.visited_environment.update(set(l_ids).difference(self.visited_environment))
 
-                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
+                #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
+                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog),  active_table.active_events.loc[idx_selected_event].at['energy_barrier'], active_table.active_events.loc[idx_selected_event].at['k'] )
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
@@ -116,8 +136,15 @@ class KMC() :
             tmp2 = [random.choice(tmp1) for i in range(nsearch)]
             central_atom_research_list += tmp2
         return central_atom_research_list
-    
-    def _select_event(self) : 
+
+    def _select_event(self, active_table) : 
+        """
+        """
+        #list of rate constant
+        l_k = np.array([active_table.active_events.loc[i].at['k'] for i in range(len(active_table.active_events))])
+        idx_selected_event, delta_t = rejection_free(l_k)
+        return idx_selected_event, delta_t
+    def _select_event_generic(self) : 
         """ 
         """
         #Find all possible event
@@ -145,7 +172,14 @@ class KMC() :
         else : 
             return self.catalog.catalog.loc[idx_event_catalog].at['atom_index'] 
 
-    def _apply_event(self, idx_atom_apply_event, idx_event_catalog) : 
+    def _apply_event(self, idx_selected_event, active_table ) : 
+        """ 
+        """
+        new_positions = active_table.active_events.loc[idx_selected_event].at['final_positions'] 
+        self.system.update_positions(new_positions)
+
+
+    def _apply_event_generic(self, idx_atom_apply_event, idx_event_catalog) : 
         """ 
         """
         if self.config['Control']['reconstruction'] :
@@ -206,6 +240,96 @@ class KMC() :
         positions[positions < 0 ] = 0
         return positions
     
+
+    def refinement(self) : 
+        #Initialize ActiveEventTable
+        active_table = ActiveEventTable() 
+
+        #Save_current_positions 
+        current_positions = self.system.positions.copy()
+
+        #Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
+        subset_reference_event_table = self.catalog.catalog[self.catalog.catalog['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
+
+        #Loop on subset : 
+        for idx, dfevent in subset_reference_event_table.iterrows() : 
+            #For each dfevent Series, need to find all atoms on which we can perform the event 
+            l_atoms_refine = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == dfevent['event_id']]
+            #for each atoms refine 
+            for at_idx in l_atoms_refine : 
+                #Need to go to saddle point applying PSR : 
+                rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).run()
+                if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
+                    print("PSR FAIL")
+                else : 
+                    #Go saddle point : 
+                        #Apply PSR to generic event
+                    new_positions = self._transform_positions(dfevent.at['saddle_positions'], rmat, tr, perm) 
+                        #Get atomic environment atoms
+                    neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+                        #Move system to saddle point
+                    self.system.update_positions(new_positions, atom_idx = neighbors)
+
+                    #When at saddle positions refine with partn
+                    results = self.engine.refine_event(self.system, at_idx)
+
+                    if results is not None : 
+                    #Generate dfevent series from refine event results 
+                        dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
+                    ##Find if min1 or min2 is initial positions 
+                    #    #To deal with pbc problem and lammps slighlty over/under box positions 
+                    #    dr1_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - results[0][at_idx],cell=self.system.cell,pbc=self.system.pbc)
+                    #    dr2_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - results[2][at_idx],cell=self.system.cell,pbc=self.system.pbc)
+                    #    #compare only atom that move 
+                    #    dr1 = np.sum(np.abs(dr1_vec))
+                    #    dr2 = np.sum(np.abs(dr2_vec))
+                    #    if dr1 < dr2 : 
+                    #        final_positions = results[2]
+                    #        dE = results[3]
+                    #    else : 
+                    #        final_positions = results[0]
+                    #        dE = results[4]
+                    #else : 
+                    #    final_positions = None
+
+                    #if final_positions is not None : 
+                    #    #Add active event refined 
+                    #    dfactive = pd.Series({'atom_index': at_idx, 
+                    #                          'final_positions' : final_positions,
+                    #                          'energy_barrier' : dE, 
+                    #                          'k' :compute_rate_Eyring(dE, self.config)})
+                        active_table.add_event(dfactive)
+                    else : 
+                        print("refine FAILED")
+                #Back to current positions : 
+                self.system.update_positions(current_positions) 
+        return active_table
+    
+    def _transform_positions(sefl, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
+        transform_positions = np.dot(positions, transformation_matrix.T) + translation_matrix 
+        return transform_positions[permutation_matrix]
+    
+    def _build_refined_event_series(self, current_positions, at_idx, min1positions, min2positions, dE_forward, dE_backwards) : 
+        #Find if min1 or min2 is initial positions 
+        #To deal with pbc problem and lammps slighlty over/under box positions 
+        dr1_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - min1positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
+        dr2_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - min2positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
+        #compare only atom that move 
+        dr1 = np.sum(np.abs(dr1_vec))
+        dr2 = np.sum(np.abs(dr2_vec))
+        if dr1 < dr2 : 
+            final_positions = min2positions
+            dE = dE_forward
+        else : 
+            final_positions = min1positions
+            dE = dE_backwards
+        #build event series 
+        dfactive = pd.Series({'atom_index': at_idx, 
+                              'final_positions' : final_positions,
+                              'energy_barrier' : dE, 
+                              'k' :compute_rate_Eyring(dE, self.config)})
+        return dfactive
+
     def initialize(self) : 
         self.logger = Logger(self.config) 
         self.logger.title()

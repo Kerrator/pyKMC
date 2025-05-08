@@ -75,7 +75,8 @@ class PointSetRegistration() :
         ira = ira_mod.IRA() 
 
         #Event informations : 
-        coords2 = self.catalog.catalog.loc[idx_cat].at["initial_positions"] 
+        #coords2 = self.catalog.catalog.loc[idx_cat].at["initial_positions"] 
+        coords2 = self.catalog.at["initial_positions"] 
         nat2 = len(coords2)
 
         #atom in the rcutevent around the central atom

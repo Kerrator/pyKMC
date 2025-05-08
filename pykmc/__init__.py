@@ -6,6 +6,7 @@ from .engine import *
 from .base_engine import *
 from .neighbors_list import *
 from .catalog import *
+from .event_table import *
 from .point_set_registration import *
 from .log import *
 from .kmc import *

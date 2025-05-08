@@ -54,9 +54,9 @@ class Logger() :
         """       
         reconstruction = self.config['Control']['reconstruction'] 
         if reconstruction : 
-            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<18s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'Recontruction dE'))
+            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<18s}'.format('Step', 'Time(s)', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'Recontruction dE'))
         else : 
-            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
+            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time(s)', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
 
     def table_line_info_kmc(self, *args) : 
         """
