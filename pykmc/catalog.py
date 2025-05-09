@@ -24,6 +24,8 @@ class Catalog :
         #Energy bounds 
         emin = self.config['EventSearch']['emin_event']
         emax = self.config['EventSearch']['emax_event']
+        print('EMIN ICI')
+        print(emin, emax)
 
         if self.config['Control']['reconstruction'] :
             if (emin < dE_forward < emax) and (emin < dE_backward < emax)  : 
