@@ -54,7 +54,7 @@ class Logger() :
         """       
         reconstruction = self.config['Control']['reconstruction'] 
         if reconstruction : 
-            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s} {:<18s}'.format('Step', 'Time(s)', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event', 'Recontruction dE'))
+            self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<14s} {:<11s}'.format('Step', 'Time(s)', 'Ndiff_env', 'N_event', 'dE_event(eV)', 'k(ps-1)'))
         else : 
             self.logger.info('{:<10s} {:<12s} {:<10s} {:<10s} {:<13s} {:<10s}'.format('Step', 'Time(s)', 'Ndiff_env', 'N_event', 'n_select_event', 'dE_event'))
 

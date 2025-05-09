@@ -41,8 +41,8 @@ class KMC() :
         self.logger.logger.info('= Starting KMC simulation =')
         self.logger.logger.info('===========================')
         ####### KMC Loop ########
+        self.logger.first_line_table()
         for step in range(nkmc_steps) :
-            self.logger.first_line_table()
 
             #########################################################
             #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
