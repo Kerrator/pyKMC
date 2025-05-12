@@ -154,7 +154,6 @@ class KMC() :
         if self.config['Control']['reconstruction'] : 
             l_env = list(set(self.atomic_environment.atomic_environment_list))
             if l_env == ['crystal'] : 
-                print('only crystal atoms')
                 self._close()
             l_catalog = [i for i in range(len(self.catalog.catalog)) if self.catalog.catalog.loc[i].at['event_id'] in l_env ]
         else  : # all events in catalog are possible 
@@ -284,29 +283,10 @@ class KMC() :
                             active_table.add_event(dfactive)
                         else : 
                             print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['initial_positions'])
-                            #write('refinefail.xyz', atoms, append=True)
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['saddle_positions'])
-                            #write('refinefail.xyz', atoms, append=True)
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['final_positions'])
-                            #write('refinefail.xyz', atoms, append=True)
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=current_positions[neighbors])
-                            #write('refinefail.xyz', atoms, append=True)
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=self.system.positions[neighbors])
-                            #write('refinefail.xyz', atoms, append=True)
-                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfactive.at['final_positions'][neighbors])
-                            #write('refinefail.xyz', atoms, append=True)
                     else : 
                         print("refine FAILED no event found")
                     #Back to current positions :
                     self.system.update_positions(current_positions)
-                    print("Event Sym Raf")
-                    print("sym matrix = ")
-                    print(dfevent.at['sym_matrix'])
-                    print("perm_matrix = ")
-                    print(dfevent.at["sym_perm"])
-                    print("CATALOG REFERENCE")
-                    print(self.catalog.catalog)
                     #Need to do the same for symetries : 
                     for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
                         #Displacement between current positions and saddle_positions : 
@@ -331,10 +311,6 @@ class KMC() :
                                 print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
                         else : 
                             print("refine FAILED no event found, SYM EVENT")
-                            traj = [] 
-                            traj.append(Atoms(len(neighbors)*["X"], positions = current_positions[neighbors])) 
-                            traj.append(Atoms(len(neighbors)*["X"], positions = self.system.positions[neighbors])) 
-                            write('raffails.xyz', traj, append=True)
                         #Back to current positions :
                         self.system.update_positions(current_positions)
         return active_table
