@@ -119,7 +119,10 @@ class KMC() :
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
             self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
-        
+
+            if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
+                self.logger.logger.info(':=> Only atoms with cristalline environment')
+                self._close()
         self.catalog.catalog.to_pickle('catalog.pickle')
 
 
