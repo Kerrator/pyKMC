@@ -254,6 +254,8 @@ class KMC() :
         subset_reference_event_table = self.catalog.catalog[self.catalog.catalog['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
 
         #Loop on subset : 
+        counts = 0
+        success = 0
         for idx, dfevent in subset_reference_event_table.iterrows() : 
             #For each dfevent Series, need to find all atoms on which we can perform the event 
             l_atoms_refine = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == dfevent['event_id']]
@@ -274,13 +276,14 @@ class KMC() :
 
                     #When at saddle positions refine with partn
                     results = self.engine.refine_event(self.system, at_idx)
-
+                    counts += 1
                     if results is not None : 
                     #Generate dfevent series from refine event results 
                         dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
                         #Check if dE coherent 
                         if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                             active_table.add_event(dfactive)
+                            success += 1
                         else : 
                             print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
                     else : 
@@ -313,6 +316,7 @@ class KMC() :
                             print("refine FAILED no event found, SYM EVENT")
                         #Back to current positions :
                         self.system.update_positions(current_positions)
+        self.logger.logger.debug("{} refine attemps, {} success".format(counts, success))
         return active_table
     
     def _transform_positions(self, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
