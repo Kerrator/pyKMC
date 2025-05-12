@@ -4,8 +4,6 @@ import numpy as np
 
 def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) : 
     #INITILIZE ARTN
-    print("HERERERERER")
-    print(central_atom_idx)
     artn = pypARTn2.artn(engine='lmp')
 
     #LAMMPS COMMANDS
@@ -42,8 +40,6 @@ def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) :
         delr2 = artn.extract('delr_min2')
         #Checks if one minimum is close to the original configuration
         if delr1 < config_event_search['partn_delr_threshold'] or delr2 < config_event_search['partn_delr_threshold'] :
-            print("TESTHERERERERER")
-            print(delr1, delr2)
             E_sad = artn.extract("etot_sad")
             E_min1 = artn.extract("etot_min1")
             E_min2 = artn.extract("etot_min2")
@@ -73,8 +69,6 @@ def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) :
 def pARTn_refine_event(lmp, config_event_search, central_atom_idx ): 
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
-    print("REFINE")
-    print(central_atom_idx)
 
     #LAMMPS COMMANDS
     lmp.command("plugin load {}".format(config_event_search['path_artnso']))

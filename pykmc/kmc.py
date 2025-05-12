@@ -277,41 +277,63 @@ class KMC() :
                     #Generate dfevent series from refine event results 
                         dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
                         #Check if dE coherent 
-                        if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < 0.1 : 
+                        if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                             active_table.add_event(dfactive)
                         else : 
                             print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['initial_positions'])
-                            write('refinefail.xyz', atoms, append=True)
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['saddle_positions'])
-                            write('refinefail.xyz', atoms, append=True)
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['final_positions'])
-                            write('refinefail.xyz', atoms, append=True)
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=current_positions[neighbors])
-                            write('refinefail.xyz', atoms, append=True)
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=self.system.positions[neighbors])
-                            write('refinefail.xyz', atoms, append=True)
-                            atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfactive.at['final_positions'][neighbors])
-                            write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['initial_positions'])
+                            #write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['saddle_positions'])
+                            #write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfevent.at['final_positions'])
+                            #write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=current_positions[neighbors])
+                            #write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=self.system.positions[neighbors])
+                            #write('refinefail.xyz', atoms, append=True)
+                            #atoms = Atoms(np.array(self.system.types)[neighbors], positions=dfactive.at['final_positions'][neighbors])
+                            #write('refinefail.xyz', atoms, append=True)
                     else : 
-                        print("refine FAILED")
+                        print("refine FAILED no event found")
                     #Back to current positions :
-                    self.system.update_positions(current_positions) 
-
+                    self.system.update_positions(current_positions)
+                    print("Event Sym Raf")
+                    print("sym matrix = ")
+                    print(dfevent.at['sym_matrix'])
+                    print("perm_matrix = ")
+                    print(dfevent.at["sym_perm"])
+                    print("CATALOG REFERENCE")
+                    print(self.catalog.catalog)
                     #Need to do the same for symetries : 
                     for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
                         #Displacement between current positions and saddle_positions : 
-                        displacements = saddle_positions-current_positions[neighbors] 
-                        apply_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
-                        new_positions = current_positions[neighbors]+apply_displacements
+                        displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
+                        #APPLY Symmetry to displacement 
+                        new_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
+                        #Apply displacement to generic initial positions 
+                        new_saddle_positions = dfevent.at['initial_positions']+new_displacements
+                        #Aplly PSR to the new saddle positions 
+                        new_positions = self._transform_positions(new_saddle_positions, rmat, tr, perm)
+                        #update system positions
                         self.system.update_positions(new_positions, atom_idx = neighbors)
-                        atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
-                        write('test.xyz', atoms, append=True)
+                        #event refine
+                        results = self.engine.refine_event(self.system, at_idx)
+                        if results is not None : 
+                        #Generate dfevent series from refine event results 
+                            dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
+                            #Check if dE coherent 
+                            if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
+                                active_table.add_event(dfactive)
+                            else : 
+                                print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                        else : 
+                            print("refine FAILED no event found, SYM EVENT")
+                            traj = [] 
+                            traj.append(Atoms(len(neighbors)*["X"], positions = current_positions[neighbors])) 
+                            traj.append(Atoms(len(neighbors)*["X"], positions = self.system.positions[neighbors])) 
+                            write('raffails.xyz', traj, append=True)
+                        #Back to current positions :
                         self.system.update_positions(current_positions)
-
-
-
-
         return active_table
     
     def _transform_positions(self, positions, transformation_matrix, translation_matrix, permutation_matrix) : 

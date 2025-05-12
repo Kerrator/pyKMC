@@ -145,7 +145,9 @@ class CatalogRef :
                                      'k' : compute_rate_Eyring(dE_backward, self.config), 
                                      'id_saddle' : id_saddle, 
                                      'id_final': id_min1, 
-                                     'move_atom_idx': np.where(neighbor_list_backward == index_move)[0][0] })
+                                     'move_atom_idx': np.where(neighbor_list_backward == index_move)[0][0],
+                                     'sym_matrix' : sym_matrix, 
+                                     'sym_perm': sym_perm })
         
         return dfevent_forward, dfevent_backward
 

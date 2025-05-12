@@ -24,8 +24,6 @@ class Catalog :
         #Energy bounds 
         emin = self.config['EventSearch']['emin_event']
         emax = self.config['EventSearch']['emax_event']
-        print('EMIN ICI')
-        print(emin, emax)
 
         if self.config['Control']['reconstruction'] :
             if (emin < dE_forward < emax) and (emin < dE_backward < emax)  : 
@@ -144,7 +142,9 @@ class Catalog :
                                      'k' : compute_rate_Eyring(dE_backward, self.config), 
                                      'id_saddle' : id_saddle, 
                                      'id_final': id_min1, 
-                                     'move_atom_idx': np.where(neighbor_list_backward == index_move)[0][0] })
+                                     'move_atom_idx': np.where(neighbor_list_backward == index_move)[0][0], 
+                                     'sym_matrix' : sym_matrix, 
+                                     'sym_perm': sym_perm})
         
         return dfevent_forward, dfevent_backward
 
