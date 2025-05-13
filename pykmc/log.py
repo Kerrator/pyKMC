@@ -38,9 +38,20 @@ class Logger() :
         self.logger.info("|    `---              ")
         self.logger.info("\n")
 
-    def write_parameter(self) : 
-        self.logger.info('=:> PARAMETERS')
-        self.logger.info('not implemented')
+    def write_parameter(self, width = 60, indent = 4) : 
+        centered_title = f"SIMULATION PARAMETERS".center(width)
+        separator = "=" * width
+        self.logger.info("\n{}\n{}\n{}".format(separator, centered_title, separator))
+
+        max_key_len = max(len(key) for section in self.config.values() for key in section)
+
+        for section in self.config : 
+            self.logger.info(section)
+            for key, value in self.config[section].items() : 
+                self.logger.info("{}{:<{}} : {}".format(" " * indent, key, max_key_len, value))
+            
+
+
         self.new_line()
 
     def first_line_table(self) : 
