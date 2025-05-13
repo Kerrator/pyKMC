@@ -11,14 +11,14 @@ import sys
 
 
 
-class CatalogRef : 
+class ReferenceEventTable : 
 
     def __init__(self, config) : 
         self.config = config
-        if self.config['Control']['catalog'] is None : 
-            self._initialize_catalog() 
+        if self.config['Control']['reference_table'] is None : 
+            self._initialize_table() 
         else : 
-            self.catalog = pd.read_pickle(self.config['Control']['catalog'])
+            self.table = pd.read_pickle(self.config['Control']['reference_table'])
 
 
     def add_event(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, neighbors_list_environment, cell) : 
@@ -54,31 +54,31 @@ class CatalogRef :
                             'energy_barrier' : dE,
                             'k' : compute_rate_Eyring(dE, self.config)})  
 
-        if len(self.catalog) > 0 : 
+        if len(self.table) > 0 : 
             #Check if event alread in catalog : 
             atol = 1e-3 
             rtol = 1e-3 
 
             #Only select rows with same atom index 
-            subset = self.catalog[self.catalog["atom_index"] == dfevent['atom_index']]
+            subset = self.table[self.table["atom_index"] == dfevent['atom_index']]
 
             #Check if we have final positions of the event close to at least one final positions in the subset 
             if not subset["final_positions"].apply(lambda pos : np.allclose(pos, dfevent["final_positions"], atol=atol, rtol=rtol)).any() : 
                 #if not add event to the catalog : 
-                self.catalog = pd.concat([self.catalog, dfevent.to_frame().T], ignore_index=True)
+                self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
                 return True 
             else :
                 return False
             
         else : 
-            self.catalog = pd.concat([self.catalog, dfevent.to_frame().T], ignore_index=True)
+            self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
             return True
         
 
     def _add_event_with_reconstruction(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell)  :
         dfevent_forward, dfevent_backward = self._event_series_with_reconstruction(min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell) 
         #Only select rows with same event_id as dfenvent : 
-        subset = self.catalog[self.catalog["event_id"] == dfevent_forward["event_id"]] 
+        subset = self.table[self.table["event_id"] == dfevent_forward["event_id"]] 
         #subset of subset with rows with the same saddle_id : 
         subset = subset[subset["id_saddle"] == dfevent_forward["id_saddle"]]
         #subset of subset of subset with rows with the same final_id : 
@@ -86,10 +86,10 @@ class CatalogRef :
         #if there is no event with same IDs
         if len(subset) == 0 : 
             #add to the catalog foward reaction  
-            self.catalog = pd.concat([self.catalog, dfevent_forward.to_frame().T], ignore_index=True)
+            self.table = pd.concat([self.table, dfevent_forward.to_frame().T], ignore_index=True)
             #Check if backward reaction is not the same as the forward one    
             if dfevent_forward["event_id"] != dfevent_forward["id_final"] :  
-                self.catalog = pd.concat([self.catalog, dfevent_backward.to_frame().T], ignore_index=True)
+                self.table = pd.concat([self.table, dfevent_backward.to_frame().T], ignore_index=True)
             return True
         else : 
             return False
@@ -151,9 +151,9 @@ class CatalogRef :
         
         return dfevent_forward, dfevent_backward
 
-    def _initialize_catalog(self) : 
+    def _initialize_table(self) : 
         if self.config['Control']['reconstruction'] : 
-            self.catalog = pd.DataFrame(columns=['event_id', 
+            self.table = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
                                                  'saddle_positions', 
                                                  'final_positions', 
@@ -165,13 +165,13 @@ class CatalogRef :
                                                  'sym_matrix', 
                                                  'sym_perm'])
         else : 
-            self.catalog = pd.DataFrame(columns = ['atom_index', 
+            self.table = pd.DataFrame(columns = ['atom_index', 
                                                    'final_positions',
                                                    'energy_barrier',
                                                    'k'])
             
-    def save(self, outfile='catalog.pickle') : 
-        self.catalog.to_pickle(outfile)
+    def save(self, outfile='reference_table.pickle') : 
+        self.table.to_pickle(outfile)
 
 
 
@@ -179,12 +179,12 @@ class ActiveEventTable() :
 
     def __init__(self, event_dataframe = None ) : 
         if event_dataframe is not None : 
-            self.active_events = event_dataframe
+            self.table = event_dataframe
         else : 
-            self.active_events = pd.DataFrame(columns = ['atom_index', 'final_positions', 'energy_barrier', 'k'])
+            self.table = pd.DataFrame(columns = ['atom_index', 'final_positions', 'energy_barrier', 'k'])
 
     def add_event(self, dfevent) : 
-        self.active_events = pd.concat([self.active_events, dfevent.to_frame().T], ignore_index=True)
+        self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
 
 
 

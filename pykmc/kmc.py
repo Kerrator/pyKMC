@@ -1,4 +1,4 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, Catalog, PointSetRegistration, Logger, ActiveEventTable
+from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
 import random 
 import numpy as np
 from ase.io import write
@@ -20,7 +20,7 @@ class KMC() :
         self.engine = None 
         self.neighbors_list = None 
         self.atomic_environment = None 
-        self.catalog = None
+        self.reference_table = None
         self.visited_environment = set(['crystal'])
             
     def run(self) : 
@@ -52,7 +52,7 @@ class KMC() :
 
             #List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
-            #Count number of tentative to prevent empty catalog : 
+            #Count number of tentative to prevent empty reference table : 
             MAX_TRIES = 5
             tries = 0 
 
@@ -66,22 +66,21 @@ class KMC() :
                     results = self.engine.search_event(self.system, idx)
 
                     if results != None : 
-                    #add results in catalog 
+                    #add results in reference table 
                         if self.config['Control']['reconstruction'] : #if reconstruction, need to center event to prevent pbc problem
                             results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
-                        is_new, in_e_bounds = self.catalog.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+                        is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
 
                     else : #failed 
                         fails += 1
                 
-                if len(self.catalog.catalog) > 0 : 
-                    #idx_event_catalog, delta_t = self._select_event() 
+                if len(self.reference_table.table) > 0 : 
                     break #end while loop
                 else : 
                     tries += 1 
-                    self.logger.logger.debug('Empty catalog after {} searches, retrying'.format(len(central_atom_research_list)))
+                    self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
             else : #if not breack encounter : 
-                self.logger.logger.debug('Emtpy catalog after {} tries, closing simulation'.format(MAX_TRIES))
+                self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
 
             ################################
@@ -106,15 +105,15 @@ class KMC() :
             #    time += delta_t
             #write config to file 
             self._append_snapshot_to_trajectory()
-            #if no reconstruction, new catalog
+            #if no reconstruction, new reference table
             if not self.config['Control']['reconstruction'] : 
-                self.catalog = Catalog(self.config)
+                self.reference_table = ReferenceEventTable(self.config)
             else : #update visited environments 
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
                 self.visited_environment.update(set(l_ids).difference(self.visited_environment))
 
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
-                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog),  active_table.active_events.loc[idx_selected_event].at['energy_barrier'], active_table.active_events.loc[idx_selected_event].at['k'] )
+                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
@@ -123,7 +122,7 @@ class KMC() :
             if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
                 self.logger.logger.info(':=> Only atoms with cristalline environment')
                 self._close()
-        self.catalog.catalog.to_pickle('catalog.pickle')
+        self.reference_table.save('reference_table.pickle')
 
 
     def central_atoms_research(self, new_environment, nsearch) : 
@@ -144,7 +143,7 @@ class KMC() :
         """
         """
         #list of rate constant
-        l_k = np.array([active_table.active_events.loc[i].at['k'] for i in range(len(active_table.active_events))])
+        l_k = np.array([active_table.table.loc[i].at['k'] for i in range(len(active_table.table))])
         idx_selected_event, delta_t = rejection_free(l_k)
         return idx_selected_event, delta_t
     def _select_event_generic(self) : 
@@ -155,37 +154,37 @@ class KMC() :
             l_env = list(set(self.atomic_environment.atomic_environment_list))
             if l_env == ['crystal'] : 
                 self._close()
-            l_catalog = [i for i in range(len(self.catalog.catalog)) if self.catalog.catalog.loc[i].at['event_id'] in l_env ]
-        else  : # all events in catalog are possible 
-            l_catalog = [i for i in range(len(self.catalog.catalog))]
+            l_reference_table = [i for i in range(len(self.reference_table.table)) if self.reference_table.table.loc[i].at['event_id'] in l_env ]
+        else  : # all events in reference events are possible 
+            l_reference_table = [i for i in range(len(self.reference_table.table))]
         #Get constant rate of possible events
-        l_k = np.array([self.catalog.catalog.loc[l_catalog[i]].at['k'] for i in range(len(l_catalog))])
+        l_k = np.array([self.reference_table.table.loc[l_reference_table[i]].at['k'] for i in range(len(l_reference_table))])
         #Apply algorithm select event : 
         idx_selected_event, delta_t = rejection_free(l_k)
-        return l_catalog[idx_selected_event], delta_t 
+        return l_reference_table[idx_selected_event], delta_t 
 
-    def _select_central_atom_idx(self, idx_event_catalog) : 
+    def _select_central_atom_idx(self, idx_event_table) : 
         """ 
         """
         if self.config['Control']['reconstruction'] : 
-            id_hash = self.catalog.catalog.loc[idx_event_catalog].at['event_id'] 
+            id_hash = self.reference_table.table.loc[idx_event_table].at['event_id'] 
             possible = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == id_hash]
             return random.choice(possible) 
         else : 
-            return self.catalog.catalog.loc[idx_event_catalog].at['atom_index'] 
+            return self.reference_table.table.loc[idx_event_table].at['atom_index'] 
 
     def _apply_event(self, idx_selected_event, active_table ) : 
         """ 
         """
-        new_positions = active_table.active_events.loc[idx_selected_event].at['final_positions'] 
+        new_positions = active_table.table.loc[idx_selected_event].at['final_positions'] 
         self.system.update_positions(new_positions)
 
 
-    def _apply_event_generic(self, idx_atom_apply_event, idx_event_catalog) : 
+    def _apply_event_generic(self, idx_atom_apply_event, idx_event_table) : 
         """ 
         """
         if self.config['Control']['reconstruction'] :
-            rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.catalog, self.neighbors_list, idx_event_catalog, idx_atom_apply_event).run()
+            rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.reference_table, self.neighbors_list, idx_event_table, idx_atom_apply_event).run()
             if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
                 return False 
             else :
@@ -194,20 +193,20 @@ class KMC() :
                 Eini = self.engine.compute_potential_energy(self.system)
                 #go to saddle point 
                 neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
-                new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['saddle_positions']), 3))
+                new_positions = np.zeros((len(self.reference_table.table.loc[idx_event_table].at['saddle_positions']), 3))
                 for i in range(len(new_positions)) : 
-                    new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['saddle_positions'][i]) + tr 
+                    new_positions[i] = np.matmul(rmat, self.reference_table.table.loc[idx_event_table].at['saddle_positions'][i]) + tr 
                 new_positions[:] = new_positions[perm]
                 self.system.update_positions(new_positions, atom_idx = neighbors)
                 #saddle potential energy 
                 Esad = self.engine.compute_potential_energy(self.system)
                 #check if energy barrier consistent : 
                 dE = Esad-Eini
-                if abs(dE-self.catalog.catalog.loc[idx_event_catalog]['energy_barrier']) < 0.5 : 
+                if abs(dE-self.reference_table.table.loc[idx_event_table]['energy_barrier']) < 0.5 : 
 
-                    new_positions = np.zeros((len(self.catalog.catalog.loc[idx_event_catalog].at['final_positions']), 3))
+                    new_positions = np.zeros((len(self.reference_table.table.loc[idx_event_table].at['final_positions']), 3))
                     for i in range(len(new_positions)) : 
-                        new_positions[i] = np.matmul(rmat, self.catalog.catalog.loc[idx_event_catalog].at['final_positions'][i]) + tr 
+                        new_positions[i] = np.matmul(rmat, self.reference_table.table.loc[idx_event_table].at['final_positions'][i]) + tr 
                     new_positions[:] = new_positions[perm]
                     self.system.update_positions(new_positions, atom_idx = neighbors)
                     return True
@@ -219,7 +218,7 @@ class KMC() :
         else : 
             #neigbors of central atoms : 
             neighbors = self.neighbors_list.get_neighbors('rcut', idx_atom_apply_event)
-            final_positions = self.catalog.catalog.loc[idx_event_catalog].at['final_positions'] 
+            final_positions = self.reference_table.table.loc[idx_event_table].at['final_positions'] 
             #updat positions : 
             self.system.update_positions(final_positions, atom_idx = neighbors)
 
@@ -251,7 +250,7 @@ class KMC() :
         current_positions = self.system.positions.copy()
 
         #Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
-        subset_reference_event_table = self.catalog.catalog[self.catalog.catalog['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
+        subset_reference_event_table = self.reference_table.table[self.reference_table.table['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
 
         #Loop on subset : 
         counts = 0
@@ -358,11 +357,11 @@ class KMC() :
         self.system.update_positions(new_positions)
         self.neighbors_list = NeighborsList(self.system, self.config) 
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
-        if self.config['Control']['catalog'] is not None : 
-            self.logger.logger.info('=> Reading catalog file {}'.format(self.config['Control']['catalog']))
+        if self.config['Control']['reference_table'] is not None : 
+            self.logger.logger.info('=> Reading Reference table file {}'.format(self.config['Control']['reference_table']))
         else : 
-            self.logger.logger.info('=> Initilizing Catalog')
-        self.catalog = Catalog(self.config)
+            self.logger.logger.info('=> Initilizing Reference Table')
+        self.reference_table = ReferenceEventTable(self.config)
         self.logger.new_line()
 
     def _append_snapshot_to_trajectory(self) : 
