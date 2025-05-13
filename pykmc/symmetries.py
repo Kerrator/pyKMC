@@ -25,7 +25,7 @@ def unique_symmetries(initial_positions, final_positions, sym_thr) :
         new_displacements = new_displacements[sym.perm[i]]
 
         for disp in unique_displacements : #Check if alreay in unique_displacements 
-            if np.allclose(disp, new_displacements, atol=1e-2, rtol=1e-2 ) : 
+            if np.allclose(disp, new_displacements, atol=1e-2, rtol=0 ) : 
                 is_duplicated = True 
                 break
         

@@ -59,7 +59,7 @@ DEFAULT = {
         'partn_nperp' : 5,
         'partn_delr_threshold' : 0.5,
         'k0' : 1.0e-12,
-        'sym_thr' : 0.2,
+        'sym_thr' : 0.01,
         'refine_energy_threshold' : 0.2
     }, 
     'PSR' : {
