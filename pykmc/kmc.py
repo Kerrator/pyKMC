@@ -255,6 +255,8 @@ class KMC() :
         #Loop on subset : 
         counts = 0
         success = 0
+        counts_sym = 0 
+        success_sym = 0 
         for idx, dfevent in subset_reference_event_table.iterrows() : 
             #For each dfevent Series, need to find all atoms on which we can perform the event 
             l_atoms_refine = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == dfevent['event_id']]
@@ -303,19 +305,21 @@ class KMC() :
                         self.system.update_positions(new_positions, atom_idx = neighbors)
                         #event refine
                         results = self.engine.refine_event(self.system, at_idx)
+                        counts_sym +=1
                         if results is not None : 
                         #Generate dfevent series from refine event results 
                             dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
                             #Check if dE coherent 
                             if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                                 active_table.add_event(dfactive)
+                                success_sym +=1
                             else : 
                                 print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
                         else : 
                             print("refine FAILED no event found, SYM EVENT")
                         #Back to current positions :
                         self.system.update_positions(current_positions)
-        self.logger.logger.debug("{} refine attemps, {} success".format(counts, success))
+        self.logger.logger.debug("{} refine attemps, {} success, {} direct and {} sym".format(counts+counts_sym, success+success_sym, success, success_sym))
         return active_table
     
     def _transform_positions(self, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
