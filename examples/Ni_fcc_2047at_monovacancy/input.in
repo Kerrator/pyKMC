@@ -1,11 +1,12 @@
 [Control] 
-config_file = ./initial_config2.xyz 
+config_file = ./initial_config.xyz 
 output_file = ./trajkmc.xyz
-nkmc_steps = 10
+nkmc_steps = 1
 #catalog = ./catalog.pickle
 nprocs = 8
 reconstruction = True
 engine = lammps
+verbosity = 2
 
 [Potential] 
 file = ./Ni_v6_2.0_LKBeland2016.eam
@@ -32,9 +33,9 @@ rcutenv = 6.5
 nsearch = 10
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
-emin_event = 0.1
+emin_event = 0.0
 partn_delr_threshold = 0.4
-k0 = 1
+k0 = 1.0e-12
 T = 300.0
 
 [PSR] 

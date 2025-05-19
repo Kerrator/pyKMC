@@ -1,11 +1,11 @@
 [Control] 
-config_file = ./initial_config.xyz
+config_file = ./initial_config_relaxed.xyz
 output_file = ./trajkmc.xyz
-nkmc_steps = 1
-#catalog = ./catalog.pickle
+nkmc_steps = 10
 nprocs = 8
 reconstruction = True
 engine = lammps
+verbosity = 2
 
 [Potential] 
 file = ./Ni_v6_2.0_LKBeland2016.eam
@@ -24,15 +24,20 @@ maxeval = 1000
 style = cna/graph
 radd_cna = 0
 rnei = 3.01
-rcut = 6.5
+rcut = 7.5
+
 
 [EventSearch] 
 style = pARTn 
-rcutenv = 6.5
+rcutenv = 7.5
 nsearch = 5
+partn_lanczos_disp = 0.0002
+partn_nperp = 7 
+partn_push_step_size = 0.2 
+partn_eigen_step_size = 0.1
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
-emax_event = 5.0
-emin_event = 0.2
+emax_event = 1.5
+emin_event = 0.0
 k0 = 1.0e-12
 T = 300.0
 
