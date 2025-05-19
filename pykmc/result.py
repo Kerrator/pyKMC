@@ -1,6 +1,7 @@
 from typing import TypeAlias, TypeVar, Generic, Optional
 from dataclasses import dataclass
 from enum import Enum
+import numpy as np
 
 """
 Construction of the Result Type is based on Rust/rustedpy and https://www.youtube.com/watch?v=1P7J2wI46sg
@@ -48,3 +49,19 @@ class ErrorInfo :
 class ErrorType(Enum) : 
     EVENT_NOT_FOUND = 1 
     EVENT_MINIMA_NOT_MATCH_POSITIONS = 2
+
+
+
+# Dataclass to store operation outputs 
+
+@dataclass 
+class EventSearchOutput : 
+    central_atom_index : int 
+    dE_forward : float 
+    dE_backward : float 
+    min1_positions : np.ndarray 
+    saddle_positions : np.ndarray
+    min2_positions : np.ndarray 
+    move_atom_index : int 
+    delr1 : float 
+    delr2 : float
