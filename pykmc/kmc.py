@@ -24,47 +24,48 @@ class KMC() :
         self.visited_environment = set(['crystal'])
             
     def run(self) : 
-        
-        ###### START ###### 
-        self.initialize()
 
+        ################################################################# 
+        #                  INITIALIZE ATTRIBUTES                        #
+        ################################################################# 
+        self.initialize()
+        #Write initial step to file : 
+        self._append_snapshot_to_trajectory()
+
+        ################################################################# 
+        #                    LOOP KMC PARAMETERS                        #
+        ################################################################# 
         nkmc_steps = self.config['Control']['nkmc_steps']
         time = 0.0 #in seconds
         nsearch = self.config['EventSearch']['nsearch']
 
+        ################################################################# 
+        #                         KMC LOOP                              #
+        ################################################################# 
+        self.logger.first_line_table() #write log head table
 
-        #Write initial step to file : 
-        self._append_snapshot_to_trajectory()
-
-
-        self.logger.logger.info('===========================')
-        self.logger.logger.info('= Starting KMC simulation =')
-        self.logger.logger.info('===========================')
-        ####### KMC Loop ########
-        self.logger.first_line_table()
         for step in range(nkmc_steps) :
-
             #########################################################
             #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
             #########################################################
-            #Find new atomic environments that have not been visited
+                #=> Find new atomic environments that have not been visited
             new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
 
-            #List of atoms(central) on which we gonna perfom an event search
+                #=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
-            #Count number of tentative to prevent empty reference table : 
-            MAX_TRIES = 5
-            tries = 0 
 
+            MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
+            tries = 0 
             while tries < MAX_TRIES : 
-                #Fro all idx in central_atom_research_list
                 fails = 0 #to count the number of event search fails
-                
+
+                #=> For all central atom index on which we want to perform an event search  
                 for idx in central_atom_research_list : 
 
-                    #do an event search 
+                    #==> Do an event search 
                     results = self.engine.search_event(self.system, idx)
 
+                    #==> Check if event found
                     if results != None : 
                     #add results in reference table 
                         if self.config['Control']['reconstruction'] : #if reconstruction, need to center event to prevent pbc problem
@@ -73,7 +74,8 @@ class KMC() :
 
                     else : #failed 
                         fails += 1
-                
+
+                #=> if reference event table is not emppty break while loop 
                 if len(self.reference_table.table) > 0 : 
                     break #end while loop
                 else : 
@@ -94,18 +96,12 @@ class KMC() :
             self._apply_event(idx_selected_event, active_table)
             time += delta_t*10**-12 #time is in seconds
 
-
-            #idx_event_catalog, delta_t = self._select_event() 
-            ##Select central atom having same atomic environment as the event
-            #idx_atom_apply_event = self._select_central_atom_idx(idx_event_catalog)
-            #is_reconstruction = self._apply_event(idx_atom_apply_event, idx_event_catalog)
-
-            #update time : 
-            #if is_reconstruction : 
-            #    time += delta_t
-            #write config to file 
+            #MINIMIZE (could remove)
+            new_positions = self.engine.minimize(self.system)
+            self.system.update_positions(new_positions)
             self._append_snapshot_to_trajectory()
-            #if no reconstruction, new reference table
+
+            #=>if no reconstruction, new reference table
             if not self.config['Control']['reconstruction'] : 
                 self.reference_table = ReferenceEventTable(self.config)
             else : #update visited environments 
@@ -367,6 +363,9 @@ class KMC() :
             self.logger.logger.info('=> Initilizing Reference Table')
         self.reference_table = ReferenceEventTable(self.config)
         self.logger.new_line()
+        self.logger.logger.info('===========================')
+        self.logger.logger.info('= Starting KMC simulation =')
+        self.logger.logger.info('===========================')
 
     def _append_snapshot_to_trajectory(self) : 
         output = self.config['Control']['output_file']
