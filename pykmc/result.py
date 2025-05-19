@@ -39,3 +39,12 @@ class Err(Generic[TERR]) :
     
 Result : TypeAlias = Ok[TOK] | Err[TERR]
 
+@dataclass 
+class ErrorInfo : 
+    type : "ErrorType"
+    message : str 
+    details : str 
+
+class ErrorType(Enum) : 
+    EVENT_NOT_FOUND = 1 
+    EVENT_MINIMA_NOT_MATCH_POSITIONS = 2
