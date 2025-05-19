@@ -37,5 +37,5 @@ class Err(Generic[TERR]) :
     def err_value(self) -> TERR : 
         return self._err 
     
-Result = TypeAlias = Ok[TOK] | Err[TERR]
+Result : TypeAlias = Ok[TOK] | Err[TERR]
 
