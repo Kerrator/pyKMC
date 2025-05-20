@@ -1,5 +1,6 @@
-from pykmc import System, Engine, Config, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
+from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
 import random 
+from .result import EventSearchOutput
 import numpy as np
 from ase.io import write
 from ase import Atoms
@@ -8,7 +9,7 @@ from .algorithms import *
 import sys
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
-from scipy.spatial import cKDTree
+from dataclasses import asdict
 
 
 class KMC() : 
@@ -63,14 +64,25 @@ class KMC() :
                 for idx in central_atom_research_list : 
 
                     #==> Do an event search 
-                    results = self.engine.search_event(self.system, idx)
-
+                    #results = self.engine.search_event(self.system, idx)
+                    event_search_output = self.engine.search_event(self.system, idx)
                     #==> Check if event found
-                    if results != None : 
+                    #if results != None : 
+                    if event_search_output.is_ok() : 
+                        event_search_output = event_search_output.ok_value()
                     #add results in reference table 
                         if self.config['Control']['reconstruction'] : #if reconstruction, need to center event to prevent pbc problem
-                            results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
-                        is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+                            #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
+                            self._center_event_positions(event_search_output)
+                        #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+                        is_new, in_e_bounds = self.reference_table.add_event(min1positions = event_search_output.min1_positions, 
+                                                                             saddlepositions = event_search_output.saddle_positions, 
+                                                                             min2positions = event_search_output.min2_positions, 
+                                                                             move_atom_idx = event_search_output.move_atom_index, 
+                                                                             dE_forward = event_search_output.dE_forward, 
+                                                                             dE_backward = event_search_output.dE_backward, 
+                                                                             neighbors_list_environment= self.neighbors_list.neighbors_list['rcut'],
+                                                                             cell= self.system.cell)
 
                     else : #failed 
                         fails += 1
@@ -219,16 +231,31 @@ class KMC() :
             self.system.update_positions(final_positions, atom_idx = neighbors)
 
 
-    def _center_event_positions(self, min1positions, saddlepositions, min2positions, move_atom_idx) : 
+    def _center_event_positions(self, event_search_output: EventSearchOutput) : 
         #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
         cell = self.system.cell
         ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
-        dx, dy, dz = ax/2 - min1positions[move_atom_idx][0], ay/2 - min1positions[move_atom_idx][1], az/2 - min1positions[move_atom_idx][2]
+        #displacement 
+        move_atom_idx = event_search_output.move_atom_index        
+        dx, dy, dz = ax/2 - event_search_output.min1_positions[move_atom_idx][0],  ay/2 - event_search_output.min1_positions[move_atom_idx][1], az/2 - event_search_output.min1_positions[move_atom_idx][2]
         displacement = np.array([dx, dy, dz])
-        min1positions = self._center_positions(min1positions, displacement, cell)
-        saddlepositions = self._center_positions(saddlepositions, displacement, cell)
-        min2positions = self._center_positions(min2positions, displacement, cell)
-        return min1positions, saddlepositions, min2positions
+        event_search_output.min1_positions = self._center_positions(event_search_output.min1_positions, displacement, cell)
+        event_search_output.saddle_positions = self._center_positions(event_search_output.saddle_positions, displacement, cell)
+        event_search_output.min2_positions = self._center_positions(event_search_output.min2_positions, displacement, cell)
+        #return min1positions, saddlepositions, min2positions
+    
+
+
+    #def _center_event_positions(self, min1positions, saddlepositions, min2positions, move_atom_idx) : 
+    #    #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
+    #    cell = self.system.cell
+    #    ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
+    #    dx, dy, dz = ax/2 - min1positions[move_atom_idx][0], ay/2 - min1positions[move_atom_idx][1], az/2 - min1positions[move_atom_idx][2]
+    #    displacement = np.array([dx, dy, dz])
+    #    min1positions = self._center_positions(min1positions, displacement, cell)
+    #    saddlepositions = self._center_positions(saddlepositions, displacement, cell)
+    #    min2positions = self._center_positions(min2positions, displacement, cell)
+    #    return min1positions, saddlepositions, min2positions
     
 
     def _center_positions(self, positions, displacement, cell) : 

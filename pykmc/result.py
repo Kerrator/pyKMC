@@ -1,4 +1,4 @@
-from typing import TypeAlias, TypeVar, Generic, Optional
+from typing import TypeAlias, TypeVar, Generic, Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -44,7 +44,8 @@ Result : TypeAlias = Ok[TOK] | Err[TERR]
 class ErrorInfo : 
     type : "ErrorType"
     message : str 
-    details : str 
+    details: Optional[str] = None
+    variables: Optional[Dict[str, Any]] = None
 
 class ErrorType(Enum) : 
     EVENT_NOT_FOUND = 1 
@@ -57,11 +58,9 @@ class ErrorType(Enum) :
 @dataclass 
 class EventSearchOutput : 
     central_atom_index : int 
-    dE_forward : float 
-    dE_backward : float 
     min1_positions : np.ndarray 
     saddle_positions : np.ndarray
     min2_positions : np.ndarray 
+    dE_forward : float 
+    dE_backward : float 
     move_atom_index : int 
-    delr1 : float 
-    delr2 : float

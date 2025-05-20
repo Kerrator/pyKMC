@@ -1,8 +1,12 @@
 import pypARTn2
 import numpy as np
+from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType
+from lammps import lammps
 
 
-def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) : 
+def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
+    #PARAMETERS : 
+    delr_threshold = config_event_search['partn_delr_threshold']
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 
@@ -39,7 +43,7 @@ def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) :
         delr1 = artn.extract('delr_min1')
         delr2 = artn.extract('delr_min2')
         #Checks if one minimum is close to the original configuration
-        if delr1 < config_event_search['partn_delr_threshold'] or delr2 < config_event_search['partn_delr_threshold'] :
+        if delr1 < delr_threshold or delr2 < delr_threshold :
             E_sad = artn.extract("etot_sad")
             E_min1 = artn.extract("etot_min1")
             E_min2 = artn.extract("etot_min2")
@@ -58,13 +62,33 @@ def pARTn_search(lmp, config_event_search, central_atom_idx, rcutenv) :
             dist[dist > rcutenv] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
             index_move = np.argmax(dist)
             if delr1 < delr2 : #necessary for no reconstruction option
-                return min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward
+                return Ok(EventSearchOutput(central_atom_index=central_atom_idx,
+                                            dE_forward=dE_forward, 
+                                            dE_backward=dE_backward,
+                                            min1_positions=min1positions,
+                                            saddle_positions=saddlepositions, 
+                                            min2_positions=min2positions,
+                                            move_atom_index= index_move))
+                #return min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward
             else : 
-                return min2positions, saddlepositions, min1positions, index_move, dE_backward, dE_forward
+                return Ok(EventSearchOutput(central_atom_index=central_atom_idx,
+                                            dE_forward=dE_backward, 
+                                            dE_backward=dE_forward,
+                                            min1_positions=min2positions,
+                                            saddle_positions=saddlepositions, 
+                                            min2_positions=min1positions,
+                                            move_atom_index= index_move))
+                #return min2positions, saddlepositions, min1positions, index_move, dE_backward, dE_forward
         else :
-            return None
+            return Err(ErrorInfo(type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS, 
+                                 message="delr1 and delr2 > at {}".format(delr_threshold), 
+                                 variables={'delr1': delr1, 'delr2': delr2}))
+            #return None
     else :
-        return None
+        return Err(ErrorInfo(type=ErrorType.EVENT_NOT_FOUND, 
+                             message="No event found", 
+                             details = err)) 
+        #return None
     
 def pARTn_refine_event(lmp, config_event_search, central_atom_idx ): 
     #INITILIZE ARTN
