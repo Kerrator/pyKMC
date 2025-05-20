@@ -1,6 +1,6 @@
 from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
 import random 
-from .result import EventSearchOutput
+from .result import EventSearchOutput, KMCLoopInfo
 import numpy as np
 from ase.io import write
 from ase import Atoms
@@ -130,6 +130,15 @@ class KMC() :
             if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
                 self.logger.logger.info(':=> Only atoms with cristalline environment')
                 self._close()
+
+            #Loop Informations : 
+            kmc_loop_info = KMCLoopInfo(step = step, 
+                                        time = time, 
+                                        nb_visited_environments = len(self.visited_environment), 
+                                        nb_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)), 
+                                        size_reference_event_table= len(self.reference_table.table)) 
+            kmc_loop_info.print_informations()
+        
         self.reference_table.save('reference_table.pickle')
 
 

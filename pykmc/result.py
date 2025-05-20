@@ -64,3 +64,20 @@ class EventSearchOutput :
     dE_forward : float 
     dE_backward : float 
     move_atom_index : int 
+
+@dataclass 
+class KMCLoopInfo : 
+    step : int = None
+    time : float = None
+    nb_visited_environments : int = None
+    nb_current_atomic_environments : int = None
+    size_reference_event_table : int = None
+    nb_applicable_reference_events : int = None
+
+    def print_informations(self) : 
+        print("KMC Step n°{}".format(self.step))
+        print("\t number of visited environment = {}".format(self.nb_visited_environments))
+        print("\t size of the reference event table = {}".format(self.size_reference_event_table))
+        print("\t number of current atomic environements = {}".format(self.nb_current_atomic_environments))
+        print("\t number of reference events that can be applied = {}".format(self.nb_applicable_reference_events))
+        print("\t time after event = {} ps".format(self.time))
