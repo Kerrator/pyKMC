@@ -75,14 +75,15 @@ class KMC() :
                             #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
                             self._center_event_positions(event_search_output)
                         #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
-                        is_new, in_e_bounds = self.reference_table.add_event(min1positions = event_search_output.min1_positions, 
-                                                                             saddlepositions = event_search_output.saddle_positions, 
-                                                                             min2positions = event_search_output.min2_positions, 
-                                                                             move_atom_idx = event_search_output.move_atom_index, 
-                                                                             dE_forward = event_search_output.dE_forward, 
-                                                                             dE_backward = event_search_output.dE_backward, 
-                                                                             neighbors_list_environment= self.neighbors_list.neighbors_list['rcut'],
-                                                                             cell= self.system.cell)
+                        valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
+                                                                      saddle_positions = event_search_output.saddle_positions, 
+                                                                      min2_positions = event_search_output.min2_positions, 
+                                                                      move_atom_idx = event_search_output.move_atom_index, 
+                                                                      dE_forward = event_search_output.dE_forward, 
+                                                                      dE_backward = event_search_output.dE_backward, 
+                                                                      cell= self.system.cell)
+                        if valid_dfevents.is_ok() : 
+                            self.reference_table.add_event(valid_dfevents.ok_value())
 
                     else : #failed 
                         fails += 1

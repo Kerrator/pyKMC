@@ -7,8 +7,7 @@ from .environments.graph_nauty import graph
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
-import sys
-
+from .result import Result, ErrorInfo, Ok, Err, ErrorType
 
 
 class ReferenceEventTable : 
@@ -21,7 +20,53 @@ class ReferenceEventTable :
             self.table = pd.read_pickle(self.config['Control']['reference_table'])
 
 
-    def add_event(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, neighbors_list_environment, cell) : 
+    def is_valid_new_event(self, min1_positions, saddle_positions, min2_positions, move_atom_idx, dE_forward, dE_backward, cell) -> Result[bool, ErrorInfo]: 
+        """ 
+        Check if the event is within energy barrier limits and if it's new
+        """ 
+        #Energy bounds 
+        emin = self.config['EventSearch']['emin_event']
+        emax = self.config['EventSearch']['emax_event']
+
+        if emin < dE_forward < emax : 
+            dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 
+                                                                         saddle_positions=saddle_positions, 
+                                                                         min2_positions=min2_positions,
+                                                                         index_move = move_atom_idx, 
+                                                                         dE_forward=dE_forward, 
+                                                                         dE_backward=dE_backward, 
+                                                                         cell = cell) 
+            if self.is_new_event(dfevent=dfevent_forward) :
+                if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
+                    return Ok(dfevent_forward.to_frame().T) 
+                else : 
+                    dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
+                    return Ok(dfevent)
+                pass
+            else : 
+                return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
+        else  : 
+            return Err(ErrorInfo(type=ErrorType.EVENT_NOT_WITHIN_ENERGY_LIMITS, 
+                                 message="Found event not in energy limits", 
+                                 details="Energy barrier = {}, energy limits {}-{}".format(dE_forward, emin, emax)))
+
+
+    def is_new_event(self, dfevent) :
+        #Only select rows with same event_id as dfenvent : 
+        subset = self.table[self.table["event_id"] == dfevent["event_id"]] 
+        #subset of subset with rows with the same saddle_id : 
+        subset = subset[subset["id_saddle"] == dfevent["id_saddle"]]
+        #subset of subset of subset with rows with the same final_id : 
+        subset = subset[subset["id_final"] == dfevent["id_final"]]
+        if len(subset) == 0 : 
+            return True 
+        else : 
+            return False
+
+    def add_event(self, dfevent) : 
+        self.table = pd.concat([self.table, dfevent], ignore_index=True)
+
+    def add_event_old(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, neighbors_list_environment, cell) : 
         """ 
         """
         #Energy bounds 
@@ -94,7 +139,7 @@ class ReferenceEventTable :
         else : 
             return False
             
-    def _event_series_with_reconstruction(self, min1_positions, saddle_positions, min2_positions, index_move, dE_forward, dE_backward, cell) : 
+    def _build_event_series(self, min1_positions, saddle_positions, min2_positions, index_move, dE_forward, dE_backward, cell) : 
         """
         """
         #compute neighbors list for initial, saddle and final positions -> to compute graphs 

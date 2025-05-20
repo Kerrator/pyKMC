@@ -50,6 +50,8 @@ class ErrorInfo :
 class ErrorType(Enum) : 
     EVENT_NOT_FOUND = 1 
     EVENT_MINIMA_NOT_MATCH_POSITIONS = 2
+    EVENT_NOT_WITHIN_ENERGY_LIMITS = 11 
+    EVENT_NOT_NEW = 12
 
 
 
@@ -67,12 +69,14 @@ class EventSearchOutput :
 
 @dataclass 
 class KMCLoopInfo : 
-    step : int = None
-    time : float = None
-    nb_visited_environments : int = None
-    nb_current_atomic_environments : int = None
-    size_reference_event_table : int = None
-    nb_applicable_reference_events : int = None
+    step : int = 0
+    time : float = 0
+    nb_visited_environments : int = 0
+    nb_current_atomic_environments : int = 0
+    nb_of_reference_event_searches : int = 0 
+    size_reference_event_table : int = 0
+    nb_applicable_reference_events : int = 0
+    nb_of_refinements_attempts : int = 0 
 
     def print_informations(self) : 
         print("KMC Step n°{}".format(self.step))
