@@ -54,6 +54,7 @@ class ErrorType(Enum) :
     EVENT_NOT_NEW = 12
     PSR_NO_MATCH_FOUND = 21
     PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
+    REFINEMENT_INVALID_ENERGY_BARRIER = 31
 
 
 
@@ -68,6 +69,15 @@ class EventSearchOutput :
     dE_forward : float 
     dE_backward : float 
     move_atom_index : int 
+
+#@dataclass 
+#class EventRefinementOutput: 
+#    central_atom_index : int 
+#    min1_positions : np.ndarray 
+#    saddle_positions : np.ndarray 
+#    min2_positions : np.ndarray 
+#    dE_foward : float 
+#    dE_backward: float 
 
 @dataclass
 class PSROutput : 

@@ -309,19 +309,26 @@ class KMC() :
                         self.system.update_positions(saddle_positions, atom_idx = neighbors)
 
                         #When at saddle positions refine with partn
-                        results = self.engine.refine_event(self.system, at_idx)
+                        refine_output = self.engine.refine_event(self.system, at_idx)
                         counts += 1
-                        if results is not None : 
+                        if refine_output.is_ok() :
+                            refine_output = refine_output.ok_value()
                         #Generate dfevent series from refine event results 
-                            dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
+                            dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
                             #Check if dE coherent 
                             if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                                 active_table.add_event(dfactive)
                                 success += 1
                             else : 
-                                print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                                refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
+                                                          message = "refinement energy barrier does not match reference one", 
+                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
+                                #print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                                print(refine_output)
                         else : 
-                            print("refine FAILED no event found")
+                            refine_output = refine_output.err_value()
+                            print(refine_output)
+                            #print("refine FAILED no event found")
                         #Back to current positions :
                         self.system.update_positions(current_positions)
                         #Need to do the same for symetries : 
@@ -337,19 +344,26 @@ class KMC() :
                             #update system positions
                             self.system.update_positions(new_positions, atom_idx = neighbors)
                             #event refine
-                            results = self.engine.refine_event(self.system, at_idx)
+                            refine_output = self.engine.refine_event(self.system, at_idx)
                             counts_sym +=1
-                            if results is not None : 
+                            if refine_output.is_ok() :
+                                refine_output = refine_output.ok_value()
                             #Generate dfevent series from refine event results 
-                                dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
+                                dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
                                 #Check if dE coherent 
                                 if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                                     active_table.add_event(dfactive)
                                     success_sym +=1
                                 else : 
-                                    print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
-                            else : 
-                                print("refine FAILED no event found, SYM EVENT")
+                                    refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
+                                                          message = "refinement energy barrier does not match reference one", 
+                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
+                                    print(refine_output)
+                                    #print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                            else :
+                                refine_output = refine_output.err_value() 
+                                print(refine_output)
+                                #print("refine FAILED no event found, SYM EVENT")
                             #Back to current positions :
                             self.system.update_positions(current_positions)
                     else : 

@@ -86,7 +86,7 @@ def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, 
                              message="No event found", 
                              details = err)) 
     
-def pARTn_refine_event(lmp, config_event_search, central_atom_idx ): 
+def pARTn_refine_event(lmp, config_event_search, central_atom_idx ) -> Result[EventSearchOutput, ErrorInfo]: 
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 
@@ -128,10 +128,20 @@ def pARTn_refine_event(lmp, config_event_search, central_atom_idx ):
         min1positions = artn.extract("tau_min1")
         min2positions = artn.extract("tau_min2")
         saddlepositions = artn.extract("tau_sad")
-        return min1positions, saddlepositions, min2positions, dE_forward, dE_backward
+        return Ok(EventSearchOutput(central_atom_index=central_atom_idx, 
+                                    min1_positions=min1positions, 
+                                    min2_positions=min2positions, 
+                                    saddle_positions=saddlepositions, 
+                                    dE_forward=dE_forward,
+                                    dE_backward=dE_backward, 
+                                    move_atom_index=None))
+        #return min1positions, saddlepositions, min2positions, dE_forward, dE_backward
     
     else : 
-        return None
+        return Err(ErrorInfo(type=ErrorType.EVENT_NOT_FOUND, 
+                             message='no event found', 
+                             details = err))
+        #return None
 
 
 
