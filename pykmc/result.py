@@ -52,6 +52,8 @@ class ErrorType(Enum) :
     EVENT_MINIMA_NOT_MATCH_POSITIONS = 2
     EVENT_NOT_WITHIN_ENERGY_LIMITS = 11 
     EVENT_NOT_NEW = 12
+    PSR_NO_MATCH_FOUND = 21
+    PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
 
 
 
@@ -66,6 +68,14 @@ class EventSearchOutput :
     dE_forward : float 
     dE_backward : float 
     move_atom_index : int 
+
+@dataclass
+class PSROutput : 
+    rotation_matrix: np.ndarray 
+    translation_matrix: np.ndarray
+    permutation_matrix: np.ndarray 
+    matching_score : float
+
 
 @dataclass 
 class KMCLoopInfo : 

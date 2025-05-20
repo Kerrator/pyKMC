@@ -1,6 +1,6 @@
 import ira_mod 
-import random
 import numpy as np
+from .result import Result, ErrorInfo, PSROutput, Ok, Err, ErrorType
 import pandas as pd 
 
 #TODO print psr DataFrame infos should be an option, self.ira should return the transformation matrix
@@ -32,19 +32,18 @@ class PointSetRegistration() :
         self.save = save
 
 
-    def run(self) : 
+    def run(self) -> Result[PSROutput, ErrorInfo] : 
         """ 
         run the point set registration
         """ 
         match self.psr_style : 
             case 'ira' : 
-                rmat, tr, perm, dh = self.ira(self.idx_cat, self.central_atom_index)
-                return rmat, tr, perm, dh
+                return self.ira(self.idx_cat, self.central_atom_index)
             case _: 
                 raise Exception('Point set registration style unknown')
         
     
-    def ira(self, idx_cat, central_atom_index) : 
+    def ira(self, idx_cat, central_atom_index) -> Result[PSROutput, ErrorInfo]: 
         """
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
 
@@ -111,9 +110,13 @@ class PointSetRegistration() :
                                             'dh'])
             if self.save :
                 results.to_pickle('psr_event_'+str(idx_cat)+'.pickle')
-            return rmat, tr, perm, dh
+            return Ok(PSROutput(rotation_matrix=rmat, 
+                                translation_matrix=tr, 
+                                permutation_matrix=perm, 
+                                matching_score=dh))
         except : 
-            return None, None, None, None
+            return Err(ErrorInfo(type=ErrorType.PSR_NO_MATCH_FOUND, 
+                                 message='IRA did not find a match')) 
 
 
 

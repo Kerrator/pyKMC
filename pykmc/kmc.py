@@ -1,6 +1,6 @@
 from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
 import random 
-from .result import EventSearchOutput, KMCLoopInfo
+from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType
 import numpy as np
 from ase.io import write
 from ase import Atoms
@@ -296,62 +296,66 @@ class KMC() :
             #for each atoms refine 
             for at_idx in l_atoms_refine : 
                 #Need to go to saddle point applying PSR : 
-                rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).run()
-                if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
-                    print("PSR FAIL")
-                else : 
-                    #Go saddle point : 
-                        #Apply PSR to generic event
-                    saddle_positions = self._transform_positions(dfevent.at['saddle_positions'], rmat, tr, perm) 
-                        #Get atomic environment atoms
-                    neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
-                        #Move system to saddle point
-                    self.system.update_positions(saddle_positions, atom_idx = neighbors)
+                psr_output = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).run()
+                if psr_output.is_ok() : 
+                    psr_output = psr_output.ok_value()
+                    if psr_output.matching_score < self.config['PSR']['hausdorff_dist_thr'] : 
+                        #Go saddle point : 
+                            #Apply PSR to generic event
+                        saddle_positions = self._transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
+                            #Get atomic environment atoms
+                        neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+                            #Move system to saddle point
+                        self.system.update_positions(saddle_positions, atom_idx = neighbors)
 
-                    #When at saddle positions refine with partn
-                    results = self.engine.refine_event(self.system, at_idx)
-                    counts += 1
-                    if results is not None : 
-                    #Generate dfevent series from refine event results 
-                        dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
-                        #Check if dE coherent 
-                        if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
-                            active_table.add_event(dfactive)
-                            success += 1
-                        else : 
-                            print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
-                    else : 
-                        print("refine FAILED no event found")
-                    #Back to current positions :
-                    self.system.update_positions(current_positions)
-                    #Need to do the same for symetries : 
-                    for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
-                        #Displacement between current positions and saddle_positions : 
-                        displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
-                        #APPLY Symmetry to displacement 
-                        new_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
-                        #Apply displacement to generic initial positions 
-                        new_saddle_positions = dfevent.at['initial_positions']+new_displacements
-                        #Aplly PSR to the new saddle positions 
-                        new_positions = self._transform_positions(new_saddle_positions, rmat, tr, perm)
-                        #update system positions
-                        self.system.update_positions(new_positions, atom_idx = neighbors)
-                        #event refine
+                        #When at saddle positions refine with partn
                         results = self.engine.refine_event(self.system, at_idx)
-                        counts_sym +=1
+                        counts += 1
                         if results is not None : 
                         #Generate dfevent series from refine event results 
                             dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
                             #Check if dE coherent 
                             if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
                                 active_table.add_event(dfactive)
-                                success_sym +=1
+                                success += 1
                             else : 
-                                print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                                print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
                         else : 
-                            print("refine FAILED no event found, SYM EVENT")
+                            print("refine FAILED no event found")
                         #Back to current positions :
                         self.system.update_positions(current_positions)
+                        #Need to do the same for symetries : 
+                        for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
+                            #Displacement between current positions and saddle_positions : 
+                            displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
+                            #APPLY Symmetry to displacement 
+                            new_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
+                            #Apply displacement to generic initial positions 
+                            new_saddle_positions = dfevent.at['initial_positions']+new_displacements
+                            #Aplly PSR to the new saddle positions 
+                            new_positions = self._transform_positions(new_saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+                            #update system positions
+                            self.system.update_positions(new_positions, atom_idx = neighbors)
+                            #event refine
+                            results = self.engine.refine_event(self.system, at_idx)
+                            counts_sym +=1
+                            if results is not None : 
+                            #Generate dfevent series from refine event results 
+                                dfactive = self._build_refined_event_series(current_positions, at_idx, results[0], results[2], results[3], results[4])
+                                #Check if dE coherent 
+                                if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
+                                    active_table.add_event(dfactive)
+                                    success_sym +=1
+                                else : 
+                                    print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
+                            else : 
+                                print("refine FAILED no event found, SYM EVENT")
+                            #Back to current positions :
+                            self.system.update_positions(current_positions)
+                    else : 
+                        psr_output = Err(ErrorInfo(type = ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD,
+                                                   message = "PSR found a match but matching score is above acceptance threshold", 
+                                                   details= "Hausdorff distance = {}, acceptance threshold = {} ".format(psr_output.matching_score, self.config['PSR']['hausdorff_dist_thr'])))
         self.logger.logger.debug("{} refine attemps, {} success, {} direct and {} sym".format(counts+counts_sym, success+success_sym, success, success_sym))
         return active_table
     
