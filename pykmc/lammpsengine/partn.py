@@ -69,7 +69,6 @@ def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, 
                                             saddle_positions=saddlepositions, 
                                             min2_positions=min2positions,
                                             move_atom_index= index_move))
-                #return min1positions, saddlepositions, min2positions, index_move, dE_forward, dE_backward
             else : 
                 return Ok(EventSearchOutput(central_atom_index=central_atom_idx,
                                             dE_forward=dE_backward, 
@@ -78,17 +77,14 @@ def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, 
                                             saddle_positions=saddlepositions, 
                                             min2_positions=min1positions,
                                             move_atom_index= index_move))
-                #return min2positions, saddlepositions, min1positions, index_move, dE_backward, dE_forward
         else :
             return Err(ErrorInfo(type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS, 
                                  message="delr1 and delr2 > at {}".format(delr_threshold), 
                                  variables={'delr1': delr1, 'delr2': delr2}))
-            #return None
     else :
         return Err(ErrorInfo(type=ErrorType.EVENT_NOT_FOUND, 
                              message="No event found", 
                              details = err)) 
-        #return None
     
 def pARTn_refine_event(lmp, config_event_search, central_atom_idx ): 
     #INITILIZE ARTN
