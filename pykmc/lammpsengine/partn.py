@@ -128,13 +128,22 @@ def pARTn_refine_event(lmp, config_event_search, central_atom_idx ) -> Result[Ev
         min1positions = artn.extract("tau_min1")
         min2positions = artn.extract("tau_min2")
         saddlepositions = artn.extract("tau_sad")
+
+        #TEST CHECK IF ATOM MOVE SAME AS CENTRAL ATOM IDX
+        dist = (min1positions-saddlepositions)**2
+        dist = dist.sum(axis=-1)
+        dist = np.sqrt(dist)
+        rcutenv = 6
+        dist[dist > rcutenv] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
+        index_move = np.argmax(dist)
+
         return Ok(EventSearchOutput(central_atom_index=central_atom_idx, 
                                     min1_positions=min1positions, 
                                     min2_positions=min2positions, 
                                     saddle_positions=saddlepositions, 
                                     dE_forward=dE_forward,
                                     dE_backward=dE_backward, 
-                                    move_atom_index=None))
+                                    move_atom_index=index_move))
         #return min1positions, saddlepositions, min2positions, dE_forward, dE_backward
     
     else : 

@@ -1,7 +1,7 @@
 [Control] 
 config_file = ./initial_config_relaxed.xyz
 output_file = ./trajkmc.xyz
-nkmc_steps = 10
+nkmc_steps = 1
 nprocs = 8
 reconstruction = True
 engine = lammps
@@ -24,13 +24,13 @@ maxeval = 1000
 style = cna/graph
 radd_cna = 0
 rnei = 3.01
-rcut = 7.5
+rcut = 6.0
 
 
 [EventSearch] 
 style = pARTn 
-rcutenv = 7.5
-nsearch = 5
+rcutenv = 6.0
+nsearch = 10
 partn_lanczos_disp = 0.0002
 partn_nperp = 7 
 partn_push_step_size = 0.2 
