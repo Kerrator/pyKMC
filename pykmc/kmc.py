@@ -320,23 +320,11 @@ class KMC() :
                                 active_table.add_event(dfactive)
                                 success += 1
                             else : 
-                                print("central atom idx = ", at_idx)
-                                print("move atom idx = ", refine_output.move_atom_index)
-                                traj_event = [] 
-                                traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.min1_positions ))
-                                traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.saddle_positions ))
-                                traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.min2_positions ))
-                                write('failrefinement_atidx'+str(at_idx)+'.xyz', traj_event)
-
-
                                 refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                           message = "refinement energy barrier does not match reference one", 
                                                           details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
-                                #print("ERROR: delta energy refinement, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
-                                print(refine_output)
                         else : 
                             refine_output = refine_output.err_value()
-                            print(refine_output)
                             #print("refine FAILED no event found")
                         #Back to current positions :
                         self.system.update_positions(current_positions)
@@ -364,23 +352,11 @@ class KMC() :
                                     active_table.add_event(dfactive)
                                     success_sym +=1
                                 else : 
-                                    #TEST
-                                    print("central atom idx = ", at_idx)
-                                    print("move atom idx = ", refine_output.move_atom_index)
-                                    traj_event = [] 
-                                    traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.min1_positions ))
-                                    traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.saddle_positions ))
-                                    traj_event.append(Atoms(symbols = self.system.types, positions = refine_output.min2_positions ))
-                                    write('failrefinement_sym_atidx'+str(at_idx)+'.xyz', traj_event)
-
                                     refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                           message = "refinement energy barrier does not match reference one", 
                                                           details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
-                                    print(refine_output)
-                                    #print("ERROR: delta energy refinement, SYM EVENT, generic event energy = {}, refine event energy = {} ".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier']))
                             else :
                                 refine_output = refine_output.err_value() 
-                                print(refine_output)
                                 #print("refine FAILED no event found, SYM EVENT")
                             #Back to current positions :
                             self.system.update_positions(current_positions)
