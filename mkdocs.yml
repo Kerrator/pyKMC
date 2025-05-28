@@ -15,7 +15,8 @@ nav:
   - Tutorial: 
       - pyKMC Workflow : 0-pyKMC-workflow.md 
       - Simple example : 1-pyKMC-simple.md
-  - API Reference: reference.md
+  - API Reference: 
+      - System: api/system.md
 
 plugins:
   - mkdocstrings:
