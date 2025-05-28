@@ -41,7 +41,7 @@ class NeighborsList:
         # Find first neighbors and atoms in environments
         for i in range(len(positions)):
             neighbors = tree.query_ball_point(positions[i], self.rnei)
-            neighbors.remove(i) #don't have self as neighbor
+            neighbors.remove(i)  # don't have self as neighbor
             self.neighbors_list["rnei"].append(neighbors)
             neighbors = tree.query_ball_point(positions[i], self.rcut)
             self.neighbors_list["rcut"].append(neighbors)
