@@ -130,11 +130,11 @@ def pARTn_refine_event(lmp, config_event_search, central_atom_idx ) -> Result[Ev
         saddlepositions = artn.extract("tau_sad")
 
         #TEST CHECK IF ATOM MOVE SAME AS CENTRAL ATOM IDX
+        #TODO either putting rcut in function parameters or remove this
         dist = (min1positions-saddlepositions)**2
         dist = dist.sum(axis=-1)
         dist = np.sqrt(dist)
-        rcutenv = 6
-        dist[dist > rcutenv] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
+        dist[dist > 6] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
         index_move = np.argmax(dist)
 
         return Ok(EventSearchOutput(central_atom_index=central_atom_idx, 

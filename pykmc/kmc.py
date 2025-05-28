@@ -321,8 +321,9 @@ class KMC() :
                                 success += 1
                             else : 
                                 refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
-                                                          message = "refinement energy barrier does not match reference one", 
-                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
+                                                      message = "refinement energy barrier does not match reference one", 
+                                                      details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'], 
+                                                      variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
                         else : 
                             refine_output = refine_output.err_value()
                             #print("refine FAILED no event found")
@@ -354,7 +355,8 @@ class KMC() :
                                 else : 
                                     refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                           message = "refinement energy barrier does not match reference one", 
-                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'])) 
+                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'], 
+                                                          variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
                             else :
                                 refine_output = refine_output.err_value() 
                                 #print("refine FAILED no event found, SYM EVENT")

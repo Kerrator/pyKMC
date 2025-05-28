@@ -21,7 +21,7 @@ def write_event_traj(catalog,index) :
     write('event_'+str(index)+'.xyz', traj)
 #catalog = pd.read_pickle('/root/pyKMC/benchmarks/event_search/catalog.pickle')
 #catalog = pd.read_pickle('/root/pyKMC/benchmarks/point_set_registration/catalog.pickle')
-catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_4000at_monovacancy+sia/catalog.pickle')
+catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_4001at_sia/reference_table.pickle')
 #catalog = pd.read_pickle('/root/pyKMC/examples/Ni_fcc_2047at_monovacancy/catalog.pickle') 
 for i in range(len(catalog)):
     print('Energy of event {} is {} with constant rate = {}'.format(i, catalog.loc[i].at['energy_barrier'], catalog.loc[i].at['k']))

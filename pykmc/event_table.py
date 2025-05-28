@@ -39,10 +39,9 @@ class ReferenceEventTable :
             if self.is_new_event(dfevent=dfevent_forward) :
                 if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
                     return Ok(dfevent_forward.to_frame().T) 
-                else : 
+                else :
                     dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
                     return Ok(dfevent)
-                pass
             else : 
                 return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
         else  : 
