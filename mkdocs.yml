@@ -17,6 +17,7 @@ nav:
       - Simple example : 1-pyKMC-simple.md
   - API Reference: 
       - System: api/system.md
+      - NeighborsList: api/neighbors_list.md
 
 plugins:
   - mkdocstrings:
