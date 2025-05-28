@@ -27,27 +27,67 @@ class ReferenceEventTable :
         #Energy bounds 
         emin = self.config['EventSearch']['emin_event']
         emax = self.config['EventSearch']['emax_event']
+        backward_emin = self.config['EventSearch']['backward_emin_event']
+        energy_asymmetry = self.config['EventSearch']['energy_event_symmetry']
 
-        if emin < dE_forward < emax : 
+        if dE_forward > emax : #barrier energy too high, reject the event 
+            return Err(ErrorInfo(type=ErrorType.EVENT_ENERGY_HIGHER_THAN_THRESHOLD, 
+                                 message = "Energy barrier of the event higher than emax_event", 
+                                 details="Energy barrier = {}, energy max threshold = {}".format(dE_forward, emax)))
+    
+        elif dE_backward < emin : #barrier energy too low, reject the event 
+            return Err(ErrorInfo(type=ErrorType.EVENT_ENERGY_LOWER_THAN_THRESHOLD, 
+                                 message = "Energy barrier of the event lower than emin_event", 
+                                 details="Energy barrier = {}, energy min threshold = {}".format(dE_forward, emin)))
+        
+        elif dE_backward < emin : #backard reaction energy barrier too low, reject the event 
+            return Err(ErrorInfo(type = ErrorType.EVENT_BACKWARD_ENERGY_LOWER_THAN_THRESHOLD, 
+                                 message= "Backward energy barrier of the event lower than emin_event", 
+                                 details="Backward Energy barrier = {}, energy min threshold = {}".format(dE_backward, emin)))
+        
+        elif (dE_forward > energy_asymmetry*backward_emin) and (dE_backward < backward_emin ) : #Asymmetric event, reject 
+            return Err(ErrorInfo(type=ErrorType.EVENT_ASYMMETRIC, 
+                                 message="Found event is highly asymmetric", 
+                                 details="Foward barrier eneryg > {} and backward barrier energy < {}".format(energy_asymmetry*backward_emin, backward_emin)))
+        
+        else : #Event is valid, construct event Series
             dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 
                                                                          saddle_positions=saddle_positions, 
                                                                          min2_positions=min2_positions,
                                                                          index_move = move_atom_idx, 
                                                                          dE_forward=dE_forward, 
                                                                          dE_backward=dE_backward, 
-                                                                         cell = cell) 
-            if self.is_new_event(dfevent=dfevent_forward) :
+                                                                         cell = cell)
+            if self.is_new_event(dfevent=dfevent_forward) :  #check if event not already in the catalog 
                 if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
-                    return Ok(dfevent_forward.to_frame().T) 
+                    return Ok(dfevent_forward.to_frame().T) #return only forward event
                 else :
                     dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
-                    return Ok(dfevent)
-            else : 
+                    return Ok(dfevent) #return foward and backward event
+            
+            else :
                 return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
-        else  : 
-            return Err(ErrorInfo(type=ErrorType.EVENT_NOT_WITHIN_ENERGY_LIMITS, 
-                                 message="Found event not in energy limits", 
-                                 details="Energy barrier = {}, energy limits {}-{}".format(dE_forward, emin, emax)))
+
+#        if emin < dE_forward < emax : 
+#            dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 
+#                                                                         saddle_positions=saddle_positions, 
+#                                                                         min2_positions=min2_positions,
+#                                                                         index_move = move_atom_idx, 
+#                                                                         dE_forward=dE_forward, 
+#                                                                         dE_backward=dE_backward, 
+#                                                                         cell = cell) 
+#            if self.is_new_event(dfevent=dfevent_forward) :
+#                if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
+#                    return Ok(dfevent_forward.to_frame().T) 
+#                else :
+#                    dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
+#                    return Ok(dfevent)
+#            else : 
+#                return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
+#        else  : 
+#            return Err(ErrorInfo(type=ErrorType.EVENT_NOT_WITHIN_ENERGY_LIMITS, 
+#                                 message="Found event not in energy limits", 
+#                                 details="Energy barrier = {}, energy limits {}-{}".format(dE_forward, emin, emax)))
 
 
     def is_new_event(self, dfevent) :
