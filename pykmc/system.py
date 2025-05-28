@@ -106,7 +106,6 @@ class System:
         Parameters
         ----------
         new_positions : np.ndarray of float, shape (N,3)
-            A NumPy array containing the new positions.
             - If `atom_idx` is None, this array should have shape `(N, 3)`,
               where N is the total number of atoms in the system.
             - If `atom_idx` is provided, this array should have shape `(M, 3)`,
