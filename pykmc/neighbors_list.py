@@ -35,7 +35,6 @@ class NeighborsList:
         """Build and populates the `neighbors_list`."""
         # Construct the kdTree
         positions = self.system.positions
-        positions[positions < 0] = 0
         box = [self.system.cell[0][0], self.system.cell[1][1], self.system.cell[2][2]]
         tree = cKDTree(positions, boxsize=box)
 
