@@ -86,9 +86,7 @@ class System:
         new_system.positions = atoms.get_positions()
         new_system.cell = atoms.get_cell()
         new_system.pbc = atoms.get_pbc()
-        new_system.index = np.linspace(
-            0, len(new_system.types) - 1, len(new_system.types)
-        ).astype(int)
+        new_system.index = np.arange(len(new_system.types))
 
         return new_system
 
