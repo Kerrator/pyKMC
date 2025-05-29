@@ -2,6 +2,7 @@ from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegi
 import random 
 from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType
 import numpy as np
+from .utils import geometry
 from ase.io import write
 from ase import Atoms
 import ase.geometry
@@ -302,7 +303,7 @@ class KMC() :
                     if psr_output.matching_score < self.config['PSR']['hausdorff_dist_thr'] : 
                         #Go saddle point : 
                             #Apply PSR to generic event
-                        saddle_positions = self._transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
+                        saddle_positions = geometry.transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
                             #Get atomic environment atoms
                         neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
                             #Move system to saddle point
@@ -334,11 +335,11 @@ class KMC() :
                             #Displacement between current positions and saddle_positions : 
                             displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
                             #APPLY Symmetry to displacement 
-                            new_displacements = self._transform_positions(displacements, sym_matrix, 0, perm_matrix)
+                            new_displacements = geometry.transform_positions(displacements, sym_matrix, 0, perm_matrix)
                             #Apply displacement to generic initial positions 
                             new_saddle_positions = dfevent.at['initial_positions']+new_displacements
                             #Aplly PSR to the new saddle positions 
-                            new_positions = self._transform_positions(new_saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+                            new_positions = geometry.transform_positions(new_saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
                             #update system positions
                             self.system.update_positions(new_positions, atom_idx = neighbors)
                             #event refine
@@ -368,10 +369,6 @@ class KMC() :
                                                    details= "Hausdorff distance = {}, acceptance threshold = {} ".format(psr_output.matching_score, self.config['PSR']['hausdorff_dist_thr'])))
         self.logger.logger.debug("{} refine attemps, {} success, {} direct and {} sym".format(counts+counts_sym, success+success_sym, success, success_sym))
         return active_table
-    
-    def _transform_positions(self, positions, transformation_matrix, translation_matrix, permutation_matrix) : 
-        transform_positions = positions @ transformation_matrix.T + translation_matrix 
-        return transform_positions[permutation_matrix]
     
     def _build_refined_event_series(self, current_positions, at_idx, min1positions, min2positions, dE_forward, dE_backwards) : 
         #Find if min1 or min2 is initial positions 
