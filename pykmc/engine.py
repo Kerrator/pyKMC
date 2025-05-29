@@ -1,36 +1,6 @@
 from .lammpsengine import LammpsEngine
-from abc import ABC, abstractmethod 
 
-
-class BaseEngine(ABC) : 
-
-    @abstractmethod 
-    def minimize(self, system) : 
-        pass 
-
-    @abstractmethod 
-    def search_event(self, system, central_atom_idx) : 
-        pass 
-
-    @abstractmethod
-    def refine_event(self, system, central_atom_idx) : 
-        pass
-    
-    @abstractmethod
-    def compute_potential_energy(self, system) : 
-        pass
-
-    def compute_distances(self, system) : 
-        pass
-    
-    @abstractmethod
-    def neighbors(self, system) : 
-        pass
-
-
-
-
-class Engine(BaseEngine) : 
+class Engine() : 
 
     def __init__(self, config: dict) : 
 

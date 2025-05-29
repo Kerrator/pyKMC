@@ -1,11 +1,10 @@
-from pykmc.base_engine import BaseEngine 
 import numpy as np 
 from ase.data import atomic_numbers, atomic_masses
 from lammps import lammps
-from pykmc.config import Config
+from ..config import Config
 from .partn import pARTn_search, pARTn_refine_event
 
-class LammpsEngine(BaseEngine) : 
+class LammpsEngine() : 
 
     def __init__(self, config: Config) :
         self.config_control = config.get('Control') 
