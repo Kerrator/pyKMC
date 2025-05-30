@@ -44,9 +44,9 @@ DEFAULT = {
         'radd_cna' : 0
     },
     'EventSearch' : {
-        'emin_event' : 0,
+        'emin_event' : 0.05,
         'emax_event' : 6, 
-        'backward_emin_event' : 0.00,
+        'backward_emin_event' : 0.05,
         'energy_event_symmetry' : 5,
         'partn_dmax' : 6.0, 
         'partn_verbose' : 2, 
