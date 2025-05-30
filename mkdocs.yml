@@ -18,6 +18,7 @@ nav:
   - API Reference: 
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
+      - AtomicEnvironment: api/atomic_environment.md
       - Algorithms: api/algorithms.md
 
 
