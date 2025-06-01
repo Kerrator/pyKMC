@@ -1,6 +1,7 @@
 """ 
 Logger class to handle log file and log parameters
 """
+import sys
 import logging 
 import logging.config
 from logging import handlers 
@@ -152,6 +153,22 @@ class CustomFormatter(logging.Formatter):
             self._style._fmt = f"{Colors.RED.value}%(levelname)-12s{Colors.RESET.value} | %(message)s"
         return super().format(record)
 
+class ProgressHandler(logging.StreamHandler) : 
+    def __init__(self, stream=sys.stdout):
+        super().__init__(stream)
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            self.stream.write('\r' + msg)
+            self.stream.flush()
+            #msg = self.format(record)
+            #stream = self.stream
+            #stream.write('\u001b[1000D' + msg + '\u001b[0K')
+            #stream.write
+            #self.flush()
+        except Exception:
+            self.handleError(record)
+
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 class AnsiStrippingFormatter(CustomFormatter):
     """
@@ -176,7 +193,6 @@ class AnsiStrippingFormatter(CustomFormatter):
         return clean_message
 
 
-
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -185,8 +201,8 @@ LOGGING_CONFIG = {
             "()" : CustomFormatter,
         },
         "file_formatter": { 
-            "()": AnsiStrippingFormatter,  # Indique à dictConfig d'instancier cette classe
-        },
+            "()": AnsiStrippingFormatter,  
+        }
     },
     "handlers": {  
         "log_file": {
@@ -212,8 +228,13 @@ LOGGING_CONFIG = {
             "formatter" : "file_formatter", 
             "level" : "DEBUG", 
             "filename" : "pykmc.info"
-        }
-    },
+        }, 
+        "progress_bar_handler": { 
+            "class": "pykmc.log.ProgressHandler",
+            "formatter": "default_formatter",
+            "level": "INFO", 
+            "stream": "ext://sys.stdout",
+    } } ,
     "loggers": {  
         "log": {  
             "handlers": ["log_file", "console_output_handler"],
@@ -225,20 +246,41 @@ LOGGING_CONFIG = {
         "info": { 
             "handlers" : ["step_informations"]
         },
-        "root" : {
-            "handlers" : ["console_output_handler"]
+        "progress" : {
+            "handlers" : ["log_file", "progress_bar_handler"],
         }
     },
 }
-class LogKMC(LogManager) : 
 
+
+class LogKMC(LogManager) : 
+    """Manages logging for the KMC, offering dynamic verbosity control.
+
+    Extends `LogManager` to adjust logging levels for specified loggers
+    (e.g., 'log', 'output') based on a simple verbosity setting (0-2).
+    Provides convenience methods for KMC-specific log messages.
+
+    Parameters
+    ----------
+    config_dict : dict[str, Any]
+        Configuration dictionary for loggers in the format expected by logging.config.dictConfig.
+    verbosity : int, optional
+        Defines the loggers level (0=WARNING, 1=INFO, 2=DEBUG). Defaults to 1.
+    """
     def __init__(self, config_dict: dict[str, Any], verbosity: int = 1):
         super().__init__(config_dict)
         self._verbosity = verbosity 
-        #apply verbosity option modifying handlers level
+        #apply verbosity option modifying logger and handlers level
         self._apply_verbosity_level()
 
     def _apply_verbosity_level(self):
+        """Modify loggers and their handlers levels.
+
+        Raises
+        ------
+        ValueError
+           if verbosity value is not 0, 1 or 2. 
+        """
         if self._verbosity == 0:
             level = logging.WARNING
         elif self._verbosity == 1:
@@ -256,8 +298,12 @@ class LogKMC(LogManager) :
                 handler.setLevel(level) 
 
     def title(self, logger_name: str) -> None : 
-        """ 
-        Head of the log file 
+        """Display pyKMC title to the logger
+
+        Parameters
+        ----------
+        logger_name : str
+            the logger name.
         """
         self.info(logger_name, "          |              ")
         self.info(logger_name, ",---.,   .|__/ ,-.-.,---.")
@@ -267,6 +313,19 @@ class LogKMC(LogManager) :
         self.info(logger_name, "\n")
 
     def write_parameter(self, logger_name: str, config: dict[str, Any], width: int = 60, indent: int = 4) -> None: 
+        """Write simulation parameter to the logger.
+
+        Parameters
+        ----------
+        logger_name : str
+            The logger name.
+        config : dict[str, Any]
+            The configuration dictionnary.
+        width : int, optional
+            Width of the lines, by default 60
+        indent : int, optional
+            How many space define the indentation, by default 4
+        """
         centered_title = f"SIMULATION PARAMETERS".center(width)
         separator = "=" * width
         self.info(logger_name, "\n{}\n{}\n{}".format(separator, centered_title, separator))
@@ -281,12 +340,12 @@ class LogKMC(LogManager) :
 
     def output_file_header(self, logger_name: str) -> None : 
         """
-        First line of the log table
+        Write the header of the output file.
 
         Parameters
         ----------
-        reconstruction : boolean
-            if we use the reconstruction of event during the KMC simulation or not
+        logger_name: str 
+            The logger name.
         """     
         #Information header : 
         self.info(logger_name, '# Simulation Progress Tracking File') 
@@ -304,22 +363,53 @@ class LogKMC(LogManager) :
         self.info(logger_name, '{:<9s} {:<8s} {:<8s} {:<10s} {:<14s} {:<14s} {:<10s}'.format('Step', 'dT(s)', 'T(s)',  'Ea(eV)',  'k_evt(ps-1)',  'k_tot(ps-1)', 'E(eV)'))
         self.info(logger_name,'{:s}'.format(80*'-') )
 
-    def table_line_info_kmc(self, logger_name, *args) : 
+    def table_line_info_kmc(self, logger_name: str, *args: int | float) : 
+        """Writes a formatted line of simulation output values into the output table.
+
+        Parameters
+        ----------
+        logger_name : str 
+            The logger name. 
+        *args : int | float 
+            Values representing the columns of the simulation output progress table.
+            These should correspond to:
+                - Step Number
+                - Time elapsed for this step (dT in s)
+                - Total cumulative time (T in s)
+                - Event energy barrier (Ea in eV)
+                - Rate constant of current event (k_evt in ps-1)
+                - Total rate constant of all events (k_tot in ps-1)
+                - Total energy (E in eV)
+
         """
-        Print info of a kmc step in the log 
-        """ 
         formats = ['{:<9n}', '{:<8e}', '{:<8e}', '{:<10e}', '{:<14e}', '{:<14e}', '{:<10e}']
         formatted_values = [fmt.format(e) if e is not None else " "*10 for fmt, e in zip_longest(formats, args, fillvalue=None)]
         self.info(logger_name, " ".join(formatted_values))
 
     def new_line(self, logger_name: str) -> None: 
-        """ 
-        New line in the log file
-        """ 
+        """Write a new line in the logger
+
+        Parameters
+        ----------
+        logger_name : str
+           The logger name. 
+        """
         self.info(logger_name, "")
 
     def progress_bar(self, logger_name: str, current_step: int, total_steps: int, bar_length: int = 40) -> None : 
-    
+        """Displays a progression bar
+
+        Parameters
+        ----------
+        logger_name : str
+            _description_
+        current_step : int
+            _description_
+        total_steps : int
+            _description_
+        bar_length : int, optional
+            _description_, by default 40
+        """
         #Compute percentage
         percent = (current_step / total_steps) * 100
     
