@@ -1,4 +1,4 @@
-from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, Logger, ActiveEventTable, ReferenceEventTable
+from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, ActiveEventTable, ReferenceEventTable
 import random 
 from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType
 import numpy as np
