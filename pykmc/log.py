@@ -284,7 +284,6 @@ class LogKMC(LogManager) :
         if self._verbosity == 0:
             level = logging.WARNING
         elif self._verbosity == 1:
-            print("yes")
             level = logging.INFO
         elif self._verbosity == 2:
             level = logging.DEBUG
@@ -294,8 +293,13 @@ class LogKMC(LogManager) :
         for logger_name in self._logger : 
             logger = self._get_active_logger(logger_name)
             logger.setLevel(level)
+            if logger_name == "progress" : #To pass debug level for progress bar 
+                logger.setLevel(logging.DEBUG)
             for handler in logger.handlers : 
-                handler.setLevel(level) 
+                if logger_name == "progress" and isinstance(handler, ProgressHandler):
+                    handler.setLevel(logging.DEBUG) #always display bar in stdout bug only debug level for log_file
+                else : 
+                    handler.setLevel(level) 
 
     def title(self, logger_name: str) -> None : 
         """Display pyKMC title to the logger
@@ -435,4 +439,4 @@ class LogKMC(LogManager) :
         ) 
     
         # Envoi du message via le logger
-        self.info(logger_name, progress_message)
+        self.debug(logger_name, progress_message)
