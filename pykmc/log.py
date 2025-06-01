@@ -121,15 +121,30 @@ class Colors(Enum) :
     """
     RESET = "\x1b[0m"
     BOLD = "\x1b[1m"
+    WHITE = "\x1b[37m"
     RED = "\x1b[31m"
     GREEN = "\x1b[32m"
     YELLOW = "\x1b[33m"
     BLUE = "\x1b[34m"
 
 class CustomFormatter(logging.Formatter):
-    def format(self, record):
-        """ 
-        Rewrite format function of Formatter, change _fmt when writing
+    """Custom Formatter to display different style messages depending on their level.
+    """
+    def format(self, record: logging.LogRecord) -> str:
+        """Dynamically formats log records based on their severity level.
+        For INFO and DEBUG level records, only the log message is displayed.
+        For other levels (WARNING, ERROR, CRITICAL), the level name is
+        included, formatted in red for easy visibility, followed by the message.
+
+        Parameters
+        ----------
+        record : logging.LogRecord
+            The log record to be formatted
+
+        Returns
+        -------
+        str
+            The formatted message.
         """
         if record.levelno == logging.INFO or record.levelno == logging.DEBUG :
             self._style._fmt = "%(message)s"
@@ -140,9 +155,21 @@ class CustomFormatter(logging.Formatter):
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 class AnsiStrippingFormatter(CustomFormatter):
     """
-    Un formatteur de log qui supprime les codes ANSI du message APRES le formatage.
+    Custom Formatter to remove Ansi caracter. 
+    Used when logging a colored message in the stdout and a file. 
     """
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str :
+        """Formats log records to remove Ansi caracters.
+
+        Parameters
+        ----------
+        record : logging.LogRecord
+            The log record to be fromatted.
+        Returns
+        -------
+        str
+            The formatted message.
+        """
         formatted_message = super().format(record)
         clean_message = ANSI_ESCAPE_PATTERN.sub('', formatted_message)
         clean_message = clean_message.replace('\r', '')
@@ -197,6 +224,9 @@ LOGGING_CONFIG = {
         },
         "info": { 
             "handlers" : ["step_informations"]
+        },
+        "root" : {
+            "handlers" : ["console_output_handler"]
         }
     },
 }
@@ -287,3 +317,32 @@ class LogKMC(LogManager) :
         New line in the log file
         """ 
         self.info(logger_name, "")
+
+    def progress_bar(self, logger_name: str, current_step: int, total_steps: int, bar_length: int = 40) -> None : 
+    
+        #Compute percentage
+        percent = (current_step / total_steps) * 100
+    
+        static_text_color = Colors.WHITE.value 
+        # Dynamical bar colors
+        bar_fill_color = Colors.WHITE.value 
+
+        if percent < 30:
+            bar_fill_color = Colors.RED.value 
+        elif percent < 70:
+            bar_fill_color = Colors.YELLOW.value 
+        else:
+            bar_fill_color = Colors.GREEN.value
+
+        # bar fill lenght 
+        filled_length = int(bar_length * current_step / total_steps)
+        # all bar 
+        bar_segment = '#' * filled_length + '-' * (bar_length - filled_length)
+        progress_message = (
+            f"{static_text_color}\rProgression: " 
+            f"{bar_fill_color}[{bar_segment}]{Colors.RESET.value}" 
+            f"{static_text_color} {percent:.1f}% "  
+        ) 
+    
+        # Envoi du message via le logger
+        self.info(logger_name, progress_message)
