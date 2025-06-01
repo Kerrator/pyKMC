@@ -1,215 +1,438 @@
-from dataclasses import dataclass
+"""Configuration models for PyKMC simulations.
+
+This module defines Pydantic BaseModel classes to structure and validate
+all input parameters required for running PyKMC simulations
+"""
+
+from __future__ import annotations
+from typing import Optional
+from pydantic import BaseModel, Field, model_validator, ValidationError
 import configparser
-
-#TODO add method to generate documentation parameters
-#TODO add check if parameters don't clash
-
-@dataclass 
-class Parameters : 
-   """
-   Physical parameters in lammps metal units
-   """ 
-   #Boltzmann constant
-   kb = 8.6173303e-05 #eV.K^-1
-   #Planck constant 
-   h = 6.582119e-03 #eV.ps 
+from typing import Any, Literal
+from dataclasses import dataclass
 
 
+@dataclass
+class PhysicalConstants:
+    """Store physical constants."""
 
-DEFAULT = {
-    'Control' : {
-        'config_file' : None, 
-        'output_file' : 'trajkmc.xyz',
-        'log_file_name' : 'pykmc.log',
-        'reference_table' : None,
-        'dimension' : 3,
-        'nprocs' : 1, 
-        'backend' : 'local',
-        'reconstruction' : True,
-        'verbosity' : 1
-
-    }, 
-    'Potential' : { 
-        'file' : None
-    },
-    'Minimization' : {
-        'style' : 'lammps', 
-        'min_style': 'cg', 
-        'etol': 1.0e-6, 
-        'ftol': 1.0e-8, 
-        'maxiter' : 100, 
-        'maxeval' : 1000
-    }, 
-    'AtomicEnvironment' : {
-        'radd_cna' : 0
-    },
-    'EventSearch' : {
-        'emin_event' : 0.05,
-        'emax_event' : 6, 
-        'backward_emin_event' : 0.05,
-        'energy_event_symmetry' : 5,
-        'partn_dmax' : 6.0, 
-        'partn_verbose' : 2, 
-        'partn_ninit' : 2, 
-        'partn_forc_thr' : 0.0001,
-        'partn_push_over' : 1.0,
-        'partn_push_mode' : 'rad', 
-        'partn_push_dist_thr' : 3.0, 
-        'partn_push_step_size' : 0.4, 
-        'partn_eigen_step_size' : 0.2, 
-        'partn_lanczos_disp' : 0.0005,
-        'partn_nsmooth' : 3, 
-        'partn_nperp' : 5,
-        'partn_delr_threshold' : 0.5,
-        'k0' : 1.0e-12,
-        'sym_thr' : 0.01,
-        'refine_energy_threshold' : 0.2
-    }, 
-    'PSR' : {
-        'kmax_factor' : 1.8,
-        'hausdorff_dist_thr' : 0.1,
-    }
-}
+    kb = 8.6173303e-05  # eV.K^-1
+    h = 6.5822119e-3  # eV.ps
 
 
-DESCRIPTIONS = {
-    "Control" : {"__description__" : ("The following parameters are general parameters that control the KMC simulations and resources used."),
-                 "nkmc_steps" : "number of KMC steps",
-                 "config_file" : "Path to the initial configuration file",
-                 "output_file" : "Path to the file where the trajectory is written, format must be recognized by ase.io.write()", 
-                 "reference_table" : "Path to a catalog to reuse from a previous simulation",
-                 "dimension" : "Dimension of the system",
-                 "nprocs" : "number of MPI process to use",
-                 "backend" : "if running the simulation locally (`'local'`), or on a cluster (`'slurm_allocation'`)", 
-                 "reconstruction" : "if a new catalog is generated at each step or reused"
-    },
-    "Potential" : {"__description__" : ("The potential section deals with the description of the potential in the format of the E/F engine used, for lammps :"), 
-                   "file" : "path to the potential file if needed", 
-                   "pair_style" : "lammps pair style command", 
-                   "pair_coeff" : "lammps pair coeff command"
-                   }, 
-    "Minimization" : {"__description__" : ("Parameters used for the minimization of the system"), 
-                      "style" : "E/F engine used", 
-                      "min_style" : "lammps minimization style", 
-                      "etol" : "lammps stopping tolerance for energy",
-                      "ftol" : "lammps stopping tolerance for force", 
-                      "maxiter" : "lammps max iterations of minimizer", 
-                      "maxeval" : "lammps max number of force/energy evaluations"
-                      },
-    "AtomicEnvironment" : {"__description__" : ("Parameters used to attribute an atomic environment to each atoms"), 
-                           "style" : "style used, `cna`, `graph` or `cna/graph`", 
-                           "rnei" : "maximal distance to consider that two atoms are connected when `graph` and `cna/graph` is used",
-                           "rcut" : "radial cuttoff defining the environment around an atom, used when `graph` and `cna/graph`",
-                           "radd_cna" : "when `cna/graph` is used, graph for atoms at a distance inferior to radd_cna to a atom having a non crystalline environment is also computed"
+class ControlConfig(BaseModel):
+    """Core simulation control parameters."""
 
-    }, 
-    "EventSearch" : {"__description__" : ("Parameters related to the search of transition paths"),
-                     "style" : "which method used, `'pARTn'` for ARTn method", 
-                     "rcutenv" : "radius of the sphere defining the positions of atoms, around the central atom, that are saved in the catalog",
-                     "nsearch" : "number of event search for each different atomic environments",
-                     "path_artnso" : "path to the partn library file",
-                     "emax_event" : "event found having a higher barrier energy value are not saved to the catalog",
-                     "emin_event" : "event found having a lower barrier energy value are not saved to the catalog",
-                     "k0" : "value of k0 when computing the rate constant with $k0 \frac{k_{b}T}{h}e^{-\frac{dE}{k_{b}T}}",
-                     "T" : "Temperature of the simulation"
-                     },
-    "PSR" : {"__description__" : ("Parameters controlling point set registration (shape matching)"), 
-             "style" : "which method is used, `'ira'` for IterativeRotationsAssignments", 
-             "kmax_factor" : "factor for multiplication of search radius", 
-             "hausdorff_dist_thr" : "Hausdorff distance threshold representing the largest displacement of any atom from the reference structure after IRA point set registration"
-             }
-}
+    initial_config: str = Field(
+        default=...,
+        description="File path for the initial atomic structure. This file should be parseable by `ase.io.read()` and contain atom types, positions, simulation cell, and periodic boundary conditions.",
+    )
+
+    trajectory_output: Optional[str] = Field(
+        default="./trajkmc.xyz",
+        description="File path where the simulation trajectory will be saved. The file should be writable by `ase.io.write` using `append=True `",
+    )
+
+    reference_table_output: Optional[str] = Field(
+        default="./reference_table.pickle",
+        description="File path where the reference table will be store in pickle format.",
+    )
+
+    reconstruction: Optional[bool] = Field(
+        default=True, description="If at each KMC step we reconstruct generic events."
+    )
+
+    n_steps: int = Field(
+        default=..., description="Total number of simulation steps to run.", gt=0
+    )
+
+    engine: Literal["lammps"] = Field(
+        default=...,
+        description="Which E/F Engine to use. Note : Only lammps is implemented.",
+    )
+
+    verbosity: Optional[int] = Field(
+        default=1, description="Controls the level of detail in the simulation output."
+    )
 
 
-@dataclass 
-class Config : 
-    """ 
-    Class to manage input parameters
-    """ 
-    @staticmethod 
-    def from_file(config_file: str): 
-        """
-        Read input parameters from file
+class AtomicEnvironmentConfig(BaseModel):
+    """Atomic environments parameters."""
+
+    style: Literal["cna", "graph", "cna/graph"] = Field(
+        ...,
+        description="Method used to characterize and assign an ID to an atom's local atomic environment",
+    )
+
+    rnei: float = Field(
+        ...,
+        description="Radius cutoff (in Angstrom) for defining the first nearest neighbors of an atom. Atoms within this distance are considered direct neighbors.",
+    )
+
+    rcut: Optional[float] = Field(
+        default=None,
+        description="Radius cutoff (in Angstrom) for defining the local atomic environment.",
+    )
+
+    neighbors_add: Optional[int] = Field(
+        default=0,
+        description="When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.",
+    )
+
+
+class EventSearchConfig(BaseModel):
+    """Event search parameters."""
+
+    style: Literal["partn"] = Field(..., description="Method used to find events.")
+    nsearch: int = Field(
+        ...,
+        description="Number of event searches to perform per unique atomic environment.",
+    )
+    emin_event: float = Field(
+        default=0.0,
+        description="Minimum energy barrier (in eV) for an event to be added to the reference table.",
+    )
+    emax_event: float = Field(
+        default=5.0,
+        description="Maximum energy barrier (in eV) for an event to be added to the reference table.",
+    )
+    backward_emin_event: float = Field(
+        default=0.05,
+        description="Minimum energy barrier (in eV) required for the backward reaction of an event to be added to the reference table. This threshold is applied only if the forward reaction's barrier falls within the `emin_event` and `emax_event` range.",
+    )
+    refined_energy_thr: float = Field(
+        default=0.2,
+        description="Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
+    )
+
+
+class PartnConfig(BaseModel):
+    """pARTn parameters."""
+
+    verbosity: int = Field(default=2, description="pARTn verbosity")
+
+    ninit: int = Field(
+        default=2,
+        description="Specify the minimal number of pushes with the initial push vector.",
+    )
+
+    forc_thr: float = Field(
+        default=0.001,
+        description="The configuration has converged to either a saddle point, or a minimum, when the sum of the parallel and perpendicular components of the atomic forces is lower than this value.",
+    )
+
+    push_over: float = Field(
+        default=1.0,
+        description="Factor that scales the displacement vector used to push the system from the saddle point towards a local energy minimum. "
+        "\n"
+        "$$ \\text{displacement} = \\text{push_factor} \\times v_0 \\times \\text{eigen_step_size} \\times \\text{push_over} \\times 0.8 $$"
+        "\n",
+    )
+
+    push_mode: Literal["list", "rad"] = Field(
+        default="rad",
+        description="Determines how the initial atomic displacement (push) is generated around the central atom "
+        "of the currently explored environment:\n"
+        "- **'list'**: The push is applied *only* to the central atom.\n"
+        "- **'rad'**: The push is applied to *all atoms* within a specified radial distance (`push_dist_thr`) "
+        "from the central atom.",
+    )
+
+    push_dist_thr: float = Field(
+        default=1.0,
+        description="If `push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom "
+        "within which all atoms receive an initial displacement.",
+    )
+
+    push_step_size: float = Field(
+        default=0.4,
+        description="Maximum size of a component in the initial displacement vector.",
+    )
+    eigen_step_size: float = Field(
+        default=0.2,
+        description="The limit to the maximum size of the displacement with eigenvector.",
+    )
+
+    lanczos_disp: float = Field(
+        default=0.0005,
+        description="Scaling factor for displacement during the Lanczos algorithm",
+    )
+
+    nsmooth: int = Field(
+        default=3,
+        description="Number of smoothing steps from initial displacement to eigenvector.",
+    )
+
+    nperp: int = Field(default=3, description="Control the perpendicular relaxation.")
+
+    delr_thr: float = Field(
+        default=0.5,
+        description="delr threshold between one minima and the intial configuration to consider the event valid.",
+    )
+
+    dmax: float = Field(
+        default=6.0,
+        description="dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
+    )
+
+    path_artnso: str = Field(
+        default=...,
+        description="Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'",
+    )
+
+
+class RateConstantConfig(BaseModel):
+    """Rate constant computation parameters."""
+
+    style: Literal["constant"] = Field(
+        default=...,
+        description="Method used to compute the prefactor of the rate constant. ",
+    )
+    k0: float = Field(
+        default=1.0,
+        description="When `style` is set to **'constant'**, this value is used directly as the pre-exponential factor ($k_0$) "
+        "\n"
+        "$$ k = k_{0} \\exp\\left(-\\frac{\\Delta E}{k_{b}T}\\right) $$"
+        "\n",
+    )
+    T: float = Field(
+        default=300,
+        description="Temperature (in Kelvin) used for computing rate constants.",
+    )
+
+
+class PSRConfig(BaseModel):
+    """Point set registration parameters."""
+
+    style: Literal["ira"] = Field(
+        default=...,
+        description="Method used for the point set registration (shape matching) between reference events and atomic environment of an atom having the same atomic environement ID of the event. This method is also used to find atomic environment symmetries.",
+    )
+
+    matching_score_thr: float = Field(
+        default=0.1,
+        description="Maximum value of the matching score of the algorithm used.",
+    )
+
+
+class LammpsConfig(BaseModel):
+    """Lammps parameters."""
+
+    pair_style: str = Field(default=..., description="Lammps pair_style command.")
+    pair_coeff: str = Field(default=..., description="Lammps pair_coeff command.")
+    min_style: Optional[str] = Field(
+        default="cg", description="Lammps min_style command."
+    )
+    minimize: Optional[str] = Field(
+        default="minimize 1.0e-6 1.0e-8 1000 1000",
+        description="Lammps minimize command",
+    )
+
+
+class IraConfig(BaseModel):
+    """IRA parameters."""
+
+    kmax_factor: float = Field(
+        default=1.8,
+        description="Multiplicative factor that needs to be larger than 1.0. Larger value increases the search space of the rotations.",
+    )
+    sym_thr: float = Field(
+        default=0.01,
+        description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
+    )
+
+
+class Config(BaseModel):
+    """Config for the KMC simulations."""
+
+    control: ControlConfig = Field(
+        default_factory=ControlConfig, description="Core simulation control parameters."
+    )
+
+    atomicenvironment: AtomicEnvironmentConfig = Field(
+        default_factory=AtomicEnvironmentConfig,
+        description="Parameters defining the local atomic environments and the method used to define them.",
+    )
+
+    eventsearch: EventSearchConfig = Field(
+        default_factory=EventSearchConfig,
+        description="Parameter controling the event searches.",
+    )
+
+    psr: PSRConfig = Field(
+        default=PSRConfig,
+        description="Parameter controlling the point set registration algorithm.",
+    )
+    rateconstant: RateConstantConfig = Field(
+        default_factory=RateConstantConfig,
+        description="Parameters used to compute rate constants.",
+    )
+
+    lammps: Optional[LammpsConfig] = Field(
+        default=None,
+        description="LAMMPS-specific parameters. Required if engine == lammps.",
+    )
+
+    partn: Optional[PartnConfig] = Field(
+        default=None, description="pARTn parameters controling the event searches"
+    )
+
+    ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
+
+    @classmethod
+    def from_ini_file(cls, ini_path: str) -> Config:
+        """Load and validates simulation configuration from an INI file.
+
+        Parses the INI file, ensuring all mandatory sections (e.g., `control`,
+        `atomicenvironment`, etc.) are present. It then validates the parameters
+        against the Pydantic `Config` model, providing clear error messages for
+        missing or invalid entries.
 
         Parameters
         ----------
-        config_file : str
-            path to the input file
+        ini_path : str
+            The file path to the INI configuration file.
+
         Returns
         -------
-        config_dict : dict 
-            dictionary of input parameters
+        Config
+            A validated `Config` instance containing all simulation parameters.
 
         Raises
         ------
-        Exception
-            if wrong section in input file
+        ValueError
+            If the specified INI file does not exist or cannot be read.
+        ValueError
+        If the INI file has parsing errors, a mandatory section is missing,
+        or Pydantic validation fails.
+
         """
-        config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation()) 
+        parser = configparser.ConfigParser()
+        parser.read(ini_path)
 
-        config.optionxform = str #Enable uppercase variable
-        try : 
-            with open(config_file) as f : #So we can raise an exception
-                config.read(config_file)
-        except :
-            raise Exception('No configuration file found')
-        
-        #Check 
-        if not config.has_section('Control')  : 
-            raise Exception('Control section in configuration file is mandatory')
-        if not config.has_section('Potential') : 
-            raise Exception('Potential section in configuration file is mandatory')
-        if not config.has_section('Minimization') : 
-            raise Exception('Minimization section in configuration file is mandatory')
-        if not config.has_section('EventSearch') : 
-            raise Exception('EventSearch section in configuration file is mandatory')
-        if not config.has_section('PSR') : 
-            raise Exception('PSR section in configuration file is mandatory')
+        config_dict: dict[str, dict[str, Any]] = {
+            section.lower(): dict(parser.items(section))
+            for section in parser.sections()
+        }
 
+        # Check sections required
+        required_sections = [
+            "control",
+            "atomicenvironment",
+            "eventsearch",
+            "rateconstant",
+            "psr",
+        ]
+        for sec in required_sections:
+            if sec not in config_dict:
+                raise ValueError(f"Section [{sec}] mandatory in the INI file.")
 
-        
-        #Convert ConfigParser in a dictionaries of dictionary and convert values 
-            #Initialize with default values 
-        config_dict = {section: default for section, default in DEFAULT.items()}
-            #Add config values
-        for section in config.sections() : 
-            if section not in config_dict: 
-                config_dict[section] = {}
-            config_dict[section].update({
-                    key : Config._convert_value(config.get(section,key))
-                    for key, _ in config.items(section)
-            })
+        try:
+            return cls.model_validate(config_dict)
+        except ValidationError as e:
+            user_msg = format_pydantic_errors(e)
+            raise ValueError(
+                f"Error while reading configuration file :\n{user_msg}"
+            ) from None
 
-        return config_dict
-    
-    def _convert_value(value) : 
-        """ 
-        Convert str value from the input file to int, float, boolean or str
+    @model_validator(mode="after")
+    def validate_dependencies(self) -> Config:
+        """Validate conditional dependencies between configuration sections or fields.
 
-        Parameters
-        ---------- 
-        value : 
-            value to be converted 
+        Ensures that when a specific configuration option is chosen (e.g., a certain
+        'engine' or 'style'), its dependent sections or parameters are also provided.
+
+        Validation rules are defined as a dictionary:
+            - Key: A tuple `(condition_field_path, condition_value)`
+                - `condition_field_path` (str): Dot-separated path to the field that triggers the dependency (e.g., "control.engine").
+                - `condition_value` (Any): The specific value of the `condition_field` that activates the dependency.
+            - Value: A list of `required_field_paths` (str)
+                - `required_field_paths`: Dot-separated paths to the fields or sections that become mandatory (e.g., "lammps").
 
         Returns
-        ------- 
-        value : 
-            the value after the conversion
-        """
-        try :
-            if value == 'True' : 
-                return True 
-            if value == 'False' :  
-                return False
-        except ValueError : 
-            pass
-        try : 
-            return int(value)
-        except ValueError : 
-            pass 
-        try : 
-            return float(value) 
-        except ValueError : 
-            pass 
-        return value
+        -------
+        Self
+            The validated `Config` instance.
 
+        Raises
+        ------
+        ValueError
+            If a required section or parameter is missing based on the validation rules.
+
+        """
+        validation_rules = {
+            ("control.engine", "lammps"): ["lammps"],
+            ("eventsearch.style", "partn"): ["partn"],
+            ("psr.style", "ira"): ["ira"],
+        }
+
+        for (field_path, condition_value), required_fields in validation_rules.items():
+            actual_value = get_nested_attr(self, field_path)
+            if actual_value is not None:  # check if it required
+                if actual_value == condition_value:
+                    missing_fields = [
+                        f for f in required_fields if get_nested_attr(self, f) is None
+                    ]
+                    if missing_fields:
+                        raise ValueError(
+                            "The following section or/and parameters are required when {} is {} : {}".format(
+                                field_path, condition_value, missing_fields
+                            )
+                        )
+        return self
+
+
+def get_nested_attr(obj: BaseModel, attr_path: str) -> Optional[Any]:
+    """Retrieve a nested attribute from a Pydantic BaseModel.
+
+    Parameters
+    ----------
+    obj : BaseModel
+        The Pydantic BaseModel instance from which to retrieve the attribute.
+    attr_path : str
+        The dot-separated path to the nested attribute.
+
+    Returns
+    -------
+    Optional[Any]
+        The value of the nested attribute, or None if the attribute
+        (or any part of its path) does not exist or is None.
+
+    """
+    for part in attr_path.split("."):
+        if obj is None:
+            return None
+        obj = getattr(obj, part, None)
+    return obj
+
+
+def format_pydantic_errors(e: ValidationError) -> str:
+    """Format Pydantic errors to be more readable.
+
+    Parameters
+    ----------
+    e : ValidationError
+        The pydantic error.
+
+    Returns
+    -------
+    str
+        Formatted error message.
+
+    """
+    messages = []
+    for err in e.errors():
+        # Find error informations
+        location = ".".join(str(loc_part) for loc_part in err["loc"])
+        msg = err.get("msg", "")
+        typ = err.get("type", "")
+        if "missing" in typ:
+            # find section and field in error message
+            parts = location.split(".")
+            section = parts[0]
+            field = parts[1]
+            messages.append(f"Section '{section}' : field '{field}' is mandatory.")
+        else:
+            # brut error
+            messages.append(f"{location} : {msg}")
+    return "\n".join(messages)
