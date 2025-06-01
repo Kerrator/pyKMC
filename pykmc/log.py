@@ -482,13 +482,13 @@ class LogKMC(LogManager):
         Parameters
         ----------
         logger_name : str
-            _description_
+            The logger name.
         current_step : int
-            _description_
+            Current step of the process.
         total_steps : int
-            _description_
+            Total steps of the process.
         bar_length : int, optional
-            _description_, by default 40.
+            Lenght of the progress bar, by default 40.
 
         """
         # Compute percentage
