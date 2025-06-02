@@ -24,29 +24,21 @@ class KMC() :
         self.neighbors_list = None 
         self.atomic_environment = None 
         self.reference_table = None
-        self.visited_environments = set(['crystal'])
+        self.visited_environments = None 
             
     def run(self) : 
-
-        ################################################################# 
-        #                  INITIALIZE ATTRIBUTES                        #
-        ################################################################# 
+        
+        #Initialize the simulation and KMC attributes and minimize the system
         self._initialize()
-        #Write initial step to file : 
+        #Write initial step to file  
         self._append_snapshot_to_trajectory()
 
-        ################################################################# 
-        #                    LOOP KMC PARAMETERS                        #
-        ################################################################# 
+        #LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
         time = 0.0 #in seconds
         nsearch = self.config.eventsearch.nsearch
 
-        ################################################################# 
-        #                         KMC LOOP                              #
-        ################################################################# 
-        #self.logger.first_line_table() #write log head table
-
+        #KMC LOOP
         for step in range(nkmc_steps) :
             #########################################################
             #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
@@ -390,32 +382,66 @@ class KMC() :
                               'energy_barrier' : dE, 
                               'k' :compute_rate_Eyring(dE, self.config)})
         return dfactive
-
-    def _initialize(self) : 
-        self._initialize_loggers()
-
-        self.loggers.info('log', ':=> Reading initial configuration file : {}'.format(self.config.control.initial_config))
-        self.system = System.create_from_file(self.config.control.initial_config)
-        
-        self.loggers.info('log', ':=> Initializing E/F {} Engine'.format(self.config.control.engine))
-        self.engine = Engine(self.config)
-        
+    
+    def minimize_system(self) -> None : 
+        """Minimize the system and update its positions"""
         self.loggers.info('log',':=> Minimizing the system')
         new_positions = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
 
-        self.loggers.info('log', ':=> Constructing Neighbors Lists')
-        self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
+    def _initialize(self) -> None: 
+        """Initialize the entire simulation before starting."""
+        self._initialize_loggers()
+        self._initialize_system()
+        self._initialize_engine() 
+        self.minimize_system() 
+        self._initialize_neighbors_list() 
+        self._initialize_atomic_environments() 
+        self._initialize_reference_table()  
+        self._initialize_visited_environments()
 
+        self.loggers.new_line('log')
+        self.loggers.info('log', '===========================')
+        self.loggers.info('log', '= Starting KMC simulation =')
+        self.loggers.info('log', '===========================')
+
+    def _initialize_loggers(self) -> None: 
+        """Initialize the loggers and create their files."""
+        self.loggers = LogKMC(LOGGING_CONFIG)
+        self.loggers.title('log')
+        self.loggers.write_parameters('log', self.config)
+        self.loggers.output_file_header('output')
+
+    def _initialize_system(self) -> None : 
+        """Read and initialize the system from the intial configuration file."""
+        self.loggers.info('log', ':=> Reading initial configuration file : {}'.format(self.config.control.initial_config))
+        self.system = System.create_from_file(self.config.control.initial_config)
+    
+    def _initialize_engine(self) -> None : 
+        """Initialize the engine based on the Config"""
+        self.loggers.info('log', ':=> Initializing E/F {} Engine'.format(self.config.control.engine))
+        self.engine = Engine(self.config)
+
+    def _initialize_neighbors_list(self) -> None : 
+        """Construct a new Neighbors List""" 
+        self.loggers.info('log', ':=> Constructing Neighbors Lists')
+        self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)
+
+    def _initialize_atomic_environments(self) -> None : 
+        """Construct a new Atomic Environment"""
         self.loggers.info('log', ':=> Computing Atomic Environments')
         self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
+    def _initialize_reference_table(self) -> None : 
+        """Initialize the Reference Event Table"""
         if self.config.control.reference_table is not None : 
             self.loggers.info('log', ':=> Reading Reference table file {}'.format(self.config.control.reference_table))
         else : 
             self.loggers.info('log', ':=> Generate a empty reference table')
         self.reference_table = ReferenceEventTable(self.config)
 
+    def _initialize_visited_environments(self) -> None : 
+        """Initialize visited environment from file if specified, else initialize as {'crystal'}"""
         if self.config.control.visited_environments is not None : 
             self.loggers.info('log', ':=> Initiating visited environment from file {}'.format(self.config.control.visited_environments))
             try:
@@ -424,21 +450,10 @@ class KMC() :
                 self.visited_environments = loaded_set_environments
             except Exception as e:
                 raise Exception("Can't read visited environment file.")
-
+        else : 
+            self.visited_environments = set(['crystal'])
         if self.config.control.visited_environments and not self.config.control.reference_table : 
-            self.loggers.warning('log', "Visited environments are setup from file while no reference table was provided")     
-        
-        self.loggers.new_line('log')
-        self.loggers.info('log', '===========================')
-        self.loggers.info('log', '= Starting KMC simulation =')
-        self.loggers.info('log', '===========================')
-
-    def _initialize_loggers(self) : 
-        self.loggers = LogKMC(LOGGING_CONFIG)
-        self.loggers.title('log')
-        self.loggers.write_parameters('log', self.config)
-        self.loggers.output_file_header('output')
-
+            self.loggers.warning('log', "Visited environments are read from file while no reference table was provided")
 
     def _append_snapshot_to_trajectory(self) : 
         output = self.config.control.trajectory_output
