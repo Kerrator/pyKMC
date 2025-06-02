@@ -68,7 +68,7 @@ class LammpsEngine() :
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         nprocs = comm.Get_size()
-        lmp = lammps(comm=comm)
+        lmp = lammps(comm=comm, cmdargs=['-screen', 'none'])
 
         #Lammps default parameters
         self._initialize_default(system, lmp)
