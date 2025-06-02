@@ -10,6 +10,7 @@ from itertools import zip_longest
 from typing import Any, TextIO
 from enum import Enum
 import re
+from .config import Config
 
 
 class LogManager:
@@ -353,7 +354,7 @@ class LogKMC(LogManager):
         self.info(logger_name, "\n")
 
     def write_parameters(
-        self, logger_name: str, config: dict[str, Any], width: int = 60, indent: int = 4
+        self, logger_name: str, config: Config, width: int = 60, indent: int = 4
     ) -> None:
         """Write simulation parameter to the logger.
 
@@ -361,8 +362,8 @@ class LogKMC(LogManager):
         ----------
         logger_name : str
             The logger name.
-        config : dict[str, Any]
-            The configuration dictionnary.
+        config : Config
+            The configuration Object
         width : int, optional
             Width of the lines, by default 60.
         indent : int, optional
@@ -386,7 +387,7 @@ class LogKMC(LogManager):
                     logger_name,
                     "{}{:<{}} : {}".format(" " * indent, key, max_key_len, value),
                 )
-        self.new_line()
+        self.new_line(logger_name)
 
     def output_file_header(self, logger_name: str) -> None:
         """Write the header of the output file.
