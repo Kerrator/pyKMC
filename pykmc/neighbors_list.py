@@ -1,4 +1,4 @@
-"""Manages atomic neighbor lists for an `System` using radial cutoffs."""
+"""Manage atomic neighbor lists for an `System` using radial cutoffs."""
 
 from scipy.spatial import cKDTree
 from .system import System
@@ -24,11 +24,14 @@ class NeighborsList:
 
     """
 
-    def __init__(self, system: System, config: Config) -> None:
+    def __init__(self, system: System, rnei: float, rcut: float = None) -> None:
         self.system = system
-        self.rnei = config.atomicenvironment.rnei
-        self.rcut = config.atomicenvironment.rcut
-        self.neighbors_list = {"rnei": [], "rcut": []}
+        self.rnei = rnei
+        self.rcut = rcut
+        if rcut is not None : 
+            self.neighbors_list = {"rnei": [], "rcut": []}
+        else : 
+            self.neighbors_list = {"rnei" : []}
         self._build_neighbors_list()
 
     def _build_neighbors_list(self) -> None:
@@ -43,8 +46,9 @@ class NeighborsList:
             neighbors = tree.query_ball_point(positions[i], self.rnei)
             neighbors.remove(i)  # don't have self as neighbor
             self.neighbors_list["rnei"].append(neighbors)
-            neighbors = tree.query_ball_point(positions[i], self.rcut)
-            self.neighbors_list["rcut"].append(neighbors)
+            if self.rcut is not None : 
+                neighbors = tree.query_ball_point(positions[i], self.rcut)
+                self.neighbors_list["rcut"].append(neighbors)
 
     def get_neighbors(self, cutoff_type: float, idx: int) -> list[int]:
         """Retrieve the neighbor list for a specific atom and cutoff.

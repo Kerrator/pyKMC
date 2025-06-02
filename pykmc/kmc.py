@@ -11,6 +11,7 @@ import sys
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from dataclasses import asdict
+import pickle
 
 
 class KMC() : 
@@ -125,7 +126,7 @@ class KMC() :
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
             #update neighborlist : 
-            self.neighbors_list = NeighborsList(self.system, self.config) 
+            self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
             #update atomic environment 
             self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
 
@@ -140,8 +141,9 @@ class KMC() :
                                         nb_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)), 
                                         size_reference_event_table= len(self.reference_table.table)) 
             kmc_loop_info.print_informations()
+
+            self._save()
         
-        self.reference_table.save('reference_table.pickle')
 
 
     def central_atoms_research(self, new_environment, nsearch) : 
@@ -405,7 +407,7 @@ class KMC() :
         self.system.update_positions(new_positions)
 
         self.loggers.info('log', ':=> Constructing Neighbors Lists')
-        self.neighbors_list = NeighborsList(self.system, self.config) 
+        self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
 
         self.loggers.info('log', ':=> Computing Atomic Environments')
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
@@ -434,6 +436,11 @@ class KMC() :
         output = self.config.control.trajectory_output
         atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
         write(output, atoms, append=True)
+
+    def _save(self) : 
+        self.reference_table.save('reference_table.pickle')
+        with open(self.config.control.visited_environments_output, 'wb') as file : 
+            pickle.dump(self.visited_environment, file)
 
     def _close(self) : 
         self.loggers.info('log', ':=> End of simulation')

@@ -185,19 +185,19 @@ class ReferenceEventTable :
         min1system = System() 
         min1system.positions = min1_positions 
         min1system.cell = cell
-        min1neighbors_list = NeighborsList(min1system, self.config) 
+        min1neighbors_list = NeighborsList(min1system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
 
         saddlesystem = System() 
         saddlesystem.positions = saddle_positions
         saddlesystem.cell = cell
-        saddleneighbors_list = NeighborsList(saddlesystem, self.config) 
+        saddleneighbors_list = NeighborsList(saddlesystem, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
         
         min2system = System() 
         min2system.positions = min2_positions 
         min2system.cell = cell
-        min2neighbors_list = NeighborsList(min2system, self.config) 
+        min2neighbors_list = NeighborsList(min2system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
         
-
+        #TODO need to see how to deal with different style for atomic environment ID
         #Compute all needed topology ID : 
         id_min1 = graph(min1neighbors_list.neighbors_list['rnei'], min1neighbors_list.neighbors_list['rcut'], atom_idx=[index_move])[0]
         id_saddle = graph(saddleneighbors_list.neighbors_list['rnei'], saddleneighbors_list.neighbors_list['rcut'], atom_idx=[index_move])[0]
