@@ -19,9 +19,13 @@ nav:
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
       - AtomicEnvironment: api/atomic_environment.md
+      - Config: api/config.md
       - Log: api/log.md
       - Algorithms: api/algorithms.md
 
+markdown_extensions:
+  - pymdownx.arithmatex:
+  - mdx_include:
 
 plugins:
   - mkdocstrings:
