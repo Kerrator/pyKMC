@@ -37,9 +37,20 @@ class ControlConfig(BaseModel):
         default="./reference_table.pickle",
         description="File path where the reference table will be store in pickle format.",
     )
-    reference_table: Optional[bool] = Field(
-        default=False,
+
+    visited_environments_output: Optional[str] = Field(
+        default="./visited_environments.pickle", 
+        description="File path where the list of atomic environments that have been explored will be sore in pickle format."
+    )
+
+    reference_table: Optional[str] = Field(
+        default=None,
         description="Path to a reference table generated from a previous simulation."
+    )
+
+    visited_environment: Optional[str] = Field(
+        default=None, 
+        description="Path to a list of visited environment generated from a previsous simulation."
     )
 
     reconstruction: Optional[bool] = Field(
