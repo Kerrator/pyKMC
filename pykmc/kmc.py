@@ -128,7 +128,7 @@ class KMC() :
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
             #update atomic environment 
-            self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
+            self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
             if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
                 #self.logger.logger.info(':=> Only atoms with cristalline environment')
@@ -410,7 +410,7 @@ class KMC() :
         self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
 
         self.loggers.info('log', ':=> Computing Atomic Environments')
-        self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
+        self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
         #if self.config['Control']['reference_table'] is not None : 
             #self.logger.logger.info('=> Reading Reference table file {}'.format(self.config['Control']['reference_table']))

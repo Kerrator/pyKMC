@@ -2,7 +2,6 @@
 
 import numpy as np
 from .environments import cna, graph
-from .config import Config
 
 
 class AtomicEnvironment:
@@ -10,14 +9,14 @@ class AtomicEnvironment:
 
     Attributes
     ----------
-    config : Config
-        configuration object
     style : str
         The atomic environment style (e.g., 'cna', 'graph', 'cna/graph').
     neighbors_list : list[list[int]]
        first neighbors lists
     environment_list : list[list[int]] or None
         Optional. lists of atoms in environments (used for 'graph' or 'cna/graph' styles).
+    neighbors_add : int or None 
+        Optional. When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.
     atomic_environment_list : list
         Computed atomic environment ID for each atom. **Populated during initialization**
         based on the chosen `style`.
@@ -31,14 +30,15 @@ class AtomicEnvironment:
 
     def __init__(
         self,
-        config: Config,
+        style: str,
         neighbors_list: list[list[int]],
         environment_list: list[list[int]] | None = None,
+        neighbors_add: int = 0
     ) -> None:
-        self.config = config
-        self.style = config.atomicenvironment.style
+        self.style =  style
         self.neighbors_list = neighbors_list
         self.environment_list = environment_list
+        self.neighbors_add = neighbors_add
 
         # Compute the atomic environment ID and store it in self.atomic_environment_list
         match self.style:
@@ -91,10 +91,9 @@ class AtomicEnvironment:
         )
 
         # If radd_cna != None add neighbors of non crystal from cna
-        n_neighbors = self.config.atomicenvironment.neighbors_add
-        if n_neighbors is not None:
+        if self.neighbors_add > 0:
             tmp = []
-            for _i in range(n_neighbors):  # Do it recursively
+            for _i in range(self.neighbors_add):  # Do it recursively
                 for idx in non_crystal_idx:
                     tmp += neighbors_list[idx]
             non_crystal_idx += tmp
