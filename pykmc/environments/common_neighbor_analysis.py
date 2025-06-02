@@ -1,6 +1,7 @@
-def cna(neighbors_list) : 
-    """
-    Classify atomic environments by neighbor count.
+"""Determine cristalline environments."""
+
+def cna(neighbors_list: list[list[int]]) -> list[str] : 
+    """Classify atomic environments by neighbor count.
 
     Determine if each atom's environment is 'crystal' (12, 8, or 6 neighbors)
     or 'noncrystal'.
@@ -14,14 +15,15 @@ def cna(neighbors_list) :
     -------
     list[str]
         'crystal' or 'noncrystal' classification for each atom.
+
     """
     crystals = [12, 8, 6] 
     hash = [] 
     for neighbors in neighbors_list : 
         if len(neighbors) in crystals : 
-            hash.append('crystal')
+            hash.append("crystal")
         else : 
-            hash.append('noncrystal')
+            hash.append("noncrystal")
     return hash
 
 
