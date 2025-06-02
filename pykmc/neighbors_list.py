@@ -26,8 +26,8 @@ class NeighborsList:
 
     def __init__(self, system: System, config: Config) -> None:
         self.system = system
-        self.rnei = config["AtomicEnvironment"]["rnei"]
-        self.rcut = config["AtomicEnvironment"]["rcut"]
+        self.rnei = config.atomicenvironment.rnei
+        self.rcut = config.atomicenvironment.rcut
         self.neighbors_list = {"rnei": [], "rcut": []}
         self._build_neighbors_list()
 

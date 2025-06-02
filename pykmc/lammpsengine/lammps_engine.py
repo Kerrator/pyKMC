@@ -7,11 +7,12 @@ from .partn import pARTn_search, pARTn_refine_event
 class LammpsEngine() : 
 
     def __init__(self, config: Config) :
-        self.config_control = config.get('Control') 
-        self.config_potential = config.get('Potential')
-        self.config_minimization = config.get('Minimization')
-        self.config_event_search = config.get('EventSearch')
-        self.config_atomic_environment = config.get('AtomicEnvironment')
+        self.config = config
+#        self.config_control = config.get('Control') 
+#        self.config_potential = config.get('Potential')
+#        self.config_minimization = config.get('Minimization')
+#        self.config_event_search = config.get('EventSearch')
+#        self.config_atomic_environment = config.get('AtomicEnvironment')
 
 
     def _initialize_default(self,system, lmp_instance) : 
@@ -47,19 +48,19 @@ class LammpsEngine() :
 
     def _initialize_potential(self, lmp_instance) : 
 
-        pair_style = self.config_potential['pair_style']
-        pair_coeff = self.config_potential['pair_coeff']
+        pair_style = self.config.lammps.pair_style
+        pair_coeff = self.config.lammps.pair_coeff
         lmp_instance.command('pair_style {}'.format(pair_style))
         lmp_instance.command('pair_coeff {}'.format(pair_coeff))
 
     def minimize(self, system) :
 
         #Parameters
-        min_style = self.config_minimization['min_style']
-        etol = self.config_minimization['etol']
-        ftol = self.config_minimization['ftol']
-        maxiter = self.config_minimization['maxiter']
-        maxeval = self.config_minimization['maxeval']
+        #min_style = self.config_minimization['min_style']
+        #etol = self.config_minimization['etol']
+        #ftol = self.config_minimization['ftol']
+        #maxiter = self.config_minimization['maxiter']
+        #maxeval = self.config_minimization['maxeval']
         
         #Lammps instance
         from mpi4py import MPI
@@ -74,8 +75,10 @@ class LammpsEngine() :
         #Initialize potential
         self._initialize_potential(lmp)
         #Minimization 
-        lmp.command('min_style {}'.format(min_style))
-        lmp.command('minimize {} {} {} {}'.format(etol, ftol, maxiter, maxeval))
+        #lmp.command('min_style {}'.format(min_style))
+        #lmp.command('minimize {} {} {} {}'.format(etol, ftol, maxiter, maxeval))
+        lmp.command('min_style {}'.format(self.config.lammps.min_style))
+        lmp.command('minimize {}'.format(self.config.lammps.minimize))
         #gather all positions 
         id = lmp.numpy.extract_atom("id")
         positions = lmp.gather_atoms("x", 1, 3)
@@ -96,14 +99,14 @@ class LammpsEngine() :
         #Initialize potential 
         self._initialize_potential(lmp)
         #pARTn search : 
-        result = pARTn_search(lmp, self.config_event_search, central_atom, self.config_atomic_environment['rcut'])
+        result = pARTn_search(lmp, self.config, central_atom, self.config.atomicenvironment.rcut)
         return result
     
     def pARTn_refine_event(self, system, central_atom) : 
         lmp = lammps(cmdargs=['-screen', 'none']) 
         self._initialize_default(system, lmp)
         self._initialize_potential(lmp)
-        result = pARTn_refine_event(lmp, self.config_event_search, central_atom)
+        result = pARTn_refine_event(lmp, self.config, central_atom)
         return result
 
     def compute_potential_energy(self, system) : 

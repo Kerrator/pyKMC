@@ -14,10 +14,10 @@ class ReferenceEventTable :
 
     def __init__(self, config) : 
         self.config = config
-        if self.config['Control']['reference_table'] is None : 
+        if not self.config.control.reference_table : 
             self._initialize_table() 
         else : 
-            self.table = pd.read_pickle(self.config['Control']['reference_table'])
+            self.table = pd.read_pickle(self.config.control.reference_table)
 
 
     def is_valid_new_event(self, min1_positions, saddle_positions, min2_positions, move_atom_idx, dE_forward, dE_backward, cell) -> Result[bool, ErrorInfo]: 
@@ -25,10 +25,10 @@ class ReferenceEventTable :
         Check if the event is within energy barrier limits and if it's new
         """ 
         #Energy bounds 
-        emin = self.config['EventSearch']['emin_event']
-        emax = self.config['EventSearch']['emax_event']
-        backward_emin = self.config['EventSearch']['backward_emin_event']
-        energy_asymmetry = self.config['EventSearch']['energy_event_symmetry']
+        emin = self.config.eventsearch.emin_event
+        emax = self.config.eventsearch.emax_event
+        backward_emin = self.config.eventsearch.backward_emin_event
+        #energy_asymmetry = self.config['EventSearch']['energy_event_symmetry']
 
         if dE_forward > emax : #barrier energy too high, reject the event 
             return Err(ErrorInfo(type=ErrorType.EVENT_ENERGY_HIGHER_THAN_THRESHOLD, 
@@ -45,10 +45,10 @@ class ReferenceEventTable :
                                  message= "Backward energy barrier of the event lower than emin_event", 
                                  details="Backward Energy barrier = {}, energy min threshold = {}".format(dE_backward, emin)))
         
-        elif (dE_forward > energy_asymmetry*backward_emin) and (dE_backward < backward_emin ) : #Asymmetric event, reject 
-            return Err(ErrorInfo(type=ErrorType.EVENT_ASYMMETRIC, 
-                                 message="Found event is highly asymmetric", 
-                                 details="Foward barrier eneryg > {} and backward barrier energy < {}".format(energy_asymmetry*backward_emin, backward_emin)))
+        #elif (dE_forward > energy_asymmetry*backward_emin) and (dE_backward < backward_emin ) : #Asymmetric event, reject 
+        #    return Err(ErrorInfo(type=ErrorType.EVENT_ASYMMETRIC, 
+        #                         message="Found event is highly asymmetric", 
+        #                         details="Foward barrier eneryg > {} and backward barrier energy < {}".format(energy_asymmetry*backward_emin, backward_emin)))
         
         else : #Event is valid, construct event Series
             dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 
@@ -109,10 +109,10 @@ class ReferenceEventTable :
         """ 
         """
         #Energy bounds 
-        emin = self.config['EventSearch']['emin_event']
-        emax = self.config['EventSearch']['emax_event']
+        emin = self.config.eventsearch.emin_event
+        emax = self.config.eventsearch.emax_event
 
-        if self.config['Control']['reconstruction'] :
+        if self.config.control.reconstruction : 
             if emin < dE_forward < emax : 
                 is_new = self._add_event_with_reconstruction(min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell)
                 in_e_bounds = True 
@@ -207,7 +207,7 @@ class ReferenceEventTable :
         neighbor_list_backward = min2neighbors_list.neighbors_list['rcut'][index_move]
 
         #Symmetries : 
-        sym_matrix, sym_perm = unique_symmetries(min1_positions[neighbor_list_forwward],min2_positions[neighbor_list_forwward], self.config['EventSearch']['sym_thr'])
+        sym_matrix, sym_perm = unique_symmetries(min1_positions[neighbor_list_forwward],min2_positions[neighbor_list_forwward], self.config.ira.sym_thr)
         dfevent_forward = pd.Series({'event_id' : id_min1 , 
                                      'initial_positions' : min1_positions[neighbor_list_forwward], 
                                      'saddle_positions': saddle_positions[neighbor_list_forwward], 
@@ -220,7 +220,7 @@ class ReferenceEventTable :
                                      'sym_matrix' : sym_matrix, 
                                      'sym_perm' : sym_perm})
 
-        sym_matrix, sym_perm = unique_symmetries(min2_positions[neighbor_list_backward], min1_positions[neighbor_list_backward], self.config['EventSearch']['sym_thr'])
+        sym_matrix, sym_perm = unique_symmetries(min2_positions[neighbor_list_backward], min1_positions[neighbor_list_backward], self.config.ira.sym_thr)
         dfevent_backward = pd.Series({'event_id' : id_min2 , 
                                      'initial_positions' : min2_positions[neighbor_list_backward], 
                                      'saddle_positions': saddle_positions[neighbor_list_backward], 
@@ -236,7 +236,7 @@ class ReferenceEventTable :
         return dfevent_forward, dfevent_backward
 
     def _initialize_table(self) : 
-        if self.config['Control']['reconstruction'] : 
+        if self.config.control.reconstruction : 
             self.table = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
                                                  'saddle_positions', 

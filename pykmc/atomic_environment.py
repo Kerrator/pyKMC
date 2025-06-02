@@ -36,12 +36,12 @@ class AtomicEnvironment:
         environment_list: list[list[int]] | None = None,
     ) -> None:
         self.config = config
-        self.style = config["AtomicEnvironment"]["style"]
+        self.style = config.atomicenvironment.style
         self.neighbors_list = neighbors_list
         self.environment_list = environment_list
 
         # Compute the atomic environment ID and store it in self.atomic_environment_list
-        match self.config["AtomicEnvironment"]["style"]:
+        match self.style:
             case "cna":
                 self.atomic_environment_list = self.compute_cna()
             case "graph":
@@ -91,7 +91,7 @@ class AtomicEnvironment:
         )
 
         # If radd_cna != None add neighbors of non crystal from cna
-        n_neighbors = self.config["AtomicEnvironment"]["radd_cna"]
+        n_neighbors = self.config.atomicenvironment.neighbors_add
         if n_neighbors is not None:
             tmp = []
             for _i in range(n_neighbors):  # Do it recursively

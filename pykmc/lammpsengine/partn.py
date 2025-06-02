@@ -4,35 +4,35 @@ from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType
 from lammps import lammps
 
 
-def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
+def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
     #PARAMETERS : 
-    delr_threshold = config_event_search['partn_delr_threshold']
+    delr_threshold = config.partn.delr_thr
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 
     #LAMMPS COMMANDS
-    lmp.command("plugin load {}".format(config_event_search['path_artnso']))
-    lmp.command("fix 10 all artn dmax {}".format(config_event_search['partn_dmax']))
+    lmp.command("plugin load {}".format(config.partn.path_artnso))
+    lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     lmp.command("min_style fire")
 
     #SETUP ARTN
     artn.set('engine_units', 'lammps/metal')
-    artn.set('verbose',config_event_search['partn_verbose'])
+    artn.set('verbose',config.partn.verbosity)
     artn.set('struc_format_out', 'none')
     artn.set("lpush_final", True)
     artn.set("lmove_nextmin", False) #if true fortran runtime error when event not found
-    artn.set("ninit", config_event_search['partn_ninit'])
-    artn.set("forc_thr", config_event_search['partn_forc_thr'])
-    artn.set('push_mode', config_event_search['partn_push_mode'])
-    if config_event_search['partn_push_mode'] == 'rad' :
-        artn.set('push_dist_thr', config_event_search['partn_push_dist_thr'])
-    artn.set("push_step_size",  config_event_search['partn_push_step_size'])
+    artn.set("ninit", config.partn.ninit)
+    artn.set("forc_thr", config.partn.forc_thr)
+    artn.set('push_mode', config.partn.push_mode)
+    if config.partn.push_mode == 'rad' :
+        artn.set('push_dist_thr', config.partn.push_dist_thr)
+    artn.set("push_step_size",  config.partn.push_step_size)
     artn.set("push_ids", [central_atom_idx+1])
-    artn.set("push_over", config_event_search['partn_push_over'])
-    artn.set('eigen_step_size', config_event_search['partn_eigen_step_size'])
-    artn.set('lanczos_disp', config_event_search['partn_lanczos_disp'])
-    artn.set('nsmooth',  config_event_search['partn_nsmooth'])
-    artn.set('nperp', config_event_search['partn_nperp'])
+    artn.set("push_over", config.partn.push_over)
+    artn.set('eigen_step_size', config.partn.eigen_step_size)
+    artn.set('lanczos_disp', config.partn.lanczos_disp)
+    artn.set('nsmooth',  config.partn.nsmooth)
+    artn.set('nperp', config.partn.nperp)
 
     #RUN
     lmp.command("minimize 1e-6 1e-8 1000 1000")
@@ -87,30 +87,30 @@ def pARTn_search(lmp: lammps, config_event_search: dict, central_atom_idx: int, 
                              message="No event found", 
                              details = err)) 
     
-def pARTn_refine_event(lmp, config_event_search, central_atom_idx ) -> Result[EventSearchOutput, ErrorInfo]: 
+def pARTn_refine_event(lmp, config, central_atom_idx ) -> Result[EventSearchOutput, ErrorInfo]: 
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 
     #LAMMPS COMMANDS
-    lmp.command("plugin load {}".format(config_event_search['path_artnso']))
-    lmp.command("fix 10 all artn dmax {}".format(config_event_search['partn_dmax']))
+    lmp.command("plugin load {}".format(config.partn.path_artnso))
+    lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     lmp.command("min_style fire")
 
     #SETUP ARTN
     artn.set('engine_units', 'lammps/metal')
-    artn.set('verbose',config_event_search['partn_verbose'])
+    artn.set('verbose',config.partn.verbosity)
     artn.set('struc_format_out', 'none')
     artn.set("lpush_final", True)
     artn.set("ninit", 0)
-    artn.set("forc_thr", config_event_search['partn_forc_thr'])
+    artn.set("forc_thr", config.partn.forc_thr)
     artn.set("push_mode", "list")
-    artn.set("push_step_size",  config_event_search['partn_push_step_size'])
+    artn.set("push_step_size",  config.partn.push_step_size)
     artn.set("push_ids", [central_atom_idx+1])
-    artn.set("push_over", config_event_search['partn_push_over'])
-    artn.set('eigen_step_size', config_event_search['partn_eigen_step_size'])
-    artn.set('lanczos_disp', config_event_search['partn_lanczos_disp'])
-    artn.set('nsmooth',  config_event_search['partn_nsmooth'])
-    artn.set('nperp', config_event_search['partn_nperp'])
+    artn.set("push_over", config.partn.push_over)
+    artn.set('eigen_step_size', config.partn.eigen_step_size)
+    artn.set('lanczos_disp', config.partn.lanczos_disp)
+    artn.set('nsmooth',  config.partn.nsmooth)
+    artn.set('nperp', config.partn.nperp)
 
 
     #RUN

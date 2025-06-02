@@ -1,4 +1,4 @@
-from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, ActiveEventTable, ReferenceEventTable
+from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, LOGGING_CONFIG, ActiveEventTable, ReferenceEventTable
 import random 
 from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType
 import numpy as np
@@ -17,7 +17,7 @@ class KMC() :
 
     def __init__(self, config) : 
         self.config = config 
-        self.logger = None
+        self.loggers = None
         self.system = None 
         self.engine = None 
         self.neighbors_list = None 
@@ -30,21 +30,21 @@ class KMC() :
         ################################################################# 
         #                  INITIALIZE ATTRIBUTES                        #
         ################################################################# 
-        self.initialize()
+        self._initialize()
         #Write initial step to file : 
         self._append_snapshot_to_trajectory()
 
         ################################################################# 
         #                    LOOP KMC PARAMETERS                        #
         ################################################################# 
-        nkmc_steps = self.config['Control']['nkmc_steps']
+        nkmc_steps = self.config.control.n_steps
         time = 0.0 #in seconds
-        nsearch = self.config['EventSearch']['nsearch']
+        nsearch = self.config.eventsearch.nsearch
 
         ################################################################# 
         #                         KMC LOOP                              #
         ################################################################# 
-        self.logger.first_line_table() #write log head table
+        #self.logger.first_line_table() #write log head table
 
         for step in range(nkmc_steps) :
             #########################################################
@@ -72,7 +72,7 @@ class KMC() :
                     if event_search_output.is_ok() : 
                         event_search_output = event_search_output.ok_value()
                     #add results in reference table 
-                        if self.config['Control']['reconstruction'] : #if reconstruction, need to center event to prevent pbc problem
+                        if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
                             #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
                             self._center_event_positions(event_search_output)
                         #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
@@ -94,9 +94,9 @@ class KMC() :
                     break #end while loop
                 else : 
                     tries += 1 
-                    self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
+                    #self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
             else : #if not breack encounter : 
-                self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
+                #self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
                 self._close()
 
             ################################
@@ -116,21 +116,21 @@ class KMC() :
             self._append_snapshot_to_trajectory()
 
             #=>if no reconstruction, new reference table
-            if not self.config['Control']['reconstruction'] : 
+            if not self.config.control.reconstruction: 
                 self.reference_table = ReferenceEventTable(self.config)
             else : #update visited environments 
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
                 self.visited_environment.update(set(l_ids).difference(self.visited_environment))
 
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
-                self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
+                #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
             #update neighborlist : 
             self.neighbors_list = NeighborsList(self.system, self.config) 
             #update atomic environment 
             self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
 
             if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
-                self.logger.logger.info(':=> Only atoms with cristalline environment')
+                #self.logger.logger.info(':=> Only atoms with cristalline environment')
                 self._close()
 
             #Loop Informations : 
@@ -169,7 +169,7 @@ class KMC() :
         """ 
         """
         #Find all possible event
-        if self.config['Control']['reconstruction'] : 
+        if self.config.control.reconstruction : 
             l_env = list(set(self.atomic_environment.atomic_environment_list))
             if l_env == ['crystal'] : 
                 self._close()
@@ -185,7 +185,7 @@ class KMC() :
     def _select_central_atom_idx(self, idx_event_table) : 
         """ 
         """
-        if self.config['Control']['reconstruction'] : 
+        if self.config.control.reconstruction : 
             id_hash = self.reference_table.table.loc[idx_event_table].at['event_id'] 
             possible = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == id_hash]
             return random.choice(possible) 
@@ -202,9 +202,9 @@ class KMC() :
     def _apply_event_generic(self, idx_atom_apply_event, idx_event_table) : 
         """ 
         """
-        if self.config['Control']['reconstruction'] :
+        if self.config.control.reconstruction :
             rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.reference_table, self.neighbors_list, idx_event_table, idx_atom_apply_event).run()
-            if rmat is None or dh > self.config['PSR']['hausdorff_dist_thr'] : 
+            if rmat is None or dh > self.config.psr.matching_score_thr : 
                 return False 
             else :
                 current_positions = self.system.positions.copy()
@@ -300,7 +300,7 @@ class KMC() :
                 psr_output = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).run()
                 if psr_output.is_ok() : 
                     psr_output = psr_output.ok_value()
-                    if psr_output.matching_score < self.config['PSR']['hausdorff_dist_thr'] : 
+                    if psr_output.matching_score < self.config.psr.matching_score_thr : 
                         #Go saddle point : 
                             #Apply PSR to generic event
                         saddle_positions = geometry.transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
@@ -317,13 +317,13 @@ class KMC() :
                         #Generate dfevent series from refine event results 
                             dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
                             #Check if dE coherent 
-                            if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
+                            if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config.eventsearch.refined_energy_thr : 
                                 active_table.add_event(dfactive)
                                 success += 1
                             else : 
                                 refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                       message = "refinement energy barrier does not match reference one", 
-                                                      details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'], 
+                                                      details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config.eventsearch.refine_energy_threshold, 
                                                       variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
                         else : 
                             refine_output = refine_output.err_value()
@@ -350,13 +350,13 @@ class KMC() :
                             #Generate dfevent series from refine event results 
                                 dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
                                 #Check if dE coherent 
-                                if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config['EventSearch']['refine_energy_threshold'] : 
+                                if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config.eventsearch.refined_energy_thr : 
                                     active_table.add_event(dfactive)
                                     success_sym +=1
                                 else : 
                                     refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                           message = "refinement energy barrier does not match reference one", 
-                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config['EventSearch']['refine_energy_threshold'], 
+                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config.eventsearch.refine_energy_threshold, 
                                                           variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
                             else :
                                 refine_output = refine_output.err_value() 
@@ -366,8 +366,8 @@ class KMC() :
                     else : 
                         psr_output = Err(ErrorInfo(type = ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD,
                                                    message = "PSR found a match but matching score is above acceptance threshold", 
-                                                   details= "Hausdorff distance = {}, acceptance threshold = {} ".format(psr_output.matching_score, self.config['PSR']['hausdorff_dist_thr'])))
-        self.logger.logger.debug("{} refine attemps, {} success, {} direct and {} sym".format(counts+counts_sym, success+success_sym, success, success_sym))
+                                                   details= "Hausdorff distance = {}, acceptance threshold = {} ".format(psr_output.matching_score, self.config.psr.matching_score)))
+        #self.logger.logger.debug("{} refine attemps, {} success, {} direct and {} sym".format(counts+counts_sym, success+success_sym, success, success_sym))
         return active_table
     
     def _build_refined_event_series(self, current_positions, at_idx, min1positions, min2positions, dE_forward, dE_backwards) : 
@@ -391,35 +391,50 @@ class KMC() :
                               'k' :compute_rate_Eyring(dE, self.config)})
         return dfactive
 
-    def initialize(self) : 
-        self.logger = Logger(self.config) 
-        self.logger.title()
-        self.logger.write_parameter()
-        self.logger.logger.info('=> Reading configuration file : {}'.format(self.config['Control']['config_file']))
-        self.system = System.create_from_file(self.config['Control']['config_file'])
-        self.logger.logger.info('=> Initializing E/F {} Engine'.format(self.config['Control']['engine']))
+    def _initialize(self) : 
+        self._initialize_loggers()
+
+        self.loggers.info('log', ':=> Reading initial configuration file : {}'.format(self.config.control.initial_config))
+        self.system = System.create_from_file(self.config.control.initial_config)
+        
+        self.loggers.info('log', ':=> Initializing E/F {} Engine'.format(self.config.control.engine))
         self.engine = Engine(self.config)
-        #minimize 
-        self.logger.logger.info('=> Minimizing the system')
+        
+        self.loggers.info('log',':=> Minimizing the system')
         new_positions = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
+
+        self.loggers.info('log', ':=> Constructing Neighbors Lists')
         self.neighbors_list = NeighborsList(self.system, self.config) 
+
+        self.loggers.info('log', ':=> Computing Atomic Environments')
         self.atomic_environment = AtomicEnvironment(self.config, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'])
-        if self.config['Control']['reference_table'] is not None : 
-            self.logger.logger.info('=> Reading Reference table file {}'.format(self.config['Control']['reference_table']))
-        else : 
-            self.logger.logger.info('=> Initilizing Reference Table')
+
+        #if self.config['Control']['reference_table'] is not None : 
+            #self.logger.logger.info('=> Reading Reference table file {}'.format(self.config['Control']['reference_table']))
+            #pass
+        #else : 
+            #self.logger.logger.info('=> Initilizing Reference Table')
+        self.loggers.info('log', ':=> Generate a empty reference table')
         self.reference_table = ReferenceEventTable(self.config)
-        self.logger.new_line()
-        self.logger.logger.info('===========================')
-        self.logger.logger.info('= Starting KMC simulation =')
-        self.logger.logger.info('===========================')
+
+        self.loggers.new_line('log')
+        self.loggers.info('log', '===========================')
+        self.loggers.info('log', '= Starting KMC simulation =')
+        self.loggers.info('log', '===========================')
+
+    def _initialize_loggers(self) : 
+        self.loggers = LogKMC(LOGGING_CONFIG)
+        self.loggers.title('log')
+        self.loggers.write_parameters('log', self.config)
+        self.loggers.output_file_header('output')
+
 
     def _append_snapshot_to_trajectory(self) : 
-        output = self.config['Control']['output_file']
+        output = self.config.control.trajectory_output
         atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
         write(output, atoms, append=True)
 
     def _close(self) : 
-        self.logger.logger.info('End of simulation')
+        self.loggers.info('log', ':=> End of simulation')
         sys.exit()

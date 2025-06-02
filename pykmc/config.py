@@ -37,6 +37,10 @@ class ControlConfig(BaseModel):
         default="./reference_table.pickle",
         description="File path where the reference table will be store in pickle format.",
     )
+    reference_table: Optional[bool] = Field(
+        default=False,
+        description="Path to a reference table generated from a previous simulation."
+    )
 
     reconstruction: Optional[bool] = Field(
         default=True, description="If at each KMC step we reconstruct generic events."
@@ -224,7 +228,7 @@ class LammpsConfig(BaseModel):
         default="cg", description="Lammps min_style command."
     )
     minimize: Optional[str] = Field(
-        default="minimize 1.0e-6 1.0e-8 1000 1000",
+        default="1.0e-6 1.0e-8 1000 1000",
         description="Lammps minimize command",
     )
 

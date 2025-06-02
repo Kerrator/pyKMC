@@ -22,7 +22,7 @@ class PointSetRegistration() :
         self.neighbors_list = neighbors_list
         self.idx_cat = idx_cat
         self.central_atom_index = central_atom_index
-        self.psr_style = self.config['PSR']['style']
+        self.psr_style = self.config.psr.style
 
 
     def run(self) -> Result[PSROutput, ErrorInfo] : 
@@ -89,7 +89,7 @@ class PointSetRegistration() :
             if np.linalg.norm(coords1[i][2] - self.system.positions[central_atom_index][2]) > alat/2 : 
                 coords1[i][2] = coords1[i][2] + np.sign(self.system.positions[central_atom_index][2]-coords1[i][2])*alat
         nat1 = len(coords1)
-        kmax_factor = self.config['PSR']['kmax_factor']
+        kmax_factor = self.config.ira.kmax_factor
         
         #Run ira to find transformation matrices
         try : 
