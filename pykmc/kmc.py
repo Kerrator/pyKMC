@@ -24,7 +24,7 @@ class KMC() :
         self.neighbors_list = None 
         self.atomic_environment = None 
         self.reference_table = None
-        self.visited_environment = set(['crystal'])
+        self.visited_environments = set(['crystal'])
             
     def run(self) : 
 
@@ -52,7 +52,7 @@ class KMC() :
             #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
             #########################################################
                 #=> Find new atomic environments that have not been visited
-            new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environment)) 
+            new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
 
                 #=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
@@ -120,7 +120,7 @@ class KMC() :
                 self.reference_table = ReferenceEventTable(self.config)
             else : #update visited environments 
                 l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
-                self.visited_environment.update(set(l_ids).difference(self.visited_environment))
+                self.visited_environments.update(set(l_ids).difference(self.visited_environments))
 
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
@@ -136,7 +136,7 @@ class KMC() :
             #Loop Informations : 
             kmc_loop_info = KMCLoopInfo(step = step, 
                                         time = time, 
-                                        nb_visited_environments = len(self.visited_environment), 
+                                        nb_visited_environments = len(self.visited_environments), 
                                         nb_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)), 
                                         size_reference_event_table= len(self.reference_table.table)) 
             kmc_loop_info.print_informations()
@@ -280,7 +280,6 @@ class KMC() :
     def refinement(self) : 
         #Initialize ActiveEventTable
         active_table = ActiveEventTable() 
-
         #Save_current_positions 
         current_positions = self.system.positions.copy()
 
@@ -417,6 +416,18 @@ class KMC() :
             self.loggers.info('log', ':=> Generate a empty reference table')
         self.reference_table = ReferenceEventTable(self.config)
 
+        if self.config.control.visited_environments is not None : 
+            self.loggers.info('log', ':=> Initiating visited environment from file {}'.format(self.config.control.visited_environments))
+            try:
+                with open(self.config.control.visited_environments, 'rb') as file:
+                    loaded_set_environments = pickle.load(file)
+                self.visited_environments = loaded_set_environments
+            except Exception as e:
+                raise Exception("Can't read visited environment file.")
+
+        if self.config.control.visited_environments and not self.config.control.reference_table : 
+            self.loggers.warning('log', "Visited environments are setup from file while no reference table was provided")     
+        
         self.loggers.new_line('log')
         self.loggers.info('log', '===========================')
         self.loggers.info('log', '= Starting KMC simulation =')
@@ -437,7 +448,7 @@ class KMC() :
     def _save(self) : 
         self.reference_table.save('reference_table.pickle')
         with open(self.config.control.visited_environments_output, 'wb') as file : 
-            pickle.dump(self.visited_environment, file)
+            pickle.dump(self.visited_environments, file)
 
     def _close(self) : 
         self.loggers.info('log', ':=> End of simulation')

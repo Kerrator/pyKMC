@@ -238,7 +238,7 @@ class ReferenceEventTable :
     def _initialize_table(self) : 
         if self.config.control.reference_table is not None : 
             self.table = pd.read_pickle(self.config.control.reference_table)
-        if self.config.control.reconstruction : 
+        elif self.config.control.reconstruction : 
             self.table = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
                                                  'saddle_positions', 

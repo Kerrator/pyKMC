@@ -48,9 +48,9 @@ class ControlConfig(BaseModel):
         description="Path to a reference table generated from a previous simulation."
     )
 
-    visited_environment: Optional[str] = Field(
+    visited_environments: Optional[str] = Field(
         default=None, 
-        description="Path to a list of visited environment generated from a previsous simulation."
+        description="Path to a list of visited environment generated from a previous simulation."
     )
 
     reconstruction: Optional[bool] = Field(
