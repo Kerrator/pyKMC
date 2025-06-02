@@ -14,10 +14,10 @@ class ReferenceEventTable :
 
     def __init__(self, config) : 
         self.config = config
-        if not self.config.control.reference_table : 
-            self._initialize_table() 
-        else : 
-            self.table = pd.read_pickle(self.config.control.reference_table)
+        #if not self.config.control.reference_table : 
+        self._initialize_table() 
+        #else : 
+        #    self.table = pd.read_pickle(self.config.control.reference_table)
 
 
     def is_valid_new_event(self, min1_positions, saddle_positions, min2_positions, move_atom_idx, dE_forward, dE_backward, cell) -> Result[bool, ErrorInfo]: 
@@ -236,6 +236,8 @@ class ReferenceEventTable :
         return dfevent_forward, dfevent_backward
 
     def _initialize_table(self) : 
+        if self.config.control.reference_table is not None : 
+            self.table = pd.read_pickle(self.config.control.reference_table)
         if self.config.control.reconstruction : 
             self.table = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 

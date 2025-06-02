@@ -89,7 +89,6 @@ class KMC() :
 
                     else : #failed 
                         fails += 1
-
                 #=> if reference event table is not emppty break while loop 
                 if len(self.reference_table.table) > 0 : 
                     break #end while loop
@@ -412,12 +411,10 @@ class KMC() :
         self.loggers.info('log', ':=> Computing Atomic Environments')
         self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
-        #if self.config['Control']['reference_table'] is not None : 
-            #self.logger.logger.info('=> Reading Reference table file {}'.format(self.config['Control']['reference_table']))
-            #pass
-        #else : 
-            #self.logger.logger.info('=> Initilizing Reference Table')
-        self.loggers.info('log', ':=> Generate a empty reference table')
+        if self.config.control.reference_table is not None : 
+            self.loggers.info('log', ':=> Reading Reference table file {}'.format(self.config.control.reference_table))
+        else : 
+            self.loggers.info('log', ':=> Generate a empty reference table')
         self.reference_table = ReferenceEventTable(self.config)
 
         self.loggers.new_line('log')
