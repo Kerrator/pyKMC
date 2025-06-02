@@ -8,7 +8,7 @@ def main() :
     args = parser.parse_args() 
 
     #Config 
-    config = Config.from_file(args.input) 
+    config = Config.from_ini_file(args.input) 
     #KMC 
     kmc = KMC(config)
     kmc.run()

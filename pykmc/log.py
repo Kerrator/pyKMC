@@ -352,7 +352,7 @@ class LogKMC(LogManager):
         self.info(logger_name, "|    `---              ")
         self.info(logger_name, "\n")
 
-    def write_parameter(
+    def write_parameters(
         self, logger_name: str, config: dict[str, Any], width: int = 60, indent: int = 4
     ) -> None:
         """Write simulation parameter to the logger.
@@ -376,12 +376,12 @@ class LogKMC(LogManager):
         )
 
         max_key_len = max(
-            len(key) for section in self.config.values() for key in section
+            len(str(key)) for section, model in config for key, value in model
         )
 
-        for section in config:
+        for section, model in config:
             self.info(logger_name, section)
-            for key, value in config[section].items():
+            for key, value in model:
                 self.info(
                     logger_name,
                     "{}{:<{}} : {}".format(" " * indent, key, max_key_len, value),
