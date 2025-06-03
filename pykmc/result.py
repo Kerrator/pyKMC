@@ -1,7 +1,8 @@
 from typing import TypeAlias, TypeVar, Generic, Optional, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field, asdict
 from enum import Enum
 import numpy as np
+import yaml
 
 """
 Construction of the Result Type is based on Rust/rustedpy and https://www.youtube.com/watch?v=1P7J2wI46sg
@@ -89,22 +90,75 @@ class PSROutput :
     permutation_matrix: np.ndarray 
     matching_score : float
 
+@dataclass
+class AtomicEnvironmentInfo:
+    """
+    Store informations on atomic environments for one KMC step.
+
+    Attributes
+    ----------
+    total_atomic_environments_encounter : int 
+        Total unique atomic environments seen so far.
+    n_current_atomic_environments : int  
+        Number of environments in the current configuration.
+    n_new_atomic_environments : int 
+        Number of new environments discovered in the last step.
+    atoms_grouped_by_environment : list[list[int]] 
+        List of atom index groups sharing identical environments.
+    """
+    total_atomic_environments_encounter: int = 0
+    n_current_atomic_environments: int = 0
+    n_new_atomic_environments: int = 0
+    atoms_grouped_by_environment: list[list[int]] = field(default_factory=list)
+
+@dataclass
+class ReferenceEventSearchInfo : 
+    total_event_searches: int 
+    n_success : int 
+    n_fails : dict[str, int] 
+
 
 @dataclass 
 class KMCLoopInfo : 
     step : int = 0
-    time : float = 0
-    nb_visited_environments : int = 0
-    nb_current_atomic_environments : int = 0
-    nb_of_reference_event_searches : int = 0 
-    size_reference_event_table : int = 0
-    nb_applicable_reference_events : int = 0
-    nb_of_refinements_attempts : int = 0 
+    atomic_environment_info: AtomicEnvironmentInfo = None
+    reference_event_searches_info: ReferenceEventSearchInfo = None
 
-    def print_informations(self) : 
-        print("KMC Step n°{}".format(self.step))
-        print("\t number of visited environment = {}".format(self.nb_visited_environments))
-        print("\t size of the reference event table = {}".format(self.size_reference_event_table))
-        print("\t number of current atomic environements = {}".format(self.nb_current_atomic_environments))
-        print("\t number of reference events that can be applied = {}".format(self.nb_applicable_reference_events))
-        print("\t time after event = {} ps".format(self.time))
+    def output_msg(self) : 
+        cleaned = clean_dict(asdict(self))
+        return yaml.dump(
+            cleaned,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            explicit_start=True,
+            Dumper=CustomDumper
+        )
+
+
+class CustomDumper(yaml.Dumper):
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+
+# Custom representer to force inner lists to be in flow style
+def represent_list_preserve_flow(dumper, data):
+    if all(isinstance(i, int) for i in data):
+        return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
+    return dumper.represent_sequence('tag:yaml.org,2002:seq', data)
+
+
+#custom representer for lists
+CustomDumper.add_representer(list, represent_list_preserve_flow) 
+
+def clean_dict(d):
+    """Clean empty attribute/non initiate attribute"""
+    if isinstance(d, dict):
+        return {
+            k: clean_dict(v)
+            for k, v in d.items()
+            if v not in (None, [], {}, '')
+        }
+    elif isinstance(d, list):
+        return [clean_dict(v) for v in d if v not in (None, [], {}, '')]
+    return d

@@ -1,6 +1,6 @@
 from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, LOGGING_CONFIG, ActiveEventTable, ReferenceEventTable
 import random 
-from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType
+from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType, Result, AtomicEnvironmentInfo, ReferenceEventSearchInfo
 import numpy as np
 from .utils import geometry
 from ase.io import write
@@ -28,7 +28,7 @@ class KMC() :
             
     def run(self) : 
         
-        #Initialize the simulation and KMC attributes and minimize the system
+        #Initialize the simulation, KMC attributes and minimize the system
         self._initialize()
         #Write initial step to file  
         self._append_snapshot_to_trajectory()
@@ -40,55 +40,60 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
-            #########################################################
-            #FIND NEW GENERIC EVENT AND UPDATE REFERENCE EVENT TABLE#
-            #########################################################
-                #=> Find new atomic environments that have not been visited
-            new_environment = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
+            #FIND NEW GENERIC EVENTS AND UPDATE REFERENCE EVENT TABLE
+                ##=> Find new atomic environments that have not been visited
+            new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
 
-                #=>List of atoms(central) on which we gonna perfom an event search
-            central_atom_research_list = self.central_atoms_research(new_environment, nsearch)
+                ##=>List of atoms(central) on which we gonna perfom an event search
+            central_atom_research_list = self.central_atoms_research(new_environments, nsearch)
 
-            MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
-            tries = 0 
-            while tries < MAX_TRIES : 
-                fails = 0 #to count the number of event search fails
+                ##=>Perform event serach on each atom in central_atom_research_list 
+            results_reference_event_searches = self.reference_event_searches(central_atom_research_list)
 
-                #=> For all central atom index on which we want to perform an event search  
-                for idx in central_atom_research_list : 
+                ##=>Construct informations event seraches 
+            reference_event_searches_info = self.info_reference_event_searches(results_reference_event_searches)
 
-                    #==> Do an event search 
-                    #results = self.engine.search_event(self.system, idx)
-                    event_search_output = self.engine.search_event(self.system, idx)
-                    #==> Check if event found
-                    #if results != None : 
-                    if event_search_output.is_ok() : 
-                        event_search_output = event_search_output.ok_value()
-                    #add results in reference table 
-                        if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
-                            #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
-                            self._center_event_positions(event_search_output)
-                        #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
-                        valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
-                                                                      saddle_positions = event_search_output.saddle_positions, 
-                                                                      min2_positions = event_search_output.min2_positions, 
-                                                                      move_atom_idx = event_search_output.move_atom_index, 
-                                                                      dE_forward = event_search_output.dE_forward, 
-                                                                      dE_backward = event_search_output.dE_backward, 
-                                                                      cell= self.system.cell)
-                        if valid_dfevents.is_ok() : 
-                            self.reference_table.add_event(valid_dfevents.ok_value())
+            #MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
+            #tries = 0 
+            #while tries < MAX_TRIES : 
+            #    fails = 0 #to count the number of event search fails
 
-                    else : #failed 
-                        fails += 1
-                #=> if reference event table is not emppty break while loop 
-                if len(self.reference_table.table) > 0 : 
-                    break #end while loop
-                else : 
-                    tries += 1 
-                    #self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
-            else : #if not breack encounter : 
-                #self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
+            #=> For all central atom index on which we want to perform an event search  
+            for idx in central_atom_research_list : 
+
+                #==> Do an event search 
+                #results = self.engine.search_event(self.system, idx)
+                event_search_output = self.engine.search_event(self.system, idx)
+                #==> Check if event found
+                #if results != None : 
+                if event_search_output.is_ok() : 
+                    event_search_output = event_search_output.ok_value()
+                #add results in reference table 
+                    if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
+                        #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
+                        self._center_event_positions(event_search_output)
+                    #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+                    valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
+                                                                  saddle_positions = event_search_output.saddle_positions, 
+                                                                  min2_positions = event_search_output.min2_positions, 
+                                                                  move_atom_idx = event_search_output.move_atom_index, 
+                                                                  dE_forward = event_search_output.dE_forward, 
+                                                                  dE_backward = event_search_output.dE_backward, 
+                                                                  cell= self.system.cell)
+                    if valid_dfevents.is_ok() : 
+                        self.reference_table.add_event(valid_dfevents.ok_value())
+
+                #else : #failed 
+                #    fails += 1
+            #=> if reference event table is not emppty break while loop 
+            #if len(self.reference_table.table) > 0 : 
+            #    break #end while loop
+            #else : 
+            #    tries += 1 
+            #    #self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
+            #else : #if not breack encounter : 
+            #    #self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
+            if len(self.reference_table.table) == 0 : 
                 self._close()
 
             ################################
@@ -126,30 +131,61 @@ class KMC() :
                 self._close()
 
             #Loop Informations : 
+            atomic_environment_info = self.info_atomic_environments(new_environments)
             kmc_loop_info = KMCLoopInfo(step = step, 
-                                        time = time, 
-                                        nb_visited_environments = len(self.visited_environments), 
-                                        nb_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)), 
-                                        size_reference_event_table= len(self.reference_table.table)) 
-            kmc_loop_info.print_informations()
+                                        atomic_environment_info=atomic_environment_info,
+                                        reference_event_searches_info=reference_event_searches_info
+                                        ) 
+            self.loggers.info('info', kmc_loop_info.output_msg())
+            print(kmc_loop_info.output_msg())
 
             self._save()
         
 
 
-    def central_atoms_research(self, new_environment, nsearch) : 
-        """ 
-        return list of central atom having new_environment * nsearch
+    def central_atoms_research(self, new_environments: list[str | bytes], nsearch: int) -> list[int]: 
+        """Generate list of central atoms on which we gonna perform generic event searches for the reference table
+
+        For each new environment it adds nseach atoms having that environment to the list.
+
+        Parameters
+        ----------
+        new_environment : list[str  |  bytes]
+            List of atomic environment ID.
+        nsearch : int
+            Number of searches per atomic environment. 
+
+        Returns
+        -------
+        list[int]
+            List of central atoms
+
+        Raises
+        ------
+        IndexError
+            If no atoms are found for a given environment, random.choice will raise an IndexError.
+
         """
         central_atom_research_list = []
         #for each atomic environment hash in new_environment 
-        for env in new_environment :
-            #find all index have that hash
+        for env in new_environments :
+            #find all index having that hash
             tmp1 = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == env] 
             #Randomly choose nsearch atoms that have that environment 
-            tmp2 = [random.choice(tmp1) for i in range(nsearch)]
+            tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
         return central_atom_research_list
+
+
+    def reference_event_searches(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
+        results = [] 
+        for at_idx in central_atom_research_list : 
+            event_search_output = self.engine.search_event(self.system, at_idx)
+            results.append(event_search_output)
+        return results
+    
+    def analyse_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]]) : 
+        pass
 
     def _select_event(self, active_table) : 
         """
@@ -388,6 +424,37 @@ class KMC() :
         self.loggers.info('log',':=> Minimizing the system')
         new_positions = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
+
+    def info_atomic_environments(self, new_environments: list[str|bytes]) -> AtomicEnvironmentInfo : 
+        atomic_environments_info = AtomicEnvironmentInfo(total_atomic_environments_encounter = len(self.visited_environments),
+                n_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)),
+                n_new_atomic_environments = len(new_environments))  
+        if self.config.control.verbosity == 2 : 
+            atom_group = {}
+            for index, item in enumerate(self.atomic_environment.atomic_environment_list):
+                if item != 'crystal' : 
+                    if item not in atom_group: 
+                        atom_group[item] = []  
+                    atom_group[item].append(index) 
+            atomic_environments_info.atoms_grouped_by_environment = list(atom_group.values())
+        return atomic_environments_info 
+
+    def info_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]])  -> ReferenceEventSearchInfo : 
+        total_event_searches = len(results_reference_event_searches)
+        n_success = 0 
+        n_fails = {'no_event_found' : 0, "minima_not_matching_positions" : 0}
+        for res in results_reference_event_searches : 
+            if res.is_ok() : 
+                n_success +=1 
+            else : 
+                #n_fails += 1
+                if res.err_value().type == ErrorType.EVENT_NOT_FOUND :
+                    n_fails['no_event_found'] +=1 
+                else : 
+                    n_fails['minima_not_matching_positions'] +=1 
+                    
+        return ReferenceEventSearchInfo(total_event_searches, n_success, n_fails)
+
 
     def _initialize(self) -> None: 
         """Initialize the entire simulation before starting."""
