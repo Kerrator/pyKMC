@@ -47,11 +47,17 @@ class KMC() :
                 ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environments, nsearch)
 
-                ##=>Perform event serach on each atom in central_atom_research_list 
+                ##=>Perform event serach on each atom in central_atom_research_list
             results_reference_event_searches = self.reference_event_searches(central_atom_research_list)
 
                 ##=>Construct informations event seraches 
             reference_event_searches_info = self.info_reference_event_searches(results_reference_event_searches)
+
+                ##=>Find only success event searches 
+            results_reference_event_searches = [e.ok_value() for e in results_reference_event_searches if e.is_ok()]
+
+                ##=>Center event to prevent pbc problem with psr
+            results_reference_event_searches = [self._center_event_positions(e) for e in results_reference_event_searches]
 
             #MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
             #tries = 0 
@@ -282,6 +288,7 @@ class KMC() :
         event_search_output.min1_positions = self._center_positions(event_search_output.min1_positions, displacement, cell)
         event_search_output.saddle_positions = self._center_positions(event_search_output.saddle_positions, displacement, cell)
         event_search_output.min2_positions = self._center_positions(event_search_output.min2_positions, displacement, cell)
+        return event_search_output
         #return min1positions, saddlepositions, min2positions
     
 
