@@ -1,6 +1,6 @@
 from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, LOGGING_CONFIG, ActiveEventTable, ReferenceEventTable
 import random 
-from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType, Result, AtomicEnvironmentInfo, ReferenceEventSearchInfo
+from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType, Result, AtomicEnvironmentInfo, ReferenceEventSearchInfo, ReferenceValidEventsInfo
 import numpy as np
 from .utils import geometry
 from ase.io import write
@@ -13,6 +13,7 @@ from .rate_constant import compute_rate_Eyring
 from dataclasses import asdict
 import pickle
 
+#TODO fix reconstruction = False
 
 class KMC() : 
 
@@ -40,7 +41,7 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
-            #FIND NEW GENERIC EVENTS AND UPDATE REFERENCE EVENT TABLE
+            #FIND NEW GENERIC EVENTS 
                 ##=> Find new atomic environments that have not been visited
             new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
 
@@ -50,7 +51,7 @@ class KMC() :
                 ##=>Perform event serach on each atom in central_atom_research_list
             results_reference_event_searches = self.reference_event_searches(central_atom_research_list)
 
-                ##=>Construct informations event seraches 
+                ##=>Construct informations event searches for output 
             reference_event_searches_info = self.info_reference_event_searches(results_reference_event_searches)
 
                 ##=>Find only success event searches 
@@ -58,6 +59,15 @@ class KMC() :
 
                 ##=>Center event to prevent pbc problem with psr
             results_reference_event_searches = [self._center_event_positions(e) for e in results_reference_event_searches]
+
+            #ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE
+                ##=>Check if the event is valid, ie if not already present and has a valid energy barrier
+            results_is_valid_events = self.is_valid_events(results_reference_event_searches)  
+
+                ##=>Construct informations valid events for output 
+            is_valid_events_info = self.info_is_valid_events(results_is_valid_events)
+            
+            
 
             #MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
             #tries = 0 
@@ -190,6 +200,20 @@ class KMC() :
             results.append(event_search_output)
         return results
     
+    def is_valid_events(self, results_reference_event_searches: list[EventSearchOutput]) -> list[Result[pd.DataFrame, ErrorInfo]] : 
+        results_is_valid_events = [] 
+        for result in results_reference_event_searches : 
+            results_is_valid_events.append(self.reference_table.is_valid_new_event(min1_positions = result.min1_positions, 
+                                                    saddle_positions = result.saddle_positions, 
+                                                    min2_positions = result.min2_positions, 
+                                                    move_atom_idx = result.move_atom_index, 
+                                                    dE_forward = result.dE_forward, 
+                                                    dE_backward = result.dE_backward, 
+                                                    cell= self.system.cell))
+        return results_is_valid_events
+        
+            
+
     def analyse_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]]) : 
         pass
 
@@ -461,8 +485,31 @@ class KMC() :
                     n_fails['minima_not_matching_positions'] +=1 
                     
         return ReferenceEventSearchInfo(total_event_searches, n_success, n_fails)
-
-
+    
+    def info_is_valid_events(self, results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]]) -> ReferenceValidEventsInfo : 
+        n_valid_events = 0 
+        invalid_events = {"dE > emax_event": 0 , 
+                          "dE < emin_event": 0, 
+                          "dE inverse < emin_event": 0, 
+                          "Event asymmetric" : 0, 
+                          "Event already in reference table" : 0}
+        for res in results_is_valid_events : 
+            if res.is_ok() : 
+                n_valid_events +=1 
+            else : 
+                match res.err_value().type : 
+                    case ErrorType.EVENT_ENERGY_HIGHER_THAN_THRESHOLD : 
+                        invalid_events['dE > emax_event'] +=1 
+                    case ErrorType.EVENT_ENERGY_LOWER_THAN_THRESHOLD : 
+                        invalid_events['dE < emin_event'] +=1
+                    case ErrorType.EVENT_BACKWARD_ENERGY_LOWER_THAN_THRESHOLD : 
+                        invalid_events['dE inverse < emin_event'] +=1 
+                    case ErrorType.EVENT_ASYMMETRIC : 
+                        invalid_events['Event asymmetric'] +=1
+                    case ErrorType.EVENT_NOT_NEW : 
+                        invalid_events['Event already in reference table'] +=1
+        return ReferenceValidEventsInfo(n_valid_events, invalid_events)
+                        
     def _initialize(self) -> None: 
         """Initialize the entire simulation before starting."""
         self._initialize_loggers()

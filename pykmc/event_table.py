@@ -28,14 +28,14 @@ class ReferenceEventTable :
         emin = self.config.eventsearch.emin_event
         emax = self.config.eventsearch.emax_event
         backward_emin = self.config.eventsearch.backward_emin_event
-        #energy_asymmetry = self.config['EventSearch']['energy_event_symmetry']
+        energy_asymmetry = self.config.eventsearch.energy_asymmetry
 
         if dE_forward > emax : #barrier energy too high, reject the event 
             return Err(ErrorInfo(type=ErrorType.EVENT_ENERGY_HIGHER_THAN_THRESHOLD, 
                                  message = "Energy barrier of the event higher than emax_event", 
                                  details="Energy barrier = {}, energy max threshold = {}".format(dE_forward, emax)))
     
-        elif dE_backward < emin : #barrier energy too low, reject the event 
+        elif dE_forward < emin : #barrier energy too low, reject the event 
             return Err(ErrorInfo(type=ErrorType.EVENT_ENERGY_LOWER_THAN_THRESHOLD, 
                                  message = "Energy barrier of the event lower than emin_event", 
                                  details="Energy barrier = {}, energy min threshold = {}".format(dE_forward, emin)))
@@ -44,11 +44,12 @@ class ReferenceEventTable :
             return Err(ErrorInfo(type = ErrorType.EVENT_BACKWARD_ENERGY_LOWER_THAN_THRESHOLD, 
                                  message= "Backward energy barrier of the event lower than emin_event", 
                                  details="Backward Energy barrier = {}, energy min threshold = {}".format(dE_backward, emin)))
-        
-        #elif (dE_forward > energy_asymmetry*backward_emin) and (dE_backward < backward_emin ) : #Asymmetric event, reject 
-        #    return Err(ErrorInfo(type=ErrorType.EVENT_ASYMMETRIC, 
-        #                         message="Found event is highly asymmetric", 
-        #                         details="Foward barrier eneryg > {} and backward barrier energy < {}".format(energy_asymmetry*backward_emin, backward_emin)))
+
+        #TODO Maybe REMOVE THIS, IT SHOULD NOT HAPPEN 
+        elif (dE_forward > energy_asymmetry*backward_emin) and (dE_backward < backward_emin ) : #Asymmetric event, reject 
+            return Err(ErrorInfo(type=ErrorType.EVENT_ASYMMETRIC, 
+                                 message="Found event is highly asymmetric", 
+                                 details="Foward barrier eneryg > {} and backward barrier energy < {}".format(energy_asymmetry*backward_emin, backward_emin)))
         
         else : #Event is valid, construct event Series
             dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 

@@ -103,22 +103,28 @@ class EventSearchConfig(BaseModel):
         ...,
         description="Number of event searches to perform per unique atomic environment.",
     )
-    emin_event: float = Field(
-        default=0.0,
-        description="Minimum energy barrier (in eV) for an event to be added to the reference table.",
-    )
     emax_event: float = Field(
         default=5.0,
         description="Maximum energy barrier (in eV) for an event to be added to the reference table.",
     )
+    emin_event: float = Field(
+        default=0.0,
+        description="Minimum energy forward and backward barrier (in eV) for an event to be added to the reference table.",
+    )
     backward_emin_event: float = Field(
         default=0.05,
-        description="Minimum energy barrier (in eV) required for the backward reaction of an event to be added to the reference table. This threshold is applied only if the forward reaction's barrier falls within the `emin_event` and `emax_event` range.",
+        description="To be used with `energy_assymetry`.",
+    )
+    energy_asymmetry: int = Field(
+        default=5, 
+        description="Prevent highly asymmetric event to be added to the reference table."
+                    "The con"
     )
     refined_energy_thr: float = Field(
         default=0.2,
         description="Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
     )
+    
 
 
 class PartnConfig(BaseModel):

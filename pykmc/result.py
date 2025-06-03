@@ -117,12 +117,18 @@ class ReferenceEventSearchInfo :
     n_success : int 
     n_fails : dict[str, int] 
 
+@dataclass 
+class ReferenceValidEventsInfo : 
+    n_valid_events: int 
+    invalid_events: dict[str, int]
+
 
 @dataclass 
 class KMCLoopInfo : 
     step : int = 0
     atomic_environment_info: AtomicEnvironmentInfo = None
     reference_event_searches_info: ReferenceEventSearchInfo = None
+    valid_event_info: ReferenceValidEventsInfo = None
 
     def output_msg(self) : 
         cleaned = clean_dict(asdict(self))
