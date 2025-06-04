@@ -33,7 +33,11 @@ def unique_symmetries(initial_positions, final_positions, sym_thr) :
             unique_sym_index.append(i) #add symmtry to unique 
             unique_displacements.append(new_displacements)
 
-    sym_matrix = np.array([sym.matrix[i] for i in unique_sym_index])
-    sym_perm = np.array([sym.perm[i] for i in unique_sym_index])
-     
+
+    #unique symetries and add identity : 
+    sym_matrix = np.concatenate([[np.eye(3)]] + [[sym.matrix[i]] for i in unique_sym_index], axis=0)
+    #sym_matrix = np.array([sym.matrix[i] for i in unique_sym_index])
+    #associated permutation : 
+    sym_perm = np.array([np.arange(nat)] + [sym.perm[i] for i in unique_sym_index])
+    #sym_perm = np.array([sym.perm[i] for i in unique_sym_index])
     return sym_matrix, sym_perm 
