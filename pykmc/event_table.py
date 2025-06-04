@@ -60,7 +60,7 @@ class ReferenceEventTable :
                                                                          dE_backward=dE_backward, 
                                                                          cell = cell)
             if self.is_new_event(dfevent=dfevent_forward) :  #check if event not already in the catalog 
-                if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
+                if dfevent_forward["event_id"] == dfevent_forward["id_final"] : #backward reaction same as forward 
                     return Ok(dfevent_forward.to_frame().T) #return only forward event
                 else :
                     dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
