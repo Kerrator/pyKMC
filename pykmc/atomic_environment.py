@@ -55,6 +55,22 @@ class AtomicEnvironment:
             case _:
                 raise Exception("Atomic environment style unknown")
 
+
+
+    def get_atoms_with_id(self, id: str|bytes) -> list[int] : 
+        """Return list of atom indices whose environment matches the given ID.
+
+        Parameters
+        ----------
+        id : str | bytes
+            The match ID.
+        Returns
+        -------
+        list[int]
+            List of atom indices
+        """
+        return [i for i, e in enumerate(self.atomic_environment_list) if e == id]
+
     def compute_cna(self) -> list[str]:
         """See :py:func:`.environments.cna` for details on CNA computation."""
         return cna(self.neighbors_list)
