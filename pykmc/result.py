@@ -59,6 +59,7 @@ class ErrorType(Enum) :
     PSR_NO_MATCH_FOUND = 21
     PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
     REFINEMENT_INVALID_ENERGY_BARRIER = 31
+    REFINEMENT_INVALID_MINIMA = 32
 
 
 
@@ -114,7 +115,7 @@ class AtomicEnvironmentInfo:
 @dataclass
 class ReferenceEventSearchInfo : 
     total_event_searches: int 
-    n_success : int 
+    n_successes : int 
     n_fails : dict[str, int] 
 
 @dataclass 
@@ -122,6 +123,11 @@ class ReferenceValidEventsInfo :
     n_valid_events: int 
     invalid_events: dict[str, int]
 
+@dataclass 
+class RefinementsInfo : 
+    n_attempts: int 
+    n_sucesses: int 
+    n_fails: dict[str, int]
 
 @dataclass 
 class KMCLoopInfo : 
@@ -129,6 +135,7 @@ class KMCLoopInfo :
     atomic_environment_info: AtomicEnvironmentInfo = None
     reference_event_searches_info: ReferenceEventSearchInfo = None
     valid_event_info: ReferenceValidEventsInfo = None
+    refinements_info : RefinementsInfo = None
 
     def output_msg(self) : 
         cleaned = clean_dict(asdict(self))
