@@ -25,7 +25,7 @@ class PointSetRegistration() :
         self.psr_style = self.config.psr.style
 
 
-    def run(self) -> Result[PSROutput, ErrorInfo] : 
+    def match(self) -> Result[PSROutput, ErrorInfo] : 
         """ 
         run the point set registration
         """ 
@@ -35,7 +35,8 @@ class PointSetRegistration() :
             case _: 
                 raise Exception('Point set registration style unknown')
         
-    
+
+
     def ira(self, idx_cat, central_atom_index) -> Result[PSROutput, ErrorInfo]: 
         """
         Use IRA to extract rotation, translation, permutation matrix to apply on generic event
@@ -103,5 +104,17 @@ class PointSetRegistration() :
             return Err(ErrorInfo(type=ErrorType.PSR_NO_MATCH_FOUND, 
                                  message='IRA did not find a match')) 
 
+
+def check_match(result_match: Result[PSROutput, ErrorInfo], matching_score: float) ->  Result[PSROutput, ErrorInfo]: 
+
+    if not result_match.is_ok() : 
+        return result_match #ErrorInfo no match 
+    else : 
+        if result_match.ok_value().matching_score > matching_score : 
+            return Err(ErrorInfo(type = ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD,
+                                                   message = "PSR found a match but matching score is above acceptance threshold", 
+                                                   details= "Hausdorff distance = {}, acceptance threshold = {} ".format(result_match.ok_value().matching_score, matching_score))) 
+        else : 
+            return result_match #Ok(PSROutput)
 
 
