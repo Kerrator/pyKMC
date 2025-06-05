@@ -115,7 +115,6 @@ class KMC() :
             ##=>Minimize 
             self.minimize_system()
 
-            self._append_snapshot_to_trajectory()
 
         # == Update variables == 
             l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
@@ -123,10 +122,10 @@ class KMC() :
             self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
             self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
-        # == Check if only cristalline environments == 
-            if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
-                self.loggers.info('log',':=> Only atoms with cristalline environment')
-                self._close()
+       
+        # == Save Reference Table and List visited environment : 
+            self._save()
+            self._append_snapshot_to_trajectory()
 
         # == Log informations == 
             atomic_environment_info = self.info_atomic_environments(new_environments)
@@ -138,93 +137,10 @@ class KMC() :
                                         )
             self.loggers.info('info', kmc_loop_info.output_msg())
 
-        # == Save Reference Table and List visited environment : 
-            self._save()
-
-            #MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
-            #tries = 0 
-            #while tries < MAX_TRIES : 
-            #    fails = 0 #to count the number of event search fails
-
-            #=> For all central atom index on which we want to perform an event search  
-            #for idx in central_atom_research_list : 
-
-            #    #==> Do an event search 
-            #    #results = self.engine.search_event(self.system, idx)
-            #    event_search_output = self.engine.search_event(self.system, idx)
-            #    #==> Check if event found
-            #    #if results != None : 
-            #    if event_search_output.is_ok() : 
-            #        event_search_output = event_search_output.ok_value()
-            #    #add results in reference table 
-            #        if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
-            #            #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
-            #            self._center_event_positions(event_search_output)
-            #        #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
-            #        valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
-            #                                                      saddle_positions = event_search_output.saddle_positions, 
-            #                                                      min2_positions = event_search_output.min2_positions, 
-            #                                                      move_atom_idx = event_search_output.move_atom_index, 
-            #                                                      dE_forward = event_search_output.dE_forward, 
-            #                                                      dE_backward = event_search_output.dE_backward, 
-            #                                                      cell= self.system.cell)
-            #        if valid_dfevents.is_ok() : 
-            #            self.reference_table.add_event(valid_dfevents.ok_value())
-
-            #    #else : #failed 
-                #    fails += 1
-            #=> if reference event table is not emppty break while loop 
-            #if len(self.reference_table.table) > 0 : 
-            #    break #end while loop
-            #else : 
-            #    tries += 1 
-            #    #self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
-            #else : #if not breack encounter : 
-            #    #self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
-            
-
-            ################################
-            #CONTRUCT CURRENT ACTIVE EVENTS#
-            ################################
-            #active_table = self.refinement() 
-            ###############################
-            #SELECT EVENT IN ACTIVE TABLE # 
-            ###############################
-            #time += delta_t*10**-12 #time is in seconds
-
-            ##MINIMIZE (could remove)
-            #new_positions = self.engine.minimize(self.system)
-            #self.system.update_positions(new_positions)
-            #self._append_snapshot_to_trajectory()
-
-            #=>if no reconstruction, new reference table
-            #if not self.config.control.reconstruction: 
-            #    self.reference_table = ReferenceEventTable(self.config)
-            #else : #update visited environments 
-            
-                #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
-                #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
-            #update neighborlist : 
-            #self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
-            ##update atomic environment 
-            #self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
-
-            #if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
-            #    #self.logger.logger.info(':=> Only atoms with cristalline environment')
-            #    self._close()
-
-            ##Loop Informations : 
-            #atomic_environment_info = self.info_atomic_environments(new_environments)
-            #kmc_loop_info = KMCLoopInfo(step = step, 
-            #                            atomic_environment_info=atomic_environment_info,
-            #                            reference_event_searches_info=reference_event_searches_info,
-            #                            valid_event_info=is_valid_events_info, 
-            #                            refinements_info=refinements_info 
-            #                            ) 
-            #self.loggers.info('info', kmc_loop_info.output_msg())
-            #print(kmc_loop_info.output_msg())
-
-            #self._save()
+        # == Check if only cristalline environments == 
+            if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
+                self.loggers.info('log',':=> Only atoms with cristalline environment')
+                self._close()
         
 
 
@@ -333,7 +249,7 @@ class KMC() :
         """ 
         """
         if self.config.control.reconstruction :
-            rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.reference_table, self.neighbors_list, idx_event_table, idx_atom_apply_event).run()
+            rmat, tr, perm, dh = PointSetRegistration(self.config, self.system, self.reference_table, self.neighbors_list, idx_event_table, idx_atom_apply_event).match()
             if rmat is None or dh > self.config.psr.matching_score_thr : 
                 return False 
             else :

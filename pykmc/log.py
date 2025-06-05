@@ -159,7 +159,7 @@ class CustomFormatter(logging.Formatter):
             self._style._fmt = "%(message)s"
         else:
             self._style._fmt = (
-                f"{Colors.RED.value}%(levelname)-12s{Colors.RESET.value} | %(message)s"
+                f"{Colors.RED.value}%(levelname)-1s{Colors.RESET.value} : %(message)s"
             )
         return super().format(record)
 
