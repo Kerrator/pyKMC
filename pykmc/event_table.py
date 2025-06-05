@@ -7,7 +7,7 @@ from .environments.graph_nauty import graph
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
-from .result import Result, ErrorInfo, Ok, Err, ErrorType
+from .result import Result, ErrorInfo, Ok, Err, ErrorType, EventSearchOutput
 
 
 class ReferenceEventTable : 
@@ -266,16 +266,38 @@ class ActiveEventTable() :
 
     def __init__(self, event_dataframe = None ) : 
         if event_dataframe is not None : 
+            if not isinstance(event_dataframe, pd.DataFrame):
+                raise TypeError("event_dataframe must be a pandas DataFrame or None.")
             self.table = event_dataframe
         else : 
-            self.table = pd.DataFrame(columns = ['atom_index', 'final_positions', 'energy_barrier', 'k'])
+            columns = {
+                'atom_index': pd.Series(dtype='int64'),        
+                'final_positions': pd.Series(dtype='object'),  
+                'energy_barrier': pd.Series(dtype='float64'),  
+                'k': pd.Series(dtype='float64')
+            }
+            self.table = pd.DataFrame(columns)
 
-    def add_event(self, dfevent) : 
-        self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
+    def add_events(self, dfevents: pd.Series| list[pd.Series]) -> None: 
+        if isinstance(dfevents, pd.Series):
+            df_to_add = dfevents.to_frame().T
+        elif isinstance(dfevents, list):
+            if not all(isinstance(s, pd.Series) for s in dfevents):
+                raise TypeError("All elements in the input list must be pandas Series.")
+            df_to_add = pd.DataFrame(dfevents) 
+        else:
+            raise TypeError("Input 'dfevents' must be a pandas Series or a list of pandas Series.")
+
+        self.table = pd.concat([self.table, df_to_add], ignore_index=True)
 
 
 
 
 
-
+def build_active_dfactive(event_search_output: EventSearchOutput, config) -> pd.DataFrame : 
+    dfactive = pd.Series({'atom_index': event_search_output.central_atom_index, 
+                              'final_positions' : event_search_output.min2_positions,
+                              'energy_barrier' : event_search_output.dE_forward, 
+                              'k' :compute_rate_Eyring(event_search_output.dE_forward, config)})
+    return dfactive
 
