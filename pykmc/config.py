@@ -120,6 +120,10 @@ class EventSearchConfig(BaseModel):
         description="Prevent highly asymmetric event to be added to the reference table."
                     "The con"
     )
+    refined_minimum_delr_thr: float = Field(
+        default = 0.1, 
+        description="Refinement is accepted only if the central atom moves less than this distance between the current position and the refined minimum."
+    )
     refined_energy_thr: float = Field(
         default=0.2,
         description="Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
