@@ -1,6 +1,6 @@
 from pykmc import System, Engine, NeighborsList, AtomicEnvironment, PointSetRegistration, LogKMC, LOGGING_CONFIG, ActiveEventTable, ReferenceEventTable
 import random 
-from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType, Result, AtomicEnvironmentInfo, ReferenceEventSearchInfo, ReferenceValidEventsInfo
+from .result import EventSearchOutput, KMCLoopInfo, Err, ErrorInfo, ErrorType, Result, AtomicEnvironmentInfo, ReferenceEventSearchInfo, ReferenceValidEventsInfo, Ok, RefinementsInfo
 import numpy as np
 from .utils import geometry
 from ase.io import write
@@ -12,8 +12,12 @@ import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from dataclasses import asdict
 import pickle
+from .point_set_registration import check_match
+from .event_table import build_active_dfactive
 
 #TODO fix reconstruction = False
+#NOTE can maybe reimplment tries if empty catalog
+#TODO add select histo refinement
 
 class KMC() : 
 
@@ -41,7 +45,7 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
-            #FIND NEW GENERIC EVENTS 
+        # == FIND NEW GENERIC EVENTS == 
                 ##=> Find new atomic environments that have not been visited
             new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
 
@@ -60,14 +64,82 @@ class KMC() :
                 ##=>Center event to prevent pbc problem with psr
             results_reference_event_searches = [self._center_event_positions(e) for e in results_reference_event_searches]
 
-            #ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE
+        # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE == 
                 ##=>Check if the event is valid, ie if not already present and has a valid energy barrier
             results_is_valid_events = self.is_valid_events(results_reference_event_searches)  
 
                 ##=>Construct informations valid events for output 
             is_valid_events_info = self.info_is_valid_events(results_is_valid_events)
+
+                ##=>Find only valid events : 
+            results_is_valid_events = [e.ok_value() for e in results_is_valid_events if e.is_ok()]
             
+                ##=>Add valid events to reference event table  
+            self.add_reference_events(results_is_valid_events) 
+
+                ##=>Close simulation if no events in the reference table  
+            if len(self.reference_table.table) == 0 : 
+                self.loggers.error('log', "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.")
+                self._close()
+
+        # == Refinement == 
+            ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
+            subset_reference_event_table = self.reference_table.table[self.reference_table.table['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
+
+            ##=>Refines all event in subset
+            results_refinements = self.refinements(subset_reference_event_table) 
+
+            ##=>Construct informations (un)success refinement 
+            refinements_info = self.info_refinements(results_refinements)
+
+            ##=>Find only success refinements 
+            results_refinements = [e.ok_value() for e in results_refinements if e.is_ok()]
+
+            ##=>Construct active event table 
+            active_table = ActiveEventTable() 
+
+            ##=>Construct dfactive event Series 
+            dfactive_events = [build_active_dfactive(e, self.config) for e in results_refinements]
             
+            ##=>Add dfactive events : 
+            active_table.add_events(dfactive_events)
+
+        # == Update System == 
+            ##=>Select event 
+            idx_selected_event, delta_t = self._select_event(active_table)
+            time += delta_t*10**-12 #time is in seconds
+
+            ##=>Move system
+            self._apply_event(idx_selected_event, active_table)
+
+            ##=>Minimize 
+            self.minimize_system()
+
+            self._append_snapshot_to_trajectory()
+
+        # == Update variables == 
+            l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
+            self.visited_environments.update(set(l_ids).difference(self.visited_environments))
+            self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
+            self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
+
+        # == Check if only cristalline environments == 
+            if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
+                self.loggers.info('log',':=> Only atoms with cristalline environment')
+                self._close()
+
+        # == Log informations == 
+            atomic_environment_info = self.info_atomic_environments(new_environments)
+            kmc_loop_info = KMCLoopInfo(step = step, 
+                                        atomic_environment_info=atomic_environment_info,
+                                        reference_event_searches_info=reference_event_searches_info,
+                                        valid_event_info=is_valid_events_info, 
+                                        refinements_info=refinements_info 
+                                        )
+            self.loggers.info('info', kmc_loop_info.output_msg())
+
+        # == Save Reference Table and List visited environment : 
+            self._save()
 
             #MAX_TRIES = 5 #Number of tentatives to prevent emtpy reference table : 
             #tries = 0 
@@ -75,31 +147,31 @@ class KMC() :
             #    fails = 0 #to count the number of event search fails
 
             #=> For all central atom index on which we want to perform an event search  
-            for idx in central_atom_research_list : 
+            #for idx in central_atom_research_list : 
 
-                #==> Do an event search 
-                #results = self.engine.search_event(self.system, idx)
-                event_search_output = self.engine.search_event(self.system, idx)
-                #==> Check if event found
-                #if results != None : 
-                if event_search_output.is_ok() : 
-                    event_search_output = event_search_output.ok_value()
-                #add results in reference table 
-                    if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
-                        #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
-                        self._center_event_positions(event_search_output)
-                    #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
-                    valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
-                                                                  saddle_positions = event_search_output.saddle_positions, 
-                                                                  min2_positions = event_search_output.min2_positions, 
-                                                                  move_atom_idx = event_search_output.move_atom_index, 
-                                                                  dE_forward = event_search_output.dE_forward, 
-                                                                  dE_backward = event_search_output.dE_backward, 
-                                                                  cell= self.system.cell)
-                    if valid_dfevents.is_ok() : 
-                        self.reference_table.add_event(valid_dfevents.ok_value())
+            #    #==> Do an event search 
+            #    #results = self.engine.search_event(self.system, idx)
+            #    event_search_output = self.engine.search_event(self.system, idx)
+            #    #==> Check if event found
+            #    #if results != None : 
+            #    if event_search_output.is_ok() : 
+            #        event_search_output = event_search_output.ok_value()
+            #    #add results in reference table 
+            #        if self.config.control.reconstruction : #if reconstruction, need to center event to prevent pbc problem
+            #            #results = (*self._center_event_positions(results[0], results[1], results[2], results[3]), *results[3:])
+            #            self._center_event_positions(event_search_output)
+            #        #is_new, in_e_bounds = self.reference_table.add_event(*results, self.neighbors_list.neighbors_list['rcut'], self.system.cell)
+            #        valid_dfevents = self.reference_table.is_valid_new_event(min1_positions = event_search_output.min1_positions, 
+            #                                                      saddle_positions = event_search_output.saddle_positions, 
+            #                                                      min2_positions = event_search_output.min2_positions, 
+            #                                                      move_atom_idx = event_search_output.move_atom_index, 
+            #                                                      dE_forward = event_search_output.dE_forward, 
+            #                                                      dE_backward = event_search_output.dE_backward, 
+            #                                                      cell= self.system.cell)
+            #        if valid_dfevents.is_ok() : 
+            #            self.reference_table.add_event(valid_dfevents.ok_value())
 
-                #else : #failed 
+            #    #else : #failed 
                 #    fails += 1
             #=> if reference event table is not emppty break while loop 
             #if len(self.reference_table.table) > 0 : 
@@ -109,53 +181,50 @@ class KMC() :
             #    #self.logger.logger.debug('Empty reference table after {} searches, retrying'.format(len(central_atom_research_list)))
             #else : #if not breack encounter : 
             #    #self.logger.logger.debug('Emtpy reference table after {} tries, closing simulation'.format(MAX_TRIES))
-            if len(self.reference_table.table) == 0 : 
-                self._close()
+            
 
             ################################
             #CONTRUCT CURRENT ACTIVE EVENTS#
             ################################
-            active_table = self.refinement() 
+            #active_table = self.refinement() 
             ###############################
             #SELECT EVENT IN ACTIVE TABLE # 
             ###############################
-            idx_selected_event, delta_t = self._select_event(active_table)
-            self._apply_event(idx_selected_event, active_table)
-            time += delta_t*10**-12 #time is in seconds
+            #time += delta_t*10**-12 #time is in seconds
 
-            #MINIMIZE (could remove)
-            new_positions = self.engine.minimize(self.system)
-            self.system.update_positions(new_positions)
-            self._append_snapshot_to_trajectory()
+            ##MINIMIZE (could remove)
+            #new_positions = self.engine.minimize(self.system)
+            #self.system.update_positions(new_positions)
+            #self._append_snapshot_to_trajectory()
 
             #=>if no reconstruction, new reference table
-            if not self.config.control.reconstruction: 
-                self.reference_table = ReferenceEventTable(self.config)
-            else : #update visited environments 
-                l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
-                self.visited_environments.update(set(l_ids).difference(self.visited_environments))
-
+            #if not self.config.control.reconstruction: 
+            #    self.reference_table = ReferenceEventTable(self.config)
+            #else : #update visited environments 
+            
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.catalog.catalog), idx_event_catalog, self.catalog.catalog.loc[idx_event_catalog].at['energy_barrier'], is_reconstruction )
                 #self.logger.table_line_info_kmc(step, time, len(list(set(self.atomic_environment.atomic_environment_list))), len(self.reference_table.table),  active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'] )
             #update neighborlist : 
-            self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
-            #update atomic environment 
-            self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
+            #self.neighbors_list = NeighborsList(self.system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut) 
+            ##update atomic environment 
+            #self.atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
 
-            if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
-                #self.logger.logger.info(':=> Only atoms with cristalline environment')
-                self._close()
+            #if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
+            #    #self.logger.logger.info(':=> Only atoms with cristalline environment')
+            #    self._close()
 
-            #Loop Informations : 
-            atomic_environment_info = self.info_atomic_environments(new_environments)
-            kmc_loop_info = KMCLoopInfo(step = step, 
-                                        atomic_environment_info=atomic_environment_info,
-                                        reference_event_searches_info=reference_event_searches_info
-                                        ) 
-            self.loggers.info('info', kmc_loop_info.output_msg())
-            print(kmc_loop_info.output_msg())
+            ##Loop Informations : 
+            #atomic_environment_info = self.info_atomic_environments(new_environments)
+            #kmc_loop_info = KMCLoopInfo(step = step, 
+            #                            atomic_environment_info=atomic_environment_info,
+            #                            reference_event_searches_info=reference_event_searches_info,
+            #                            valid_event_info=is_valid_events_info, 
+            #                            refinements_info=refinements_info 
+            #                            ) 
+            #self.loggers.info('info', kmc_loop_info.output_msg())
+            #print(kmc_loop_info.output_msg())
 
-            self._save()
+            #self._save()
         
 
 
@@ -212,7 +281,9 @@ class KMC() :
                                                     cell= self.system.cell))
         return results_is_valid_events
         
-            
+    def add_reference_events(self, results_is_valid_events)  : 
+        for dfevent in results_is_valid_events : 
+            self.reference_table.add_event(dfevent)
 
     def analyse_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]]) : 
         pass
@@ -334,9 +405,88 @@ class KMC() :
         positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
         positions[positions < 0 ] = 0
         return positions
-    
 
-    def refinement(self) : 
+    def refinements(self, reference_event)  : 
+
+        ##=>Initialize results
+        results_refinements = [] 
+
+        for idx, dfevent in reference_event.iterrows() :  
+            ###=>Find atoms with same atomic environment as the generic event
+            atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
+            for at_idx in atoms_refine_idx : 
+            ###=>refine single generic
+                result_single = self.refine_single(at_idx, dfevent) 
+                results_refinements += result_single
+
+        return results_refinements
+
+    def refine_single(self, at_idx, dfevent) -> Result[EventSearchOutput, ErrorInfo] : 
+        ##=>PSR between generic event and at_idx environments 
+        result_psr = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).match()
+        ##=>Check results if match or match < matching_score
+        result_psr = check_match(result_psr, self.config.psr.matching_score_thr)
+        if not result_psr.is_ok() : 
+            result_psr.err_value().variables = {"n_sym_associated" : len(dfevent.at['sym_matrix'])}
+            return [result_psr] #Err()
+        else : 
+            output_psr = result_psr.ok_value() 
+
+            displacement = dfevent.at['saddle_positions'] - dfevent.at['initial_positions']
+
+            all_results = [] 
+            #Apply symmetries : 
+
+            current_positions = self.system.positions.copy()
+            for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'],dfevent.at['sym_perm']):
+                new_displacement = geometry.transform_positions(displacement, sym_matrix, 0, perm_matrix) 
+                saddle_positions = dfevent.at['initial_positions']+new_displacement
+                new_positions = geometry.transform_positions(saddle_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+                self.system.update_positions(new_positions, atom_idx=neighbors)
+
+                result_refine = self.engine.refine_event(self.system, at_idx)
+
+                if result_refine.is_ok() :  
+                    result_refine = self.check_refinement_minima(result_refine.ok_value(), current_positions, at_idx, self.config.eventsearch.refined_minimum_delr_thr)
+                    if result_refine.is_ok() : 
+                        result_refine = self.check_refinement_energy(result_refine, abs(result_refine.ok_value().dE_forward-dfevent['energy_barrier']), self.config.eventsearch.refined_energy_thr)
+                self.system.update_positions(current_positions)
+                all_results.append(result_refine)
+            return all_results
+
+
+    def check_refinement_minima(self, result_refine: EventSearchOutput, current_positions, at_idx: int, minimum_delr_thr: float ) -> Result[EventSearchOutput, ErrorInfo] : 
+        """Find if min1 or min2 is initial positions """ 
+        #To deal with pbc problem and lammps slighlty over/under box positions 
+        dr1_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - result_refine.min1_positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
+        dr2_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - result_refine.min2_positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
+        #compare only atom that move 
+        dr1 = np.sum(np.abs(dr1_vec))
+        dr2 = np.sum(np.abs(dr2_vec))
+
+        if dr1 > minimum_delr_thr and dr2 > minimum_delr_thr : 
+            return Err(ErrorInfo(type=ErrorType.REFINEMENT_INVALID_MINIMA, 
+                                 message="Mismatch between current positions and minima positions of the refined event."))
+
+        elif dr1 < dr2 : 
+            return Ok(result_refine)
+        else : 
+            result_refine.min1_positions, result_refine.min2_positions = result_refine.min2_positions, result_refine.min1_positions
+            return Ok(result_refine)
+
+
+    def check_refinement_energy(self, result_refine: Result[EventSearchOutput, ErrorInfo], energy_mismatch: float, refined_energy_thr: float) -> Result[EventSearchOutput, ErrorInfo] : 
+        if energy_mismatch > refined_energy_thr : 
+            return Err(ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
+                             message = "refinement energy barrier does not match reference one"))
+        else : 
+            return result_refine
+
+        
+
+
+    def refinement_old(self) : 
         #Initialize ActiveEventTable
         active_table = ActiveEventTable() 
         #Save_current_positions 
@@ -346,10 +496,6 @@ class KMC() :
         subset_reference_event_table = self.reference_table.table[self.reference_table.table['event_id'].isin(self.atomic_environment.atomic_environment_list)] 
 
         #Loop on subset : 
-        counts = 0
-        success = 0
-        counts_sym = 0 
-        success_sym = 0 
         for idx, dfevent in subset_reference_event_table.iterrows() : 
             #For each dfevent Series, need to find all atoms on which we can perform the event 
             l_atoms_refine = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == dfevent['event_id']]
@@ -360,17 +506,26 @@ class KMC() :
                 if psr_output.is_ok() : 
                     psr_output = psr_output.ok_value()
                     if psr_output.matching_score < self.config.psr.matching_score_thr : 
-                        #Go saddle point : 
-                            #Apply PSR to generic event
-                        saddle_positions = geometry.transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
-                            #Get atomic environment atoms
-                        neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
-                            #Move system to saddle point
-                        self.system.update_positions(saddle_positions, atom_idx = neighbors)
+
+                        displacement = dfevent.at['saddle_positions'] - dfevent.at['initial_positions']
+                        print(dfevent.at['sym_matrix'])
+                        for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'],dfevent.at['sym_perm']):
+                            new_displacement = geometry.transform_positions(displacement, sym_matrix, 0, perm_matrix) 
+                            saddle_positions = dfevent.at['initial_positions']+new_displacement
+                            new_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+                            neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+                            self.system.update_positions(new_positions, atom_idx=neighbors)
+
+                        ##Go saddle point : 
+                        #    #Apply PSR to generic event
+                        #saddle_positions = geometry.transform_positions(dfevent.at['saddle_positions'], psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix) 
+                        #    #Get atomic environment atoms
+                        #neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+                        #    #Move system to saddle point
+                        #self.system.update_positions(saddle_positions, atom_idx = neighbors)
 
                         #When at saddle positions refine with partn
                         refine_output = self.engine.refine_event(self.system, at_idx)
-                        counts += 1
                         if refine_output.is_ok() :
                             refine_output = refine_output.ok_value()
                         #Generate dfevent series from refine event results 
@@ -378,7 +533,6 @@ class KMC() :
                             #Check if dE coherent 
                             if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config.eventsearch.refined_energy_thr : 
                                 active_table.add_event(dfactive)
-                                success += 1
                             else : 
                                 refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
                                                       message = "refinement energy barrier does not match reference one", 
@@ -390,38 +544,38 @@ class KMC() :
                         #Back to current positions :
                         self.system.update_positions(current_positions)
                         #Need to do the same for symetries : 
-                        for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
-                            #Displacement between current positions and saddle_positions : 
-                            displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
-                            #APPLY Symmetry to displacement 
-                            new_displacements = geometry.transform_positions(displacements, sym_matrix, 0, perm_matrix)
-                            #Apply displacement to generic initial positions 
-                            new_saddle_positions = dfevent.at['initial_positions']+new_displacements
-                            #Aplly PSR to the new saddle positions 
-                            new_positions = geometry.transform_positions(new_saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
-                            #update system positions
-                            self.system.update_positions(new_positions, atom_idx = neighbors)
-                            #event refine
-                            refine_output = self.engine.refine_event(self.system, at_idx)
-                            counts_sym +=1
-                            if refine_output.is_ok() :
-                                refine_output = refine_output.ok_value()
-                            #Generate dfevent series from refine event results 
-                                dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
-                                #Check if dE coherent 
-                                if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config.eventsearch.refined_energy_thr : 
-                                    active_table.add_event(dfactive)
-                                    success_sym +=1
-                                else : 
-                                    refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
-                                                          message = "refinement energy barrier does not match reference one", 
-                                                          details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config.eventsearch.refine_energy_threshold, 
-                                                          variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
-                            else :
-                                refine_output = refine_output.err_value() 
-                                #print("refine FAILED no event found, SYM EVENT")
-                            #Back to current positions :
-                            self.system.update_positions(current_positions)
+                        #for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'], dfevent.at['sym_perm'])  : 
+                        #    #Displacement between current positions and saddle_positions : 
+                        #    displacements = dfevent.at['saddle_positions']-dfevent.at['initial_positions']
+                        #    #APPLY Symmetry to displacement 
+                        #    new_displacements = geometry.transform_positions(displacements, sym_matrix, 0, perm_matrix)
+                        #    #Apply displacement to generic initial positions 
+                        #    new_saddle_positions = dfevent.at['initial_positions']+new_displacements
+                        #    #Aplly PSR to the new saddle positions 
+                        #    new_positions = geometry.transform_positions(new_saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+                        #    #update system positions
+                        #    self.system.update_positions(new_positions, atom_idx = neighbors)
+                        #    #event refine
+                        #    refine_output = self.engine.refine_event(self.system, at_idx)
+                        #    counts_sym +=1
+                        #    if refine_output.is_ok() :
+                        #        refine_output = refine_output.ok_value()
+                        #    #Generate dfevent series from refine event results 
+                        #        dfactive = self._build_refined_event_series(current_positions, at_idx, refine_output.min1_positions, refine_output.min2_positions, refine_output.dE_forward, refine_output.dE_backward)
+                        #        #Check if dE coherent 
+                        #        if abs(dfactive.at['energy_barrier']-dfevent.at['energy_barrier']) < self.config.eventsearch.refined_energy_thr : 
+                        #            active_table.add_event(dfactive)
+                        #            success_sym +=1
+                        #        else : 
+                        #            refine_output = ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
+                        #                                  message = "refinement energy barrier does not match reference one", 
+                        #                                  details = "Reference energy barrier = {}, refined one = {}, refine energy threshold = {}".format(dfevent.at['energy_barrier'], dfactive.at['energy_barrier'], self.config.eventsearch.refine_energy_threshold, 
+                        #                                  variables = {'reference_event_index' : idx , 'atom_index' : at_idx , 'min1_positions' : refine_output.min1_positions, 'saddle_positions' : refine_output.saddle_positions, 'min2_positions' :refine_output.min2_positions })) 
+                        #    else :
+                        #        refine_output = refine_output.err_value() 
+                        #        #print("refine FAILED no event found, SYM EVENT")
+                        #    #Back to current positions :
+                        #    self.system.update_positions(current_positions)
                     else : 
                         psr_output = Err(ErrorInfo(type = ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD,
                                                    message = "PSR found a match but matching score is above acceptance threshold", 
@@ -509,7 +663,41 @@ class KMC() :
                     case ErrorType.EVENT_NOT_NEW : 
                         invalid_events['Event already in reference table'] +=1
         return ReferenceValidEventsInfo(n_valid_events, invalid_events)
-                        
+
+
+    def info_refinements(self, results_refinements: list[Result[EventSearchOutput, ErrorType]]) :  
+        n_attempts = len(results_refinements)
+        n_successes = 0
+        n_fails = {"psr" : {"no match found": 0, 
+                            "matching score > matching thr":0, 
+                            "n_symmetries" : []}, 
+                    "invalid dE" : 0, 
+                    "invalid min" : 0, 
+                    "event not found":0}
+
+        for res in results_refinements : 
+            if res.is_ok() : 
+                n_successes += 1 
+            else : 
+                match res.err_value().type : 
+                    case ErrorType.PSR_NO_MATCH_FOUND : 
+                        n_fails["psr"]["no match found"] +=1 
+                        n_fails["psr"]["n_symmetries"].append(res.err_value().variables["n_sym_associated"])
+                    case ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD : 
+                        n_fails["psr"]["matching score > matching thr"] +=1 
+                        n_fails["psr"]["n_symmetries"].append(res.err_value().variables["n_sym_associated"])
+                    case ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER : 
+                        n_fails["invalid dE"] +=1 
+                    case ErrorType.REFINEMENT_INVALID_MINIMA : 
+                        n_fails["invalid min"] +=1
+                    case ErrorType.EVENT_NOT_FOUND : 
+                        n_fails["event not found"] +=1
+
+        return RefinementsInfo(n_attempts, n_successes, n_fails) 
+
+
+
+
     def _initialize(self) -> None: 
         """Initialize the entire simulation before starting."""
         self._initialize_loggers()
