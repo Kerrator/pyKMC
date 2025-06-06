@@ -16,6 +16,18 @@
   <details><summary>Description</summary>
   File path where the reference table will be store in pickle format.
   </details>
+- **`visited_environments_output`** : `str`, default = `'./visited_environments.pickle'`
+  <details><summary>Description</summary>
+  File path where the list of atomic environments that have been explored will be sore in pickle format.
+  </details>
+- **`reference_table`** : `str`, optional
+  <details><summary>Description</summary>
+  Path to a reference table generated from a previous simulation.
+  </details>
+- **`visited_environments`** : `str`, optional
+  <details><summary>Description</summary>
+  Path to a list of visited environment generated from a previous simulation.
+  </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.
@@ -74,17 +86,25 @@
   <details><summary>Description</summary>
   Number of event searches to perform per unique atomic environment.
   </details>
-- **`emin_event`** : `float`, default = `0.0`
-  <details><summary>Description</summary>
-  Minimum energy barrier (in eV) for an event to be added to the reference table.
-  </details>
 - **`emax_event`** : `float`, default = `5.0`
   <details><summary>Description</summary>
   Maximum energy barrier (in eV) for an event to be added to the reference table.
   </details>
+- **`emin_event`** : `float`, default = `0.0`
+  <details><summary>Description</summary>
+  Minimum energy forward and backward barrier (in eV) for an event to be added to the reference table.
+  </details>
 - **`backward_emin_event`** : `float`, default = `0.05`
   <details><summary>Description</summary>
-  Minimum energy barrier (in eV) required for the backward reaction of an event to be added to the reference table. This threshold is applied only if the forward reaction's barrier falls within the `emin_event` and `emax_event` range.
+  To be used with `energy_assymetry`.
+  </details>
+- **`energy_asymmetry`** : `int`, default = `5`
+  <details><summary>Description</summary>
+  Prevent highly asymmetric event to be added to the reference table.The con
+  </details>
+- **`refined_minimum_delr_thr`** : `float`, default = `0.1`
+  <details><summary>Description</summary>
+  Refinement is accepted only if the central atom moves less than this distance between the current position and the refined minimum.
   </details>
 - **`refined_energy_thr`** : `float`, default = `0.2`
   <details><summary>Description</summary>
@@ -150,7 +170,7 @@
   <details><summary>Description</summary>
   Lammps min_style command.
   </details>
-- **`minimize`** : `str`, default = `'minimize 1.0e-6 1.0e-8 1000 1000'`
+- **`minimize`** : `str`, default = `'1.0e-6 1.0e-8 1000 1000'`
   <details><summary>Description</summary>
   Lammps minimize command
   </details>
