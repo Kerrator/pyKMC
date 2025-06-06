@@ -1,6 +1,6 @@
 import pypARTn2
 import numpy as np
-from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType
+from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType, EventRefinementOutput
 from lammps import lammps
 
 def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
@@ -137,20 +137,18 @@ def pARTn_refine_event(lmp, config, central_atom_idx ) -> Result[EventSearchOutp
         dist[dist > 6] = 0 #if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
         index_move = np.argmax(dist)
 
-        return Ok(EventSearchOutput(central_atom_index=central_atom_idx, 
+        return Ok(EventRefinementOutput(central_atom_index=central_atom_idx, 
                                     min1_positions=min1positions, 
                                     min2_positions=min2positions, 
                                     saddle_positions=saddlepositions, 
                                     dE_forward=dE_forward,
                                     dE_backward=dE_backward, 
                                     move_atom_index=index_move))
-        #return min1positions, saddlepositions, min2positions, dE_forward, dE_backward
     
     else : 
         return Err(ErrorInfo(type=ErrorType.EVENT_NOT_FOUND, 
                              message='no event found', 
                              details = err))
-        #return None
 
 
 

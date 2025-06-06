@@ -335,12 +335,13 @@ class KMC() :
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
             for at_idx in atoms_refine_idx : 
             ###=>refine single generic
-                result_single = self.refine_single(at_idx, dfevent) 
+                result_single = self.refine_single(at_idx, dfevent, idx) 
                 results_refinements += result_single
+
 
         return results_refinements
 
-    def refine_single(self, at_idx, dfevent) -> Result[EventSearchOutput, ErrorInfo] : 
+    def refine_single(self, at_idx, dfevent, cat_idx) -> Result[EventSearchOutput, ErrorInfo] : 
         ##=>PSR between generic event and at_idx environments 
         result_psr = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).match()
         ##=>Check results if match or match < matching_score
@@ -365,7 +366,7 @@ class KMC() :
                 self.system.update_positions(new_positions, atom_idx=neighbors)
 
                 result_refine = self.engine.refine_event(self.system, at_idx)
-
+                result_refine.num_reference_event = cat_idx
                 if result_refine.is_ok() :  
                     result_refine = self.check_refinement_minima(result_refine.ok_value(), current_positions, at_idx, self.config.eventsearch.refined_minimum_delr_thr)
                     if result_refine.is_ok() : 
