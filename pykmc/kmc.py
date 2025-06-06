@@ -118,6 +118,15 @@ class KMC() :
             ##=>Minimize 
             self.minimize_system()
 
+        # == Log informations == 
+            atomic_environment_info = self.info_atomic_environments(new_environments)
+            kmc_loop_info = KMCLoopInfo(step = step, 
+                                        atomic_environment_info=atomic_environment_info,
+                                        reference_event_searches_info=reference_event_searches_info,
+                                        valid_event_info=is_valid_events_info, 
+                                        refinements_info=refinements_info 
+                                        )
+            self.loggers.info('info', kmc_loop_info.output_msg())
 
         # == Update variables == 
             l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
@@ -130,15 +139,6 @@ class KMC() :
             self._save()
             self._append_snapshot_to_trajectory()
 
-        # == Log informations == 
-            atomic_environment_info = self.info_atomic_environments(new_environments)
-            kmc_loop_info = KMCLoopInfo(step = step, 
-                                        atomic_environment_info=atomic_environment_info,
-                                        reference_event_searches_info=reference_event_searches_info,
-                                        valid_event_info=is_valid_events_info, 
-                                        refinements_info=refinements_info 
-                                        )
-            self.loggers.info('info', kmc_loop_info.output_msg())
 
         # == Check if only cristalline environments == 
             if set(list(self.atomic_environment.atomic_environment_list)) == {"crystal"} : 
