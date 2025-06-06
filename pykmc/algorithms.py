@@ -33,4 +33,4 @@ def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float]:
 
     # compute associated update time:
     delta_t = -m.log(random.random()) / k_cumulative[-1]
-    return idx_selected_event, delta_t
+    return idx_selected_event, delta_t, k_cumulative[-1]

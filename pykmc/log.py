@@ -407,6 +407,7 @@ class LogKMC(LogManager):
             logger_name, "\t# dT(s)         : Time elapsed for this specific step."
         )
         self.info(logger_name, "\t# T(s)          : Total time since simulation start.")
+        self.info(logger_name, "\t# Ref event     : Index in the reference talbe of the selected event.")
         self.info(logger_name, "\t# Ea(eV)        : Event activation energy barrier.")
         self.info(
             logger_name, "\t# k_evt(ps-1)   : Rate constant of the selected event."
@@ -420,11 +421,11 @@ class LogKMC(LogManager):
         # First line of the table
         self.info(
             logger_name,
-            "{:<9s} {:<8s} {:<8s} {:<10s} {:<14s} {:<14s} {:<10s}".format(
-                "Step", "dT(s)", "T(s)", "Ea(eV)", "k_evt(ps-1)", "k_tot(ps-1)", "E(eV)"
+            "{:<10s} {:<14s} {:<14s} {:<14s} {:<14s} {:<14s} {:<14s} {:<14s}".format(
+                "Step", "dT(s)", "T(s)", "Ref event", "Ea(eV)", "k_evt(ps-1)", "k_tot(ps-1)", "E(eV)"
             ),
         )
-        self.info(logger_name, "{:s}".format(80 * "-"))
+        self.info(logger_name, "{:s}".format(110 * "-"))
 
     def table_line_info_kmc(self, logger_name: str, *args: int | float) -> None:
         """Write a formatted line of simulation output values into the output table.
@@ -439,6 +440,7 @@ class LogKMC(LogManager):
                 - Step Number
                 - Time elapsed for this step (dT in s)
                 - Total cumulative time (T in s)
+                - Index in the reference table of the selected event.
                 - Event energy barrier (Ea in eV)
                 - Rate constant of current event (k_evt in ps-1)
                 - Total rate constant of all events (k_tot in ps-1)
@@ -446,16 +448,17 @@ class LogKMC(LogManager):
 
         """
         formats = [
-            "{:<9n}",
-            "{:<8e}",
-            "{:<8e}",
-            "{:<10e}",
+            "{:<10n}",
             "{:<14e}",
             "{:<14e}",
-            "{:<10e}",
+            "{:<14d}",
+            "{:<14e}",
+            "{:<14e}",
+            "{:<14e}",
+            "{:<14e}",
         ]
         formatted_values = [
-            fmt.format(e) if e is not None else " " * 10
+            fmt.format(e) if e is not None else " " * 14
             for fmt, e in zip_longest(formats, args, fillvalue=None)
         ]
         self.info(logger_name, " ".join(formatted_values))

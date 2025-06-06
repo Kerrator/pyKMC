@@ -37,6 +37,8 @@ class Initializer() :
         self.kmc.loggers.info('log', '= Starting KMC simulation =')
         self.kmc.loggers.info('log', '===========================')
 
+        self.kmc.loggers.table_line_info_kmc('output', 0, 0.0, 0.0, None, None, None, None, self.kmc.total_energy )
+
     def initialize_loggers(self) -> None: 
         """Initialize the loggers and create their files."""
         self.kmc.loggers = LogKMC(LOGGING_CONFIG)

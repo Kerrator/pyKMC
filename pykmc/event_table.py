@@ -7,7 +7,7 @@ from .environments.graph_nauty import graph
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
-from .result import Result, ErrorInfo, Ok, Err, ErrorType, EventSearchOutput
+from .result import Result, ErrorInfo, Ok, Err, ErrorType, EventSearchOutput, EventRefinementOutput
 
 
 class ReferenceEventTable : 
@@ -274,7 +274,8 @@ class ActiveEventTable() :
                 'atom_index': pd.Series(dtype='int64'),        
                 'final_positions': pd.Series(dtype='object'),  
                 'energy_barrier': pd.Series(dtype='float64'),  
-                'k': pd.Series(dtype='float64')
+                'k': pd.Series(dtype='float64'),
+                'num_reference_event' : pd.Series(dtype='int64')
             }
             self.table = pd.DataFrame(columns)
 
@@ -294,10 +295,11 @@ class ActiveEventTable() :
 
 
 
-def build_active_dfactive(event_search_output: EventSearchOutput, config) -> pd.DataFrame : 
+def build_active_dfactive(event_search_output: EventRefinementOutput, config) -> pd.DataFrame : 
     dfactive = pd.Series({'atom_index': event_search_output.central_atom_index, 
                               'final_positions' : event_search_output.min2_positions,
                               'energy_barrier' : event_search_output.dE_forward, 
-                              'k' :compute_rate_Eyring(event_search_output.dE_forward, config)})
+                              'k' :compute_rate_Eyring(event_search_output.dE_forward, config), 
+                              'num_reference_event' : event_search_output.num_reference_event})
     return dfactive
 

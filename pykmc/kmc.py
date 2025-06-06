@@ -109,7 +109,7 @@ class KMC() :
 
         # == Update System == 
             ##=>Select event 
-            idx_selected_event, delta_t = self._select_event(active_table)
+            idx_selected_event, delta_t, ktot = self._select_event(active_table)
             time += delta_t*10**-12 #time is in seconds
 
             ##=>Move system
@@ -127,6 +127,8 @@ class KMC() :
                                         refinements_info=refinements_info 
                                         )
             self.loggers.info('info', kmc_loop_info.output_msg())
+
+            self.loggers.table_line_info_kmc('output', step+1, delta_t*10**-12, time, active_table.table.loc[idx_selected_event].at['num_reference_event'], active_table.table.loc[idx_selected_event].at['energy_barrier'], active_table.table.loc[idx_selected_event].at['k'], ktot, self.total_energy )
 
         # == Update variables == 
             l_ids = list(set(self.atomic_environment.atomic_environment_list)) 
@@ -212,8 +214,8 @@ class KMC() :
         """
         #list of rate constant
         l_k = np.array([active_table.table.loc[i].at['k'] for i in range(len(active_table.table))])
-        idx_selected_event, delta_t = rejection_free(l_k)
-        return idx_selected_event, delta_t
+        idx_selected_event, delta_t, ktot = rejection_free(l_k)
+        return idx_selected_event, delta_t, ktot
     def _select_event_generic(self) : 
         """ 
         """
@@ -366,8 +368,8 @@ class KMC() :
                 self.system.update_positions(new_positions, atom_idx=neighbors)
 
                 result_refine = self.engine.refine_event(self.system, at_idx)
-                result_refine.num_reference_event = cat_idx
                 if result_refine.is_ok() :  
+                    result_refine.ok_value().num_reference_event = cat_idx
                     result_refine = self.check_refinement_minima(result_refine.ok_value(), current_positions, at_idx, self.config.eventsearch.refined_minimum_delr_thr)
                     if result_refine.is_ok() : 
                         result_refine = self.check_refinement_energy(result_refine, abs(result_refine.ok_value().dE_forward-dfevent['energy_barrier']), self.config.eventsearch.refined_energy_thr)

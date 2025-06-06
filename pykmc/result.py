@@ -84,7 +84,7 @@ class EventRefinementOutput:
     dE_forward : float 
     dE_backward: float 
     move_atom_index: int 
-    num_reference_event: int = None
+    num_reference_event: Optional[int] = None
 
 @dataclass
 class PSROutput : 
