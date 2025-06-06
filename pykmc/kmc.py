@@ -15,6 +15,7 @@ import pickle
 from .point_set_registration import check_match
 from .event_table import build_active_dfactive
 from .initializer import Initializer
+from .info_simulation import info_atomic_environments, info_reference_event_searches, info_is_valid_reference_events, info_refinements
 
 
 #TODO fix reconstruction = False
@@ -37,7 +38,7 @@ class KMC() :
     def run(self) : 
         
         #Initialize the simulation, KMC attributes and minimize the system
-        Initializer(self).initialize()
+        self._initialize()
         #Write initial step to file  
         self._append_snapshot_to_trajectory()
 
@@ -48,9 +49,12 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
-        # == FIND NEW GENERIC EVENTS == 
-                ##=> Find new atomic environments that have not been visited
+        #=>Find Current atomic environments that has not been visited == 
             new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
+        #=>Construct informations for output  
+            atomic_environment_info = self.get_info_atomic_environments(new_environments)
+
+        # == FIND NEW GENERIC EVENTS == 
 
                 ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environments, nsearch)
@@ -59,7 +63,7 @@ class KMC() :
             results_reference_event_searches = self.reference_event_searches(central_atom_research_list)
 
                 ##=>Construct informations event searches for output 
-            reference_event_searches_info = self.info_reference_event_searches(results_reference_event_searches)
+            reference_event_searches_info = self.get_info_reference_event_searches(results_reference_event_searches)
 
                 ##=>Find only success event searches 
             results_reference_event_searches = [e.ok_value() for e in results_reference_event_searches if e.is_ok()]
@@ -72,7 +76,7 @@ class KMC() :
             results_is_valid_events = self.is_valid_events(results_reference_event_searches)  
 
                 ##=>Construct informations valid events for output 
-            is_valid_events_info = self.info_is_valid_events(results_is_valid_events)
+            is_valid_events_info = self.get_info_is_valid_reference_events(results_is_valid_events)
 
                 ##=>Find only valid events : 
             results_is_valid_events = [e.ok_value() for e in results_is_valid_events if e.is_ok()]
@@ -93,7 +97,7 @@ class KMC() :
             results_refinements = self.refinements(subset_reference_event_table) 
 
             ##=>Construct informations (un)success refinement 
-            refinements_info = self.info_refinements(results_refinements)
+            refinements_info = self.get_info_refinements(results_refinements)
 
             ##=>Find only success refinements 
             results_refinements = [e.ok_value() for e in results_refinements if e.is_ok()]
@@ -119,7 +123,6 @@ class KMC() :
             self.minimize_system()
 
         # == Log informations == 
-            atomic_environment_info = self.info_atomic_environments(new_environments)
             kmc_loop_info = KMCLoopInfo(step = step, 
                                         atomic_environment_info=atomic_environment_info,
                                         reference_event_searches_info=reference_event_searches_info,
@@ -434,90 +437,20 @@ class KMC() :
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
 
-    def info_atomic_environments(self, new_environments: list[str|bytes]) -> AtomicEnvironmentInfo : 
-        atomic_environments_info = AtomicEnvironmentInfo(total_atomic_environments_encounter = len(self.visited_environments),
-                n_current_atomic_environments = len(set(self.atomic_environment.atomic_environment_list)),
-                n_new_atomic_environments = len(new_environments))  
-        if self.config.control.verbosity == 2 : 
-            atom_group = {}
-            for index, item in enumerate(self.atomic_environment.atomic_environment_list):
-                if item != 'crystal' : 
-                    if item not in atom_group: 
-                        atom_group[item] = []  
-                    atom_group[item].append(index) 
-            atomic_environments_info.atoms_grouped_by_environment = list(atom_group.values())
-        return atomic_environments_info 
+    def get_info_atomic_environments(self, new_environments: list[str|bytes]) -> AtomicEnvironmentInfo : 
+        return info_atomic_environments(self, new_environments)
 
-    def info_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]])  -> ReferenceEventSearchInfo : 
-        total_event_searches = len(results_reference_event_searches)
-        n_success = 0 
-        n_fails = {'no_event_found' : 0, "minima_not_matching_positions" : 0}
-        for res in results_reference_event_searches : 
-            if res.is_ok() : 
-                n_success +=1 
-            else : 
-                #n_fails += 1
-                if res.err_value().type == ErrorType.EVENT_NOT_FOUND :
-                    n_fails['no_event_found'] +=1 
-                else : 
-                    n_fails['minima_not_matching_positions'] +=1 
-                    
-        return ReferenceEventSearchInfo(total_event_searches, n_success, n_fails)
+    def get_info_reference_event_searches(self, results_reference_event_searches: list[Result[EventSearchOutput, ErrorInfo]]) -> ReferenceEventSearchInfo : 
+        return info_reference_event_searches(results_reference_event_searches)
+
+    def get_info_is_valid_reference_events(self, results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]]) -> ReferenceValidEventsInfo :
+        return info_is_valid_reference_events(results_is_valid_events) 
     
-    def info_is_valid_events(self, results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]]) -> ReferenceValidEventsInfo : 
-        n_valid_events = 0 
-        invalid_events = {"dE > emax_event": 0 , 
-                          "dE < emin_event": 0, 
-                          "dE inverse < emin_event": 0, 
-                          "Event asymmetric" : 0, 
-                          "Event already in reference table" : 0}
-        for res in results_is_valid_events : 
-            if res.is_ok() : 
-                n_valid_events +=1 
-            else : 
-                match res.err_value().type : 
-                    case ErrorType.EVENT_ENERGY_HIGHER_THAN_THRESHOLD : 
-                        invalid_events['dE > emax_event'] +=1 
-                    case ErrorType.EVENT_ENERGY_LOWER_THAN_THRESHOLD : 
-                        invalid_events['dE < emin_event'] +=1
-                    case ErrorType.EVENT_BACKWARD_ENERGY_LOWER_THAN_THRESHOLD : 
-                        invalid_events['dE inverse < emin_event'] +=1 
-                    case ErrorType.EVENT_ASYMMETRIC : 
-                        invalid_events['Event asymmetric'] +=1
-                    case ErrorType.EVENT_NOT_NEW : 
-                        invalid_events['Event already in reference table'] +=1
-        return ReferenceValidEventsInfo(n_valid_events, invalid_events)
+    def get_info_refinements(self,  results_refinements: list[Result[EventSearchOutput, ErrorType]]) -> RefinementsInfo:
+        return info_refinements(results_refinements) 
 
-
-    def info_refinements(self, results_refinements: list[Result[EventSearchOutput, ErrorType]]) :  
-        n_attempts = len(results_refinements)
-        n_successes = 0
-        n_fails = {"psr" : {"no match found": 0, 
-                            "matching score > matching thr":0, 
-                            "n_symmetries" : []}, 
-                    "invalid dE" : 0, 
-                    "invalid min" : 0, 
-                    "event not found":0}
-
-        for res in results_refinements : 
-            if res.is_ok() : 
-                n_successes += 1 
-            else : 
-                match res.err_value().type : 
-                    case ErrorType.PSR_NO_MATCH_FOUND : 
-                        n_fails["psr"]["no match found"] +=1 
-                        n_fails["psr"]["n_symmetries"].append(res.err_value().variables["n_sym_associated"])
-                    case ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD : 
-                        n_fails["psr"]["matching score > matching thr"] +=1 
-                        n_fails["psr"]["n_symmetries"].append(res.err_value().variables["n_sym_associated"])
-                    case ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER : 
-                        n_fails["invalid dE"] +=1 
-                    case ErrorType.REFINEMENT_INVALID_MINIMA : 
-                        n_fails["invalid min"] +=1
-                    case ErrorType.EVENT_NOT_FOUND : 
-                        n_fails["event not found"] +=1
-
-        return RefinementsInfo(n_attempts, n_successes, n_fails) 
+    def _initialize(self) : 
+        Initializer(self).initialize()
 
     def _append_snapshot_to_trajectory(self) : 
         output = self.config.control.trajectory_output
