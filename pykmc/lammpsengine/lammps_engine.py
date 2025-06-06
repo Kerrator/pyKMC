@@ -82,11 +82,12 @@ class LammpsEngine() :
         #gather all positions 
         id = lmp.numpy.extract_atom("id")
         positions = lmp.gather_atoms("x", 1, 3)
+        total_energy = lmp.get_thermo("etotal")
         if rank == 0 : 
             #convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
-            return positions
+            return positions, total_energy
         else : 
             return None
         

@@ -3,7 +3,6 @@ import numpy as np
 from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType
 from lammps import lammps
 
-
 def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
     #PARAMETERS : 
     delr_threshold = config.partn.delr_thr
@@ -36,7 +35,6 @@ def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: floa
 
     #RUN
     lmp.command("minimize 1e-6 1e-8 1000 1000")
-
     #EXTRACT DATA
     err = artn.get_runparam("error_message")
     if not err :

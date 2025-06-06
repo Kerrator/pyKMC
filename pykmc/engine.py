@@ -12,8 +12,8 @@ class Engine() :
                 raise ValueError("Engine type unknown")
 
     def minimize(self, system) : 
-        result = self.engine.minimize(system)
-        return result
+        minimized_positions, total_energy = self.engine.minimize(system)
+        return minimized_positions, total_energy
 
     def search_event(self, system, central_atom_idx:int ) : 
         match self.engine.config.eventsearch.style :

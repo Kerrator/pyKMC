@@ -32,6 +32,7 @@ class KMC() :
         self.atomic_environment = None 
         self.reference_table = None
         self.visited_environments = None 
+        self.total_energy = None
             
     def run(self) : 
         
@@ -426,8 +427,9 @@ class KMC() :
     def minimize_system(self) -> None : 
         """Minimize the system and update its positions"""
         self.loggers.info('log',':=> Minimizing the system')
-        new_positions = self.engine.minimize(self.system)
+        new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
+        self.total_energy = total_energy
 
     def info_atomic_environments(self, new_environments: list[str|bytes]) -> AtomicEnvironmentInfo : 
         atomic_environments_info = AtomicEnvironmentInfo(total_atomic_environments_encounter = len(self.visited_environments),
