@@ -2,6 +2,8 @@ import pypARTn2
 import numpy as np
 from ..result import Result, ErrorInfo, EventSearchOutput, Ok, Err, ErrorType, EventRefinementOutput
 from lammps import lammps
+import sys
+from io import StringIO
 
 def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: float) -> Result[EventSearchOutput, ErrorInfo]: 
     #PARAMETERS : 
@@ -86,6 +88,7 @@ def pARTn_search(lmp: lammps, config: dict, central_atom_idx: int, rcutenv: floa
                              details = err)) 
     
 def pARTn_refine_event(lmp, config, central_atom_idx ) -> Result[EventSearchOutput, ErrorInfo]: 
+    
     #INITILIZE ARTN
     artn = pypARTn2.artn(engine='lmp')
 

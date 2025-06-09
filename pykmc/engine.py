@@ -1,4 +1,6 @@
 from .lammpsengine import LammpsEngine
+import sys 
+import os
 
 class Engine() : 
 
@@ -18,7 +20,15 @@ class Engine() :
     def search_event(self, system, central_atom_idx:int ) : 
         match self.engine.config.eventsearch.style :
             case 'partn' : 
+                original_stdout_fd = os.dup(1)
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
+                os.dup2(devnull, 1)
                 result =  self.engine.pARTn(system, central_atom_idx)
+                # Restore original stdout (fd 1)
+                os.dup2(original_stdout_fd, 1)
+                os.close(original_stdout_fd)
+                os.close(devnull)
             case _ : 
                 raise Exception('Event Search style unknown')
         return result 

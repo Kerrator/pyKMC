@@ -4,6 +4,8 @@ from lammps import lammps
 from ..config import Config
 from .partn import pARTn_search, pARTn_refine_event
 
+
+
 class LammpsEngine() : 
 
     def __init__(self, config: Config) :
@@ -99,7 +101,7 @@ class LammpsEngine() :
         self._initialize_default(system, lmp)
         #Initialize potential 
         self._initialize_potential(lmp)
-        #pARTn search : 
+        #pARTn search :
         result = pARTn_search(lmp, self.config, central_atom, self.config.atomicenvironment.rcut)
         return result
     
