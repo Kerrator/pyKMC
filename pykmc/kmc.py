@@ -51,31 +51,34 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
+
             self.loggers.info('log', '{}{}Step : {}{}'.format(Colors.BOLD.value, Colors.YELLOW.value, step, Colors.RESET.value))
+
         #=>Find Current atomic environments that has not been visited == 
-            new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
+            new_environments = self.atomic_environment.get_new_environment(self.visited_environments)
             self.loggers.info('log', '\t :=> {} new atomic environments found'.format(len(new_environments)))
+
         #=>Construct informations for output  
             atomic_environment_info = self.get_info_atomic_environments(new_environments)
 
         # == FIND NEW GENERIC EVENTS == 
-
                 ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environments, nsearch)
+
                 ##=>Perform event serach on each atom in central_atom_research_list
             event_search = EventSearch(self.system, self.engine, self.loggers)
             event_search.run(central_atom_research_list)
-            results_reference_event_searches = event_search.results
 
                 ##=>Construct informations event searches for output 
-            reference_event_searches_info = self.get_info_reference_event_searches(results_reference_event_searches)
+            reference_event_searches_info = self.get_info_reference_event_searches(event_search.results)
 
                 ##=>Find only success event searches 
-            results_reference_event_searches = event_search.get_successes_results()
+            #results_reference_event_searches = event_search.get_successes_results()
 
         # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE == 
                 ##=>Check if the event is valid, ie if not already present and has a valid energy barrier
-            results_is_valid_events = self.is_valid_events(results_reference_event_searches)  
+            #results_is_valid_events = self.is_valid_events(results_reference_event_searches)  
+            results_is_valid_events = self.is_valid_events(event_search.get_successes_results())  
 
                 ##=>Construct informations valid events for output 
             is_valid_events_info = self.get_info_is_valid_reference_events(results_is_valid_events)
