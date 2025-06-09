@@ -54,7 +54,7 @@ class ControlConfig(BaseModel):
     )
 
     reconstruction: Optional[bool] = Field(
-        default=True, description="If at each KMC step we reconstruct generic events."
+        default=True, description="If at each KMC step we reconstruct generic events.\n NOT WORKING"
     )
 
     n_steps: int = Field(
