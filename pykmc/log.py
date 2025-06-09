@@ -514,7 +514,7 @@ class LogKMC(LogManager):
         # all bar
         bar_segment = "#" * filled_length + "-" * (bar_length - filled_length)
         progress_message = (
-            f"{static_text_color}\rProgression: "
+            f"{static_text_color}\r\t Progression: "
             f"{bar_fill_color}[{bar_segment}]{Colors.RESET.value}"
             f"{static_text_color} {percent:.1f}% "
         )
