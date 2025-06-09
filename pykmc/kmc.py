@@ -16,6 +16,8 @@ from .point_set_registration import check_match
 from .event_table import build_active_dfactive
 from .initializer import Initializer
 from .info_simulation import info_atomic_environments, info_reference_event_searches, info_is_valid_reference_events, info_refinements
+from .eventsearch import EventSearch
+from .log import Colors
 
 
 #TODO fix reconstruction = False
@@ -49,8 +51,10 @@ class KMC() :
 
         #KMC LOOP
         for step in range(nkmc_steps) :
+            self.loggers.info('log', '{}{}Step : {}{}'.format(Colors.BOLD.value, Colors.YELLOW.value, step, Colors.RESET.value))
         #=>Find Current atomic environments that has not been visited == 
             new_environments = list(set(self.atomic_environment.atomic_environment_list).difference(self.visited_environments)) 
+            self.loggers.info('log', '\t :=> {} new atomic environments found'.format(len(new_environments)))
         #=>Construct informations for output  
             atomic_environment_info = self.get_info_atomic_environments(new_environments)
 
@@ -58,18 +62,16 @@ class KMC() :
 
                 ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(new_environments, nsearch)
-
                 ##=>Perform event serach on each atom in central_atom_research_list
-            results_reference_event_searches = self.reference_event_searches(central_atom_research_list)
+            event_search = EventSearch(self.system, self.engine, self.loggers)
+            event_search.run(central_atom_research_list)
+            results_reference_event_searches = event_search.results
 
                 ##=>Construct informations event searches for output 
             reference_event_searches_info = self.get_info_reference_event_searches(results_reference_event_searches)
 
                 ##=>Find only success event searches 
-            results_reference_event_searches = [e.ok_value() for e in results_reference_event_searches if e.is_ok()]
-
-                ##=>Center event to prevent pbc problem with psr
-            results_reference_event_searches = [self._center_event_positions(e) for e in results_reference_event_searches]
+            results_reference_event_searches = event_search.get_successes_results()
 
         # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE == 
                 ##=>Check if the event is valid, ie if not already present and has a valid energy barrier
@@ -186,12 +188,12 @@ class KMC() :
         return central_atom_research_list
 
 
-    def reference_event_searches(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
-        results = [] 
-        for at_idx in central_atom_research_list : 
-            event_search_output = self.engine.search_event(self.system, at_idx)
-            results.append(event_search_output)
-        return results
+    #def reference_event_searches(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
+    #    results = [] 
+    #    for at_idx in central_atom_research_list : 
+    #        event_search_output = self.engine.search_event(self.system, at_idx)
+    #        results.append(event_search_output)
+    #    return results
     
     def is_valid_events(self, results_reference_event_searches: list[EventSearchOutput]) -> list[Result[pd.DataFrame, ErrorInfo]] : 
         results_is_valid_events = [] 
@@ -296,19 +298,19 @@ class KMC() :
             self.system.update_positions(final_positions, atom_idx = neighbors)
 
 
-    def _center_event_positions(self, event_search_output: EventSearchOutput) : 
-        #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
-        cell = self.system.cell
-        ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
-        #displacement 
-        move_atom_idx = event_search_output.move_atom_index        
-        dx, dy, dz = ax/2 - event_search_output.min1_positions[move_atom_idx][0],  ay/2 - event_search_output.min1_positions[move_atom_idx][1], az/2 - event_search_output.min1_positions[move_atom_idx][2]
-        displacement = np.array([dx, dy, dz])
-        event_search_output.min1_positions = self._center_positions(event_search_output.min1_positions, displacement, cell)
-        event_search_output.saddle_positions = self._center_positions(event_search_output.saddle_positions, displacement, cell)
-        event_search_output.min2_positions = self._center_positions(event_search_output.min2_positions, displacement, cell)
-        return event_search_output
-        #return min1positions, saddlepositions, min2positions
+    #def _center_event_positions(self, event_search_output: EventSearchOutput) : 
+    #    #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
+    #    cell = self.system.cell
+    #    ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
+    #    #displacement 
+    #    move_atom_idx = event_search_output.move_atom_index        
+    #    dx, dy, dz = ax/2 - event_search_output.min1_positions[move_atom_idx][0],  ay/2 - event_search_output.min1_positions[move_atom_idx][1], az/2 - event_search_output.min1_positions[move_atom_idx][2]
+    #    displacement = np.array([dx, dy, dz])
+    #    event_search_output.min1_positions = self._center_positions(event_search_output.min1_positions, displacement, cell)
+    #    event_search_output.saddle_positions = self._center_positions(event_search_output.saddle_positions, displacement, cell)
+    #    event_search_output.min2_positions = self._center_positions(event_search_output.min2_positions, displacement, cell)
+    #    return event_search_output
+    #    #return min1positions, saddlepositions, min2positions
     
 
 
@@ -324,11 +326,11 @@ class KMC() :
     #    return min1positions, saddlepositions, min2positions
     
 
-    def _center_positions(self, positions, displacement, cell) : 
-        positions += displacement 
-        positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
-        positions[positions < 0 ] = 0
-        return positions
+    #def _center_positions(self, positions, displacement, cell) : 
+    #    positions += displacement 
+    #    positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
+    #    positions[positions < 0 ] = 0
+    #    return positions
 
     def refinements(self, reference_event)  : 
 
@@ -453,9 +455,8 @@ class KMC() :
         Initializer(self).initialize()
 
     def _append_snapshot_to_trajectory(self) : 
-        output = self.config.control.trajectory_output
         atoms = Atoms(self.system.types, positions=self.system.positions, cell=self.system.cell, pbc=self.system.pbc)
-        write(output, atoms, append=True)
+        write(self.config.control.trajectory_output, atoms, append=True)
 
     def _save(self) : 
         self.reference_table.save('reference_table.pickle')

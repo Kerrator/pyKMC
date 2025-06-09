@@ -521,3 +521,5 @@ class LogKMC(LogManager):
 
         # Envoi du message via le logger
         self.debug(logger_name, progress_message)
+        if bar_length == filled_length : 
+            self.debug(logger_name, '\n')
