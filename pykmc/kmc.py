@@ -15,6 +15,7 @@ from .result import (
     ReferenceEventSearchInfo,
     ReferenceValidEventsInfo,
     RefinementsInfo,
+    EventRefinementOutput,
 )
 import numpy as np
 from ase.io import write
@@ -138,10 +139,7 @@ class KMC:
             refinement = self.execute_refinements(subset_reference_event_table)
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
-
-            ##=>Construct active event table
-            active_table = ActiveEventTable(self.config)
-            active_table.add_events(refinement.get_successes_results())
+            active_table = self.add_active_events(refinement.get_successes_results())
 
             # == Update System ==
             ##=>Select event
@@ -340,6 +338,26 @@ class KMC:
         )
         refinement.execute(df_reference_events)
         return refinement
+
+    def add_active_events(
+        self, events: list[EventRefinementOutput]
+    ) -> ActiveEventTable:
+        """Create a new ActiveEventTable, add active events and return it.
+
+        Parameters
+        ----------
+        events : list[RefinementsInfo]
+            List of events to be added.
+
+        Returns
+        -------
+        ActiveEventTable
+            The active event table object.
+
+        """
+        active_table = ActiveEventTable(self.config)
+        active_table.add_events(events)
+        return active_table
 
     def _select_event(self, active_table: ActiveEventTable) -> tuple[int, float, float]:
         """Select an event in the active table based on the refection free algorithm.
