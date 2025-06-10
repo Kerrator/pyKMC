@@ -103,6 +103,8 @@ class LammpsEngine() :
         self._initialize_potential(lmp)
         #pARTn search :
         result = pARTn_search(lmp, self.config, central_atom, self.config.atomicenvironment.rcut)
+        if result.is_ok() : 
+            result.ok_value().cell = system.cell
         return result
     
     def pARTn_refine_event(self, system, central_atom) : 

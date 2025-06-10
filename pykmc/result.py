@@ -74,6 +74,7 @@ class EventSearchOutput :
     dE_forward : float 
     dE_backward : float 
     move_atom_index : int 
+    cell: Optional[np.ndarray] = None
 
 @dataclass 
 class EventRefinementOutput: 
