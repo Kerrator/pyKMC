@@ -71,7 +71,7 @@ class AtomicEnvironment:
         """
         return [i for i, e in enumerate(self.atomic_environment_list) if e == id]
     
-    def get_new_environment(self, visited_environments: set[str|bytes]) -> list[str|bytes] : 
+    def get_new_environments(self, visited_environments: set[str|bytes]) -> list[str|bytes] : 
         """ 
         Return list of atomic environment ID that are in the current self.environment_list but not in visited_environments
         """
