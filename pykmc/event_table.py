@@ -14,10 +14,25 @@ class ReferenceEventTable :
 
     def __init__(self, config) : 
         self.config = config
-        #if not self.config.control.reference_table : 
         self._initialize_table() 
-        #else : 
-        #    self.table = pd.read_pickle(self.config.control.reference_table)
+
+    def add_events(self, events: list[EventSearchOutput] ) -> None : 
+        results_is_valid_events = [] 
+        #Check if the event is valid based on is_valid_new_event conditions
+        for ev in events : 
+            results_is_valid_events.append(self.is_valid_new_event(min1_positions = ev.min1_positions, 
+                                                    saddle_positions = ev.saddle_positions, 
+                                                    min2_positions = ev.min2_positions, 
+                                                    move_atom_idx = ev.move_atom_index, 
+                                                    dE_forward = ev.dE_forward, 
+                                                    dE_backward = ev.dE_backward, 
+                                                    cell= ev.cell))
+        df_valid_events = self.get_valid_events(results_is_valid_events) 
+        for df in df_valid_events : 
+            self.add(df)
+        
+        return results_is_valid_events
+
 
 
     def is_valid_new_event(self, min1_positions, saddle_positions, min2_positions, move_atom_idx, dE_forward, dE_backward, cell) -> Result[bool, ErrorInfo]: 
@@ -69,27 +84,6 @@ class ReferenceEventTable :
             else :
                 return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
 
-#        if emin < dE_forward < emax : 
-#            dfevent_forward, dfevent_backward = self._build_event_series(min1_positions=min1_positions, 
-#                                                                         saddle_positions=saddle_positions, 
-#                                                                         min2_positions=min2_positions,
-#                                                                         index_move = move_atom_idx, 
-#                                                                         dE_forward=dE_forward, 
-#                                                                         dE_backward=dE_backward, 
-#                                                                         cell = cell) 
-#            if self.is_new_event(dfevent=dfevent_forward) :
-#                if dfevent_forward["event_id"] != dfevent_forward["id_final"] : #backward reaction same as forward 
-#                    return Ok(dfevent_forward.to_frame().T) 
-#                else :
-#                    dfevent =pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T], ignore_index=True)  
-#                    return Ok(dfevent)
-#            else : 
-#                return Err(ErrorInfo(type=ErrorType.EVENT_NOT_NEW, message="Found event already in reference table", details="Same topology"))
-#        else  : 
-#            return Err(ErrorInfo(type=ErrorType.EVENT_NOT_WITHIN_ENERGY_LIMITS, 
-#                                 message="Found event not in energy limits", 
-#                                 details="Energy barrier = {}, energy limits {}-{}".format(dE_forward, emin, emax)))
-
 
     def is_new_event(self, dfevent) :
         #Only select rows with same event_id as dfenvent : 
@@ -103,82 +97,18 @@ class ReferenceEventTable :
         else : 
             return False
 
-    def add_event(self, dfevent) : 
+    def get_valid_events(self, results_is_valid_event: list[Result[pd.DataFrame, ErrorInfo]]) -> pd.DataFrame : 
+        return [e.ok_value() for e in results_is_valid_event if e.is_ok()]
+
+    def add(self, dfevent) : 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 
-    def add_event_old(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, neighbors_list_environment, cell) : 
+    def has_id_subset_table(self, ids: list[str|bytes]) -> pd.DataFrame : 
         """ 
+        return subset table with event having id in ids
         """
-        #Energy bounds 
-        emin = self.config.eventsearch.emin_event
-        emax = self.config.eventsearch.emax_event
+        return self.table[self.table['event_id'].isin(ids)] 
 
-        if self.config.control.reconstruction : 
-            if emin < dE_forward < emax : 
-                is_new = self._add_event_with_reconstruction(min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell)
-                in_e_bounds = True 
-            else : 
-                is_new = True 
-                in_e_bounds = False
-        else : 
-            if emin < dE_forward < emax : 
-                #Get environment of move_atom_idx 
-                neighbors = neighbors_list_environment[move_atom_idx]
-                is_new = self._add_event_no_reconstruction(min2positions[neighbors], move_atom_idx, dE_forward)
-                in_e_bounds = True 
-            else : 
-                is_new = True
-                in_e_bounds = False  
-        return is_new, in_e_bounds
-
-
-    def _add_event_no_reconstruction(self, final_positions, move_atom_idx, dE) :
-
-        dfevent = pd.Series({'atom_index' : move_atom_idx, 
-                            'final_positions' : final_positions, 
-                            'energy_barrier' : dE,
-                            'k' : compute_rate_Eyring(dE, self.config)})  
-
-        if len(self.table) > 0 : 
-            #Check if event alread in catalog : 
-            atol = 1e-3 
-            rtol = 1e-3 
-
-            #Only select rows with same atom index 
-            subset = self.table[self.table["atom_index"] == dfevent['atom_index']]
-
-            #Check if we have final positions of the event close to at least one final positions in the subset 
-            if not subset["final_positions"].apply(lambda pos : np.allclose(pos, dfevent["final_positions"], atol=atol, rtol=rtol)).any() : 
-                #if not add event to the catalog : 
-                self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
-                return True 
-            else :
-                return False
-            
-        else : 
-            self.table = pd.concat([self.table, dfevent.to_frame().T], ignore_index=True)
-            return True
-        
-
-    def _add_event_with_reconstruction(self, min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell)  :
-        dfevent_forward, dfevent_backward = self._event_series_with_reconstruction(min1positions, saddlepositions, min2positions, move_atom_idx, dE_forward, dE_backward, cell) 
-        #Only select rows with same event_id as dfenvent : 
-        subset = self.table[self.table["event_id"] == dfevent_forward["event_id"]] 
-        #subset of subset with rows with the same saddle_id : 
-        subset = subset[subset["id_saddle"] == dfevent_forward["id_saddle"]]
-        #subset of subset of subset with rows with the same final_id : 
-        subset = subset[subset["id_final"] == dfevent_forward["id_final"]]
-        #if there is no event with same IDs
-        if len(subset) == 0 : 
-            #add to the catalog foward reaction  
-            self.table = pd.concat([self.table, dfevent_forward.to_frame().T], ignore_index=True)
-            #Check if backward reaction is not the same as the forward one    
-            if dfevent_forward["event_id"] != dfevent_forward["id_final"] :  
-                self.table = pd.concat([self.table, dfevent_backward.to_frame().T], ignore_index=True)
-            return True
-        else : 
-            return False
-            
     def _build_event_series(self, min1_positions, saddle_positions, min2_positions, index_move, dE_forward, dE_backward, cell) : 
         """
         """
@@ -239,7 +169,7 @@ class ReferenceEventTable :
     def _initialize_table(self) : 
         if self.config.control.reference_table is not None : 
             self.table = pd.read_pickle(self.config.control.reference_table)
-        elif self.config.control.reconstruction : 
+        else : 
             self.table = pd.DataFrame(columns=['event_id', 
                                                  'initial_positions', 
                                                  'saddle_positions', 
@@ -251,11 +181,7 @@ class ReferenceEventTable :
                                                  'move_atom_idx', 
                                                  'sym_matrix', 
                                                  'sym_perm'])
-        else : 
-            self.table = pd.DataFrame(columns = ['atom_index', 
-                                                   'final_positions',
-                                                   'energy_barrier',
-                                                   'k'])
+        
             
     def save(self, outfile='reference_table.pickle') : 
         self.table.to_pickle(outfile)
@@ -264,7 +190,10 @@ class ReferenceEventTable :
 
 class ActiveEventTable() : 
 
-    def __init__(self, event_dataframe = None ) : 
+    def __init__(self, config, event_dataframe = None ) : 
+
+        self.config = config
+
         if event_dataframe is not None : 
             if not isinstance(event_dataframe, pd.DataFrame):
                 raise TypeError("event_dataframe must be a pandas DataFrame or None.")
@@ -279,7 +208,20 @@ class ActiveEventTable() :
             }
             self.table = pd.DataFrame(columns)
 
-    def add_events(self, dfevents: pd.Series| list[pd.Series]) -> None: 
+    def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput] ) : 
+        if isinstance(events, list) : 
+            dfactive = [] 
+            for e in events : 
+                dfactive.append(self.build_event_series(e))
+        elif isinstance(events, EventRefinementOutput) : 
+            dfactive = self.build_event_series(events)
+        else : 
+            raise TypeError("Input 'events' must be an EventRefinementOutput dataclass or a list of it.")
+        self.add(dfactive)
+
+
+
+    def add(self, dfevents: pd.Series| list[pd.Series]) -> None: 
         if isinstance(dfevents, pd.Series):
             df_to_add = dfevents.to_frame().T
         elif isinstance(dfevents, list):
@@ -295,11 +237,11 @@ class ActiveEventTable() :
 
 
 
-def build_active_dfactive(event_search_output: EventRefinementOutput, config) -> pd.DataFrame : 
-    dfactive = pd.Series({'atom_index': event_search_output.central_atom_index, 
-                              'final_positions' : event_search_output.min2_positions,
-                              'energy_barrier' : event_search_output.dE_forward, 
-                              'k' :compute_rate_Eyring(event_search_output.dE_forward, config), 
-                              'num_reference_event' : event_search_output.num_reference_event})
-    return dfactive
+    def build_event_series(self, event_search_output: EventRefinementOutput) -> pd.DataFrame : 
+        dfactive = pd.Series({'atom_index': event_search_output.central_atom_index, 
+                                  'final_positions' : event_search_output.min2_positions,
+                                  'energy_barrier' : event_search_output.dE_forward, 
+                                  'k' :compute_rate_Eyring(event_search_output.dE_forward, self.config), 
+                                  'num_reference_event' : event_search_output.num_reference_event})
+        return dfactive
 
