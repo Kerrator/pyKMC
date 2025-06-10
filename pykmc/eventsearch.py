@@ -12,7 +12,7 @@ class EventSearch() :
         self.loggers = loggers
         self.results = None
 
-    def run(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
+    def execute(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
         self.results = []
         self.loggers.info('log', '\t :=> Searching {} reference events'.format(len(central_atom_research_list))) 
         for i, at_idx in enumerate(central_atom_research_list) : 
