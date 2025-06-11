@@ -1,13 +1,48 @@
+"""Module implementing the Refinement class that deals with the event refinement procedure."""
+
 from .result import Result, EventRefinementOutput, ErrorInfo, ErrorType, Err, Ok
 from .point_set_registration import PointSetRegistration, check_match
 from .utils import geometry
+from .config import Config
+from .system import System
+from .neighbors_list import NeighborsList
+from .log import LogKMC
+from .atomic_environment import AtomicEnvironment
+from .engine import Engine
 import ase.geometry
 import numpy as np
-import pandas as pd 
+import pandas as pd
 
-class Refinement() : 
 
-    def __init__(self, config, loggers, system, neighbors_list, atomic_environment, engine): 
+class Refinement:
+    """Perfrom event refinements and deal with results.
+
+    Parameters
+    ----------
+    config : Config
+        The configuration of the simulation.
+    loggers : LogKMC
+        The logger of the KMC simulation.
+    system : System
+        The atomic system.
+    neighbors_list : NeighborsList
+        The neighbors lists of the system.
+    atomic_environment : AtomicEnvironment
+        The atomic environment of the system.
+    engine : Engine
+        The engine to use for the refinement.
+
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        loggers: LogKMC,
+        system: System,
+        neighbors_list: NeighborsList,
+        atomic_environment: AtomicEnvironment,
+        engine: Engine,
+    ) -> None:
         self.config = config
         self.loggers = loggers
         self.system = system
@@ -16,95 +51,253 @@ class Refinement() :
         self.engine = engine
         self.results = None
 
+    def execute(self, df_reference_events: pd.DataFrame) -> None:
+        """Execute event refinements for each reference event in the df_reference_events dataframe.
 
-    def execute(self, df_reference_events: pd.DataFrame) : 
-        self.results = [] 
+        It stores the results of the event refinements in self.results.
+
+        Parameters
+        ----------
+        df_reference_events : pd.DataFrame
+            dataframe of reference events to refine.
+
+        """
+        self.results = []
 
         total_refinements = self.get_total_refinements_todo(df_reference_events)
-        self.loggers.info('log', "\t :=> Refining {} events".format(total_refinements)) 
-        count = 0 
+        self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
+        count = 0
 
-        for idx, dfevent in df_reference_events.iterrows() :  
+        for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
-            atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
-            for at_idx in atoms_refine_idx : 
-            ###=>refine single generic
-                result_single = self.refine_single(at_idx, dfevent, idx, total_refinements, count) 
+            atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
+                dfevent["event_id"]
+            )
+            for at_idx in atoms_refine_idx:
+                ###=>refine single generic
+                result_single = self.refine_single(
+                    at_idx, dfevent, idx, total_refinements, count
+                )
                 self.results += result_single
                 count += len(result_single)
 
-    def refine_single(self, at_idx, dfevent, cat_idx, total_refinements, count) -> Result[EventRefinementOutput, ErrorInfo] : 
-        ##=>PSR between generic event and at_idx environments 
-        result_psr = PointSetRegistration(self.config, self.system, dfevent, self.neighbors_list, 0, at_idx).match()
+    def refine_single(
+        self,
+        at_idx: int,
+        dfevent: pd.Series,
+        cat_idx: int,
+        total_refinements: int,
+        count: int,
+    ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
+        """Perform a single reference event refinement.
+
+        If a reference event has symmetries, it also refine those symmetric events.
+
+        Parameters
+        ----------
+        at_idx : int
+            index of the central atom for which we perform the refinement.
+        dfevent : pd.Series
+            a Series of the reference event to refine.
+        cat_idx : int
+            index of the event in the reference event table.
+        total_refinements : int
+            total refinements to do.
+        count : int
+            number of refinements already done.
+
+        Returns
+        -------
+        list[Result[EventRefinementOutput, ErrorInfo]]
+            list of Result of the refinements.
+
+        """
+        ##=>PSR between generic event and at_idx environments
+        result_psr = PointSetRegistration(
+            self.config, self.system, dfevent, self.neighbors_list, at_idx
+        ).match()
         ##=>Check results if match or match < matching_score
         result_psr = check_match(result_psr, self.config.psr.matching_score_thr)
-        if not result_psr.is_ok() : 
-            result_psr.err_value().variables = {"n_sym_associated" : len(dfevent.at['sym_matrix'])}
-            return [result_psr] #Err()
-        else : 
-            output_psr = result_psr.ok_value() 
+        if not result_psr.is_ok():
+            result_psr.err_value().variables = {
+                "n_sym_associated": len(dfevent.at["sym_matrix"])
+            }
+            return [result_psr]  # Err()
+        else:
+            output_psr = result_psr.ok_value()
 
-            displacement = dfevent.at['saddle_positions'] - dfevent.at['initial_positions']
+            displacement = (
+                dfevent.at["saddle_positions"] - dfevent.at["initial_positions"]
+            )
 
-            all_results = [] 
-            #Apply symmetries : 
+            all_results = []
+            # Apply symmetries :
 
             current_positions = self.system.positions.copy()
-            for sym_matrix, perm_matrix in zip(dfevent.at['sym_matrix'],dfevent.at['sym_perm']):
-                new_displacement = geometry.transform_positions(displacement, sym_matrix, 0, perm_matrix) 
-                saddle_positions = dfevent.at['initial_positions']+new_displacement
-                new_positions = geometry.transform_positions(saddle_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                neighbors = self.neighbors_list.get_neighbors('rcut', at_idx)
+            for sym_matrix, perm_matrix in zip(
+                dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
+            ):
+                new_displacement = geometry.transform_positions(
+                    displacement, sym_matrix, 0, perm_matrix
+                )
+                saddle_positions = dfevent.at["initial_positions"] + new_displacement
+                new_positions = geometry.transform_positions(
+                    saddle_positions,
+                    output_psr.rotation_matrix,
+                    output_psr.translation_matrix,
+                    output_psr.permutation_matrix,
+                )
+                neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
                 self.system.update_positions(new_positions, atom_idx=neighbors)
 
                 result_refine = self.engine.refine_event(self.system, at_idx)
 
-                count +=1 
-                self.loggers.progress_bar('progress', count, total_refinements )
+                count += 1
+                self.loggers.progress_bar("progress", count, total_refinements)
 
-                if result_refine.is_ok() :  
+                if result_refine.is_ok():
                     result_refine.ok_value().num_reference_event = cat_idx
-                    result_refine = self.check_refinement_minima(result_refine.ok_value(), current_positions, at_idx, self.config.eventsearch.refined_minimum_delr_thr)
-                    if result_refine.is_ok() : 
-                        result_refine = self.check_refinement_energy(result_refine, abs(result_refine.ok_value().dE_forward-dfevent['energy_barrier']), self.config.eventsearch.refined_energy_thr)
+                    result_refine = self.check_refinement_minima(
+                        result_refine.ok_value(),
+                        current_positions,
+                        at_idx,
+                        self.config.eventsearch.refined_minimum_delr_thr,
+                    )
+                    if result_refine.is_ok():
+                        result_refine = self.check_refinement_energy(
+                            result_refine,
+                            abs(
+                                result_refine.ok_value().dE_forward
+                                - dfevent["energy_barrier"]
+                            ),
+                            self.config.eventsearch.refined_energy_thr,
+                        )
                 self.system.update_positions(current_positions)
                 all_results.append(result_refine)
             return all_results
-        
 
-    def check_refinement_minima(self, result_refine: EventRefinementOutput, current_positions, at_idx: int, minimum_delr_thr: float ) -> Result[EventRefinementOutput, ErrorInfo] : 
-        """Find if min1 or min2 is initial positions """ 
-        #To deal with pbc problem and lammps slighlty over/under box positions 
-        dr1_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - result_refine.min1_positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
-        dr2_vec, _ = ase.geometry.find_mic(current_positions[at_idx] - result_refine.min2_positions[at_idx],cell=self.system.cell,pbc=self.system.pbc)
-        #compare only atom that move 
+    def check_refinement_minima(
+        self,
+        result_refine: EventRefinementOutput,
+        current_positions: np.ndarray,
+        at_idx: int,
+        minimum_delr_thr: float,
+    ) -> Result[EventRefinementOutput, ErrorInfo]:
+        """Find if which of the first or second minimum correspond to the current positions of the system.
+
+        It compare the distance between the central atom in the current positions and its positions in the first and second minima.
+
+        Parameters
+        ----------
+        result_refine : EventRefinementOutput
+            dataclass with information from the refinement procedure.
+        current_positions : np.ndarray
+            current positions of the system.
+        at_idx : int
+            index of the central atom.
+        minimum_delr_thr : float
+            maximum distance to consider the event valid, ie that one minima correspond to the current positions.
+
+        Returns
+        -------
+        Result[EventRefinementOutput, ErrorInfo]
+            List of results of the procedure.
+
+        """
+        # To deal with pbc problem and lammps slighlty over/under box positions
+        dr1_vec, _ = ase.geometry.find_mic(
+            current_positions[at_idx] - result_refine.min1_positions[at_idx],
+            cell=self.system.cell,
+            pbc=self.system.pbc,
+        )
+        dr2_vec, _ = ase.geometry.find_mic(
+            current_positions[at_idx] - result_refine.min2_positions[at_idx],
+            cell=self.system.cell,
+            pbc=self.system.pbc,
+        )
+        # compare only atom that move
         dr1 = np.sum(np.abs(dr1_vec))
         dr2 = np.sum(np.abs(dr2_vec))
 
-        if dr1 > minimum_delr_thr and dr2 > minimum_delr_thr : 
-            return Err(ErrorInfo(type=ErrorType.REFINEMENT_INVALID_MINIMA, 
-                                 message="Mismatch between current positions and minima positions of the refined event."))
+        if dr1 > minimum_delr_thr and dr2 > minimum_delr_thr:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                    message="Mismatch between current positions and minima positions of the refined event.",
+                )
+            )
 
-        elif dr1 < dr2 : 
+        elif dr1 < dr2:
             return Ok(result_refine)
-        else : 
-            result_refine.min1_positions, result_refine.min2_positions = result_refine.min2_positions, result_refine.min1_positions
+        else:
+            result_refine.min1_positions, result_refine.min2_positions = (
+                result_refine.min2_positions,
+                result_refine.min1_positions,
+            )
             return Ok(result_refine)
 
+    def check_refinement_energy(
+        self,
+        result_refine: Result[EventRefinementOutput, ErrorInfo],
+        energy_mismatch: float,
+        refined_energy_thr: float,
+    ) -> Result[EventRefinementOutput, ErrorInfo]:
+        """Check if the energy barrier of the refinement correspond the one of the reference event.
 
-    def check_refinement_energy(self, result_refine: Result[EventRefinementOutput, ErrorInfo], energy_mismatch: float, refined_energy_thr: float) -> Result[EventRefinementOutput, ErrorInfo] : 
-        if energy_mismatch > refined_energy_thr : 
-            return Err(ErrorInfo(type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER, 
-                             message = "refinement energy barrier does not match reference one"))
-        else : 
+        Parameters
+        ----------
+        result_refine : Result[EventRefinementOutput, ErrorInfo]
+            Results of the refinement procedure.
+        energy_mismatch : float
+            Difference between the reference event energy barrier and the refine one.
+        refined_energy_thr : float
+            maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy
+
+        Returns
+        -------
+        Result[EventRefinementOutput, ErrorInfo]
+            list of results of the procedure.
+
+        """
+        if energy_mismatch > refined_energy_thr:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER,
+                    message="refinement energy barrier does not match reference one",
+                )
+            )
+        else:
             return result_refine
-        
-    def get_total_refinements_todo(self, df_reference_events: pd.DataFrame ) -> int : 
-        total = 0 
-        for idx, dfevent in df_reference_events.iterrows() :  
+
+    def get_total_refinements_todo(self, df_reference_events: pd.DataFrame) -> int:
+        """Give the total number of refinements to do.
+
+        Parameters
+        ----------
+        df_reference_events : pd.DataFrame
+            dataframe with reference events to refine.
+
+        Returns
+        -------
+        int
+            total number of refinements to do.
+
+        """
+        total = 0
+        for _idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
-            total += len(self.atomic_environment.get_atoms_with_id(dfevent["event_id"]))*len(dfevent["sym_matrix"])
+            total += len(
+                self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
+            ) * len(dfevent["sym_matrix"])
         return total
 
-    def get_successes_results(self) -> list[EventRefinementOutput]: 
+    def get_successes_results(self) -> list[EventRefinementOutput]:
+        """Return successful results.
+
+        Returns
+        -------
+        list[EventRefinementOutput]
+            list of EventRefinementOutpout dataclass with refine event's informations.
+
+        """
         return [e.ok_value() for e in self.results if e.is_ok()]

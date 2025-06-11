@@ -50,24 +50,24 @@ class KMC:
 
     Attributes
     ----------
-        config : Config
-            The parameters of the simulation.
-        loggers : LogKMC
-            Handle logging of simulation progress.
-        system : System
-            The atomic system.
-        engine : Engine
-            The E/F engine used.
-        neighbors_list : NeighborsList
-            Store neighbors of atoms in the system.
-        atomic_environment : AtomicEnvironment
-            Store atomic environment of atoms in the system
-        reference_table : ReferenceEventTable
-            Store generic events that can be apply to the system.
-        visited_environment : set[str|bytes]
-            Track atomic environments already explored. Those for which event searches as been previously done.
-        total_energy : float
-            The total energy of the system.
+    config : Config
+        The parameters of the simulation.
+    loggers : LogKMC
+        Handle logging of simulation progress.
+    system : System
+        The atomic system.
+    engine : Engine
+        The E/F engine used.
+    neighbors_list : NeighborsList
+        Store neighbors of atoms in the system.
+    atomic_environment : AtomicEnvironment
+        Store atomic environment of atoms in the system
+    reference_table : ReferenceEventTable
+        Store generic events that can be apply to the system.
+    visited_environment : set[str|bytes]
+        Track atomic environments already explored. Those for which event searches as been previously done.
+    total_energy : float
+        The total energy of the system.
 
     """
 

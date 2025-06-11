@@ -31,6 +31,7 @@
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.
+   NOT WORKING
   </details>
 - **`n_steps`** : `int`, mandatory
   <details><summary>Description</summary>

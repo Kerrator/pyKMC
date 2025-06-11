@@ -1,38 +1,109 @@
-from .result import Result, EventSearchOutput, ErrorInfo
+"""Module implementing the EventSearch class that deals with the event search procedure."""
+
+from .result import EventSearchOutput
+from .system import System
+from .engine import Engine
+from .log import LogKMC
 from .utils.geometry import translate
-import numpy as np 
+import numpy as np
 
 
-class EventSearch() : 
+class EventSearch:
+    """Perform event searches and manage results.
 
-    def __init__(self, system, engine, loggers) : 
+    Parameters
+    ----------
+    system : System
+        The atomic system.
+    engine : Engine
+        The engine used to perform the event search.
+    loggers : LogKMC
+        The KMC simulation loggers.
 
-        self.system = system 
-        self.engine = engine 
+    """
+
+    def __init__(self, system: System, engine: Engine, loggers: LogKMC) -> None:
+        self.system = system
+        self.engine = engine
         self.loggers = loggers
         self.results = None
 
-    def execute(self, central_atom_research_list: list[int] ) -> list[Result[EventSearchOutput, ErrorInfo]] : 
+    def execute(self, central_atom_research_list: list[int]) -> None:
+        """Execute an event search for each central atom in the central_atom_research_list list.
+
+        It stores the results of the event searches in self.results
+
+        Parameters
+        ----------
+        central_atom_research_list : list[int]
+            list of central atom around which we will perform the event search.
+
+        """
         self.results = []
-        self.loggers.info('log', '\t :=> Searching {} reference events'.format(len(central_atom_research_list))) 
-        for i, at_idx in enumerate(central_atom_research_list) : 
+        self.loggers.info(
+            "log",
+            "\t :=> Searching {} reference events".format(
+                len(central_atom_research_list)
+            ),
+        )
+        for i, at_idx in enumerate(central_atom_research_list):
             event_search_output = self.engine.search_event(self.system, at_idx)
             self.results.append(event_search_output)
-            self.loggers.progress_bar('progress', i+1, len(central_atom_research_list))
-    
-    def _center_event_positions(self, event_search_output: EventSearchOutput) : 
-        #Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr 
-        cell = self.system.cell
-        ax, ay, az = cell[0][0], cell[1][1], cell[2][2] 
-        #displacement 
-        move_atom_idx = event_search_output.move_atom_index        
-        dx, dy, dz = ax/2 - event_search_output.min1_positions[move_atom_idx][0],  ay/2 - event_search_output.min1_positions[move_atom_idx][1], az/2 - event_search_output.min1_positions[move_atom_idx][2]
-        displacement = np.array([dx, dy, dz])
-        event_search_output.min1_positions = translate(event_search_output.min1_positions, displacement, cell)
-        event_search_output.saddle_positions = translate(event_search_output.saddle_positions, displacement, cell)
-        event_search_output.min2_positions = translate(event_search_output.min2_positions, displacement, cell)
-        return event_search_output   
+            self.loggers.progress_bar(
+                "progress", i + 1, len(central_atom_research_list)
+            )
 
-    def get_successes_results(self) -> list[EventSearchOutput]: 
-        return [self._center_event_positions(e.ok_value()) for e in self.results if e.is_ok()] 
-    
+    def _center_event_positions(
+        self, event_search_output: EventSearchOutput
+    ) -> EventSearchOutput:
+        """Translate positions of the events so that the atom that move the most during the event is at the center of the simulation box.
+
+        It is used to that when we store positions in the reference table around the atom that move the most we don't have periodic bound problems.
+
+        Parameters
+        ----------
+        event_search_output : EventSearchOutput
+            The dataclass countaining the event search outputs.
+
+        Returns
+        -------
+        EventSearchOutput
+            The dataclass countaining the event search outputs with translated positions.
+
+        """
+        # Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr
+        cell = self.system.cell
+        ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
+        # displacement
+        move_atom_idx = event_search_output.move_atom_index
+        dx, dy, dz = (
+            ax / 2 - event_search_output.min1_positions[move_atom_idx][0],
+            ay / 2 - event_search_output.min1_positions[move_atom_idx][1],
+            az / 2 - event_search_output.min1_positions[move_atom_idx][2],
+        )
+        displacement = np.array([dx, dy, dz])
+        event_search_output.min1_positions = translate(
+            event_search_output.min1_positions, displacement, cell
+        )
+        event_search_output.saddle_positions = translate(
+            event_search_output.saddle_positions, displacement, cell
+        )
+        event_search_output.min2_positions = translate(
+            event_search_output.min2_positions, displacement, cell
+        )
+        return event_search_output
+
+    def get_successes_results(self) -> list[EventSearchOutput]:
+        """Return a list of only successful event searches.
+
+        Returns
+        -------
+        list[EventSearchOutput]
+            List of successful event searches.
+
+        """
+        return [
+            self._center_event_positions(e.ok_value())
+            for e in self.results
+            if e.is_ok()
+        ]

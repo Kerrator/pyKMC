@@ -22,6 +22,21 @@ nav:
       - Config: api/config.md
       - Log: api/log.md
       - Algorithms: api/algorithms.md
+      - KMC: api/kmc.md 
+      - Environments: api/environments.md
+      - Engine: api/engine.md
+      - LammpsEngine: api/lammpsengine.md
+      - EventTable : api/event_table.md
+      - EventSearch : api/eventsearch.md
+      - Refinement : api/refinement.md
+      - PointSetRegistration : api/point_set_registration.md
+      - Symmetries : api/symmetries.md
+      - RateConstante : api/rate_constant.md
+      - Initialize : api/initializer.md
+      - Result : api/result.md
+      - Info: api/info_simulations.md
+      - Utils: api/utils.md
+      - run : api/run.md
 
 markdown_extensions:
   - pymdownx.arithmatex:
