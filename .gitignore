@@ -49,3 +49,6 @@ examples/tutorial/input.in
 *pykmc.info 
 *visited_environments.pickle
 *pykmc.egg-info/*
+*PKG-INFO 
+*SOURCES.txt 
+*requires.txt
