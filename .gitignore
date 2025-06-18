@@ -48,4 +48,4 @@ examples/tutorial/input.in
 *pykmc.out 
 *pykmc.info 
 *visited_environments.pickle
-pykmc.egg-info/*
+*pykmc.egg-info/*
