@@ -45,3 +45,6 @@ examples/tutorial/input.in
 */allcrystal.xyz
 *tmp.err
 *reference_table.pickle
+*pykmc.out 
+*pykmc.info 
+*visited_environments.pickle
