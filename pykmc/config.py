@@ -126,7 +126,7 @@ class EventSearchConfig(BaseModel):
     )
     refined_energy_thr: float = Field(
         default=0.2,
-        description="Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
+        description="Maximumallowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
     )
     
 

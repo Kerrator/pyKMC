@@ -377,7 +377,7 @@ class LogKMC(LogManager):
         )
 
         max_key_len = max(
-            len(str(key)) for section, model in config for key, value in model
+            len(str(key)) for section, model in config for key, value in model if key is not None
         )
 
         for section, model in config:
