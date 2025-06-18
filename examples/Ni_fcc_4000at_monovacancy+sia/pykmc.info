@@ -1,0 +1,1224 @@
+---
+step: 0
+atomic_environment_info:
+  total_atomic_environments_encounter: 1
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 4
+  atoms_grouped_by_environment:
+    - [1863, 1871]
+    - [1864, 1904, 2264, 2304]
+    - [1867, 3999]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 40
+  n_successes: 6
+  n_fails:
+    no_event_found: 29
+    minima_not_matching_positions: 5
+valid_event_info:
+  n_valid_events: 5
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 1
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 4
+    event not found: 0
+
+---
+step: 1
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1865, 2665]
+    - [2264, 2268, 2304, 2308]
+    - [2265, 3999]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 3
+    event not found: 0
+
+---
+step: 2
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [2265, 2306]
+    - [2266, 2346]
+    - [2304, 2308, 2704, 2708]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 1
+
+---
+step: 3
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1865, 2665]
+    - [2264, 2268, 2304, 2308]
+    - [2265, 3999]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 1
+    event not found: 0
+
+---
+step: 4
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1826, 1906]
+    - [1864, 1868, 2264, 2268]
+    - [1866, 3999]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 1
+
+---
+step: 5
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1827, 1835]
+    - [1828, 1868, 2228, 2268]
+    - [1831, 1866]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 0
+    event not found: 0
+
+---
+step: 6
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1429, 2229]
+    - [1828, 1832, 1868, 1872]
+    - [1829, 1831]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 1
+
+---
+step: 7
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1430, 1510]
+    - [1468, 1472, 1868, 1872]
+    - [1470, 1829]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 2
+    event not found: 0
+
+---
+step: 8
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1427, 1435]
+    - [1428, 1468, 1828, 1868]
+    - [1431, 1829]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 3
+    invalid min: 1
+    event not found: 0
+
+---
+step: 9
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1426, 1506]
+    - [1431, 1466]
+    - [1464, 1468, 1864, 1868]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 3
+    event not found: 1
+
+---
+step: 10
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1466, 1471]
+    - [1467, 1475]
+    - [1468, 1508, 1868, 1908]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 2
+
+---
+step: 11
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1069, 1869]
+    - [1468, 1472, 1508, 1512]
+    - [1469, 1471]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 1
+    event not found: 2
+
+---
+step: 12
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1067, 1075]
+    - [1068, 1108, 1468, 1508]
+    - [1071, 1469]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 0
+    event not found: 0
+
+---
+step: 13
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [669, 1471]
+    - [1068, 1072, 1108, 1112]
+    - [1069, 1469]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 1
+
+---
+step: 14
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1071, 1079]
+    - [1072, 1112, 1472, 1512]
+    - [1075, 1469]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 0
+
+---
+step: 15
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1070, 1150]
+    - [1108, 1112, 1508, 1512]
+    - [1110, 1469]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 0
+
+---
+step: 16
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [709, 1509]
+    - [1108, 1112, 1148, 1152]
+    - [1109, 1110]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 1
+
+---
+step: 17
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1107, 1115]
+    - [1108, 1148, 1508, 1548]
+    - [1110, 1111]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 2
+    event not found: 1
+
+---
+step: 18
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1106, 1186]
+    - [1111, 1146]
+    - [1144, 1148, 1544, 1548]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 2
+
+---
+step: 19
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1107, 1115]
+    - [1108, 1148, 1508, 1548]
+    - [1110, 1111]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 1
+
+---
+step: 20
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1109, 1909]
+    - [1110, 1509]
+    - [1508, 1512, 1548, 1552]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 0
+
+---
+step: 21
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1107, 1115]
+    - [1108, 1148, 1508, 1548]
+    - [1110, 1111]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 0
+
+---
+step: 22
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [709, 1509]
+    - [1108, 1112, 1148, 1152]
+    - [1109, 1110]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 52
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 0
+
+---
+step: 23
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1110, 1115]
+    - [1111, 1119]
+    - [1112, 1152, 1512, 1552]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 0
+
+---
+step: 24
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1074, 1154]
+    - [1112, 1116, 1512, 1516]
+    - [1114, 1115]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 48
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 2
+    event not found: 2
+
+---
+step: 25
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1073, 1873]
+    - [1114, 1473]
+    - [1472, 1476, 1512, 1516]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 49
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 2
+
+---
+step: 26
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1466, 1479]
+    - [1472, 1512, 1872, 1912]
+    - [1473, 1475]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 47
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 3
+    event not found: 1
+
+---
+step: 27
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1471, 2269]
+    - [1475, 1869]
+    - [1868, 1872, 1908, 1912]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 1
+    invalid min: 1
+    event not found: 0
+
+---
+step: 28
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1869, 1910]
+    - [1870, 1950]
+    - [1908, 1912, 2308, 2312]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 52
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 0
+
+---
+step: 29
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1907, 1915]
+    - [1908, 1948, 2308, 2348]
+    - [1910, 1911]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 52
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 0
+
+---
+step: 30
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1869, 1990]
+    - [1910, 1950]
+    - [1948, 1952, 2348, 2352]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 51
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 1
+    event not found: 0
+
+---
+step: 31
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1950, 1955]
+    - [1951, 1959]
+    - [1952, 1992, 2352, 2392]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 52
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 0
+
+---
+step: 32
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1630, 1910]
+    - [1950, 1990]
+    - [1988, 1992, 2388, 2392]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 2
+
+---
+step: 33
+atomic_environment_info:
+  total_atomic_environments_encounter: 5
+  n_current_atomic_environments: 5
+  n_new_atomic_environments: 0
+  atoms_grouped_by_environment:
+    - [1989, 2789]
+    - [1990, 2389]
+    - [2028, 2032, 2388, 2392]
+    - [2450, 2451, 2455, 2490, 2848, 2849, 2850, 2851, 2854, 2887, 2889, 2891]
+reference_event_searches_info:
+  total_event_searches: 0
+  n_successes: 0
+  n_fails:
+    no_event_found: 0
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 0
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 52
+  n_sucesses: 50
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 2
+

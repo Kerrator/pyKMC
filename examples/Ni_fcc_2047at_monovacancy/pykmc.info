@@ -1,0 +1,33 @@
+---
+step: 0
+atomic_environment_info:
+  total_atomic_environments_encounter: 1
+  n_current_atomic_environments: 2
+  n_new_atomic_environments: 1
+  atoms_grouped_by_environment:
+  - [1133, 1135, 1139, 1164, 1165, 1166, 1167, 1170, 1388, 1419, 1420, 1423]
+reference_event_searches_info:
+  total_event_searches: 3
+  n_successes: 1
+  n_fails:
+    no_event_found: 2
+    minima_not_matching_positions: 0
+valid_event_info:
+  n_valid_events: 1
+  invalid_events:
+    dE > emax_event: 0
+    dE < emin_event: 0
+    dE inverse < emin_event: 0
+    Event asymmetric: 0
+    Event already in reference table: 0
+refinements_info:
+  n_attempts: 12
+  n_sucesses: 12
+  n_fails:
+    psr:
+      no match found: 0
+      matching score > matching thr: 0
+    invalid dE: 0
+    invalid min: 0
+    event not found: 0
+

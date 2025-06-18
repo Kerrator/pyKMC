@@ -1,6 +1,10 @@
 site_name: pyKMC
 theme:
   name: material
+  palette:
+    scheme: slate
+    primary: blue grey
+    accent: orange
   features:
   - content.code.copy  # Ajoute un bouton "Copier" sur les blocs de code
   - content.code.annotate  # Active le surlignage de syntaxe
@@ -10,6 +14,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: installation.md
+  - User Guide : user_guide.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters : parameters.md
   - Tutorial: 
@@ -41,6 +46,12 @@ nav:
 markdown_extensions:
   - pymdownx.arithmatex:
   - mdx_include:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
 
 plugins:
   - mkdocstrings:
@@ -56,5 +67,5 @@ plugins:
             show_root_heading: true
   - search:
   - mkdocs-jupyter:
-
+use_directory_urls: false
 site_url: https://hugomoison.github.io/pyKMC/
