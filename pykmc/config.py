@@ -333,6 +333,7 @@ class Config(BaseModel):
 
         """
         parser = configparser.ConfigParser()
+        parser.optionxform = str
         parser.read(ini_path)
 
         config_dict: dict[str, dict[str, Any]] = {
