@@ -52,8 +52,7 @@ class ReferenceEventTable:
         results_is_valid_events = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
-            results_is_valid_events.append(
-                self.is_valid_new_event(
+            res = self.is_valid_new_event(
                     min1_positions=ev.min1_positions,
                     saddle_positions=ev.saddle_positions,
                     min2_positions=ev.min2_positions,
@@ -62,10 +61,19 @@ class ReferenceEventTable:
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
                 )
-            )
-        df_valid_events = self.get_valid_events(results_is_valid_events)
-        for df in df_valid_events:
-            self.add(df)
+            results_is_valid_events.append(res)
+            if res.is_ok() : 
+                self.add(res.ok_value()) 
+        #df_valid_events = self.get_valid_events(results_is_valid_events)
+
+
+        #Check if events in results are not the same : 
+
+
+
+
+        #for df in df_valid_events:
+        #    self.add(df)
 
         return results_is_valid_events
 
