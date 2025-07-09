@@ -168,8 +168,11 @@ def pARTn_refine_event(
     artn.set("engine_units", "lammps/metal")
     artn.set("verbose", config.partn.verbosity)
     artn.set("struc_format_out", "none")
-    artn.set("lpush_final", True)
+    artn.set("lpush_final", False)
     artn.set("ninit", 0)
+    artn.set("lanczos_min_size", 30)
+    artn.set("lanczos_max_size", 50)
+    artn.set("nperp_limitation", [200])
     artn.set("forc_thr", config.partn.forc_thr)
     artn.set("push_mode", "list")
     artn.set("push_step_size", config.partn.push_step_size)
@@ -187,35 +190,13 @@ def pARTn_refine_event(
     err = artn.get_runparam("error_message")
     if not err:
         E_sad = artn.extract("etot_sad")
-        E_min1 = artn.extract("etot_min1")
-        E_min2 = artn.extract("etot_min2")
-
-        dE_forward = E_sad - E_min1
-        dE_backward = E_sad - E_min2
-
-        min1positions = artn.extract("tau_min1")
-        min2positions = artn.extract("tau_min2")
         saddlepositions = artn.extract("tau_sad")
-
-        # TEST CHECK IF ATOM MOVE SAME AS CENTRAL ATOM IDX
-        # TODO either putting rcut in function parameters or remove this
-        dist = (min1positions - saddlepositions) ** 2
-        dist = dist.sum(axis=-1)
-        dist = np.sqrt(dist)
-        dist[dist > config.atomicenvironment.rcut] = (
-            0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
-        )
-        index_move = np.argmax(dist)
 
         return Ok(
             EventRefinementOutput(
                 central_atom_index=central_atom_idx,
-                min1_positions=min1positions,
-                min2_positions=min2positions,
                 saddle_positions=saddlepositions,
-                dE_forward=dE_forward,
-                dE_backward=dE_backward,
-                move_atom_index=index_move,
+                E_saddle= E_sad
             )
         )
 

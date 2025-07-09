@@ -39,25 +39,31 @@ def unique_symmetries(
 
     # Find unique symmetries
     # Displacment event matrix
-    displacements = initial_positions - final_positions
+    #displacements = initial_positions - final_positions
 
-    unique_displacements = [displacements]
+    #unique_displacements = [displacements]
+    unique_displacements = [final_positions]
     unique_sym_index = []
 
     for i in range(len(sym.matrix)):  # Loop over all symmetries
         is_duplicated = False
         # Apply symmetry to displacements event matrix
-        new_displacements = displacements @ sym.matrix[i].T
-        new_displacements = new_displacements[sym.perm[i]]
+        #new_displacements = displacements @ sym.matrix[i].T
+        new_final_positions = final_positions @ sym.matrix[i].T
+        #new_displacements = new_displacements[sym.perm[i]]
+        new_final_positions = new_final_positions[sym.perm[i]]
 
-        for disp in unique_displacements:  # Check if alreay in unique_displacements
-            if np.allclose(disp, new_displacements, atol=1e-2, rtol=0):
+        #for disp in unique_displacements:  # Check if alreay in unique_displacements
+        for pos in unique_displacements:  # Check if alreay in unique_displacements
+            #if np.allclose(disp, new_displacements, atol=1e-1, rtol=0):
+            if np.allclose(pos, new_final_positions, atol=1e-1, rtol=0):
                 is_duplicated = True
                 break
 
         if not is_duplicated:  # if new unique symmetry
             unique_sym_index.append(i)  # add symmtry to unique
-            unique_displacements.append(new_displacements)
+            #unique_displacements.append(new_displacements)
+            unique_displacements.append(new_final_positions)
 
     # unique symetries and add identity :
     sym_matrix = np.concatenate(
