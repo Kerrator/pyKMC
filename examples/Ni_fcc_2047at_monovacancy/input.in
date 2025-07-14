@@ -1,6 +1,6 @@
 [Control] 
 initial_config = ./initial_config.xyz 
-n_steps = 1
+n_steps = 10
 engine = lammps
 verbosity = 2
 
@@ -11,11 +11,11 @@ pair_coeff = * * ./Ni_v6_2.0_LKBeland2016.eam Ni
 [AtomicEnvironment] 
 style = cna/graph
 rnei = 3.01
-rcut = 6.5
+rcut = 6.0
 
 [EventSearch] 
 style = partn
-nsearch = 3
+nsearch = 10
 emax_event = 5.0
 emin_event = 0.0
 

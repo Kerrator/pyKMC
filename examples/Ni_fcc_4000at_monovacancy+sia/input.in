@@ -3,27 +3,26 @@ initial_config = ./initial_config.xyz
 n_steps = 5
 engine = lammps
 verbosity = 2
-reference_table = reference_table.pickle
-visited_environments = visited_environments.pickle
+#reference_table = reference_table.pickle
+#visited_environments = visited_environments.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
 pair_coeff = * * ./Ni_v6_2.0_LKBeland2016.eam Ni
+min_style = cg 
+minimize = 1e-10 1e-12 10000 10000
 
 [AtomicEnvironment] 
 style = cna/graph
-rnei = 3.01
-rcut = 8.0
-neighbors_add = 1
+rnei = 3.0
+rcut = 6.0
+#neighbors_add = 1
 
 [EventSearch] 
 style = partn
-rcutenv = 6.5
 nsearch = 10
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 emax_event = 5.0
 emin_event = 0.0
-partn_delr_threshold = 0.4
 
 [pARTn] 
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
@@ -35,7 +34,7 @@ T = 300.0
 
 [PSR] 
 style = ira 
-matching_score_thr = 0.3
+matching_score_thr = 0.4
 
 [IRA]
 kmax_factor = 2.0
