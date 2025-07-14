@@ -134,7 +134,6 @@ class KMC:
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
             )
-
             ##=>Refines all event in subset
             refinement = self.execute_refinements(subset_reference_event_table)
 

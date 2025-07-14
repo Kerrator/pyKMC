@@ -177,77 +177,12 @@ class Refinement:
                             ),
                             self.config.eventsearch.refined_energy_thr,
                         )
-                if result_refine.is_ok() == False : 
-                    if sym_matrix[0][0] == 1 and sym_matrix[1][1] == 1 and sym_matrix[2][2] == 1 : 
-                        print("Fails Symmetric event")
-                    else : 
-                        print("Fail but not symmetric")
                 self.system.update_positions(current_positions)
                 all_results.append(result_refine)
             return all_results
 
 
 
-#    def check_refinement_minima(
-#        self,
-#        result_refine: EventRefinementOutput,
-#        current_positions: np.ndarray,
-#        at_idx: int,
-#        minimum_delr_thr: float,
-#    ) -> Result[EventRefinementOutput, ErrorInfo]:
-#        """Find if which of the first or second minimum correspond to the current positions of the system.
-#
-#        It compare the distance between the central atom in the current positions and its positions in the first and second minima.
-#
-#        Parameters
-#        ----------
-#        result_refine : EventRefinementOutput
-#            dataclass with information from the refinement procedure.
-#        current_positions : np.ndarray
-#            current positions of the system.
-#        at_idx : int
-#            index of the central atom.
-#        minimum_delr_thr : float
-#            maximum distance to consider the event valid, ie that one minima correspond to the current positions.
-#
-#        Returns
-#        -------
-#        Result[EventRefinementOutput, ErrorInfo]
-#            List of results of the procedure.
-#
-#        """
-#        # To deal with pbc problem and lammps slighlty over/under box positions
-#        dr1_vec, _ = ase.geometry.find_mic(
-#            current_positions[at_idx] - result_refine.min1_positions[at_idx],
-#            cell=self.system.cell,
-#            pbc=self.system.pbc,
-#        )
-#        dr2_vec, _ = ase.geometry.find_mic(
-#            current_positions[at_idx] - result_refine.min2_positions[at_idx],
-#            cell=self.system.cell,
-#            pbc=self.system.pbc,
-#        )
-#        # compare only atom that move
-#        dr1 = np.sum(np.abs(dr1_vec))
-#        dr2 = np.sum(np.abs(dr2_vec))
-#
-#        if dr1 > minimum_delr_thr and dr2 > minimum_delr_thr:
-#            return Err(
-#                ErrorInfo(
-#                    type=ErrorType.REFINEMENT_INVALID_MINIMA,
-#                    message="Mismatch between current positions and minima positions of the refined event.",
-#                )
-#            )
-#
-#        elif dr1 < dr2:
-#            return Ok(result_refine)
-#        else:
-#            result_refine.min1_positions, result_refine.min2_positions = (
-#                result_refine.min2_positions,
-#                result_refine.min1_positions,
-#            )
-#            return Ok(result_refine)
-#
     def check_refinement_energy(
         self,
         result_refine: Result[EventRefinementOutput, ErrorInfo],
