@@ -165,6 +165,7 @@ class LammpsEngine:
         result = pARTn_search(lmp, self.config, central_atom)
         if result.is_ok():
             result.ok_value().cell = system.cell
+        lmp.close()
         return result
 
     def pARTn_refine_event(
