@@ -132,8 +132,10 @@ class LammpsEngine:
             # convert ctype positions into a numpy array
             positions = np.ctypeslib.as_array(positions)
             positions = np.reshape(positions, (-1, 3))
+            lmp.close()
             return positions, total_energy
         else:
+            lmp.close()
             return None
 
     def pARTn(
@@ -165,6 +167,7 @@ class LammpsEngine:
         result = pARTn_search(lmp, self.config, central_atom)
         if result.is_ok():
             result.ok_value().cell = system.cell
+        lmp.close()
         return result
 
     def pARTn_refine_event(
@@ -189,6 +192,7 @@ class LammpsEngine:
         self._initialize_default(system, lmp)
         self._initialize_potential(lmp)
         result = pARTn_refine_event(lmp, self.config, central_atom)
+        lmp.close()
         return result
 
     def compute_potential_energy(self, system: System) -> float:
@@ -212,6 +216,7 @@ class LammpsEngine:
         lmp.command("compute c1 all pe")
         lmp.command("run 0")
         potential_energy = lmp.extract_compute("c1", 0, 0)
+        lmp.close()
         return potential_energy
 
     def compute_distances(self, system: System) -> None:
