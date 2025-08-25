@@ -1,6 +1,9 @@
 from pykmc.enginemanager.lmpi.engines.mpi_api_engine import MpiApiEngine
 from pykmc.enginemanager.lmpi.sessions.mpi_api_sessions import MpiApiSession
+from pykmc import System
 from mpi4py import MPI 
+import pytest
+from pytest_lazy_fixtures import lf
 import os
 import time
 
@@ -73,13 +76,16 @@ class TestLammpsApiMpiEngine :
 
         session.close() 
 
+        time.sleep(4)
         # Test if command was sent to lammps : 
         logfile = os.path.join(os.getcwd(), 'lammps.log.0')
         with open(logfile) as f : 
             log_text = f.read() 
         assert 'units metal' in log_text
 
-    def test_initialize_session(self) : 
+
+    @pytest.mark.parametrize("system", [lf("system_single_type_fcc")])
+    def test_initialize_session(self, system: System) : 
         comm = MPI.COMM_WORLD 
         rank = comm.Get_rank() 
         size = comm.Get_size() 
@@ -102,10 +108,11 @@ class TestLammpsApiMpiEngine :
         
         # ------------ SESSION CODE (rank 0) ------------
         session = MpiApiSession(engine_ranks=engine_ranks, session_id=0)
-        session.initialize()
+        session.initialize_parameters()
+        session.initialize_system(system)
         session.command("log flush")
         session.close() 
-        time.sleep(0.5)
+        time.sleep(1.5)
         # Test if command was sent to lammps : 
         logfile = os.path.join(os.getcwd(), 'lammps.log.0')
         with open(logfile) as f : 
@@ -115,6 +122,8 @@ class TestLammpsApiMpiEngine :
         assert 'dimension 3' in log_text
         assert 'boundary p p p' in log_text
         assert 'atom_modify sort 0 0.0' in log_text
+        assert 'region box' in log_text 
+        assert 'create_box' in log_text 
 
 
         

@@ -1,5 +1,5 @@
 from mpi4py import MPI 
-from ..helpers import initialize_parameters
+from ..lammps_operations import initialize_parameters, initialize_system
 
 class MpiApiSession : 
     """A class to manage an MPI API session for LAMMPS.
@@ -70,6 +70,16 @@ class MpiApiSession :
         return self._is_busy
     
     #ACTIONS 
+    def initialize_parameters(self) -> None : 
+        """ 
+        Initialize LAMMPS engine with default parameters
+        """
+        print(f"[Session] Initializing Lammps parameters")
+        self.send_message({"type": "initialize_parameters"})
 
-    def initialize(self) : 
-        initialize_parameters(self)
+    def initialize_system(self, system) -> None : 
+        """ 
+        Initialize Lammps system
+        """
+        print(f"[Session] Initializing Lammps System")
+        self.send_message({"type": "initialize_system", "value": system})
