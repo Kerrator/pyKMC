@@ -2,6 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
+from ..helpers import initialize_parameters, initialize_system
 
 
 class MpiApiEngine() : 
@@ -17,6 +18,14 @@ class MpiApiEngine() :
         self._is_busy = False 
         self.message_reader_thread = None 
         self.message_queue = queue.Queue() #Queue to hold messages from the session 
+
+        # Dispatch map of possible lammps operation
+        self._operations_map = {
+            "close" : self.close,
+            "command": self.command,
+        } 
+
+
 
     def start(self) -> None : 
         """Start Lammps"""
@@ -91,31 +100,39 @@ class MpiApiEngine() :
 
     def _handle_message(self, msg: dict) -> None:
         """Handle incoming messages from the session."""
-        msg_type = msg.get("type")
-        if msg_type == "close":
-            self.engine_comm.barrier()  # synchronise every rank to close properly 
-            self.close()
-        elif msg_type == "command":
-            cmd = msg.get("value")
-            if cmd:
-                self.engine_comm.barrier()  # Ensure all ranks are synchronized before sending the command
-                try : 
-                    self.command(cmd)
-                except Exception as e:
-                    print(f"[Engine Rank {self.rank}] Error executing command '{cmd}': {e}")
-                self.engine_comm.barrier()  # Ensure all ranks are synchronized after sending the command
 
-        elif msg_type == "partn" : 
-            central_atom = msg.get("value")
-            if central_atom is not None:
-                try:
-                    self.engine_comm.barrier()  # Ensure all ranks are synchronized before sending the command
-                    self.partn(central_atom)
-                    self.engine_comm.barrier()  # Ensure all ranks are synchronized after sending the command
-                except Exception as e:
-                    print(f"[Engine Rank {self.rank}] Error executing partn for atom {central_atom}: {e}")
-        else:
+        print("ici")
+        msg_type = msg.get("type")
+
+        operation_handler = self._operations_map.get(msg_type)
+        if operation_handler is None:
             raise ValueError(f"Unknown message type: {msg_type}")
+
+        else : 
+            #Call method of function (and so check if self needs to be provided or not)
+            value = msg.get("value", None)
+            self.engine_comm.barrier()
+            try :
+                if value is None : 
+                    args = () 
+                    kwargs = {}
+                elif isinstance(value, dict) : 
+                    args = ()
+                    kwargs = value
+                else : 
+                    args = (value,)
+                    kwargs = {}
+
+                if hasattr(operation_handler, "__self__") and operation_handler.__self__ is self:
+                    #it s a method
+                    operation_handler(*args, **kwargs)
+                else:
+                    #it s an external method that takes engine as a parameter
+                    operation_handler(self,*args, **kwargs)
+            except Exception as e:
+                print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
+
+            self.engine_comm.barrier()
         
 
     def command(self, cmd: str) -> None:
@@ -143,7 +160,7 @@ class MpiApiEngine() :
             self.lmp.close()
             self.lmp = None
         self._is_alive = False
-        if self.message_reader_thread is not None:
+        if self.message_reader_thread is not None :
             self.message_reader_thread.join(timeout=1)
             self.message_reader_thread = None
 
@@ -153,4 +170,4 @@ class MpiApiEngine() :
     
     def is_busy(self) -> bool:
         """Check if the LAMMPS engine is busy."""
-        return self._is_busy  
+        return self._is_busy 
