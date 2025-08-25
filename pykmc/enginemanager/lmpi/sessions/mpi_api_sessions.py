@@ -1,0 +1,69 @@
+from mpi4py import MPI 
+
+class MpiApiSession : 
+    """A class to manage an MPI API session for LAMMPS.
+    This class provides an interface to send messages to the Lammps MPI API engine.
+    It should live on the rank 0 of the MPI World communicator.
+    It should knows on which ranks the LAMMPS engine is running.
+    """
+    def __init__(self, engine_ranks, session_id) -> None:
+        self.engine_ranks = engine_ranks
+        self.engine_master_rank = engine_ranks[0]
+        self.session_id = session_id
+        self.comm = MPI.COMM_WORLD
+        self._is_alive = False
+        self._is_busy = False
+
+        if self.comm.Get_rank() != 0:
+            raise RuntimeError("MpiApiSession must be used from rank 0.")
+        
+
+    def send_message(self, msg: dict,  expect_status: bool = True) -> None:
+        """
+        Send a message to the engine's master rank.
+        """
+        self.comm.send(msg, dest=self.engine_master_rank)
+        #NOTE : If a lot of message are sent, it will slow down a lot, it is ok if it's just at the initialization, but if 
+        #it became a bottleneck, we will need to implement a more efficient way to get status.
+        if expect_status:
+            self.receive_status()
+
+    def receive_status(self) -> None:
+        """
+        Receive the status of the engine.
+        """
+        msg = self.comm.recv(source=self.engine_master_rank, tag=0)
+        if msg.get("type") == "status":
+            value = msg.get("value", {})
+            self._is_alive = value.get("alive", False)
+            self._is_busy = value.get("busy", False)
+        else:
+            raise RuntimeError(f"Unexpected message type received: {msg}, expected 'status' but got '{msg.get('type')}'")
+
+    def command(self, cmd: str) -> None: 
+        """
+        Send a LAMMPS command to the engine.
+        """
+        print(f"[Session] Sending command: {cmd}")
+        self.send_message({"type": "command", "value": cmd})
+
+
+    def close(self) -> None:
+        """
+        Instruct the engine to shut down.
+        """
+        print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
+        self.send_message({"type": "close"})
+        self._is_alive = False
+
+    def is_alive(self) -> bool:
+        """
+        Check if the engine is alive.
+        """
+        return self._is_alive   
+    
+    def is_busy(self) -> bool:
+        """
+        Check if the engine is busy.
+        """
+        return self._is_busy
