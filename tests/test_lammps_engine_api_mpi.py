@@ -2,6 +2,7 @@ from pykmc.enginemanager.lmpi.engines.mpi_api_engine import MpiApiEngine
 from pykmc.enginemanager.lmpi.sessions.mpi_api_sessions import MpiApiSession
 from mpi4py import MPI 
 import os
+import time
 
 class TestLammpsApiMpiEngine : 
 
@@ -76,8 +77,44 @@ class TestLammpsApiMpiEngine :
         logfile = os.path.join(os.getcwd(), 'lammps.log.0')
         with open(logfile) as f : 
             log_text = f.read() 
-        print(log_text)
         assert 'units metal' in log_text
+
+    def test_initialize_session(self) : 
+        comm = MPI.COMM_WORLD 
+        rank = comm.Get_rank() 
+        size = comm.Get_size() 
+
+        #test when engine also leave on the master session rank or not 
+        start_rank_engine = 1
+
+        if size < 2:
+            raise RuntimeError("This test requires at least 2 MPI ranks.")  
+    
+        engine_ranks = list(range(start_rank_engine, size)) 
+
+        engine_comm = comm.Split(color=1 if rank in engine_ranks else MPI.UNDEFINED, key=rank)
+
+        # Start the MPI API Engine only on the specified engine ranks
+        if rank in engine_ranks:
+            engine = MpiApiEngine(engine_comm, engine_id=0)
+            engine.start()
+            return 
+        
+        # ------------ SESSION CODE (rank 0) ------------
+        session = MpiApiSession(engine_ranks=engine_ranks, session_id=0)
+        session.initialize()
+        session.command("log flush")
+        session.close() 
+        time.sleep(0.5)
+        # Test if command was sent to lammps : 
+        logfile = os.path.join(os.getcwd(), 'lammps.log.0')
+        with open(logfile) as f : 
+            log_text = f.read() 
+        assert 'units metal' in log_text
+        assert 'atom_style atomic' in log_text
+        assert 'dimension 3' in log_text
+        assert 'boundary p p p' in log_text
+        assert 'atom_modify sort 0 0.0' in log_text
 
 
         

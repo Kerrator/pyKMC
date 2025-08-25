@@ -1,4 +1,5 @@
 from mpi4py import MPI 
+from ..helpers import initialize_parameters
 
 class MpiApiSession : 
     """A class to manage an MPI API session for LAMMPS.
@@ -67,3 +68,8 @@ class MpiApiSession :
         Check if the engine is busy.
         """
         return self._is_busy
+    
+    #ACTIONS 
+
+    def initialize(self) : 
+        initialize_parameters(self)
