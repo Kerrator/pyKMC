@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions
 
 
 class MpiApiEngine() : 
@@ -27,7 +27,8 @@ class MpiApiEngine() :
             "initialize_system" : initialize_system,
             "initialize_potential": initialize_potential,
             "minimize" : minimize, 
-            "get_total_energy" : get_total_energy
+            "get_total_energy" : get_total_energy, 
+            "get_positions": get_positions
         } 
 
 
@@ -83,12 +84,16 @@ class MpiApiEngine() :
             if msg is None:
                 continue
             
-            self._handle_message(msg)
+            result = self._handle_message(msg)
             if self.rank == 0:
                 self._send_status()
             #Check if engine was told to shutdown
             if not self._is_alive:
                 break
+
+            if self.rank == 0 : 
+                if result is not None : 
+                    MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
 
     def _send_status(self) : 
         """Send the status of the engine to the session."""
@@ -129,14 +134,16 @@ class MpiApiEngine() :
 
                 if hasattr(operation_handler, "__self__") and operation_handler.__self__ is self:
                     #it s a method
-                    operation_handler(*args, **kwargs)
+                    result = operation_handler(*args, **kwargs)
                 else:
                     #it s an external method that takes engine as a parameter
-                    operation_handler(self,*args, **kwargs)
+                    result = operation_handler(self,*args, **kwargs)
             except Exception as e:
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
 
             self.engine_comm.barrier()
+
+            return result
         
 
     def command(self, cmd: str) -> None:

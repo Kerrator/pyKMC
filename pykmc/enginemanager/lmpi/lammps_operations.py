@@ -59,7 +59,12 @@ def minimize(engine, config) :
 def get_total_energy(engine) : 
     #Get total energy
     result = engine.lmp.get_thermo("etotal")
-    #Send it to session on global rank 0 
-    if engine.rank == 0: #local rank 0
-            MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
-    
+    return result
+
+def get_positions(engine) : 
+    result = engine.lmp.gather_atoms("x", 1, 3)
+    if engine.rank == 0:
+        # convert ctype positions into a numpy array
+        result = np.ctypeslib.as_array(result)
+        result = np.reshape(result, (-1, 3))
+        return result

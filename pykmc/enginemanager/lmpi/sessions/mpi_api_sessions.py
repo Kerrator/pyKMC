@@ -1,4 +1,5 @@
 from mpi4py import MPI 
+import numpy as np
 from ..lammps_operations import initialize_parameters, initialize_system
 
 class MpiApiSession : 
@@ -105,13 +106,23 @@ class MpiApiSession :
         print(f"[Session] Get total energy")
         try : 
             self.send_message({"type": "get_total_energy"})
-            print("AFTER SEND MESSAGE")
             msg = self.comm.recv(source=self.engine_master_rank, tag=1)
-            print("AFTER RECEIVE MESSAGE")
-            print("MESSAGE IS {}".format(msg))
             if msg.get("type") == "result":
                 return msg["value"]  
             else:
                 raise RuntimeError(f"Unexpected message type: {msg}")
         finally:
+            self._is_busy = False
+    
+    def get_positions(self) -> np.ndarray[float] : 
+        self._is_busy = True
+        print(f"[Session] Get Positions")
+        try : 
+            self.send_message({"type": "get_positions"})
+            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result" : 
+                return msg["value"]
+            else : 
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally : 
             self._is_busy = False
