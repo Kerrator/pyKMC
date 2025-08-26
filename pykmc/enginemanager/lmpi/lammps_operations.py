@@ -217,4 +217,84 @@ def partn_search(engine, config, central_atom_idx: int) :
             )
         )
 
+def partn_refine(engine, config, central_atom_idx:int ) : 
+    # INITILIZE ARTN
+    artn = pypARTn2.artn(engine="lmp")
+
+    # LAMMPS COMMANDS
+    engine.command("plugin load {}".format(config.partn.path_artnso))
+    engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
+    engine.command("min_style fire")
+
+    # SETUP ARTN
+    artn.reset_input()
+    #Control
+    artn.set("engine_units", "lammps/metal")
+    artn.set("verbose", config.partn.verbosity)
+    artn.set("struc_format_out", "none")
+    artn.set("delr_thr", config.partn.delr_thr)
+
+    #Exploration
+    artn.set("lpush_final", False)
+    artn.set(
+        "lmove_nextmin", False
+    )  # if true fortran runtime error when event not found
+    artn.set("zseed", config.partn.zseed)
+
+    #Initial push : Should not happen when refining 
+    artn.set("push_mode", config.partn.r_push_mode)
+    if config.partn.push_mode == "rad":
+        artn.set("push_dist_thr", config.partn.r_push_dist_thr)
+    artn.set("push_step_size", config.partn.r_push_step_size)
+    artn.set("push_ids", [central_atom_idx + 1]) #fortran start at 1
+    artn.set("ninit", config.partn.r_ninit)
+
+    #Lanczos 
+    artn.set("lanczos_min_size", config.partn.r_lanczos_min_size)
+    artn.set("lanczos_max_size", config.partn.r_lanczos_max_size)
+    artn.set("lanczos_disp", config.partn.r_lanczos_disp)
+    artn.set("lanczos_eval_conv_thr", config.partn.r_lanczos_eval_conv_thr)
+
+    #Eigenvector push
+    artn.set("eigval_thr", config.partn.r_eigval_thr)
+    artn.set("eigen_step_size", config.partn.r_eigen_step_size)
+    artn.set("nsmooth", config.partn.r_nsmooth)
+    artn.set("neigen", config.partn.r_neigen)
+    artn.set("alpha_mix_cr", config.partn.r_alpha_mix_cr)
+    artn.set("nnewchance", config.partn.r_nnewchance)
+
+       #Perpendicular relaxation 
+    artn.set("nperp", config.partn.r_nperp)
+    artn.set("nperp_limitation", [200])
+
+    #Convergence
+    artn.set("forc_thr", config.partn.r_forc_thr)
+
+
+
+
+
+    # RUN
+    engine.command("minimize 1e-6 1e-8 1000 1000")
+
+    # EXTRACT DATA
+    err = artn.get_runparam("error_message")
+    if not err:
+        E_sad = artn.extract("etot_sad")
+        saddlepositions = artn.extract("tau_sad")
+
+        return Ok(
+            EventRefinementOutput(
+                central_atom_index=central_atom_idx,
+                saddle_positions=saddlepositions,
+                E_saddle= E_sad
+            )
+        )
+
+    else:
+        return Err(
+            ErrorInfo(
+                type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
+            )
+        )
     

@@ -147,3 +147,16 @@ class MpiApiSession :
                 raise RuntimeError(f"Unexpected message type: {msg}")
         finally : 
             self._is_busy = False
+
+    def partn_refine(self, config, central_atom_idx) : 
+        self._is_busy = True 
+        print(f"[Session] Launching pARTn search")
+        try : 
+            self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx}})
+            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result" : 
+                return msg["value"]
+            else : 
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally : 
+            self._is_busy = False

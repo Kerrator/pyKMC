@@ -312,7 +312,7 @@ class TestLammpsApiMpiEngine :
         session.initialize_parameters()
         session.initialize_system(system)
         session.initialize_potential(config)
-        result = session.partn_search(config, 0)
+        result = session.partn_refine(config, 0)
         if result.is_ok() : 
             print(result.ok_value())
         else : 
