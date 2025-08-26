@@ -1,5 +1,6 @@
-from pykmc.enginemanager.lmpi.engines.mpi_api_engine import MpiApiEngine
-from pykmc.enginemanager.lmpi.sessions.mpi_api_sessions import MpiApiSession
+from pykmc.enginemanager.lmpi.engines import MpiApiEngine
+from pykmc.enginemanager.lmpi.sessions import MpiApiSession
+from pykmc.enginemanager.lmpi.pool import ManagerFactory, Manager
 from pykmc import System, Config
 from mpi4py import MPI 
 import pytest
@@ -319,6 +320,19 @@ class TestLammpsApiMpiEngine :
             print(result.err_value())
         session.command("log flush")
         session.close()
+
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_initialize_manager(self, system: System, config: Config)  : 
+        factory = ManagerFactory(n_sessions=4)
+        manager = factory.launch()
+
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        manager.close_all()
+
 
         
 
