@@ -1,6 +1,6 @@
 from pykmc.enginemanager.lmpi.engines.mpi_api_engine import MpiApiEngine
 from pykmc.enginemanager.lmpi.sessions.mpi_api_sessions import MpiApiSession
-from pykmc import System
+from pykmc import System, Config
 from mpi4py import MPI 
 import pytest
 from pytest_lazy_fixtures import lf
@@ -14,7 +14,7 @@ class TestLammpsApiMpiEngine :
         rank = comm.Get_rank() 
         size = comm.Get_size() 
 
-        #test when engine also leave on the master session rank or not 
+        #test when engine also live on the master session rank or not 
         start_rank_engine = 1
 
         if size < 2:
@@ -40,6 +40,7 @@ class TestLammpsApiMpiEngine :
             msg = {"type": "close"}
             comm.send(msg, dest=engine_ranks[0], tag=1)
 
+        time.sleep(4)
         # Test if command was sent to lammps : 
         if rank == 0 : 
             logfile = os.path.join(os.getcwd(), 'lammps.log.0')
@@ -52,7 +53,7 @@ class TestLammpsApiMpiEngine :
         rank = comm.Get_rank() 
         size = comm.Get_size() 
 
-        #test when engine also leave on the master session rank or not 
+        #test when engine also live on the master session rank or not 
         start_rank_engine = 1
 
         if size < 2:
@@ -84,13 +85,13 @@ class TestLammpsApiMpiEngine :
         assert 'units metal' in log_text
 
 
-    @pytest.mark.parametrize("system", [lf("system_single_type_fcc")])
-    def test_initialize_session(self, system: System) : 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_initialize_session(self, system: System, config: Config) : 
         comm = MPI.COMM_WORLD 
         rank = comm.Get_rank() 
         size = comm.Get_size() 
 
-        #test when engine also leave on the master session rank or not 
+        #test when engine also live on the master session rank or not 
         start_rank_engine = 1
 
         if size < 2:
@@ -110,8 +111,10 @@ class TestLammpsApiMpiEngine :
         session = MpiApiSession(engine_ranks=engine_ranks, session_id=0)
         session.initialize_parameters()
         session.initialize_system(system)
+        session.initialize_potential(config)
         session.command("log flush")
         session.close() 
+        print(config)
         time.sleep(1.5)
         # Test if command was sent to lammps : 
         logfile = os.path.join(os.getcwd(), 'lammps.log.0')
@@ -124,6 +127,8 @@ class TestLammpsApiMpiEngine :
         assert 'atom_modify sort 0 0.0' in log_text
         assert 'region box' in log_text 
         assert 'create_box' in log_text 
+
+        print(config)
 
 
         

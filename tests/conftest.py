@@ -1,5 +1,5 @@
 import pytest 
-from pykmc import System
+from pykmc import System, Config
 import numpy as np 
 from copy import deepcopy
 # System Fixtures 
@@ -7,14 +7,8 @@ from copy import deepcopy
 
 @pytest.fixture
 def config_system_single_type():
-    return {
-        'AtomicEnvironment': {
-            'rnei': 3.01,   
-            'rcut': 3.5, 
-            'radd_cna' : 0,
-        }
-    }
-
+    config = Config.from_ini_file("./tests/data/input.in")
+    return config
 
 @pytest.fixture
 def system_single_type_fcc() -> System:

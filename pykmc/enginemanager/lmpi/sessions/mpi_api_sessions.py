@@ -83,3 +83,10 @@ class MpiApiSession :
         """
         print(f"[Session] Initializing Lammps System")
         self.send_message({"type": "initialize_system", "value": system})
+    
+    def initialize_potential(self, config) -> None : 
+        """ 
+        Initialize Lammps potential
+        """
+        print(f"[Session] Initializing Lammps Potential")
+        self.send_message({"type": "initialize_potential", "value": config})

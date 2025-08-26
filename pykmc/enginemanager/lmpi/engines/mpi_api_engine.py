@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential
 
 
 class MpiApiEngine() : 
@@ -24,7 +24,8 @@ class MpiApiEngine() :
             "close" : self.close,
             "command": self.command,
             "initialize_parameters": initialize_parameters,
-            "initialize_system" : initialize_system
+            "initialize_system" : initialize_system,
+            "initialize_potential": initialize_potential 
         } 
 
 

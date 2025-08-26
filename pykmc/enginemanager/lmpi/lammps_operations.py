@@ -44,4 +44,9 @@ def initialize_system(engine, system) :
             + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
         )
 
+def initialize_potential(engine, config) : 
+    pair_style = config.lammps.pair_style
+    pair_coeff = config.lammps.pair_coeff
+    engine.command("pair_style {}".format(pair_style))
+    engine.command("pair_coeff {}".format(pair_coeff))
 
