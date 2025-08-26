@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy
 
 
 class MpiApiEngine() : 
@@ -25,7 +25,9 @@ class MpiApiEngine() :
             "command": self.command,
             "initialize_parameters": initialize_parameters,
             "initialize_system" : initialize_system,
-            "initialize_potential": initialize_potential 
+            "initialize_potential": initialize_potential,
+            "minimize" : minimize, 
+            "get_total_energy" : get_total_energy
         } 
 
 
@@ -104,7 +106,6 @@ class MpiApiEngine() :
     def _handle_message(self, msg: dict) -> None:
         """Handle incoming messages from the session."""
 
-        print("ici")
         msg_type = msg.get("type")
 
         operation_handler = self._operations_map.get(msg_type)

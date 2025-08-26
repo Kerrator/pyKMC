@@ -90,3 +90,28 @@ class MpiApiSession :
         """
         print(f"[Session] Initializing Lammps Potential")
         self.send_message({"type": "initialize_potential", "value": config})
+    
+    def minimize(self, config) -> None : 
+        """ 
+        Minimize the system
+        """
+        print(f"[Session] Minimizing the system")
+        self.send_message({"type": "minimize", "value" : config})
+
+    def get_total_energy(self) -> float : 
+        """ 
+        """
+        self._is_busy = True  # Mark the session as busy
+        print(f"[Session] Get total energy")
+        try : 
+            self.send_message({"type": "get_total_energy"})
+            print("AFTER SEND MESSAGE")
+            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            print("AFTER RECEIVE MESSAGE")
+            print("MESSAGE IS {}".format(msg))
+            if msg.get("type") == "result":
+                return msg["value"]  
+            else:
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
+            self._is_busy = False

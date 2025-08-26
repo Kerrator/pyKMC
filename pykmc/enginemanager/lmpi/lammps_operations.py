@@ -1,5 +1,6 @@
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
+from mpi4py import MPI
 
 def initialize_parameters(engine) : 
     engine.command("units metal")
@@ -32,7 +33,7 @@ def initialize_system(engine, system) :
             "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
         )
         engine.command("create_box {} box".format(len(map_type)))
-        engine.create_atoms(natoms, ind, types, x)
+        engine.lmp.create_atoms(natoms, ind, types, x)
         # Set masses
         for key in map_type.keys():
             engine.command(
@@ -50,3 +51,15 @@ def initialize_potential(engine, config) :
     engine.command("pair_style {}".format(pair_style))
     engine.command("pair_coeff {}".format(pair_coeff))
 
+
+def minimize(engine, config) : 
+    engine.command("min_style {}".format(config.lammps.min_style))
+    engine.command("minimize {}".format(config.lammps.minimize))
+
+def get_total_energy(engine) : 
+    #Get total energy
+    result = engine.lmp.get_thermo("etotal")
+    #Send it to session on global rank 0 
+    if engine.rank == 0: #local rank 0
+            MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
+    
