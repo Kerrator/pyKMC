@@ -126,3 +126,11 @@ class MpiApiSession :
                 raise RuntimeError(f"Unexpected message type: {msg}")
         finally : 
             self._is_busy = False
+
+    def set_positions(self, positions: np.ndarray[float]) -> None : 
+        self._is_busy = True 
+        print(f"[Session] Set new positions")
+        try : 
+            self.send_message({"type": "set_positions", "value": positions})
+        finally : 
+            self._is_busy = False

@@ -6,6 +6,7 @@ import pytest
 from pytest_lazy_fixtures import lf
 import os
 import time
+import numpy as np
 
 class TestLammpsApiMpiEngine : 
 
@@ -245,7 +246,43 @@ class TestLammpsApiMpiEngine :
         session.command("log flush")
         session.close() 
 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_set_positions(self, system: System, config: Config) : 
+        comm = MPI.COMM_WORLD 
+        rank = comm.Get_rank() 
+        size = comm.Get_size() 
 
+        #test when engine also live on the master session rank or not 
+        start_rank_engine = 1
+
+        if size < 2:
+            raise RuntimeError("This test requires at least 2 MPI ranks.")  
+    
+        engine_ranks = list(range(start_rank_engine, size)) 
+
+        engine_comm = comm.Split(color=1 if rank in engine_ranks else MPI.UNDEFINED, key=rank)
+
+        # Start the MPI API Engine only on the specified engine ranks
+        if rank in engine_ranks:
+            engine = MpiApiEngine(engine_comm, engine_id=0)
+            engine.start()
+            return 
+        
+        # ------------ SESSION CODE (rank 0) ------------
+        session = MpiApiSession(engine_ranks=engine_ranks, session_id=0)
+        session.initialize_parameters()
+        session.initialize_system(system)
+        session.initialize_potential(config)
+        positions = session.get_positions()
+        positions[0][0], positions[0][1], positions[0][2] = 0.1, 0.2, 0.3
+        session.set_positions(positions)
+        positions = session.get_positions()
+        session.command("log flush")
+        session.close()
+
+        assert positions[0][0] == 0.1
+        assert positions[0][1] == 0.2
+        assert positions[0][2] == 0.3
 
         
 

@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions
 
 
 class MpiApiEngine() : 
@@ -28,7 +28,8 @@ class MpiApiEngine() :
             "initialize_potential": initialize_potential,
             "minimize" : minimize, 
             "get_total_energy" : get_total_energy, 
-            "get_positions": get_positions
+            "get_positions": get_positions, 
+            "set_positions": set_positions
         } 
 
 

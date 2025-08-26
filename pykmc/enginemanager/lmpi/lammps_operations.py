@@ -1,13 +1,18 @@
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
+import ctypes 
+from ctypes import c_double
+
+
 
 def initialize_parameters(engine) : 
     engine.command("units metal")
     engine.command("atom_style atomic")
     engine.command("dimension 3")
     engine.command("boundary p p p")
-    engine.command("atom_modify sort 0 0.0")
+    engine.command("atom_modify map array") #! necessary for scatter atoms
+    engine.command("atom_modify sort 0 0.0") #! necessary for partn
 
 def initialize_system(engine, system) : 
 
@@ -66,5 +71,17 @@ def get_positions(engine) :
     if engine.rank == 0:
         # convert ctype positions into a numpy array
         result = np.ctypeslib.as_array(result)
+        print("GET POS")
+        print(result)
         result = np.reshape(result, (-1, 3))
         return result
+    
+def set_positions(engine, positions) : 
+    #positions = positions.ravel()
+    #positions = (c_double*len(positions))(*positions.tolist())
+    #print(positions)
+#    positions = np.ctypeslib.as_ctypes(positions)
+    positions = positions.flatten().astype(np.float64)
+    positions = np.ascontiguousarray(positions)
+    c_array = (ctypes.c_double * len(positions))(*positions)
+    engine.lmp.scatter_atoms("x", 1, 3, c_array)
