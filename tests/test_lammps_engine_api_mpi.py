@@ -333,6 +333,32 @@ class TestLammpsApiMpiEngine :
         manager.initialize_sessions(config, system)
         manager.close_all()
 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_minimize_manager(self, system: System, config: Config)  : 
+        factory = ManagerFactory(n_sessions=4)
+        manager = factory.launch()
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        print("done")
+        f = manager.minimize(config)
+        re = f.result()
+        manager.close_all()
+
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_partn_manager(self, system: System, config: Config)  : 
+        factory = ManagerFactory(n_sessions=4)
+        manager = factory.launch()
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        idx = 20*[0]
+        futures = manager.partn_search(config, idx)
+        re = [f.result() for f in futures] 
+        manager.close_all()
 
         
 

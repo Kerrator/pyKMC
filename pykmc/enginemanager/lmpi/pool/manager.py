@@ -65,6 +65,40 @@ class Manager:
                 return session
         return None
 
+    def _run_job(self, session, job: Job) : 
+        try : 
+            #find method session having job.method_name
+            method = getattr(session, job.operation_name)
+            print(f"[PoolManager] Running job: {job.operation_name} with params: {job.params} on session: {session.session_id}") 
+            if job.params is None : 
+                result = method()
+            else : 
+                result = method(**job.params) 
+            job.future.set_result(result)
+        except Exception as e : 
+            job.future.set_exception(e)
+
+
+    def submit_job(self, method_name: str, params: dict = None) -> Future:
+
+        future = Future()
+        job = Job(method_name, params, future)
+        print(f"[PoolManager] Submitting job: {job.operation_name} with params: {job.params}")
+        self.job_queue.put(job)
+        return future
+
+    def minimize(self, config ) : 
+        future = self.submit_job("minimize", {"config" : config})
+        return future
+
+    def partn_search(self, config, central_atom: list[int]) -> list[Future] : 
+        futures = []
+        for atom in central_atom :
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom})
+            futures.append(f) 
+        return futures
+
+
     def close_all(self):
         """
         Close all sessions and their underlying engines.
