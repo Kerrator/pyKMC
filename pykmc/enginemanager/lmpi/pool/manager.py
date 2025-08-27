@@ -98,6 +98,12 @@ class Manager:
             futures.append(f) 
         return futures
 
+    def partn_refine(self, config, central_atom: list[int]) -> list[Future] : 
+        futures = []
+        for atom in central_atom :
+            f = self.submit_job("partn_refine", {"config": config, "central_atom_idx": atom})
+            futures.append(f) 
+        return futures
 
     def close_all(self):
         """
