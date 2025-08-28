@@ -1,6 +1,7 @@
 from mpi4py import MPI 
 import numpy as np
 from ..lammps_operations import initialize_parameters, initialize_system
+from ...messenger import MpiMessenger
 
 class MpiApiSession : 
     """A class to manage an MPI API session for LAMMPS.
@@ -8,15 +9,15 @@ class MpiApiSession :
     It should live on the rank 0 of the MPI World communicator.
     It should knows on which ranks the LAMMPS engine is running.
     """
-    def __init__(self, engine_ranks, session_id) -> None:
+    def __init__(self, messenger, engine_ranks, session_id) -> None:
+        self.messenger = messenger
         self.engine_ranks = engine_ranks
         self.engine_master_rank = engine_ranks[0]
         self.session_id = session_id
-        self.comm = MPI.COMM_WORLD
         self._is_alive = False
         self._is_busy = False
 
-        if self.comm.Get_rank() != 0:
+        if MPI.COMM_WORLD.Get_rank() != 0:
             raise RuntimeError("MpiApiSession must be used from rank 0.")
         
 
@@ -24,7 +25,7 @@ class MpiApiSession :
         """
         Send a message to the engine's master rank.
         """
-        self.comm.send(msg, dest=self.engine_master_rank)
+        self.messenger.send(msg, dest=self.engine_master_rank, tag=2)
         #NOTE : If a lot of message are sent, it will slow down a lot, it is ok if it's just at the initialization, but if 
         #it became a bottleneck, we will need to implement a more efficient way to get status.
         if expect_status:
@@ -34,7 +35,7 @@ class MpiApiSession :
         """
         Receive the status of the engine.
         """
-        msg = self.comm.recv(source=self.engine_master_rank, tag=0)
+        msg = self.messenger.recv(source=self.engine_master_rank, tag = 0)
         if msg.get("type") == "status":
             value = msg.get("value", {})
             self._is_alive = value.get("alive", False)
@@ -106,7 +107,7 @@ class MpiApiSession :
         print(f"[Session] Get total energy")
         try : 
             self.send_message({"type": "get_total_energy"})
-            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result":
                 return msg["value"]  
             else:
@@ -119,7 +120,7 @@ class MpiApiSession :
         print(f"[Session] Get Positions")
         try : 
             self.send_message({"type": "get_positions"})
-            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]
             else : 
@@ -140,7 +141,7 @@ class MpiApiSession :
         print(f"[Session] Launching pARTn search")
         try : 
             self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx}})
-            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]
             else : 
@@ -153,7 +154,7 @@ class MpiApiSession :
         print(f"[Session] Launching pARTn search")
         try : 
             self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx}})
-            msg = self.comm.recv(source=self.engine_master_rank, tag=1)
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]
             else : 

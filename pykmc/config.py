@@ -66,6 +66,16 @@ class ControlConfig(BaseModel):
         description="Which E/F Engine to use. Note : Only lammps is implemented.",
     )
 
+    n_sessions: Optional[int] = Field(
+        default=1, 
+        description="Number of Sessions"
+    )
+
+    engine_use_rank_0: Optional[bool] = Field(
+        default=True, 
+        description="If use mpi rank 0 or not."
+    )
+
     verbosity: Optional[int] = Field(
         default=1, description="Controls the level of detail in the simulation output."
     )

@@ -282,7 +282,6 @@ def partn_refine(engine, config, central_atom_idx:int ) :
     if not err:
         E_sad = artn.extract("etot_sad")
         saddlepositions = artn.extract("tau_sad")
-
         return Ok(
             EventRefinementOutput(
                 central_atom_index=central_atom_idx,

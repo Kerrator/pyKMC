@@ -2,6 +2,8 @@
 initial_config = ./initial_config.xyz 
 n_steps = 10
 engine = lammps
+n_sessions = 4
+engine_use_rank_0 = True
 verbosity = 2
 
 [Lammps] 

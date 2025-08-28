@@ -3,13 +3,14 @@ import threading
 from mpi4py import MPI 
 import queue 
 from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine
-
+from ...messenger import QueueMessenger, MpiMessenger
 
 class MpiApiEngine() : 
     """ 
     """
     
-    def __init__(self, engine_comm: MPI.Comm, engine_id: int) -> None : 
+    def __init__(self, messenger, engine_comm: MPI.Comm, engine_id: int) -> None : 
+        self.messenger = messenger
         self.engine_comm = engine_comm 
         self.rank = engine_comm.Get_rank() #Ranks of the current process in the engine communicator 
         self.engine_id = engine_id #Identifier
@@ -40,7 +41,11 @@ class MpiApiEngine() :
         """Start Lammps"""
         self.start_engine() 
         self.start_reader_thread() 
-        self.run_engine_loop() 
+        if self.rank == 0 and isinstance(self.messenger, QueueMessenger):
+            t = threading.Thread(target=self.run_engine_loop, daemon=True)
+            t.start()
+        else:
+            self.run_engine_loop()
 
     def start_engine(self) -> None : 
         if self.engine_comm is None : 
@@ -60,20 +65,36 @@ class MpiApiEngine() :
         """Read messages from the LAMMPS session. it is run in a separate thread on the master rank.
         The message is a dictionnary of the form : {'type': str, 'value', str}"""
         while self._is_alive:
-            #Check if a message is available from the session
-            if MPI.COMM_WORLD.Iprobe(source=MPI.ANY_SOURCE) : 
-                msg = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE)
-                self.message_queue.put(msg)  # Add the message to the queue for processing
-
+            if isinstance(self.messenger, MpiMessenger):
+            #  MPI
+                if self.messenger.comm.Iprobe(source=MPI.ANY_SOURCE, tag=2):
+                    msg = self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
+                    self.message_queue.put(msg)
+                else:
+                    threading.Event().wait(0.01)
+        
+            elif isinstance(self.messenger, QueueMessenger):
+                # Queue : block until reception
+                msg = self.messenger.recv(tag=2)
+                self.message_queue.put(msg)
+        
             else:
-                # If no message is available, sleep for a short duration to avoid busy waiting
-                threading.Event().wait(0.01)
+                raise RuntimeError("Unsupported messenger type")
+        #while self._is_alive:
+        #    #Check if a message is available from the session
+        #    if MPI.COMM_WORLD.Iprobe(source=MPI.ANY_SOURCE) : 
+        #        msg = self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
+        #        #msg = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE)
+        #        self.message_queue.put(msg)  # Add the message to the queue for processing
+
+        #    else:
+        #        # If no message is available, sleep for a short duration to avoid busy waiting
+        #        threading.Event().wait(0.01)
 
     #RUN ON ALL RANKS
     def run_engine_loop(self):
         """All ranks run this while lammps is alive, when a message is broadcaster from the master rank, execute the command."""
         while self._is_alive:
-
             if self.rank == 0:
                 try:
                     msg = self.message_queue.get(timeout=0.01)  # wait for a message
@@ -81,7 +102,6 @@ class MpiApiEngine() :
                     continue
             else:
                 msg = None
-
             # broadcast to all ranks in engine_comm
             msg = self.engine_comm.bcast(msg, root=0)
             if msg is None:
@@ -95,8 +115,9 @@ class MpiApiEngine() :
                 break
 
             if self.rank == 0 : 
-                if result is not None : 
-                    MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
+                if result is not None :
+                    self.messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+#                    MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
 
     def _send_status(self) : 
         """Send the status of the engine to the session."""
@@ -107,8 +128,8 @@ class MpiApiEngine() :
             "busy": self._is_busy,
             }
         }
-
-        MPI.COMM_WORLD.send(status_msg, dest=0, tag=0)  # Rank 0 du world: session 
+        self.messenger.send(status_msg, dest=0, tag=0)
+#        MPI.COMM_WORLD.send(status_msg, dest=0, tag=0)  # Rank 0 du world: session 
 
 
     def _handle_message(self, msg: dict) -> None:
@@ -141,12 +162,12 @@ class MpiApiEngine() :
                 else:
                     #it s an external method that takes engine as a parameter
                     result = operation_handler(self,*args, **kwargs)
+                return result
             except Exception as e:
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
+            finally : 
+                self.engine_comm.barrier()
 
-            self.engine_comm.barrier()
-
-            return result
         
 
     def command(self, cmd: str) -> None:
