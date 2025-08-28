@@ -41,5 +41,5 @@ class QueueMessenger(Messenger) :
             if t == tag:
                 return msg
             else:
-                # remettre les autres dans la file
+                #put back in queue 
                 self.message_queue.put((t, msg))

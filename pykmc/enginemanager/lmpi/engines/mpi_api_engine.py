@@ -80,16 +80,7 @@ class MpiApiEngine() :
         
             else:
                 raise RuntimeError("Unsupported messenger type")
-        #while self._is_alive:
-        #    #Check if a message is available from the session
-        #    if MPI.COMM_WORLD.Iprobe(source=MPI.ANY_SOURCE) : 
-        #        msg = self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
-        #        #msg = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE)
-        #        self.message_queue.put(msg)  # Add the message to the queue for processing
-
-        #    else:
-        #        # If no message is available, sleep for a short duration to avoid busy waiting
-        #        threading.Event().wait(0.01)
+        
 
     #RUN ON ALL RANKS
     def run_engine_loop(self):
