@@ -69,7 +69,7 @@ class Manager:
         try : 
             #find method session having job.method_name
             method = getattr(session, job.operation_name)
-            print(f"[PoolManager] Running job: {job.operation_name} with params: {job.params} on session: {session.session_id}") 
+            print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
             if job.params is None : 
                 result = method()
             else : 
@@ -83,12 +83,16 @@ class Manager:
 
         future = Future()
         job = Job(method_name, params, future)
-        print(f"[PoolManager] Submitting job: {job.operation_name} with params: {job.params}")
+        print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
         self.job_queue.put(job)
         return future
 
     def minimize(self, config ) : 
         future = self.submit_job("minimize", {"config" : config})
+        return future
+    
+    def minimize_with_results(self, config) : 
+        future = self.submit_job("minimize_with_results", {"config": config})
         return future
 
     def partn_search(self, config, central_atom: list[int]) -> list[Future] : 

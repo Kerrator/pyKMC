@@ -370,6 +370,21 @@ class TestLammpsApiMpiEngine :
         re = [f.result() for f in futures] 
         manager.close_all()
 
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_minimize_with_results_manager(self, system: System, config: Config)  : 
+        factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0)
+        manager = factory.launch()
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        futures = manager.minimize_with_results(config)
+        positions, total_energy = futures.result()
+        print(positions)
+        print(total_energy)
+        manager.close_all()
+
         
 
 

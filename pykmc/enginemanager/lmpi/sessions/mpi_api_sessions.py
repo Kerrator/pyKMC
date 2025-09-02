@@ -2,6 +2,7 @@ from mpi4py import MPI
 import numpy as np
 from ..lammps_operations import initialize_parameters, initialize_system
 from ...messenger import MpiMessenger
+from threading import RLock  
 
 class MpiApiSession : 
     """A class to manage an MPI API session for LAMMPS.
@@ -16,6 +17,7 @@ class MpiApiSession :
         self.session_id = session_id
         self._is_alive = False
         self._is_busy = False
+        self._lock = RLock()
 
         if MPI.COMM_WORLD.Get_rank() != 0:
             raise RuntimeError("MpiApiSession must be used from rank 0.")
@@ -133,6 +135,21 @@ class MpiApiSession :
         print(f"[Session] Set new positions")
         try : 
             self.send_message({"type": "set_positions", "value": positions})
+        finally : 
+            self._is_busy = False
+
+    def minimize_with_results(self, config) : 
+        """Minimize and return the minimized positions and the total energy.
+        """
+        self._is_busy = True
+        print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
+        try : 
+            self.send_message({"type": "minimize_with_results", "value": config})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result" : 
+                return msg["value"]
+            else : 
+                raise RuntimeError(f"Unexpected message type: {msg}")
         finally : 
             self._is_busy = False
 

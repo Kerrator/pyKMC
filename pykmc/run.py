@@ -6,6 +6,7 @@ from an input file, initializes the KMC simulation, and runs it.
 
 import argparse
 from .kmc import KMC
+from pykmc.enginemanager.lmpi.pool import ManagerFactory
 from .config import Config
 
 
@@ -23,8 +24,14 @@ def main() -> None:
     # Config
     config = Config.from_ini_file(args.input)
     # KMC
-    kmc = KMC(config)
-    kmc.run()
+    factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0)
+    manager = factory.launch()
+    if manager is not None: #On rank 0
+        kmc = KMC(config) 
+        kmc._initialize()
+        kmc.manager = manager
+#        kmc = KMC(config)
+        kmc.run()
 
 
 if __name__ == "__main__":

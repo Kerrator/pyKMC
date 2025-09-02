@@ -80,8 +80,6 @@ def get_positions(engine) :
     if engine.rank == 0:
         # convert ctype positions into a numpy array
         result = np.ctypeslib.as_array(result)
-        print("GET POS")
-        print(result)
         result = np.reshape(result, (-1, 3))
         return result
     
@@ -90,6 +88,17 @@ def set_positions(engine, positions) :
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
+
+
+def minimize_with_results(engine, config) : 
+    """ 
+    Minimize and return the minimized positions and the total energy.
+    """
+    minimize(engine, config) 
+    positions = get_positions(engine)
+    total_energy = get_total_energy(engine)
+    if engine.rank == 0 : 
+        return positions, total_energy
 
 
 def partn_search(engine, config, central_atom_idx: int) : 

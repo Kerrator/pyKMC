@@ -75,6 +75,7 @@ class KMC:
         self.config = config
         self.loggers = None
         self.system = None
+        self.manager = None
         self.engine = None
         self.neighbors_list = None
         self.atomic_environment = None
@@ -85,7 +86,9 @@ class KMC:
     def run(self) -> None:
         """Run the simulation."""
         # Initialize the simulation, KMC attributes and minimize the system
-        self._initialize()
+        #self._initialize()
+        self.manager.initialize_sessions(self.config, self.system)
+        self.minimize_system()
         # Write initial step to file
         self._append_snapshot_to_trajectory()
 
@@ -401,7 +404,9 @@ class KMC:
     def minimize_system(self) -> None:
         """Minimize the system and update its positions."""
         self.loggers.info("log", ":=> Minimizing the system")
-        new_positions, total_energy = self.engine.minimize(self.system)
+        future = self.manager.minimize_with_results(self.config)
+        new_positions, total_energy = future.result()
+        #new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
 
