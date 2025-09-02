@@ -95,10 +95,10 @@ class Manager:
         future = self.submit_job("minimize_with_results", {"config": config})
         return future
 
-    def partn_search(self, config, central_atom: list[int]) -> list[Future] : 
+    def partn_search(self, config, central_atom: list[int], positions=None) -> list[Future] : 
         futures = []
         for atom in central_atom :
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom})
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions})
             futures.append(f) 
         return futures
 

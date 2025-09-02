@@ -101,7 +101,12 @@ def minimize_with_results(engine, config) :
         return positions, total_energy
 
 
-def partn_search(engine, config, central_atom_idx: int) : 
+def partn_search(engine, config, central_atom_idx: int, positions = None) : 
+
+    #Set positions 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
+
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
 

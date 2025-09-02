@@ -48,7 +48,7 @@ class EventSearch:
                 len(central_atom_research_list)
             ),
         )
-        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list) 
+        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions) 
         self.results = [f.result() for f in futures]
         #for i, at_idx in enumerate(central_atom_research_list):
         #    event_search_output = self.engine.search_event(self.system, at_idx)
