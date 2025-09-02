@@ -287,7 +287,7 @@ class KMC:
             The EventSearch class containing results of the event searches.
 
         """
-        event_search = EventSearch(self.system, self.engine, self.loggers)
+        event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
         event_search.execute(central_atom_research_list)
         return event_search
 

@@ -3,6 +3,7 @@
 from .result import EventSearchOutput
 from .system import System
 from .engine import Engine
+from .enginemanager.lmpi.pool import Manager
 from .log import LogKMC
 from .utils.geometry import translate
 import numpy as np
@@ -22,9 +23,10 @@ class EventSearch:
 
     """
 
-    def __init__(self, system: System, engine: Engine, loggers: LogKMC) -> None:
+    def __init__(self, config, system: System, manager: Manager, loggers: LogKMC) -> None:
+        self.config = config
         self.system = system
-        self.engine = engine
+        self.manager = manager
         self.loggers = loggers
         self.results = None
 
@@ -39,19 +41,21 @@ class EventSearch:
             list of central atom around which we will perform the event search.
 
         """
-        self.results = []
+        #self.results = []
         self.loggers.info(
             "log",
             "\t :=> Searching {} reference events".format(
                 len(central_atom_research_list)
             ),
         )
-        for i, at_idx in enumerate(central_atom_research_list):
-            event_search_output = self.engine.search_event(self.system, at_idx)
-            self.results.append(event_search_output)
-            self.loggers.progress_bar(
-                "progress", i + 1, len(central_atom_research_list)
-            )
+        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list) 
+        self.results = [f.result() for f in futures]
+        #for i, at_idx in enumerate(central_atom_research_list):
+        #    event_search_output = self.engine.search_event(self.system, at_idx)
+        #    self.results.append(event_search_output)
+        #    self.loggers.progress_bar(
+        #        "progress", i + 1, len(central_atom_research_list)
+        #    )
 
     def _center_event_positions(
         self, event_search_output: EventSearchOutput
@@ -91,6 +95,7 @@ class EventSearch:
         event_search_output.min2_positions = translate(
             event_search_output.min2_positions, displacement, cell
         )
+        event_search_output.cell = cell
         return event_search_output
 
     def get_successes_results(self) -> list[EventSearchOutput]:
