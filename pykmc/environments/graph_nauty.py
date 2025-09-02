@@ -34,13 +34,16 @@ def graph(
     #nprocs = comm.Get_size()
 
     ## Split index atoms in approximatively even number sublist
-    #if atom_idx is None:  # graph for all atoms in system
+    if atom_idx is None:  # graph for all atoms in system
+
+        local_index = np.arange(len(neighbors_list))
+    else : 
+        local_index = atom_idx
     #    split = np.array_split(range(len(neighbors_list)), nprocs)
     #else:
     #    split = np.array_split(atom_idx, nprocs)  # when using cna/graph
     #local_index = split[rank]
 
-    local_index = np.arange(len(neighbors_list))
     list_g = make_graph(local_index, neighbors_list, environment_list)
 
     list_hash = []
@@ -49,7 +52,7 @@ def graph(
         list_hash.append(pynauty.certificate(g))
     #list_hash = comm.gather(list_hash, root=0)
     #if rank == 0:
-    list_hash = [gcertificate for e in list_hash for gcertificate in e]
+#    list_hash = [gcertificate for e in list_hash for gcertificate in e]
     return list_hash
     #else:
     #    return None
