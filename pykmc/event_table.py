@@ -49,7 +49,6 @@ class ReferenceEventTable:
             The results of the operation.
 
         """
-        print(events)
         results_is_valid_events = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
@@ -536,6 +535,7 @@ class ActiveEventTable:
             The pd.Series of the event.
 
         """
+        
         dfactive = pd.Series(
             {
                 "atom_index": event_search_output.central_atom_index,

@@ -82,6 +82,7 @@ class KMC:
         self.reference_table = None
         self.visited_environments = None
         self.total_energy = None
+        self.potential_energy = None
 
     def run(self) -> None:
         """Run the simulation."""
@@ -89,6 +90,20 @@ class KMC:
         #self._initialize()
         self.manager.initialize_sessions(self.config, self.system)
         self.minimize_system()
+        self.neighbors_list = NeighborsList(
+                self.system,
+                self.config.atomicenvironment.rnei,
+                self.config.atomicenvironment.rcut,
+            )
+        self.atomic_environment = AtomicEnvironment(
+                self.config.atomicenvironment.style,
+                self.neighbors_list.neighbors_list["rnei"],
+                self.neighbors_list.neighbors_list["rcut"],
+                self.config.atomicenvironment.neighbors_add,
+            )
+        #Set new positions to all sessions/engine : 
+        self.manager.set_all_positions(self.system.positions)  
+
         # Write initial step to file
         self._append_snapshot_to_trajectory()
 
@@ -151,6 +166,8 @@ class KMC:
             ##=>Move system
             self._apply_event(idx_selected_event, active_table)
 
+            ###=> Synchronise all lammps instances with new positions 
+            self.manager.set_all_positions(positions=self.system.positions)
             ##=>Minimize
             self.minimize_system()
 
@@ -213,6 +230,7 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
+        self._close()
 
     def get_new_environments(self) -> list[str | bytes]:
         """Get atomic environments of the current system that has not been already explored.
@@ -336,9 +354,9 @@ class KMC:
             self.system,
             self.neighbors_list,
             self.atomic_environment,
-            self.engine,
+            self.manager,
         )
-        refinement.execute(df_reference_events)
+        refinement.execute(df_reference_events, self.potential_energy)
         return refinement
 
     def add_active_events(
@@ -409,6 +427,8 @@ class KMC:
         #new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
+        future = self.manager.get_potential_energy()
+        self.potential_energy = future.result()
 
     def get_info_atomic_environments(
         self, new_environments: list[str | bytes]
@@ -518,4 +538,5 @@ class KMC:
     def _close(self) -> None:
         """Close the simulation."""
         self.loggers.info("log", ":=> End of simulation")
+        self.manager.close_all()
         sys.exit()

@@ -75,6 +75,14 @@ def get_total_energy(engine) :
     result = engine.lmp.get_thermo("etotal")
     return result
 
+def get_potential_energy(engine) : 
+    #get potential energy 
+    engine.command("compute c1 all pe")
+    engine.command("run 0")
+    result = engine.lmp.extract_compute("c1", 0, 0)
+    engine.command("uncompute c1")
+    return result
+
 def get_positions(engine) : 
     result = engine.lmp.gather_atoms("x", 1, 3)
     if engine.rank == 0:
@@ -231,7 +239,12 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
             )
         )
 
-def partn_refine(engine, config, central_atom_idx:int ) : 
+def partn_refine(engine, config, central_atom_idx:int , positions = None) : 
+
+    #Set positions 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
+
     # INITILIZE ARTN
     artn = pypARTn2.artn(engine="lmp")
 
@@ -290,6 +303,7 @@ def partn_refine(engine, config, central_atom_idx:int ) :
 
     # RUN
     engine.command("minimize 1e-6 1e-8 1000 1000")
+    engine.command("unfix 10") #Otherwise, if you use other minimization style for the system minimization error "min_style fire must be use with fix ART"
 
     # EXTRACT DATA
     err = artn.get_runparam("error_message")

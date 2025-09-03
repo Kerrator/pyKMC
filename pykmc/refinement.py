@@ -41,17 +41,17 @@ class Refinement:
         system: System,
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
-        engine: Engine,
+        manager: Engine,
     ) -> None:
         self.config = config
         self.loggers = loggers
         self.system = system
         self.neighbors_list = neighbors_list
         self.atomic_environment = atomic_environment
-        self.engine = engine
+        self.manager = manager
         self.results = None
 
-    def execute(self, df_reference_events: pd.DataFrame) -> None:
+    def execute(self, df_reference_events: pd.DataFrame, total_energy) -> None:
         """Execute event refinements for each reference event in the df_reference_events dataframe.
 
         It stores the results of the event refinements in self.results.
@@ -68,6 +68,9 @@ class Refinement:
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
         count = 0
 
+        all_futures = []
+        future_context = {}  # mapping future -> contexte
+        #Launch all refine Jobs 
         for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
@@ -75,11 +78,37 @@ class Refinement:
             )
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
-                result_single = self.refine_single(
-                    at_idx, dfevent, idx, total_refinements, count
+                futures = result_single = self.refine_single(
+                    at_idx, dfevent, idx, total_refinements, count, future_context
                 )
-                self.results += result_single
+                if isinstance(futures,list): #If symmetries
+                    all_futures.extend(futures)
+                else:
+                    all_futures.append(futures)
+                #self.results += result_single
                 count += len(result_single)
+
+        #Get results and update values : 
+        for f in all_futures:
+            #get results
+            res = f.result()
+            #get specific results info
+            ctx = future_context[f]
+            #update result 
+            if res.is_ok() : 
+                res.ok_value().min2_positions = ctx["min2_positions"]
+                res.ok_value().num_reference_event = ctx["num_reference_event"]
+                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
+                #Now check if energy barrier consistent with generic one 
+                res = self.check_refinement_energy(res,
+                            abs(
+                                res.ok_value().dE_forward
+                                - ctx["reference_energy_barrier"] 
+                            ),
+                            self.config.eventsearch.refined_energy_thr,
+                        )
+            self.results.append(res)
+
 
     def refine_single(
         self,
@@ -88,6 +117,7 @@ class Refinement:
         cat_idx: int,
         total_refinements: int,
         count: int,
+        future_context: dict
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
 
@@ -130,11 +160,12 @@ class Refinement:
                 dfevent.at["saddle_positions"] - dfevent.at["initial_positions"]
             )
 
-            all_results = []
+            #all_results = []
+            futures = []
             # Apply symmetries :
 
             current_positions = self.system.positions.copy()
-            initial_potential_energy = self.engine.compute_potential_energy(self.system)
+            #initial_potential_energy = self.system.total_energy
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
             ):
@@ -149,37 +180,52 @@ class Refinement:
                     output_psr.permutation_matrix,
                 )
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
-                self.system.update_positions(new_positions, atom_idx=neighbors)
 
-                result_refine = self.engine.refine_event(self.system, at_idx)
+                self.system.update_positions(new_positions, atom_idx=neighbors)
+                #add a job to manager queue
+                f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                futures.append(f)
+
+
+                #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
+                #Update Result : 
+                #        #Apply psr to generic final positions
+                final_positions = dfevent.at["final_positions"] + new_displacement
+                new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                self.system.update_positions(new_positions, atom_idx=neighbors )
+                future_context[f] = {
+                    "min2_positions": self.system.positions.copy(),
+                    "num_reference_event": cat_idx, 
+                    "reference_energy_barrier": dfevent["energy_barrier"]
+                }
 
                 count += 1
                 self.loggers.progress_bar("progress", count, total_refinements)
 
-                if result_refine.is_ok():
-                    #Update Result : 
-                        #Apply psr to generic final positions
-                    final_positions = dfevent.at["final_positions"] + new_displacement
-                    new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                    self.system.update_positions(new_positions, atom_idx=neighbors )
-                    result_refine.ok_value().min2_positions = self.system.positions 
-                        #Compute dE 
-                    result_refine.ok_value().dE_forward = result_refine.ok_value().E_saddle - initial_potential_energy  
+                #if result_refine.is_ok():
+                #    #Update Result : 
+                #        #Apply psr to generic final positions
+                #    final_positions = dfevent.at["final_positions"] + new_displacement
+                #    new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                #    self.system.update_positions(new_positions, atom_idx=neighbors )
+                #    result_refine.ok_value().min2_positions = self.system.positions 
+                #        #Compute dE 
+                #    result_refine.ok_value().dE_forward = result_refine.ok_value().E_saddle - initial_potential_energy  
 
-                    result_refine.ok_value().num_reference_event = cat_idx
+                #    result_refine.ok_value().num_reference_event = cat_idx
 
-                        #Check if energy barrier consistent with generic one
-                    result_refine = self.check_refinement_energy(
-                            result_refine,
-                            abs(
-                                result_refine.ok_value().dE_forward
-                                - dfevent["energy_barrier"]
-                            ),
-                            self.config.eventsearch.refined_energy_thr,
-                        )
+                #        #Check if energy barrier consistent with generic one
+                #    result_refine = self.check_refinement_energy(
+                #            result_refine,
+                #            abs(
+                #                result_refine.ok_value().dE_forward
+                #                - dfevent["energy_barrier"]
+                #            ),
+                #            self.config.eventsearch.refined_energy_thr,
+                #        )
                 self.system.update_positions(current_positions)
-                all_results.append(result_refine)
-            return all_results
+                #all_results.append(result_refine)
+            return futures
 
 
 
