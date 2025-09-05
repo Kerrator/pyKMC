@@ -66,7 +66,7 @@ class Refinement:
 
         total_refinements = self.get_total_refinements_todo(df_reference_events)
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
-        count = 0
+        #count = 0
 
         all_futures = []
         future_context = {}  # mapping future -> contexte
@@ -78,22 +78,29 @@ class Refinement:
             )
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
-                futures = result_single = self.refine_single(
-                    at_idx, dfevent, idx, total_refinements, count, future_context
+                futures = self.refine_single(
+                    at_idx, dfevent, idx, total_refinements,  future_context
                 )
                 if isinstance(futures,list): #If symmetries
                     all_futures.extend(futures)
                 else:
                     all_futures.append(futures)
                 #self.results += result_single
-                count += len(result_single)
+                #count = len(all_futures)
 
         #Get results and update values : 
         for f in all_futures:
             #get results
             res = f.result()
+            job_queue_len = self.manager.job_queue.qsize()
+            #if job_queue_len != 0 : 
+                #self.loggers.progress_bar("progress", total_refinements-job_queue_len, total_refinements)
             #get specific results info
             ctx = future_context[f]
+
+            _ = future_context.pop(f)
+
+            self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
             #update result 
             if res.is_ok() : 
                 res.ok_value().min2_positions = ctx["min2_positions"]
@@ -116,7 +123,6 @@ class Refinement:
         dfevent: pd.Series,
         cat_idx: int,
         total_refinements: int,
-        count: int,
         future_context: dict
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
@@ -199,8 +205,6 @@ class Refinement:
                     "reference_energy_barrier": dfevent["energy_barrier"]
                 }
 
-                count += 1
-                self.loggers.progress_bar("progress", count, total_refinements)
 
                 #if result_refine.is_ok():
                 #    #Update Result : 

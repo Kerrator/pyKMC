@@ -73,13 +73,9 @@ class System:
             If the file cannot be read or parsed into an ASE Atoms object.
 
         """
-        print("1")
         # Create ase.Atoms from file
         try:
-            print("2")
-            print(file_path)
             atoms = read(file_path, parallel=False)
-            print("3")
         except Exception as e:
             raise ValueError(f"Can't create System from file {file_path}: {e}") from e
 
@@ -95,7 +91,6 @@ class System:
         #Wrap positions
         new_system.update_positions(new_system.positions)
 
-        print("4")
         return new_system
 
     def update_positions(

@@ -5,6 +5,9 @@ from concurrent.futures import Future
 import queue
 import threading
 
+#TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
+#initiated in kmc, after the initialization of manager ...))
+
 @dataclass 
 class Job: 
     operation_name: str 
@@ -29,7 +32,7 @@ class Manager:
         """
         Send the same command to all sessions and wait for all to finish.
         """
-        print("[PoolManager] Broadcasting command:", cmd)
+        #print("[PoolManager] Broadcasting command:", cmd)
         for session in self.sessions:
             session.command(cmd)
 
@@ -50,7 +53,7 @@ class Manager:
             while True : 
                 session = self._get_available_engine() 
                 if session is not None : 
-                    print(f"[PoolManager] Found available session: {session.session_id}")
+                    #print(f"[PoolManager] Found available session: {session.session_id}")
                     threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
                     threading.Event().wait(0.05) # Wait a bit to allow the job to be processed
                     break #job is submited
@@ -69,7 +72,7 @@ class Manager:
         try : 
             #find method session having job.method_name
             method = getattr(session, job.operation_name)
-            print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
+            #print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
             if job.params is None : 
                 result = method()
             else : 
@@ -79,7 +82,7 @@ class Manager:
             job.future.set_exception(e)
 
     def set_all_positions(self, positions) : 
-        print("[Manager] Setting positions to all sessions.")
+        #print("[Manager] Setting positions to all sessions.")
         for session in self.sessions : 
             session.set_positions(positions=positions)
 
@@ -87,7 +90,7 @@ class Manager:
 
         future = Future()
         job = Job(method_name, params, future)
-        print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
+        #print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
         self.job_queue.put(job)
         return future
 
@@ -118,6 +121,6 @@ class Manager:
         """
         Close all sessions and their underlying engines.
         """
-        print("[PoolManager] Closing all sessions.")
+        #print("[PoolManager] Closing all sessions.")
         for session in self.sessions:
             session.close()    

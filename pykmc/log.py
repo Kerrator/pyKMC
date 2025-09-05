@@ -278,7 +278,8 @@ LOGGING_CONFIG = {
         },
         "info": {"handlers": ["step_informations"]},
         "progress": {
-            "handlers": ["log_file", "progress_bar_handler"],
+            #"handlers": ["log_file", "progress_bar_handler"],
+            "handlers": ["progress_bar_handler"],
         },
     },
 }

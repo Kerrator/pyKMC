@@ -65,7 +65,6 @@ class Initializer:
                 self.kmc.config.control.initial_config
             ),
         )
-        print(self.kmc.config)
         self.kmc.system = System.create_from_file(
             self.kmc.config.control.initial_config
         )
@@ -96,7 +95,6 @@ class Initializer:
             self.kmc.neighbors_list.neighbors_list["rcut"],
             self.kmc.config.atomicenvironment.neighbors_add,
         )
-        print("Done")
 
     def initialize_reference_table(self) -> None:
         """Initialize the Reference Event Table."""

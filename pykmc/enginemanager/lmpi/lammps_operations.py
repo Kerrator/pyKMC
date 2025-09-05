@@ -3,6 +3,7 @@ from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes 
 import pypARTn2
+import os
 
 from ...result import  (
     Result,
@@ -110,7 +111,11 @@ def minimize_with_results(engine, config) :
 
 
 def partn_search(engine, config, central_atom_idx: int, positions = None) : 
-
+    original_stdout_fd = os.dup(1)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
+    os.dup2(devnull, 1)
+    
     #Set positions 
     if positions is not None : 
         set_positions(engine=engine, positions=positions)
@@ -175,6 +180,14 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     engine.command("minimize 1e-6 1e-8 1000 1000")
     # EXTRACT DATA
     err = artn.get_runparam("error_message")
+
+
+
+    # Restore original stdout (fd 1)
+    os.dup2(original_stdout_fd, 1)
+    os.close(original_stdout_fd)
+    os.close(devnull)
+
     if not err:
         # Results
         delr1 = artn.extract("delr_min1")
