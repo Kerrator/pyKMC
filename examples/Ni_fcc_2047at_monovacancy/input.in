@@ -5,8 +5,8 @@ engine = lammps
 n_sessions = 8
 engine_use_rank_0 = True
 verbosity = 2
-reference_table = reference_table.pickle
-visited_environments =visited_environments.pickle
+#reference_table = reference_table.pickle
+#visited_environments =visited_environments.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -19,7 +19,7 @@ rcut = 6.0
 
 [EventSearch] 
 style = partn
-nsearch = 1
+nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
 
