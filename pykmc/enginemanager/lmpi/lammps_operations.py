@@ -110,7 +110,7 @@ def minimize_with_results(engine, config) :
         return positions, total_energy
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None) : 
+def partn_search(engine, config, central_atom_idx: int, positions = None, local_forces = False) : 
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
@@ -119,6 +119,15 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     #Set positions 
     if positions is not None : 
         set_positions(engine=engine, positions=positions)
+
+
+
+    if local_forces : 
+        positions = get_positions(engine)
+        engine.command("region sphere_region sphere {} {} {} {}".format(positions[central_atom_idx][0], positions[central_atom_idx][1], positions[central_atom_idx][2], 7))
+        engine.command("group atoms_in_sphere region sphere_region")
+        engine.command("group atoms_outside subtract all atoms_in_sphere")
+        engine.command("fix freeze_outside atoms_outside setforce 0.0 0.0 0.0")
 
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
@@ -187,6 +196,11 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     os.dup2(original_stdout_fd, 1)
     os.close(original_stdout_fd)
     os.close(devnull)
+    if local_forces : 
+        engine.command("unfix freeze_outside")
+        engine.command("group atoms_outside delete")
+        engine.command("group atoms_in_sphere delete")
+        engine.command("region sphere_region delete")
 
     if not err:
         # Results

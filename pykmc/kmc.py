@@ -34,6 +34,7 @@ from .info_simulation import (
 from .eventsearch import EventSearch
 from .refinement import Refinement
 from .log import Colors
+import time
 
 
 # TODO fix reconstruction = False
@@ -109,11 +110,16 @@ class KMC:
 
         # LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
-        time = 0.0  # in seconds
+        total_time = 0.0  # in seconds
         nsearch = self.config.eventsearch.nsearch
+
+        
 
         # KMC LOOP
         for step in range(nkmc_steps):
+            start_real = time.time()
+            start_cpu = time.process_time()
+
             self.loggers.info(
                 "log",
                 "{}{}Step : {}{}".format(
@@ -161,7 +167,7 @@ class KMC:
             # == Update System ==
             ##=>Select event
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
-            time += delta_t * 10**-12  # time is in seconds
+            total_time += delta_t * 10**-12  # time is in seconds
 
             ##=>Move system
             self._apply_event(idx_selected_event, active_table)
@@ -191,16 +197,22 @@ class KMC:
             )
             self.loggers.info("info", kmc_loop_info.output_msg())
 
+
+            elapsed_real = time.time() - start_real
+            elapsed_cpu = time.process_time() - start_cpu
+            
             self.loggers.table_line_info_kmc(
                 "output",
                 step + 1,
                 delta_t * 10**-12,
-                time,
+                total_time,
                 active_table.table.loc[idx_selected_event].at["num_reference_event"],
                 active_table.table.loc[idx_selected_event].at["energy_barrier"],
                 active_table.table.loc[idx_selected_event].at["k"],
                 ktot,
                 self.total_energy,
+                elapsed_cpu, 
+                elapsed_real
             )
 
             # == Update variables ==
