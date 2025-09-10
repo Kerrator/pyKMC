@@ -12,6 +12,7 @@ from .engine import Engine
 import ase.geometry
 import numpy as np
 import pandas as pd
+import concurrent.futures
 
 
 class Refinement:
@@ -158,7 +159,11 @@ class Refinement:
             result_psr.err_value().variables = {
                 "n_sym_associated": len(dfevent.at["sym_matrix"])
             }
-            return [result_psr]  # Err()
+            f = concurrent.futures.Future()
+            f.set_result(result_psr)
+            future_context[f] = {}
+            return f
+#            return [result_psr]  # Err()
         else:
             output_psr = result_psr.ok_value()
 
