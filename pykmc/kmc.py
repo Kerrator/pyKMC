@@ -132,6 +132,7 @@ class KMC:
 
             # == FIND NEW GENERIC EVENTS ==
             ##=>List of atoms(central) on which we gonna perfom an event search
+            #Need to use this list to define active volume
             central_atom_research_list = self.central_atoms_research(
                 new_environments, nsearch
             )
@@ -317,6 +318,10 @@ class KMC:
             The EventSearch class containing results of the event searches.
 
         """
+        #Define active volume first:
+
+
+
         event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
         event_search.execute(central_atom_research_list)
         return event_search

@@ -14,6 +14,7 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
+from ...system import (System)
 
 
 def initialize_parameters(engine) : 
@@ -110,24 +111,16 @@ def minimize_with_results(engine, config) :
         return positions, total_energy
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None, local_forces = False) : 
+def partn_search(engine, config, central_atom_idx: int, system) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
-    
-    #Set positions 
-    if positions is not None : 
-        set_positions(engine=engine, positions=positions)
 
 
-
-    if local_forces : 
-        positions = get_positions(engine)
-        engine.command("region sphere_region sphere {} {} {} {}".format(positions[central_atom_idx][0], positions[central_atom_idx][1], positions[central_atom_idx][2], 7))
-        engine.command("group atoms_in_sphere region sphere_region")
-        engine.command("group atoms_outside subtract all atoms_in_sphere")
-        engine.command("fix freeze_outside atoms_outside setforce 0.0 0.0 0.0")
+    #Define active volume:
+    av, inner_ind, buffer_ind = define_active_volume(config, central_atom_idx, system)
+    map = make_active_volume(engine, system, inner_ind, buffer_ind)
 
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
@@ -196,11 +189,11 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, local_
     os.dup2(original_stdout_fd, 1)
     os.close(original_stdout_fd)
     os.close(devnull)
-    if local_forces : 
-        engine.command("unfix freeze_outside")
-        engine.command("group atoms_outside delete")
-        engine.command("group atoms_in_sphere delete")
-        engine.command("region sphere_region delete")
+
+    engine.command("unfix freeze_outside")
+    engine.command("group atoms_outside delete")
+    engine.command("group atoms_in_sphere delete")
+    engine.command("region sphere_region delete")
 
     if not err:
         # Results
@@ -351,4 +344,148 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
                 type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
             )
         )
-    
+
+
+#----------------------------------NEW CODE-----------------------------------------
+
+def define_active_volume(config, system, central_atom_idx: int):
+    '''
+    Want to make it so the radius and such are defined in the config file later
+    Need to pass the ID of the atom getting checked. It will be in ORIGINAL system units, so it'll need to be mapped
+
+        Parameters
+    ----------
+    radius: float
+        Radius of active volume in latsize units (can change to angstrom)
+    ratio: float
+        Ratio of the active volume that is allowed to move
+    central_atom_idx : int
+        The central atom index.
+    '''
+
+    # Defining parameters
+    # Radius of whole active volume in Ang
+    r_a = config.r_act # Ensures AV is larger than topology analysis
+    # Define the thickness of the buffer zone
+    r_m = config.r_mov
+
+    positions = system.positions
+
+    center = positions[central_atom_idx]
+
+    inner_movable_indices = []
+    total_active_indices = []
+    non_active_indices = []
+
+    for i, pos in enumerate(positions):
+        distance = np.linalg.norm(pos - center)
+        if distance <= r_m:
+            inner_movable_indices.append(i)
+            total_active_indices.append(i)  # Inner is also part of total active
+        elif distance <= r_a:
+            total_active_indices.append(i)
+        else:
+            non_active_indices.append(i)
+
+    buffer_indices = np.array(list(set(total_active_indices) - set(inner_movable_indices)))
+    inner_movable_indices = np.array(sorted(inner_movable_indices))  # Ensure sorted for consistent indexing
+    buffer_indices = np.sort(buffer_indices)
+    non_active_indices = np.sort(non_active_indices)
+    av_indices = np.sort(np.concatenate([inner_movable_indices, buffer_indices]))  # Sorts all the atoms
+
+    cell = system.cell
+    types = [system.types[i] for i in av_indices]
+    positions = system.positions[av_indices]
+    print("Number of atoms in AV", len(positions))
+    pbc = system.pbc
+
+    av = System(types, positions, cell, pbc, av_indices)
+    return av, inner_movable_indices, buffer_indices
+
+
+def make_active_volume(engine, system, inner_movable_indices, buffer_indices) :
+    '''
+    Makes the active volume in lammps. This is where the map for ID's gets made
+    '''
+
+    # -------------------Setting up AV----------------------
+
+    initialize_system(engine, system)  # This encompasses making the av system
+    initialize_potential(engine, system)
+
+    # ------------------Now want refactored atoms-----------------------------
+    engine.command('reset_atoms id')
+    # ---------------------------Now Map-------------------------------
+
+    engine_positions = get_positions(engine)
+
+    map = map_atom_indices(system, engine_positions)  # This will make the map needed for pARTn
+
+    engine_inner_movable_ids = []
+    engine_buffer_ids = []
+    # Convert target arrays to sets for efficient O(1) average time lookup
+    inner_movable_set = set(inner_movable_indices)
+    buffer_set = set(buffer_indices)
+
+    for i in range(len(map)):
+        # self.map[i] represents an original ID
+        # Check if this original ID is present in the set of inner_movable_indices
+        if map[i] in inner_movable_set:
+            engine_inner_movable_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
+
+        # Check if this original ID is present in the set of buffer_indices
+        if map[i] in buffer_set:
+            engine_buffer_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
+    #
+    # #Defining groups of atoms
+    #
+    engine.command(f"group inner_movable id {' '.join(map(str, engine_inner_movable_ids))}")
+    if len(engine_buffer_ids) > 0:
+        engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
+        engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+    else:
+        print('No buffer atoms defined')
+
+    return map
+
+
+def map_atom_indices(system, engine_positions) :
+    """
+    Create a mapping from new IDs (after 'reset_ids all compress yes')
+    back to original IDs (before reset) using positions.
+
+    Parameters:
+        combined_array_0 (ndarray): N x 4 array [old_ID, x, y, z] before reset
+        atom_positions (ndarray): N x 3 array [x, y, z] after reset (ordered by new_ID)
+
+    Returns:
+        new_to_old (dict): {new_ID: old_ID}
+    """
+    old_IDs = system.index
+    old_positions = system.positions
+
+    # Round positions to avoid floating-point mismatch issues
+    precision = 12
+    old_positions_rounded = np.round(old_positions, precision)
+    atom_positions_rounded = np.round(engine_positions, precision)
+
+    # Convert positions to structured array for fast set lookups
+    dtype = [('x', float), ('y', float), ('z', float)]
+
+    old_struct = old_positions_rounded.copy(order='C').view(dtype).squeeze()
+    new_struct = atom_positions_rounded.copy(order='C').view(dtype).squeeze()
+
+    # Build a dictionary from position → old ID
+    pos_to_old = {tuple(p): id_ for p, id_ in zip(old_struct, old_IDs)}
+
+    # Map each new position to old ID
+    new_to_old = np.array([pos_to_old[tuple(p)] for p in new_struct], dtype=int)
+
+    return new_to_old
+
+
+# def shift_atoms(engine) -> None:
+#     positions= get_positions(engine)
+#
+#     for i in range(len(positions)):
+#         self.og_system.positions[self.map[i]] = self.lmp_new_positions[i]
