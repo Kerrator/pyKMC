@@ -60,7 +60,7 @@ class MpiApiSession :
         """
         Instruct the engine to shut down.
         """
-        #print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
+        print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
         self.send_message({"type": "close"})
         self._is_alive = False
 
