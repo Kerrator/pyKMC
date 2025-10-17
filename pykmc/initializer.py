@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from .kmc import KMC
 from .log import LogKMC, LOGGING_CONFIG
 from .system import System
-from .engine import Engine
 from .neighbors_list import NeighborsList
 from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
@@ -34,8 +33,6 @@ class Initializer:
         """Initialize the entire KMC object before starting the simulation."""
         self.initialize_loggers()
         self.initialize_system()
-        #self.initialize_engine()
-        #self.kmc.minimize_system()
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()

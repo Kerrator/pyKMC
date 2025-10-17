@@ -8,7 +8,7 @@ from .system import System
 from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
-from .engine import Engine
+from .enginemanager.lmpi.pool import Manager
 import ase.geometry
 import numpy as np
 import pandas as pd
@@ -42,7 +42,7 @@ class Refinement:
         system: System,
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
-        manager: Engine,
+        manager: Manager,
     ) -> None:
         self.config = config
         self.loggers = loggers
