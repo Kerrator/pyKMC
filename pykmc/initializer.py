@@ -66,14 +66,6 @@ class Initializer:
             self.kmc.config.control.initial_config
         )
 
-    def initialize_engine(self) -> None:
-        """Initialize the engine based on the Config."""
-        self.kmc.loggers.info(
-            "log",
-            ":=> Initializing E/F {} Engine".format(self.kmc.config.control.engine),
-        )
-        self.kmc.engine = Engine(self.kmc.config)
-
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""
         self.kmc.loggers.info("log", ":=> Constructing Neighbors Lists")
