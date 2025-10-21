@@ -111,6 +111,8 @@ class ErrorType(Enum):
     PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
     REFINEMENT_INVALID_ENERGY_BARRIER = 31
     REFINEMENT_INVALID_MINIMA = 32
+    RECONSTRUCTION_INVALID_MIN1 = 41 
+    RECONSTRUCTION_INVALID_MIN2 = 42
 
 
 # Dataclass to store operation outputs
@@ -201,6 +203,13 @@ class PSROutput:
     translation_matrix: np.ndarray
     permutation_matrix: np.ndarray
     matching_score: float
+
+@dataclass 
+class ReconstructionOutput : 
+    """Store the result of a reconstruction"""
+    min1_positions: np.ndarray 
+    saddle_positions: np.ndarray 
+    min2_positions: np.ndarray
 
 
 @dataclass
