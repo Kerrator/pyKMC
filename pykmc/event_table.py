@@ -548,3 +548,15 @@ class ActiveEventTable:
             }
         )
         return dfactive
+    
+
+    def save(self, outfile: str = "active_table.pickle") -> None:
+        """Save the reference event table to a pickle file.
+
+        Parameters
+        ----------
+        outfile : str, optional
+            path to the output file, by default 'active_table.pickle'.
+
+        """
+        self.table.to_pickle(outfile)
