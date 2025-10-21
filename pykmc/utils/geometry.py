@@ -77,15 +77,16 @@ def push_towards(current_positions, target_positions, fraction = 0.1, cell = Non
         new_positions = ase.geometry.wrap_positions(positions=new_positions, cell=cell, pbc=[True, True, True])
     return new_positions
 
-def compute_delr(positions_1, positions_2, cell) : 
+def compute_delr(positions_1, positions_2, cell=None) : 
     displacements = positions_2 - positions_1
 
-    #cell_lengths = np.linalg.norm(cell, axis=1)  
+    if cell is not None : 
+        cell_lengths = np.linalg.norm(cell, axis=1)  
 
-    ##apply pbc 
+        #apply pbc 
 
-    #for i in range(3) : 
-    #    displacements[:, i] -= cell_lengths[i] * np.round(displacements[:, i] / cell_lengths[i])
+        for i in range(3) : 
+            displacements[:, i] -= cell_lengths[i] * np.round(displacements[:, i] / cell_lengths[i])
     
     # Calcul des normes des déplacements
     distances = np.linalg.norm(displacements, axis=1)
