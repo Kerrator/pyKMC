@@ -16,6 +16,9 @@ from .result import (
     ReferenceValidEventsInfo,
     RefinementsInfo,
     EventRefinementOutput,
+    ReconstructionOutput,
+    Err,
+    Ok
 )
 import numpy as np
 from ase.io import write
@@ -172,7 +175,8 @@ class KMC:
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
             total_time += delta_t * 10**-12  # time is in seconds
             ##=>Move system
-            self._validate_active_event(idx_selected_event, active_table)
+            result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
+            self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
             #self._apply_event(idx_selected_event, active_table)
 
             ###=> Synchronise all lammps instances with new positions 
@@ -418,7 +422,7 @@ class KMC:
         idx_selected_event, delta_t, ktot = rejection_free(l_k)
         return idx_selected_event, delta_t, ktot
 
-    def _validate_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
+    def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         """"""
         #event data
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
@@ -431,7 +435,7 @@ class KMC:
 
 
         #positions towards min1 
-        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.5, cell = self.system.cell)
+        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=1, cell = self.system.cell)
         tmp_positions[neighbors] = saddle_toward_min1_pos 
         future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = future.result()
@@ -441,20 +445,44 @@ class KMC:
         t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = self.system.cell, pbc = True)
         delr1 = compute_delr(self.system.positions[neighbors], t1[neighbors], self.system.cell) 
         print(delr1)
+        if delr1 > self.config.psr.matching_score_thr : 
+            return Err(
+                    ErrorInfo(
+                        type=ErrorType.RECONSTRUCTION_INVALID_MIN1,
+                        message="do not retreive initial minima : delr1 = {}".format(delr1),
+                        variables={"delr1": delr1},
+                    )
+                )
+        else : 
+            #positions towards min2 : 
+            saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=1, cell = self.system.cell)
+            tmp_positions[neighbors] = saddle_toward_min2_pos
+            future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
+            min2_pos, _ = future.result()
 
-        #positions towards min2 : 
-        saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=1, cell = self.system.cell)
-        tmp_positions[neighbors] = saddle_toward_min2_pos
-        future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        min2_pos, _ = future.result()
+            #Compare min2pos with expected final_positions
+            #TODO 
+            delr2 = compute_delr(supposed_final_positions, min2_pos[neighbors], self.system.cell)
+            print(delr2)
+            if delr2 > self.config.psr.matching_score_thr : 
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
+                        message="do not retreive expected final minima : delr2 = {}".format(delr2),
+                        variables={"delr2": delr2},
+                    )
+                )
 
-        #Compare min2pos with expected final_positions
-        #TODO 
-        delr2 = compute_delr(supposed_final_positions, min2_pos[neighbors], self.system.cell)
-        print(delr2)
-        
-        #update system positions : 
-        self.system.update_positions(min2_pos)
+            else : 
+                return Ok(
+                    ReconstructionOutput(
+                        min1_positions=min1_pos,
+                        saddle_positions=tmp_positions,
+                        min2_positions=min2_pos
+                    )
+                ) 
+            #update system positions : 
+            self.system.update_positions(min2_pos)
 
 
         
