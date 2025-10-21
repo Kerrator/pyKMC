@@ -1,8 +1,8 @@
 [Control] 
 initial_config = /root/pyKMC/examples/Ni_fcc_2047at_monovacancy/initial_config.xyz 
-n_steps = 1
+n_steps = 100
 engine = lammps
-#n_sessions = 1
+n_sessions = 7
 #engine_use_rank_0 = True
 verbosity = 2
 #reference_table = reference_table.pickle
