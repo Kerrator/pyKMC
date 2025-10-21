@@ -77,6 +77,7 @@ class Refinement:
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["event_id"]
             )
+            
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
                 futures = self.refine_single(
@@ -150,6 +151,9 @@ class Refinement:
             list of Result of the refinements.
 
         """
+
+        
+
         ##=>PSR between generic event and at_idx environments
         result_psr = PointSetRegistration(
             self.config, self.system, dfevent, self.neighbors_list, at_idx
@@ -168,9 +172,11 @@ class Refinement:
         else:
             output_psr = result_psr.ok_value()
 
-            displacement = (
+            displacement_saddle = (
                 dfevent.at["saddle_positions"] - dfevent.at["initial_positions"]
             )
+
+            displacement_final = dfevent.at["final_positions"] - dfevent.at["initial_positions"]
 
             #all_results = []
             futures = []
@@ -181,19 +187,25 @@ class Refinement:
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
             ):
-                new_displacement = geometry.transform_positions(
-                    displacement, sym_matrix, 0, perm_matrix
+                new_displacement_saddle = geometry.transform_positions(
+                    displacement_saddle, sym_matrix, 0, perm_matrix
                 )
-                saddle_positions = dfevent.at["initial_positions"] + new_displacement
-                new_positions = geometry.transform_positions(
+                new_displacement_final = geometry.transform_positions(displacement_final, sym_matrix, 0, perm_matrix)
+
+                saddle_positions = dfevent.at["initial_positions"] + new_displacement_saddle
+                final_positions = dfevent.at["initial_positions"] + new_displacement_final
+
+                new_positions_saddle = geometry.transform_positions(
                     saddle_positions,
                     output_psr.rotation_matrix,
                     output_psr.translation_matrix,
                     output_psr.permutation_matrix,
                 )
+                new_positions_final = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
 
-                self.system.update_positions(new_positions, atom_idx=neighbors)
+                #move to saddle point
+                self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
                 #add a job to manager queue
                 f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
                 futures.append(f)
@@ -202,12 +214,12 @@ class Refinement:
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
                 #Update Result : 
                 #        #Apply psr to generic final positions
-                final_positions = dfevent.at["final_positions"] + new_displacement
-                new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                # self.system.update_positions(new_positions, atom_idx=neighbors )
+                #final_positions = dfevent.at["final_positions"] + new_displacement
+                #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                #self.system.update_positions(new_positions, atom_idx=neighbors )
                 future_context[f] = {
                     #"min2_positions": self.system.positions.copy()[neighbors],
-                    "min2_positions": final_positions,
+                    "min2_positions": new_positions_final,
                     "num_reference_event": cat_idx, 
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "neighbors": neighbors
