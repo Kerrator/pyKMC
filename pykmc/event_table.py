@@ -459,6 +459,7 @@ class ActiveEventTable:
         else:
             columns = {
                 "atom_index": pd.Series(dtype="int64"),
+                "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
@@ -520,7 +521,7 @@ class ActiveEventTable:
         self.table = pd.concat([self.table, df_to_add], ignore_index=True)
 
     def build_event_series(
-        self, event_search_output: EventRefinementOutput
+        self, event_refinement_output: EventRefinementOutput
     ) -> pd.Series:
         """Build an event Series based on the EventRefinementOuput dataclass.
 
@@ -538,11 +539,12 @@ class ActiveEventTable:
         
         dfactive = pd.Series(
             {
-                "atom_index": event_search_output.central_atom_index,
-                "final_positions": event_search_output.min2_positions,
-                "energy_barrier": event_search_output.dE_forward,
-                "k": compute_rate_Eyring(event_search_output.dE_forward, self.config),
-                "num_reference_event": event_search_output.num_reference_event,
+                "atom_index": event_refinement_output.central_atom_index,
+                "saddle_positions": event_refinement_output.saddle_positions,
+                "final_positions": event_refinement_output.min2_positions,
+                "energy_barrier": event_refinement_output.dE_forward,
+                "k": compute_rate_Eyring(event_refinement_output.dE_forward, self.config),
+                "num_reference_event": event_refinement_output.num_reference_event,
             }
         )
         return dfactive

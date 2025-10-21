@@ -107,6 +107,7 @@ class Refinement:
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
                 res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
+                res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one 
                 res = self.check_refinement_energy(res,
                             abs(
@@ -203,11 +204,13 @@ class Refinement:
                 #        #Apply psr to generic final positions
                 final_positions = dfevent.at["final_positions"] + new_displacement
                 new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                self.system.update_positions(new_positions, atom_idx=neighbors )
+                # self.system.update_positions(new_positions, atom_idx=neighbors )
                 future_context[f] = {
-                    "min2_positions": self.system.positions.copy(),
+                    #"min2_positions": self.system.positions.copy()[neighbors],
+                    "min2_positions": final_positions,
                     "num_reference_event": cat_idx, 
-                    "reference_energy_barrier": dfevent["energy_barrier"]
+                    "reference_energy_barrier": dfevent["energy_barrier"],
+                    "neighbors": neighbors
                 }
 
 
