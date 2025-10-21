@@ -98,12 +98,12 @@ class MpiApiSession :
         #print(f"[Session] Initializing Lammps Potential")
         self.send_message({"type": "initialize_potential", "value": config})
     
-    def minimize(self, config) -> None : 
+    def minimize(self, config, positions=None) -> None : 
         """ 
         Minimize the system
         """
         #print(f"[Session] Minimizing the system")
-        self.send_message({"type": "minimize", "value" : config})
+        self.send_message({"type": "minimize", "value" : {"config": config, "positions": positions}})
 
     def get_total_energy(self) -> float : 
         """ 
@@ -141,13 +141,13 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    def minimize_with_results(self, config) : 
+    def minimize_with_results(self, config, positions=None) : 
         """Minimize and return the minimized positions and the total energy.
         """
         self._is_busy = True
         #print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
         try : 
-            self.send_message({"type": "minimize_with_results", "value": config})
+            self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]

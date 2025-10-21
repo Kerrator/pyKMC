@@ -98,8 +98,8 @@ class Manager:
         future = self.submit_job("minimize", {"config" : config})
         return future
     
-    def minimize_with_results(self, config) : 
-        future = self.submit_job("minimize_with_results", {"config": config})
+    def minimize_with_results(self, config, positions=None) : 
+        future = self.submit_job("minimize_with_results", {"config": config, "positions": positions})
         return future
     
     def get_potential_energy(self) : 

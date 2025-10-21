@@ -99,15 +99,17 @@ def set_positions(engine, positions) :
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
 
-def minimize_with_results(engine, config) : 
+def minimize_with_results(engine, config, positions=None) : 
     """ 
     Minimize and return the minimized positions and the total energy.
     """
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
     minimize(engine, config) 
-    positions = get_positions(engine)
+    new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
     if engine.rank == 0 : 
-        return positions, total_energy
+        return new_positions, total_energy
 
 
 def partn_search(engine, config, central_atom_idx: int, positions = None) : 
