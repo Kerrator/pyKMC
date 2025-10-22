@@ -65,7 +65,8 @@ class Refinement:
         """
         self.results = []
 
-        total_refinements = self.get_total_refinements_todo(df_reference_events)
+        total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
+        e_thr = self.get_energy_thr_refine(df_reference_events, supposed_ktot)
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
         #count = 0
 
@@ -81,7 +82,7 @@ class Refinement:
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
                 futures = self.refine_single(
-                    at_idx, dfevent, idx, total_refinements,  future_context
+                    at_idx, dfevent, idx, total_refinements,  future_context, total_energy, e_thr
                 )
                 if isinstance(futures,list): #If symmetries
                     all_futures.extend(futures)
@@ -126,7 +127,9 @@ class Refinement:
         dfevent: pd.Series,
         cat_idx: int,
         total_refinements: int,
-        future_context: dict
+        future_context: dict, 
+        total_energy: float, 
+        e_thr: float
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
 
@@ -206,8 +209,17 @@ class Refinement:
 
                 #move to saddle point
                 self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-                #add a job to manager queue
-                f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                if dfevent.at["energy_barrier"] > e_thr : #dont refine 
+                    f = concurrent.futures.Future()
+                    f.set_result(Ok(EventRefinementOutput(
+                        central_atom_index=at_idx, 
+                        saddle_positions=self.system.positions,
+                        E_saddle=total_energy+dfevent["energy_barrier"]
+                    )))
+                else : 
+
+                    #add a job to manager queue
+                    f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
                 futures.append(f)
 
 
@@ -301,12 +313,28 @@ class Refinement:
 
         """
         total = 0
+        supposed_ktot = 0
         for _idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
-            total += len(
+            n_atoms = len(
                 self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
             ) * len(dfevent["sym_matrix"])
-        return total
+            total += n_atoms 
+            supposed_ktot += dfevent.at["k"]*n_atoms
+        return total, supposed_ktot
+    
+    def get_energy_thr_refine(self, df_reference_events, supposed_ktot) : 
+        tol = self.config.control.refine_thr
+        k_thr = supposed_ktot*tol
+        
+        #get energy corresponding to the first k value just under k_thr
+        mask = df_reference_events["k"] <  k_thr
+        if mask.any():
+            e_value = df_reference_events.loc[mask].sort_values("k").iloc[-1]["energy_barrier"]
+        else: #refine no event
+            e_value = 0.0 
+        e_value += 0.1 #to be sure want using condition 
+        return e_value
 
     def get_successes_results(self) -> list[EventRefinementOutput]:
         """Return successful results.

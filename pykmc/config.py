@@ -80,6 +80,11 @@ class ControlConfig(BaseModel):
         default=1, description="Controls the level of detail in the simulation output."
     )
 
+    refine_thr: Optional[int] = Field(
+        default=0.99,
+        description="Event constributing to this percent of ktot are refined."
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
