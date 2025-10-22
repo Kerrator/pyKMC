@@ -425,6 +425,17 @@ class ReferenceEventTable:
                 ]
             )
 
+    def remove(self, ind: int) -> None : 
+        """Remove event at row = ind
+
+        Parameters
+        ----------
+        ind : int
+            index of the row to be removed
+        """
+        self.table = self.table.drop(ind)
+        self.table = self.table.reset_index(drop=True)
+
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
 
@@ -549,6 +560,16 @@ class ActiveEventTable:
         )
         return dfactive
     
+    def remove(self, ind: int) -> None : 
+        """Remove event at row = ind
+
+        Parameters
+        ----------
+        ind : int
+            index of the row to be removed
+        """
+        self.table = self.table.drop(ind)
+        self.table = self.table.reset_index(drop=True)
 
     def save(self, outfile: str = "active_table.pickle") -> None:
         """Save the reference event table to a pickle file.
