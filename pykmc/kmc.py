@@ -159,6 +159,12 @@ class KMC:
                 )
                 self._close()
 
+
+            # == Update variables ==
+            l_ids = list(set(self.atomic_environment.atomic_environment_list))
+            self.visited_environments.update(
+                set(l_ids).difference(self.visited_environments)
+            )
             # == Refinement ==
             ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
@@ -171,13 +177,9 @@ class KMC:
             active_table = self.add_active_events(refinement.get_successes_results())
 
             # == Update System ==
-            ##=>Select event
-            idx_selected_event, delta_t, ktot = self._select_event(active_table)
-            total_time += delta_t * 10**-12  # time is in seconds
-            ##=>Move system
-            result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
+            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
             self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
-            #self._apply_event(idx_selected_event, active_table)
+            total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions 
             self.manager.set_all_positions(positions=self.system.positions)
@@ -223,10 +225,6 @@ class KMC:
             )
 
             # == Update variables ==
-            l_ids = list(set(self.atomic_environment.atomic_environment_list))
-            self.visited_environments.update(
-                set(l_ids).difference(self.visited_environments)
-            )
             self.neighbors_list = NeighborsList(
                 self.system,
                 self.config.atomicenvironment.rnei,
@@ -422,8 +420,42 @@ class KMC:
         idx_selected_event, delta_t, ktot = rejection_free(l_k)
         return idx_selected_event, delta_t, ktot
 
+
+    def reconstruction(self, active_table) : 
+            
+            err_reference = []
+            err_ae = []
+            while len(active_table.table) > 0 : 
+                ##=>Select event
+                idx_selected_event, delta_t, ktot = self._select_event(active_table)
+                ##=>Reconstruct event 
+                self.loggers.info("log", "\t :=> Event Reconstruction")
+                result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
+                if result_reconstruction.is_ok() : 
+                    break 
+                else : 
+                    self.loggers.info("log", "\t :=> Reconstruction fails : {}".format(result_reconstruction.err_value().message))
+                    num_ref_event = active_table.table.loc[idx_selected_event].at['num_reference_event']
+                    ae_topo = self.reference_table.table.loc[num_ref_event].at['event_id']
+                    err_reference.append(num_ref_event)
+                    err_ae.append(ae_topo)
+
+                    self.loggers.info("log", "\t :=> Removing active event.")
+                    active_table.remove(idx_selected_event)
+            else : 
+                self.loggers.error("log", "All event reconstuctions failed.")
+                self._close()
+
+            if len(err_reference) != 0 : 
+                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
+                self.reference_table.remove(list(set(err_reference)))
+                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
+                self.visited_environments = self.visited_environments.difference(set(err_ae))
+            return result_reconstruction, delta_t, ktot, idx_selected_event
+
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
-        """"""
+        """Try to reconstruct the selected active event 
+        """
         #event data
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
         neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
@@ -435,40 +467,36 @@ class KMC:
 
 
         #positions towards min1 
-        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=1, cell = self.system.cell)
+        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.15, cell = self.system.cell)
         tmp_positions[neighbors] = saddle_toward_min1_pos 
         future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = future.result()
 
         #compaire min1_pos with system current positions
-        #TODO 
         t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = self.system.cell, pbc = True)
         delr1 = compute_delr(self.system.positions[neighbors], t1[neighbors], self.system.cell) 
-        print(delr1)
         if delr1 > self.config.psr.matching_score_thr : 
             return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN1,
-                        message="do not retreive initial minima : delr1 = {}".format(delr1),
+                        message="did not retreive initial minimum : delr1 = {}".format(delr1),
                         variables={"delr1": delr1},
                     )
                 )
         else : 
             #positions towards min2 : 
-            saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=1, cell = self.system.cell)
+            saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=0.15, cell = self.system.cell)
             tmp_positions[neighbors] = saddle_toward_min2_pos
             future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
             min2_pos, _ = future.result()
 
             #Compare min2pos with expected final_positions
-            #TODO 
             delr2 = compute_delr(supposed_final_positions, min2_pos[neighbors], self.system.cell)
-            print(delr2)
             if delr2 > self.config.psr.matching_score_thr : 
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
-                        message="do not retreive expected final minima : delr2 = {}".format(delr2),
+                        message="did not retreive expected final minimum : delr2 = {}".format(delr2),
                         variables={"delr2": delr2},
                     )
                 )
@@ -481,25 +509,7 @@ class KMC:
                         min2_positions=min2_pos
                     )
                 ) 
-            #update system positions : 
-            self.system.update_positions(min2_pos)
 
-
-        
-
-
-        ##move the system to the saddle point
-        #central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
-        #neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
-        #new_positions = active_table.table.loc[idx_selected_event].at["saddle_positions"].copy()
-        #self.system.update_positions(new_positions, neighbors)
-        ##push toward supposed final positions
-        #close_final = push_towards(active_table.table.loc[idx_selected_event].at["saddle_positions"].copy(), active_table.table.loc[idx_selected_event].at["final_positions"].copy(), fraction=0.2)
-        #self.system.update_positions(close_final, neighbors)
-
-        ##minimize
-        #self.minimize_system(positions=self.system.positions)
-        
 
     def _apply_event(
         self, idx_selected_event: int, active_table: ActiveEventTable
