@@ -1,8 +1,24 @@
 import pytest 
 from pykmc import System, Config
 import numpy as np 
+from pykmc.basins import StatesConnectivity, BasinStatesConnectivity
 from copy import deepcopy
+import pandas as pd
+import logging
 # System Fixtures 
+
+@pytest.fixture(scope="session")
+def test_logger():
+    """Logger for tests."""
+    logger = logging.getLogger("tests")
+
+    if not logger.handlers:
+        handler = logging.StreamHandler()  
+        formatter = logging.Formatter("[%(levelname)s] %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    return logger
 
 
 @pytest.fixture
@@ -54,3 +70,39 @@ def system_single_type_fcc_vacancy(system_single_type_fcc: System) -> System:
     system.index = np.delete(system.index, 0, axis=0)
 
     return system
+
+@pytest.fixture
+def mock_statesconnectivity():
+    """Fixture returning a real StatesConnectivity instance with a fake connectivity table."""
+    state_connectivity = StatesConnectivity()
+
+    fake_df = pd.DataFrame({
+        "state": [0, 0, 1, 2],
+        "state_connexion": [1, 2, 0, 0],
+        "event_connexion": [12, 34, 13, 35],
+        "central_atom": [345, 7, 911, 20],
+        "sym": [0, 1, 0, 0],
+        "transient": [True, False, True, False],
+    })
+
+    state_connectivity.df = fake_df
+
+    return state_connectivity
+
+@pytest.fixture
+def mock_basinstatesconnectivity():
+    """Fixture returning a real BasinStatesConnectivity instance with a fake connectivity table."""
+    state_connectivity = BasinStatesConnectivity()
+
+    fake_df = pd.DataFrame({
+        "state": [0, 0, 1, 2],
+        "state_connexion": [1, 2, 0, 0],
+        "event_connexion": [12, 34, 13, 35],
+        "central_atom": [345, 7, 911, 20],
+        "sym": [0, 1, 0, 0],
+        "transient": [True, False, True, False],
+    })
+
+    state_connectivity.df = fake_df
+
+    return state_connectivity
