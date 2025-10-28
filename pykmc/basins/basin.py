@@ -129,7 +129,10 @@ class BasinsGenericEvents() :
         self._initialize_basins(system)
         #explore the basin
         self.construct_connexion_table()
-        #select an event
+        #reorder states index 
+        mapping = self.connectivity_table.reorder_states_index()
+        self.states = {mapping[old]: val for old, val in self.basin.states.items()}
+
 
     def select_event(self) : 
         """ 
