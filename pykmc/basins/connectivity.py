@@ -88,6 +88,23 @@ class StatesConnectivity() :
         """
         return list(df[['state', 'event_connexion', 'central_atom', 'sym', 'transient']].itertuples(index=False, name=None))
     
+
+    def reorder_states_index(self) : 
+        """If the connectivity table has non continuous state index, reorder them"""
+
+        unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
+
+        mapping = {old: new for new, old in enumerate(unique_states)}
+
+        # Étape 3 : appliquer au DataFrame
+        df_new = self.df.copy()
+        df_new["state"] = df_new["state"].map(mapping)
+        df_new["state_connexion"] = df_new["state_connexion"].map(mapping)
+
+        self.df = df_new 
+
+        return  mapping
+    
     def save(self, outfile: str = "basin_connectivity.pickle") -> None:
         """Save the connectivity DataFrame to a pickle file.
 
