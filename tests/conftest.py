@@ -1,10 +1,15 @@
 import pytest 
-from pykmc import System, Config
+from pykmc import System, Config, AtomicEnvironment, NeighborsList
 import numpy as np 
-from pykmc.basins import StatesConnectivity, BasinStatesConnectivity
+from pykmc.basins import StatesConnectivity, BasinStatesConnectivity, StateData, ReferenceEventTable
 from copy import deepcopy
 import pandas as pd
 import logging
+from unittest.mock import Mock
+import os, sys
+import pickle
+from functools import wraps
+import subprocess
 # System Fixtures 
 
 @pytest.fixture(scope="session")
@@ -20,7 +25,19 @@ def test_logger():
 
     return logger
 
-
+@pytest.fixture
+def mock_config():
+    """Fixture pour créer une configuration mock"""
+    config = Mock()
+    config.atomicenvironment.rnei = 3.01
+    config.atomicenvironment.rcut = 6.5
+    config.atomicenvironment.style = 'cna/graph'
+    config.atomicenvironment.neighbors_add = 0  
+    config.basin.energy_thr = 0.4
+    config.psr.style = 'ira'
+    config.psr.matching_score_thr = 0.1
+    config.ira.kmax_factor = 1.8
+    return config
 @pytest.fixture
 def config_system_single_type():
     config = Config.from_ini_file("./tests/data/input.in")
@@ -106,3 +123,126 @@ def mock_basinstatesconnectivity():
     state_connectivity.df = fake_df
 
     return state_connectivity
+
+@pytest.fixture
+def mock_state_data(system_Ni_4000at_monovacancy_sia):
+    """Fixture returning a dummy StateData for testing basin exploration."""
+    system = system_Ni_4000at_monovacancy_sia
+    nl = NeighborsList(system=system, rnei=3.01, rcut=6.5)
+    ae = AtomicEnvironment(style='cna/graph', neighbors_list=nl.neighbors_list["rnei"], environment_list=nl.neighbors_list["rcut"])
+    state = StateData(
+        system=system_Ni_4000at_monovacancy_sia,
+        environment =ae,
+        neighbors_list=nl,
+        transient=True,
+        visited=False
+    )
+    return state
+
+@pytest.fixture
+def mock_state_data_Cu(system_Cu):
+    """Fixture returning a dummy StateData for testing basin exploration."""
+    system = system_Cu
+    nl = NeighborsList(system=system, rnei=2.9, rcut=6.5)
+    ae = AtomicEnvironment(style='cna/graph', neighbors_list=nl.neighbors_list["rnei"], environment_list=nl.neighbors_list["rcut"])
+    state = StateData(
+        system=system_Cu,
+        environment =ae,
+        neighbors_list=nl,
+        transient=True,
+        visited=False
+    )
+    return state
+
+@pytest.fixture 
+def system_Ni_4000at_monovacancy_sia()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "initial_config_Ni_fcc_4000at_monovacancy+sia.xyz") 
+    system = System.create_from_file(filepath)
+    return system 
+
+@pytest.fixture 
+def system_Cu()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "initial_config_Cu.xyz") 
+    system = System.create_from_file(filepath)
+    return system
+
+
+@pytest.fixture 
+def reference_table_Ni_4000at_monovacancy_sia()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "input.in")
+    config = Config.from_ini_file(filepath)
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "reference_table_Ni_fcc_4000at_monovacancy+sia.pickle") 
+    config.control.reference_table = filepath
+    reference_table = ReferenceEventTable(config) 
+    return reference_table
+
+
+@pytest.fixture 
+def reference_table_Cu_fake()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "input.in")
+    config = Config.from_ini_file(filepath)
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "reference_table_Cu_fake.pickle") 
+    config.control.reference_table = filepath
+    reference_table = ReferenceEventTable(config) 
+    return reference_table
+
+
+@pytest.fixture 
+def visited_environments_Ni_4000at_monovacancy_sia()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "visited_environments_Ni_fcc_4000at_monovacancy+sia.pickle") 
+    
+    with open(filepath, "rb") as file:
+        loaded_set_environments = pickle.load(file)
+    return loaded_set_environments
+
+@pytest.fixture 
+def visited_environments_Cu()-> System : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "visited_environments_Cu.pickle") 
+    
+    with open(filepath, "rb") as file:
+        loaded_set_environments = pickle.load(file)
+    return loaded_set_environments
+
+@pytest.fixture 
+def config_Ni_4000at_monovacancy_sia() : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "input.in")
+    config = Config.from_ini_file(filepath)
+    return config
+
+@pytest.fixture 
+def config_Cu() : 
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    filepath = os.path.join(data_dir, "input_Cu.in")
+    config = Config.from_ini_file(filepath)
+    return config
+
+def mpi_test(nproc=2):
+    """Décorateur pour lancer un test sous mpirun."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Si déjà lancé sous MPI, exécuter le test directement
+            if "OMPI_COMM_WORLD_SIZE" in os.environ or "PMI_SIZE" in os.environ:
+                return func(*args, **kwargs)
+            
+            # Sinon relancer ce test avec mpirun
+            cmd = [
+                "mpirun", "-n", str(nproc),
+                sys.executable, "-m", "pytest", "-v",
+                f"{__file__}::{func.__name__}"
+            ]
+            print(f"\n[pytest-mpi] Launching under MPI: {' '.join(cmd)}\n")
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                pytest.fail(f"MPI test {func.__name__} failed with code {result.returncode}")
+        return wrapper
+    return decorator

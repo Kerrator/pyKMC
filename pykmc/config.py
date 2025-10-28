@@ -85,6 +85,10 @@ class ControlConfig(BaseModel):
         description="Event constributing to this percent of ktot are refined."
     )
 
+    basin: Optional[bool] = Field(
+        default=False,
+        description="Basin mode"
+    )
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
@@ -469,6 +473,13 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+class BasinConfig(BaseModel):
+    """Basin parameters"""
+
+    energy_thr: float = Field(
+    default = 0.1,
+    description="Energy threshold"    
+    )
 
 class Config(BaseModel):
     """Config for the KMC simulations."""
@@ -506,6 +517,8 @@ class Config(BaseModel):
     )
 
     ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
+
+    basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:

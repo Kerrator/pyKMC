@@ -4,9 +4,10 @@ import numpy as np
 from unittest.mock import Mock, MagicMock, patch
 import os
 import copy
-from pykmc.basins import  StatesConnectivity, BasinStatesConnectivity
+from pykmc.basins import  StatesConnectivity, BasinStatesConnectivity, BasinGenericEventExplorer, BasinsGenericEvents
 import logging
-
+from pykmc.enginemanager.lmpi.pool import ManagerFactory
+from .conftest import mpi_test
 
 
 logger = logging.getLogger("tests")
@@ -45,3 +46,34 @@ class TestStatesConnectivity :
         test_logger.debug("After update state index : df = {} \n".format(conn1.get_table()))
 
 
+class TestBasinExplorer : 
+
+    def test_generic_event_explorer(self, test_logger, mock_config, reference_table_Ni_4000at_monovacancy_sia, mock_state_data ):
+        test_logger.debug(":=> Running basin exploration with generic event.")
+
+        basin_explorer = BasinGenericEventExplorer(mock_config, reference_table_Ni_4000at_monovacancy_sia ) 
+        basin_explorer.explore(state=mock_state_data)
+
+        test_logger.debug("connexion_table : \n{}".format(basin_explorer.get_connectivity_table()))
+
+class TestBasin : 
+
+    #@mpi_test(nproc=8)
+    def test_connectivity_table_construction(self, test_logger, config_Cu, reference_table_Cu_fake, system_Cu, visited_environments_Cu) : 
+
+        factory = ManagerFactory(n_sessions=config_Cu.control.n_sessions, use_rank_0=True)
+        manager = factory.launch()
+        if manager is not None:
+            manager.initialize_sessions(config_Cu, system_Cu)
+            f = manager.minimize_with_results(config=config_Cu)
+            p, e = f.result()
+            print(e)
+            self.basin = BasinsGenericEvents(config=config_Cu, reference_table=reference_table_Cu_fake, known_environments=visited_environments_Cu, manager = None)
+            self.basin.manager = manager
+
+            self.basin._initialize(system=system_Cu)
+            self.basin.construct_connexion_table()
+            print(self.basin.states)
+            print("END")
+            print(self.basin.connectivity_table.get_table())
+            manager.close_all()
