@@ -183,8 +183,11 @@ class ReferenceEventTable:
                 if (
                     dfevent_forward["event_id"] == dfevent_forward["id_final"]
                 ):  # backward reaction same as forward
+                    dfevent_forward["idx_backward"] = len(self.table) 
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
                 else:
+                    dfevent_forward["idx_backward"] = len(self.table) + 1
+                    dfevent_backward["idx_backward"] = len(self.table) 
                     dfevent = pd.concat(
                         [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
                         ignore_index=True,
@@ -375,6 +378,7 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
+                "idx_backward" : -1 #unknown yet
             }
         )
 
@@ -396,6 +400,7 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
+                "idx_backward": -1 #unknown yet
             }
         )
 
@@ -422,6 +427,7 @@ class ReferenceEventTable:
                     "move_atom_idx",
                     "sym_matrix",
                     "sym_perm",
+                    "idx_backward"
                 ]
             )
 
