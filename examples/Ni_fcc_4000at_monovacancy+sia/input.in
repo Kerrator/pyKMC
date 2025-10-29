@@ -38,3 +38,5 @@ matching_score_thr = 0.4
 
 [IRA]
 kmax_factor = 2.0
+
+[BASIN]
