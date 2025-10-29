@@ -1,5 +1,8 @@
 import numpy as np
+from ase import Atoms
 from ase.data import atomic_numbers, atomic_masses
+from ase.geometry import find_mic
+from ase.io import write
 from mpi4py import MPI
 import ctypes 
 import pypARTn2
@@ -112,15 +115,17 @@ def minimize_with_results(engine, config) :
 
 
 def partn_search(engine, config, central_atom_idx: int, system) :
-    original_stdout_fd = os.dup(1)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
-    os.dup2(devnull, 1)
+    # original_stdout_fd = os.dup(1)
+    # devnull = os.open(os.devnull, os.O_WRONLY)
+    # # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
+    # os.dup2(devnull, 1)
 
+    engine.command('plugin clear')
+    engine.command('clear')
 
     #Define active volume:
     av, inner_ind, buffer_ind = define_active_volume(config, central_atom_idx, system)
-    map = make_active_volume(engine, system, inner_ind, buffer_ind)
+    atom_map = make_active_volume(engine, config, av, inner_ind, buffer_ind)
 
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
@@ -152,7 +157,8 @@ def partn_search(engine, config, central_atom_idx: int, system) :
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.push_dist_thr)
     artn.set("push_step_size", config.partn.push_step_size)
-    artn.set("push_ids", [central_atom_idx + 1])
+
+    artn.set("push_ids", (np.where(atom_map == central_atom_idx+1)[0]+1))
     artn.set("ninit", config.partn.ninit)
 
     #Lanczos
@@ -160,7 +166,6 @@ def partn_search(engine, config, central_atom_idx: int, system) :
     artn.set("lanczos_max_size", config.partn.lanczos_max_size)
     artn.set("lanczos_disp", config.partn.lanczos_disp)
     artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
-
     #Eigenvector push 
     artn.set("eigval_thr", config.partn.eigval_thr)
     artn.set("eigen_step_size", config.partn.eigen_step_size)
@@ -168,14 +173,13 @@ def partn_search(engine, config, central_atom_idx: int, system) :
     artn.set("neigen", config.partn.neigen)
     artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
     artn.set("nnewchance", config.partn.nnewchance)
-
     #Perpendicular relaxation 
     artn.set("nperp", config.partn.nperp)
 
     #Convergence
     artn.set("forc_thr", config.partn.forc_thr)
 
-    #Final push 
+    #Final push
     artn.set("push_over", config.partn.push_over)
 
     # RUN
@@ -185,20 +189,21 @@ def partn_search(engine, config, central_atom_idx: int, system) :
 
 
 
-    # Restore original stdout (fd 1)
-    os.dup2(original_stdout_fd, 1)
-    os.close(original_stdout_fd)
-    os.close(devnull)
+    # # Restore original stdout (fd 1)
+    # os.dup2(original_stdout_fd, 1)
+    # os.close(original_stdout_fd)
+    # os.close(devnull)
 
-    engine.command("unfix freeze_outside")
-    engine.command("group atoms_outside delete")
-    engine.command("group atoms_in_sphere delete")
-    engine.command("region sphere_region delete")
+
+    engine.command("unfix f_buffer")
+    engine.command("group inner_movable delete")
+    engine.command("group buffer delete")
 
     if not err:
         # Results
         delr1 = artn.extract("delr_min1")
         delr2 = artn.extract("delr_min2")
+        print("delr1", delr1, "delr2", delr2)
         # Checks if one minimum is close to the original configuration
         if delr1 < delr_threshold or delr2 < delr_threshold:
             E_sad = artn.extract("etot_sad")
@@ -220,10 +225,17 @@ def partn_search(engine, config, central_atom_idx: int, system) :
                 0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
             )
             index_move = np.argmax(dist)
+
+            # NEED TO CHANGE: reset the system so that we can apply the changes made in the av
+            # engine.command("clear")
+            # initialize_system(engine, system)
+            # initialize_potential(engine, config)
+            # initialize_parameters(engine)
+
             if delr1 < delr2:  # necessary for no reconstruction option
                 return Ok(
                     EventSearchOutput(
-                        central_atom_index=central_atom_idx,
+                        central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),
                         dE_forward=dE_forward,
                         dE_backward=dE_backward,
                         min1_positions=min1positions,
@@ -259,26 +271,33 @@ def partn_search(engine, config, central_atom_idx: int, system) :
             )
         )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None) : 
+def partn_refine(engine, config, central_atom_idx:int, system) :
 
-    #Set positions 
-    if positions is not None : 
-        set_positions(engine=engine, positions=positions)
+    test_image = Atoms(system.types, positions=system.positions, cell=system.cell, pbc=system.pbc)
+    test_image.write('updated_system_in_refine.xyz', format='xyz')
 
-    # INITILIZE ARTN
-    artn = pypARTn2.artn(engine="lmp")
+    engine.command('plugin clear')
+    engine.command('clear')
+
+    # Define active volume:
+    av, inner_ind, buffer_ind = define_active_volume(config, central_atom_idx, system)
+    atom_map = make_active_volume(engine, config, av, inner_ind, buffer_ind)
+    #map = make_active_volume(engine, av, inner_ind, buffer_ind)
 
     # LAMMPS COMMANDS
     engine.command("plugin load {}".format(config.partn.path_artnso))
     engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
     engine.command("min_style fire")
 
+    # INITILIZE ARTN
+    artn = pypARTn2.artn(engine="lmp")
+
     # SETUP ARTN
     artn.reset_input()
     #Control
     artn.set("engine_units", "lammps/metal")
     artn.set("verbose", config.partn.verbosity)
-    artn.set("struc_format_out", "none")
+    artn.set("struc_format_out", "xyz")
     artn.set("delr_thr", config.partn.delr_thr)
 
     #Exploration
@@ -293,7 +312,11 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.r_push_dist_thr)
     artn.set("push_step_size", config.partn.r_push_step_size)
-    artn.set("push_ids", [central_atom_idx + 1]) #fortran start at 1
+
+    print('--------CENTRAL ATOM INDEX--------', central_atom_idx)
+    print('-------Mapped Central Index',np.where(atom_map == central_atom_idx+1)[0]+1)
+
+    artn.set("push_ids", (np.where(atom_map == central_atom_idx+1)[0]+1))
     artn.set("ninit", config.partn.r_ninit)
 
     #Lanczos 
@@ -317,22 +340,28 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)
 
-
-
-
-
     # RUN
     engine.command("minimize 1e-6 1e-8 1000 1000")
     engine.command("unfix 10") #Otherwise, if you use other minimization style for the system minimization error "min_style fire must be use with fix ART"
 
     # EXTRACT DATA
     err = artn.get_runparam("error_message")
+
+    engine.command("unfix f_buffer")
+    engine.command("group inner_movable delete")
+    engine.command("group buffer delete")
+
     if not err:
+        print("---------------NOT ERROR--------------")
         E_sad = artn.extract("etot_sad")
         saddlepositions = artn.extract("tau_sad")
+        #system_saddlepositions=system.positions
+        #for i in range(len(atom_map)):
+            #system_saddlepositions[atom_map[i]-1]=saddlepositions[i]
         return Ok(
             EventRefinementOutput(
-                central_atom_index=central_atom_idx,
+                central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),
+                #saddle_positions=system_saddlepositions,
                 saddle_positions=saddlepositions,
                 E_saddle= E_sad
             )
@@ -348,7 +377,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
 
 #----------------------------------NEW CODE-----------------------------------------
 
-def define_active_volume(config, system, central_atom_idx: int):
+def define_active_volume(config, central_atom_idx: int, system):
     '''
     Want to make it so the radius and such are defined in the config file later
     Need to pass the ID of the atom getting checked. It will be in ORIGINAL system units, so it'll need to be mapped
@@ -365,76 +394,85 @@ def define_active_volume(config, system, central_atom_idx: int):
 
     # Defining parameters
     # Radius of whole active volume in Ang
-    r_a = config.r_act # Ensures AV is larger than topology analysis
-    # Define the thickness of the buffer zone
-    r_m = config.r_mov
+    r_a = config.partn.r_act # Ensure AV is larger than topology analysis
+    # Defines the radius of atoms that can move.
+    r_m = config.partn.r_mov
+
+    #NEED TO ADD WARNING IF R_A<R_M
 
     positions = system.positions
 
     center = positions[central_atom_idx]
 
     inner_movable_indices = []
+    buffer_indices = []
     total_active_indices = []
     non_active_indices = []
 
     for i, pos in enumerate(positions):
-        distance = np.linalg.norm(pos - center)
-        if distance <= r_m:
+        diff = pos - center
+        diff_mic, distance = find_mic(diff, system.cell, pbc=True)
+        if np.abs(distance) <= r_m:
             inner_movable_indices.append(i)
             total_active_indices.append(i)  # Inner is also part of total active
-        elif distance <= r_a:
+        elif np.abs(distance) > r_m and np.abs(distance) <= r_a: #Can change to make it between r_m and r_a
+            buffer_indices.append(i)
             total_active_indices.append(i)
         else:
             non_active_indices.append(i)
 
-    buffer_indices = np.array(list(set(total_active_indices) - set(inner_movable_indices)))
+    print("Number of atoms in Active Volume: {}".format(len(total_active_indices)))
+
+    #buffer_indices = np.array(list(set(total_active_indices) - set(inner_movable_indices)))
     inner_movable_indices = np.array(sorted(inner_movable_indices))  # Ensure sorted for consistent indexing
-    buffer_indices = np.sort(buffer_indices)
-    non_active_indices = np.sort(non_active_indices)
-    av_indices = np.sort(np.concatenate([inner_movable_indices, buffer_indices]))  # Sorts all the atoms
+    buffer_indices = np.array(sorted(buffer_indices))
+    non_active_indices = np.array(sorted(non_active_indices))
+    av_indices = np.array(sorted(total_active_indices))
+    #av_indices = np.sort(np.concatenate([inner_movable_indices, buffer_indices]))  # Sorts all the atoms
 
     cell = system.cell
     types = [system.types[i] for i in av_indices]
     positions = system.positions[av_indices]
-    print("Number of atoms in AV", len(positions))
     pbc = system.pbc
 
     av = System(types, positions, cell, pbc, av_indices)
     return av, inner_movable_indices, buffer_indices
 
 
-def make_active_volume(engine, system, inner_movable_indices, buffer_indices) :
+def make_active_volume(engine, config, system, inner_movable_indices, buffer_indices) :
     '''
     Makes the active volume in lammps. This is where the map for ID's gets made
     '''
 
     # -------------------Setting up AV----------------------
 
+    initialize_parameters(engine)
     initialize_system(engine, system)  # This encompasses making the av system
-    initialize_potential(engine, system)
+    initialize_potential(engine, config)
 
     # ------------------Now want refactored atoms-----------------------------
     engine.command('reset_atoms id')
     # ---------------------------Now Map-------------------------------
-
+    engine.command("atom_modify sort 0 0.0")  # ! necessary for partn
     engine_positions = get_positions(engine)
 
-    map = map_atom_indices(system, engine_positions)  # This will make the map needed for pARTn
+    atom_map = map_atom_indices(system, engine_positions)  # This will make the map needed for pARTn
 
     engine_inner_movable_ids = []
     engine_buffer_ids = []
     # Convert target arrays to sets for efficient O(1) average time lookup
-    inner_movable_set = set(inner_movable_indices)
-    buffer_set = set(buffer_indices)
 
-    for i in range(len(map)):
+    inner_movable_set = set(inner_movable_indices+1)
+    buffer_set = set(buffer_indices+1)
+
+    for i in range(len(atom_map)):
         # self.map[i] represents an original ID
         # Check if this original ID is present in the set of inner_movable_indices
-        if map[i] in inner_movable_set:
+        if atom_map[i] in inner_movable_set:
             engine_inner_movable_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
 
         # Check if this original ID is present in the set of buffer_indices
-        if map[i] in buffer_set:
+        if atom_map[i] in buffer_set:
             engine_buffer_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
     #
     # #Defining groups of atoms
@@ -443,10 +481,15 @@ def make_active_volume(engine, system, inner_movable_indices, buffer_indices) :
     if len(engine_buffer_ids) > 0:
         engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+
     else:
         print('No buffer atoms defined')
+    engine.command('run 0')
+    engine.command('write_dump all custom dump.atom id type x y z fx fy fz')
+    engine.command('write_dump buffer custom dump.buffer id type x y z fx fy fz')
+    engine.command('write_dump inner_movable custom dump.active id type x y z fx fy fz')
 
-    return map
+    return atom_map
 
 
 def map_atom_indices(system, engine_positions) :
@@ -461,7 +504,7 @@ def map_atom_indices(system, engine_positions) :
     Returns:
         new_to_old (dict): {new_ID: old_ID}
     """
-    old_IDs = system.index
+    old_IDs = system.index+1
     old_positions = system.positions
 
     # Round positions to avoid floating-point mismatch issues

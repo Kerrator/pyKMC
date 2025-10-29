@@ -49,7 +49,7 @@ class EventSearch:
             ),
         )
 
-        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions) 
+        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, system=self.system)
 
         for f in futures : 
             self.results.append(f.result())

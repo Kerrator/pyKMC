@@ -140,8 +140,13 @@ class EventSearchConfig(BaseModel):
     )
 
     delr_thr: float = Field(
-        default=0.5,
+        default=0.1,
         description="delr threshold between one minima and the intial configuration to consider the event valid.",
+    )
+
+    refined_energy_difference_thr: float = Field(
+        default=0.05,
+        description="Energy threshold for what is defined as a unique event during refinement. If the difference between other values in the active table is less than this, it's disregarded"
     )
 
     
@@ -240,7 +245,7 @@ class PartnConfig(BaseModel):
     )
 
     nnewchance: int = Field(
-        default=0, 
+        default=2,  #This should be increased
         description="Number of times a research is allowed to cross a convex region (without counting the starting convex region)."
     )
 
@@ -262,7 +267,7 @@ class PartnConfig(BaseModel):
     )
 
     nevalf_max: int = Field(
-        default=9999, 
+        default=100000,
         description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
     )
 
@@ -285,6 +290,16 @@ class PartnConfig(BaseModel):
     path_artnso: str = Field(
         default=...,
         description="Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'",
+    )
+
+    r_act: float = Field(
+        default=6,
+        description="Radius of active volume in Angstrom",
+    )
+
+    r_mov: float = Field(
+        default=4,
+        description="Radius within the active volume that contains movable atoms in Angstrom",
     )
 
 #################

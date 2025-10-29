@@ -14,6 +14,10 @@ import numpy as np
 import pandas as pd
 import concurrent.futures
 
+#Troubleshooting
+from ase.io import write
+from ase import Atoms
+
 
 class Refinement:
     """Perfrom event refinements and deal with results.
@@ -103,19 +107,47 @@ class Refinement:
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
             #update result 
-            if res.is_ok() : 
+            if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
-                #Now check if energy barrier consistent with generic one 
-                res = self.check_refinement_energy(res,
-                            abs(
-                                res.ok_value().dE_forward
-                                - ctx["reference_energy_barrier"] 
-                            ),
-                            self.config.eventsearch.refined_energy_thr,
-                        )
-            self.results.append(res)
+                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
+
+                # Check if energy barrier consistent with generic one
+                res = self.check_refinement_energy(
+                    res,
+                    abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
+                    self.config.eventsearch.refined_energy_thr,
+                )
+
+                # === New: compare with previously refined events ===
+                is_similar = False
+                for prev_res in self.results:
+                    if not prev_res.is_ok():
+                        continue
+
+                    # Compare activation energy
+                    dE_diff = abs(res.ok_value().dE_forward - prev_res.ok_value().dE_forward)
+
+                    # Compare final minimum positions (Euclidean distance)
+                    pos_diff = np.linalg.norm(
+                        np.array(res.ok_value().min2_positions)
+                        - np.array(prev_res.ok_value().min2_positions)
+                    )
+
+                    # Skip if both are within thresholds
+                    if (
+                            dE_diff < self.config.eventsearch.refined_energy_thr
+                            and pos_diff < self.config.eventsearch.refined_energy_difference_thr
+                    ):
+                        print('Refinement is similar')
+                        is_similar = True
+                        break  # No need to check further
+
+                # Only append if not similar to an existing refinement
+                if not is_similar:
+                    self.results.append(res)
+
+        #Need to compare activation energies between each other
 
 
     def refine_single(
@@ -194,7 +226,11 @@ class Refinement:
 
                 self.system.update_positions(new_positions, atom_idx=neighbors)
                 #add a job to manager queue
-                f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                new_system = self.system
+                test_image=Atoms(new_system.types,positions=new_system.positions,cell=new_system.cell,pbc=new_system.pbc)
+                test_image.write('updated_system.xyz',format='xyz')
+
+                f = self.manager.partn_refine(self.config, at_idx, new_system) #send copy not reference !
                 futures.append(f)
 
 

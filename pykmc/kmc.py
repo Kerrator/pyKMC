@@ -140,6 +140,8 @@ class KMC:
             ##=>Perform event search on each atom in central_atom_research_list
             event_search = self.execute_event_searches(central_atom_research_list)
 
+            print(event_search)
+
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
             results_is_valid_events = self.add_reference_events(
@@ -154,6 +156,9 @@ class KMC:
                 )
                 self._close()
 
+            #ADD RESET OF INITIAL SYSTEM
+
+
             # == Refinement ==
             ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
@@ -164,7 +169,6 @@ class KMC:
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
-
             # == Update System ==
             ##=>Select event
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
@@ -237,7 +241,7 @@ class KMC:
             self._save()
             self._append_snapshot_to_trajectory()
 
-            # == Check if only cristalline environments ==
+            # == Check if only crystalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
                 "crystal"
             }:

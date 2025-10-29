@@ -106,15 +106,15 @@ class Manager:
         future = self.submit_job("get_potential_energy")
         return future
 
-    def partn_search(self, config, central_atom: list[int], positions=None) -> list[Future] : 
+    def partn_search(self, config, central_atom: list[int], system) -> list[Future] :
         futures = []
         for atom in central_atom :
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions})
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "system": system})
             futures.append(f) 
         return futures
 
-    def partn_refine(self, config, central_atom: int, positions=None) -> list[Future] : 
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions})
+    def partn_refine(self, config, central_atom: int, system) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "system": system})
         return future
 
     def close_all(self):
