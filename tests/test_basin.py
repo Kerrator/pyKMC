@@ -73,6 +73,8 @@ class TestBasin :
 
             self.basin._initialize(system=system_Cu)
             self.basin.construct_connexion_table()
+            mapping = self.basin.connectivity_table.reorder_states_index()
+            self.basin.states = {mapping[old]: val for old, val in self.basin.states.items()}
             print(self.basin.states)
             print("END")
             print(self.basin.connectivity_table.get_table())
