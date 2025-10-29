@@ -10,16 +10,20 @@ class StatesConnectivity() :
                                         'event_connexion',
                                         'central_atom', 
                                         'sym',
-                                        'transient']) 
+                                        'transient',
+                                        'dE', 
+                                        'k']) 
         self.graph = None # Placeholder for later if needed to generate a connectivity graph from the dataframe, for path finding and vizualization
 
-    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient )  : 
+    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE, k )  : 
         new_row = pd.DataFrame([{'state': state, 
                                  'state_connexion': state_connexion, 
                                  'event_connexion': event_connexion, 
                                  'central_atom': central_atom, 
                                  'sym': sym, 
-                                 'transient': transient}])
+                                 'transient': transient, 
+                                 'dE': dE,
+                                 'k': k}])
         self.df = pd.concat([self.df, new_row], ignore_index=True)
 
 
@@ -123,7 +127,9 @@ class StatesConnectivity() :
                                         'event_connexion',
                                         'central_atom', 
                                         'sym',
-                                        'transient'])
+                                        'transient', 
+                                        'dE', 
+                                        'k'])
         
 
 class BasinStatesConnectivity(StatesConnectivity)  : 

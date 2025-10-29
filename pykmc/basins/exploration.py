@@ -50,7 +50,7 @@ class BasinGenericEventExplorer(Explorer) :
                 #Loop over symmetries : 
                 for i in range(len(df_event.at["sym_matrix"])) : 
                     #for each symmetries add connectivity in table 
-                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=idx, central_atom=at, sym=i, transient=is_transient )
+                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=idx, central_atom=at, sym=i, transient=is_transient, dE=df_event["energy_barrier"], k=df_event["k"] )
 
                     #update count 
                     count +=1
