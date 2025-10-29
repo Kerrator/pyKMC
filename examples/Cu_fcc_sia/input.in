@@ -1,12 +1,13 @@
 [Control] 
 initial_config = ./initial_config.xyz 
-n_steps = 1
+n_steps = 50
 engine = lammps
 verbosity = 2
-n_sessions = 8
-engine_use_rank_0 = True
-#reference_table = reference_table.pickle 
-#visited_environments = visited_environments.pickle
+n_sessions = 7
+engine_use_rank_0 = False
+reference_table = reference_table_fake.pickle 
+visited_environments = visited_environments.pickle
+reference_table_output = a.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -16,19 +17,18 @@ minimize = 1e-10 1e-12 10000 10000
 
 [AtomicEnvironment] 
 style = cna/graph
-rnei = 3.0
+rnei = 2.9
 rcut = 6.5
-#neighbors_add = 1
 
 [EventSearch] 
 style = partn
-nsearch = 50
+nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
-forc_thr = 0.000001
+forc_thr = 0.001
 
 [RateConstant] 
 style = constant
@@ -41,3 +41,5 @@ matching_score_thr = 0.4
 
 [IRA]
 kmax_factor = 2.0
+
+[BASIN]
