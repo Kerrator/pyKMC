@@ -285,6 +285,40 @@ matching_score_thr = 0.3
 [IRA] 
 ```
 
+## Running a simulation
+
+Once both the input file and the initial configuration file are ready, launch the simulation by executing:
+
+```bash 
+python -m pykmc -in <your_input_file_name> 
+``` 
+
+## Using multiple lammps instances 
+
+To speed up event searches and the refinement part of the KMC loop, it is possible to use multiple LAMMPS instances.
+Each instance runs independently on a separate set of cores.
+
+The number of instances is defined by the n_sessions parameter in the [Control] section of the input file.
+The main KMC loop always runs on the main rank (rank 0), but you can choose whether the LAMMPS instances should use all other ranks only, or include rank 0 as well.
+This behavior is controlled by the engine_use_rank_0 parameter in the [Control] section.
+Note that enabling the use of rank 0 may slightly slow down the simulation, since that instance communicates via threads rather than MPI messages.
+
+For example, if you have 8 cores available and want to run 4 LAMMPS instances, each on different ranks than the master one, your input file should contain the following parameters:
+
+```INI 
+[Control]
+...
+n_sessions = 4 
+engine_use_rank_0 = False 
+... 
+``` 
+
+You can then start the simulation with:
+```bash 
+mpirun -n 8 python -m pykmc -in <your_input_file> 
+``` 
+The available cores will be automatically split according to your configuration.
+In this example, the LAMMPS instances will run on ranks 1–2, 3–4, 5–6, and 7, while the main KMC loop runs on rank 0.
 
 
 

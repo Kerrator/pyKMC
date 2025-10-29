@@ -1,8 +1,6 @@
 import numpy as np
 from ase import Atoms
 from ase.data import atomic_numbers, atomic_masses
-from ase.geometry import find_mic
-from ase.io import write
 from mpi4py import MPI
 import ctypes 
 import pypARTn2
@@ -103,15 +101,17 @@ def set_positions(engine, positions) :
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
 
-def minimize_with_results(engine, config) : 
+def minimize_with_results(engine, config, positions=None) :
     """ 
     Minimize and return the minimized positions and the total energy.
     """
-    minimize(engine, config) 
-    positions = get_positions(engine)
+    if positions is not None :
+        set_positions(engine=engine, positions=positions)
+    minimize(engine, config)
+    new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
     if engine.rank == 0 : 
-        return positions, total_energy
+        return new_positions, total_energy
 
 
 def partn_search(engine, config, central_atom_idx: int, system) :
@@ -166,6 +166,7 @@ def partn_search(engine, config, central_atom_idx: int, system) :
     artn.set("lanczos_max_size", config.partn.lanczos_max_size)
     artn.set("lanczos_disp", config.partn.lanczos_disp)
     artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
+
     #Eigenvector push 
     artn.set("eigval_thr", config.partn.eigval_thr)
     artn.set("eigen_step_size", config.partn.eigen_step_size)
@@ -173,6 +174,7 @@ def partn_search(engine, config, central_atom_idx: int, system) :
     artn.set("neigen", config.partn.neigen)
     artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
     artn.set("nnewchance", config.partn.nnewchance)
+
     #Perpendicular relaxation 
     artn.set("nperp", config.partn.nperp)
 
@@ -184,97 +186,87 @@ def partn_search(engine, config, central_atom_idx: int, system) :
 
     # RUN
     engine.command("minimize 1e-6 1e-8 1000 1000")
-    # EXTRACT DATA
-    err = artn.get_runparam("error_message")
-
-
-
-    # # Restore original stdout (fd 1)
-    # os.dup2(original_stdout_fd, 1)
-    # os.close(original_stdout_fd)
-    # os.close(devnull)
-
 
     engine.command("unfix f_buffer")
     engine.command("group inner_movable delete")
     engine.command("group buffer delete")
 
-    if not err:
-        # Results
-        delr1 = artn.extract("delr_min1")
-        delr2 = artn.extract("delr_min2")
-        print("delr1", delr1, "delr2", delr2)
-        # Checks if one minimum is close to the original configuration
-        if delr1 < delr_threshold or delr2 < delr_threshold:
-            E_sad = artn.extract("etot_sad")
-            E_min1 = artn.extract("etot_min1")
-            E_min2 = artn.extract("etot_min2")
+    # Restore original stdout (fd 1)
+    #os.dup2(original_stdout_fd, 1)
+    #os.close(original_stdout_fd)
+    #os.close(devnull)
 
-            dE_forward = E_sad - E_min1
-            dE_backward = E_sad - E_min2
 
-            min1positions = artn.extract("tau_min1")
-            min2positions = artn.extract("tau_min2")
-            saddlepositions = artn.extract("tau_sad")
+    # EXTRACT DATA
+    if engine.rank == 0 :
+        err = artn.get_runparam("error_message")
 
-            # find atom that moves the most
-            dist = (min1positions - saddlepositions) ** 2
-            dist = dist.sum(axis=-1)
-            dist = np.sqrt(dist)
-            dist[dist > config.atomicenvironment.rcut] = (
-                0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
-            )
-            index_move = np.argmax(dist)
+        if not err:
+            # Results
+            delr1 = artn.extract("delr_min1")
+            delr2 = artn.extract("delr_min2")
+            # Checks if one minimum is close to the original configuration
+            if delr1 < delr_threshold or delr2 < delr_threshold:
+                E_sad = artn.extract("etot_sad")
+                E_min1 = artn.extract("etot_min1")
+                E_min2 = artn.extract("etot_min2")
 
-            # NEED TO CHANGE: reset the system so that we can apply the changes made in the av
-            # engine.command("clear")
-            # initialize_system(engine, system)
-            # initialize_potential(engine, config)
-            # initialize_parameters(engine)
+                dE_forward = E_sad - E_min1
+                dE_backward = E_sad - E_min2
 
-            if delr1 < delr2:  # necessary for no reconstruction option
-                return Ok(
-                    EventSearchOutput(
-                        central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),
-                        dE_forward=dE_forward,
-                        dE_backward=dE_backward,
-                        min1_positions=min1positions,
-                        saddle_positions=saddlepositions,
-                        min2_positions=min2positions,
-                        move_atom_index=index_move,
-                    )
+                min1positions = artn.extract("tau_min1")
+                min2positions = artn.extract("tau_min2")
+                saddlepositions = artn.extract("tau_sad")
+
+                # find atom that moves the most
+                dist = (min1positions - saddlepositions) ** 2
+                dist = dist.sum(axis=-1)
+                dist = np.sqrt(dist)
+                dist[dist > config.atomicenvironment.rcut] = (
+                    0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
                 )
+                index_move = np.argmax(dist)
+                if delr1 < delr2:  # necessary for no reconstruction option
+                    return Ok(
+                        EventSearchOutput(
+                            central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),,
+                            dE_forward=dE_forward,
+                            dE_backward=dE_backward,
+                            min1_positions=min1positions,
+                            saddle_positions=saddlepositions,
+                            min2_positions=min2positions,
+                            move_atom_index=index_move,
+                        )
+                    )
+                else:
+                    return Ok(
+                        EventSearchOutput(
+                            central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),,
+                            dE_forward=dE_backward,
+                            dE_backward=dE_forward,
+                            min1_positions=min2positions,
+                            saddle_positions=saddlepositions,
+                            min2_positions=min1positions,
+                            move_atom_index=index_move,
+                        )
+                    )
             else:
-                return Ok(
-                    EventSearchOutput(
-                        central_atom_index=central_atom_idx,
-                        dE_forward=dE_backward,
-                        dE_backward=dE_forward,
-                        min1_positions=min2positions,
-                        saddle_positions=saddlepositions,
-                        min2_positions=min1positions,
-                        move_atom_index=index_move,
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
+                        message="delr1 and delr2 > at {}".format(delr_threshold),
+                        variables={"delr1": delr1, "delr2": delr2},
                     )
                 )
         else:
             return Err(
                 ErrorInfo(
-                    type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
-                    message="delr1 and delr2 > at {}".format(delr_threshold),
-                    variables={"delr1": delr1, "delr2": delr2},
+                    type=ErrorType.EVENT_NOT_FOUND, message="No event found", details=err
                 )
             )
-    else:
-        return Err(
-            ErrorInfo(
-                type=ErrorType.EVENT_NOT_FOUND, message="No event found", details=err
-            )
-        )
 
 def partn_refine(engine, config, central_atom_idx:int, system) :
 
-    test_image = Atoms(system.types, positions=system.positions, cell=system.cell, pbc=system.pbc)
-    test_image.write('updated_system_in_refine.xyz', format='xyz')
 
     engine.command('plugin clear')
     engine.command('clear')
@@ -297,7 +289,7 @@ def partn_refine(engine, config, central_atom_idx:int, system) :
     #Control
     artn.set("engine_units", "lammps/metal")
     artn.set("verbose", config.partn.verbosity)
-    artn.set("struc_format_out", "xyz")
+    artn.set("struc_format_out", "none")
     artn.set("delr_thr", config.partn.delr_thr)
 
     #Exploration
@@ -340,32 +332,31 @@ def partn_refine(engine, config, central_atom_idx:int, system) :
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)
 
+
+
+
+
     # RUN
     engine.command("minimize 1e-6 1e-8 1000 1000")
     engine.command("unfix 10") #Otherwise, if you use other minimization style for the system minimization error "min_style fire must be use with fix ART"
 
-    # EXTRACT DATA
-    err = artn.get_runparam("error_message")
 
     engine.command("unfix f_buffer")
     engine.command("group inner_movable delete")
     engine.command("group buffer delete")
 
-    if not err:
-        print("---------------NOT ERROR--------------")
-        E_sad = artn.extract("etot_sad")
-        saddlepositions = artn.extract("tau_sad")
-        #system_saddlepositions=system.positions
-        #for i in range(len(atom_map)):
-            #system_saddlepositions[atom_map[i]-1]=saddlepositions[i]
-        return Ok(
-            EventRefinementOutput(
-                central_atom_index=int(np.where(atom_map == central_atom_idx+1)[0]),
-                #saddle_positions=system_saddlepositions,
-                saddle_positions=saddlepositions,
-                E_saddle= E_sad
+    if engine.rank == 0 :
+        err = artn.get_runparam("error_message")
+        if not err:
+            E_sad = artn.extract("etot_sad")
+            saddlepositions = artn.extract("tau_sad")
+            return Ok(
+                EventRefinementOutput(
+                    central_atom_index=central_atom_idx,
+                    saddle_positions=saddlepositions,
+                    E_saddle= E_sad
+                )
             )
-        )
 
     else:
         return Err(

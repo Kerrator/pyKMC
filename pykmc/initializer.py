@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from .kmc import KMC
 from .log import LogKMC, LOGGING_CONFIG
 from .system import System
-from .engine import Engine
 from .neighbors_list import NeighborsList
 from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
@@ -34,8 +33,6 @@ class Initializer:
         """Initialize the entire KMC object before starting the simulation."""
         self.initialize_loggers()
         self.initialize_system()
-        #self.initialize_engine()
-        #self.kmc.minimize_system()
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()
@@ -68,14 +65,6 @@ class Initializer:
         self.kmc.system = System.create_from_file(
             self.kmc.config.control.initial_config
         )
-
-    def initialize_engine(self) -> None:
-        """Initialize the engine based on the Config."""
-        self.kmc.loggers.info(
-            "log",
-            ":=> Initializing E/F {} Engine".format(self.kmc.config.control.engine),
-        )
-        self.kmc.engine = Engine(self.kmc.config)
 
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""

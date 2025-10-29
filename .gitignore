@@ -53,3 +53,4 @@ examples/tutorial/input.in
 *PKG-INFO 
 *SOURCES.txt 
 *requires.txt
+*__pycache__

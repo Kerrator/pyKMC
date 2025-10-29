@@ -2,7 +2,6 @@
 
 from .result import EventSearchOutput
 from .system import System
-from .engine import Engine
 from .enginemanager.lmpi.pool import Manager
 from .log import LogKMC
 from .utils.geometry import translate

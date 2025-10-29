@@ -8,7 +8,7 @@ from .system import System
 from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
-from .engine import Engine
+from .enginemanager.lmpi.pool import Manager
 import ase.geometry
 import numpy as np
 import pandas as pd
@@ -46,7 +46,7 @@ class Refinement:
         system: System,
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
-        manager: Engine,
+        manager: Manager,
     ) -> None:
         self.config = config
         self.loggers = loggers
@@ -69,7 +69,8 @@ class Refinement:
         """
         self.results = []
 
-        total_refinements = self.get_total_refinements_todo(df_reference_events)
+        total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
+        e_thr = self.get_energy_thr_refine(df_reference_events, supposed_ktot)
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
         #count = 0
 
@@ -81,10 +82,11 @@ class Refinement:
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["event_id"]
             )
+
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
                 futures = self.refine_single(
-                    at_idx, dfevent, idx, total_refinements,  future_context
+                    at_idx, dfevent, idx, total_refinements,  future_context, total_energy, e_thr
                 )
                 if isinstance(futures,list): #If symmetries
                     all_futures.extend(futures)
@@ -107,45 +109,20 @@ class Refinement:
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
             #update result 
-            if res.is_ok():
+            if res.is_ok() : 
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
-
-                # Check if energy barrier consistent with generic one
-                res = self.check_refinement_energy(
-                    res,
-                    abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
-                    self.config.eventsearch.refined_energy_thr,
-                )
-
-                # === New: compare with previously refined events ===
-                is_similar = False
-                for prev_res in self.results:
-                    if not prev_res.is_ok():
-                        continue
-
-                    # Compare activation energy
-                    dE_diff = abs(res.ok_value().dE_forward - prev_res.ok_value().dE_forward)
-
-                    # Compare final minimum positions (Euclidean distance)
-                    pos_diff = np.linalg.norm(
-                        np.array(res.ok_value().min2_positions)
-                        - np.array(prev_res.ok_value().min2_positions)
-                    )
-
-                    # Skip if both are within thresholds
-                    if (
-                            dE_diff < self.config.eventsearch.refined_energy_thr
-                            and pos_diff < self.config.eventsearch.refined_energy_difference_thr
-                    ):
-                        print('Refinement is similar')
-                        is_similar = True
-                        break  # No need to check further
-
-                # Only append if not similar to an existing refinement
-                if not is_similar:
-                    self.results.append(res)
+                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
+                res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
+                #Now check if energy barrier consistent with generic one
+                res = self.check_refinement_energy(res,
+                            abs(
+                                res.ok_value().dE_forward
+                                - ctx["reference_energy_barrier"] 
+                            ),
+                            self.config.eventsearch.refined_energy_thr,
+                        )
+            self.results.append(res)
 
         #Need to compare activation energies between each other
 
@@ -156,7 +133,9 @@ class Refinement:
         dfevent: pd.Series,
         cat_idx: int,
         total_refinements: int,
-        future_context: dict
+        future_context: dict,
+        total_energy: float,
+        e_thr: float
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
 
@@ -181,6 +160,9 @@ class Refinement:
             list of Result of the refinements.
 
         """
+
+
+
         ##=>PSR between generic event and at_idx environments
         result_psr = PointSetRegistration(
             self.config, self.system, dfevent, self.neighbors_list, at_idx
@@ -199,9 +181,11 @@ class Refinement:
         else:
             output_psr = result_psr.ok_value()
 
-            displacement = (
+            displacement_saddle = (
                 dfevent.at["saddle_positions"] - dfevent.at["initial_positions"]
             )
+
+            displacement_final = dfevent.at["final_positions"] - dfevent.at["initial_positions"]
 
             #all_results = []
             futures = []
@@ -212,38 +196,54 @@ class Refinement:
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
             ):
-                new_displacement = geometry.transform_positions(
-                    displacement, sym_matrix, 0, perm_matrix
+                new_displacement_saddle = geometry.transform_positions(
+                    displacement_saddle, sym_matrix, 0, perm_matrix
                 )
-                saddle_positions = dfevent.at["initial_positions"] + new_displacement
-                new_positions = geometry.transform_positions(
+                new_displacement_final = geometry.transform_positions(displacement_final, sym_matrix, 0, perm_matrix)
+
+                saddle_positions = dfevent.at["initial_positions"] + new_displacement_saddle
+                final_positions = dfevent.at["initial_positions"] + new_displacement_final
+
+                new_positions_saddle = geometry.transform_positions(
                     saddle_positions,
                     output_psr.rotation_matrix,
                     output_psr.translation_matrix,
                     output_psr.permutation_matrix,
                 )
+                new_positions_final = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
 
-                self.system.update_positions(new_positions, atom_idx=neighbors)
-                #add a job to manager queue
-                new_system = self.system
-                test_image=Atoms(new_system.types,positions=new_system.positions,cell=new_system.cell,pbc=new_system.pbc)
-                test_image.write('updated_system.xyz',format='xyz')
+                #move to saddle point
+                self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
+                if dfevent.at["energy_barrier"] > e_thr : #dont refine
+                    f = concurrent.futures.Future()
+                    f.set_result(Ok(EventRefinementOutput(
+                        central_atom_index=at_idx,
+                        saddle_positions=self.system.positions,
+                        E_saddle=total_energy+dfevent["energy_barrier"]
+                    )))
+                else :
 
-                f = self.manager.partn_refine(self.config, at_idx, new_system) #send copy not reference !
+                    #add a job to manager queue
+                    new_system = self.system
+                    test_image=Atoms(new_system.types,positions=new_system.positions,cell=new_system.cell,pbc=new_system.pbc)
+                    test_image.write('updated_system.xyz',format='xyz')
+                    f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
                 futures.append(f)
 
 
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
                 #Update Result : 
                 #        #Apply psr to generic final positions
-                final_positions = dfevent.at["final_positions"] + new_displacement
-                new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                self.system.update_positions(new_positions, atom_idx=neighbors )
+                #final_positions = dfevent.at["final_positions"] + new_displacement
+                #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                #self.system.update_positions(new_positions, atom_idx=neighbors )
                 future_context[f] = {
-                    "min2_positions": self.system.positions.copy(),
+                    #"min2_positions": self.system.positions.copy()[neighbors],
+                    "min2_positions": new_positions_final,
                     "num_reference_event": cat_idx, 
-                    "reference_energy_barrier": dfevent["energy_barrier"]
+                    "reference_energy_barrier": dfevent["energy_barrier"],
+                    "neighbors": neighbors
                 }
 
 
@@ -322,12 +322,28 @@ class Refinement:
 
         """
         total = 0
+        supposed_ktot = 0
         for _idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
-            total += len(
+            n_atoms = len(
                 self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
             ) * len(dfevent["sym_matrix"])
-        return total
+            total += n_atoms
+            supposed_ktot += dfevent.at["k"]*n_atoms
+        return total, supposed_ktot
+
+    def get_energy_thr_refine(self, df_reference_events, supposed_ktot) :
+        tol = self.config.control.refine_thr
+        k_thr = supposed_ktot*tol
+
+        #get energy corresponding to the first k value just under k_thr
+        mask = df_reference_events["k"] <  k_thr
+        if mask.any():
+            e_value = df_reference_events.loc[mask].sort_values("k").iloc[-1]["energy_barrier"]
+        else: #refine no event
+            e_value = 0.0
+        e_value += 0.1 #to be sure want using condition
+        return e_value
 
     def get_successes_results(self) -> list[EventRefinementOutput]:
         """Return successful results.

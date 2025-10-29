@@ -1,6 +1,6 @@
 """Module containing function to apply geometric transformations."""
 
-__all__ = ["transform_positions", "translate"]
+__all__ = ["transform_positions", "translate", "push_towards", "compute_delr"]
 import ase.geometry
 import numpy as np
 
@@ -58,3 +58,42 @@ def translate(
     positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
     positions[positions < 0] = 0
     return positions
+
+
+def push_towards(current_positions, target_positions, fraction = 0.1, cell = None) : 
+    displacement = target_positions - current_positions
+
+    if cell is not None:
+        box = np.diag(cell)
+        displacement -= np.round(displacement / box) * box
+        #unwrap target
+        target_positions_unwrapped = current_positions + displacement
+    else:
+        target_positions_unwrapped = target_positions
+
+    new_positions = current_positions + fraction * (target_positions_unwrapped - current_positions)
+
+    if cell is not None : 
+        new_positions = ase.geometry.wrap_positions(positions=new_positions, cell=cell, pbc=[True, True, True])
+    return new_positions
+
+def compute_delr(positions_1, positions_2, cell=None) : 
+    displacements = positions_2 - positions_1
+
+    if cell is not None : 
+        cell_lengths = np.linalg.norm(cell, axis=1)  
+
+        #apply pbc 
+
+        for i in range(3) : 
+            displacements[:, i] -= cell_lengths[i] * np.round(displacements[:, i] / cell_lengths[i])
+    
+    # Calcul des normes des déplacements
+    distances = np.linalg.norm(displacements, axis=1)
+    
+    # Retour du déplacement maximum
+    delr = np.max(distances)
+    
+    return delr
+
+
