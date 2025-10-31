@@ -45,12 +45,17 @@ class BasinGenericEventExplorer(Explorer) :
             is_transient = self.detector.detect(df_event, self.reference_table.table, self.config.basin.energy_thr)
             #All atoms on which we can apply the event : 
             l_atoms = state.environment.get_atoms_with_id(df_event["event_id"])
+            #Find backward info
+            backward_idx = self.reference_table.table.loc[idx].at["idx_backward"]
+            dE_backward = self.reference_table.table.loc[backward_idx].at["energy_barrier"]
+            k_backward = self.reference_table.table.loc[backward_idx].at["k"]
+
             #Loop over all atoms on which we can apply the event : 
             for at in l_atoms : 
                 #Loop over symmetries : 
                 for i in range(len(df_event.at["sym_matrix"])) : 
                     #for each symmetries add connectivity in table 
-                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=idx, central_atom=at, sym=i, transient=is_transient, dE=df_event["energy_barrier"], k=df_event["k"] )
+                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=idx, central_atom=at, sym=i, transient=is_transient, dE_forward=df_event["energy_barrier"], k_forward=df_event["k"], dE_backward=dE_backward, k_backward=k_backward )
 
                     #update count 
                     count +=1

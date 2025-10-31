@@ -11,19 +11,23 @@ class StatesConnectivity() :
                                         'central_atom', 
                                         'sym',
                                         'transient',
-                                        'dE', 
-                                        'k']) 
+                                        'dE_forward', 
+                                        'k_forward',
+                                        'dE_backward', 
+                                        'k_backward']) 
         self.graph = None # Placeholder for later if needed to generate a connectivity graph from the dataframe, for path finding and vizualization
 
-    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE, k )  : 
+    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE_forward, k_forward, dE_backward, k_backward )  : 
         new_row = pd.DataFrame([{'state': state, 
                                  'state_connexion': state_connexion, 
                                  'event_connexion': event_connexion, 
                                  'central_atom': central_atom, 
                                  'sym': sym, 
                                  'transient': transient, 
-                                 'dE': dE,
-                                 'k': k}])
+                                 'dE_forward': dE_forward,
+                                 'k_forward': k_forward, 
+                                 'dE_backward': dE_backward,
+                                 'k_backward': k_backward}])
         self.df = pd.concat([self.df, new_row], ignore_index=True)
 
 
@@ -92,9 +96,38 @@ class StatesConnectivity() :
         """
         return list(df[['state', 'event_connexion', 'central_atom', 'sym', 'transient']].itertuples(index=False, name=None))
     
-
     def reorder_states_index(self) : 
-        """If the connectivity table has non continuous state index, reorder them"""
+        """Reorder index so that there is no jump, transient are first"""
+
+        #All states : 
+        unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
+
+        #find transient states (all states in the state row)
+        current_transient_states = sorted(self.df['state'].unique())
+
+        #find absorbing states (all other)
+        current_absorbing_states = list(set(unique_states).difference(current_transient_states))
+
+        #Create mapping 
+        mapping = {}
+        new_idx = 0 
+
+        for idx in current_transient_states : 
+            mapping[idx] = new_idx
+            new_idx += 1 
+        
+        for idx in current_absorbing_states : 
+            mapping[idx] = new_idx 
+            new_idx += 1
+
+        #Apply mapping 
+        self.df['state'] = self.df['state'].map(mapping)
+        self.df['state_connexion'] = self.df['state_connexion'].map(mapping)
+
+        return mapping
+
+    def reorder_states_index2(self) : 
+        """Reorder state index so If the connectivity table has non continuous state index, reorder them"""
 
         unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
 
@@ -128,8 +161,10 @@ class StatesConnectivity() :
                                         'central_atom', 
                                         'sym',
                                         'transient', 
-                                        'dE', 
-                                        'k'])
+                                        'dE_forward', 
+                                        'k_forward', 
+                                        'dE_backward',
+                                        'k_backward'])
         
 
 class BasinStatesConnectivity(StatesConnectivity)  : 

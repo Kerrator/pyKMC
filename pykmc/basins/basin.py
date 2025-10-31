@@ -1,6 +1,7 @@
 from .detection import Detector
 from .exploration import Explorer, BasinGenericEventExplorer
 from .connectivity import BasinStatesConnectivity
+from .selection import FTPASelector
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration
@@ -51,6 +52,7 @@ class BasinsGenericEvents() :
         self.explored_states = [] 
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
+        self.selector = FTPASelector()
         self._add_state(state_index=0, system=system)  #add current state 0 to self.states
 
 
@@ -74,7 +76,6 @@ class BasinsGenericEvents() :
                     #Check if it is a new_system or already in states 
                 is_new_state = self.is_new_state(new_system) 
                 if is_new_state != -1 : #It already exists 
-                    print("already known state")
                     #update table
                     self.connectivity_table.change_state_index(current_index=to_explore, new_index=is_new_state)
                     self.explored_states.append(to_explore)
@@ -86,7 +87,6 @@ class BasinsGenericEvents() :
 
                 #Check if unknown atomic environments
                 if self.is_states_has_unknown_environments(self.states[to_explore]) : 
-                    print("has unknown environments")
                     #We consider that this state is an absorbing one because we need to search new events (in main KMC loop) 
                     #Need to update the connectivity table 
                     self.connectivity_table.change_state_to_absorbing(to_explore) 
@@ -101,7 +101,6 @@ class BasinsGenericEvents() :
 
             #Explore state 
             self.current_state = to_explore
-            print("HERE")
             print(self.current_state, to_explore)
             print(self.states)
             last_state_connectivity = self.get_last_state_index()
@@ -117,7 +116,6 @@ class BasinsGenericEvents() :
             self.explorer.clear()
             self.update_to_explore()
 
-            print(self.connectivity_table.get_table())
 
 
             
@@ -199,16 +197,10 @@ class BasinsGenericEvents() :
             ####################
             ####################
             new_system.update_positions(final_positions, atom_idx = neighbors)
-            print("yes")
             future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
-            print("oui")
             min_pos, _ = future.result()
-            print("si")
             new_system.update_positions(min_pos)
 
-
-            #TODO CHANGE 
-            
 
             return new_system
 
