@@ -78,4 +78,5 @@ class TestBasin :
             print(self.basin.states)
             print("END")
             print(self.basin.connectivity_table.get_table())
+            exit_state = self.basin.selector.select_from_connectivity(self.basin.connectivity_table)
             manager.close_all()

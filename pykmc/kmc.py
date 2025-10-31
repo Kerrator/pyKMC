@@ -175,7 +175,16 @@ class KMC:
             active_table = self.add_active_events(refinement.get_successes_results())
 
             # == Update System ==
-            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
+            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
+                #IF selected event shows we are in a basin
+                #get basin info/explore
+                #move system to a state connected to the exit_state 
+                #construct new active table with only event : new_actual_state - > exit_state
+                #reconstruct event
+                #update delta_t, ktot (use basin infos)
+
+
+
             self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
             total_time += delta_t * 10**-12  # time is in seconds
 
@@ -603,3 +612,4 @@ class KMC:
         self.loggers.info("log", ":=> End of simulation")
         self.manager.close_all()
         sys.exit()
+
