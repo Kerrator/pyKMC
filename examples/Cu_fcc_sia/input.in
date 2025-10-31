@@ -1,13 +1,13 @@
 [Control] 
 initial_config = ./initial_config.xyz 
-n_steps = 50
+n_steps = 1
 engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-reference_table = reference_table_fake.pickle 
-visited_environments = visited_environments.pickle
-reference_table_output = a.pickle
+#reference_table = reference_table_fake.pickle 
+#visited_environments = visited_environments.pickle
+#reference_table_output = a.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -22,7 +22,7 @@ rcut = 6.5
 
 [EventSearch] 
 style = partn
-nsearch = 20
+nsearch = 1
 emax_event = 5.0
 emin_event = 0.0
 
