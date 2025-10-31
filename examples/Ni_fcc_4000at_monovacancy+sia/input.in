@@ -1,6 +1,6 @@
 [Control] 
 initial_config = ./initial_config.xyz 
-n_steps = 100
+n_steps = 10
 engine = lammps
 verbosity = 2
 n_sessions = 7
@@ -20,7 +20,7 @@ rcut = 6.5
 
 [EventSearch] 
 style = partn
-nsearch = 20
+nsearch = 10
 emax_event = 5.0
 emin_event = 0.0
 
@@ -29,7 +29,7 @@ path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
-k0 = 1.0
+k0 = 10.0
 T = 300.0
 
 [PSR] 
