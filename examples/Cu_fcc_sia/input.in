@@ -1,13 +1,13 @@
 [Control] 
-initial_config = ./cu_fcc_defects.xyz
-n_steps = 10
+initial_config = ./initial_config.xyz 
+n_steps = 1
 engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-reference_table = reference_table_fake.pickle 
-visited_environments = visited_environments.pickle
-reference_table_output = a.pickle
+#reference_table = reference_table_fake.pickle 
+#visited_environments = visited_environments.pickle
+#reference_table_output = a.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
