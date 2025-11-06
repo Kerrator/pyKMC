@@ -1,7 +1,7 @@
 from .detection import Detector
 from .exploration import Explorer, BasinGenericEventExplorer
 from .connectivity import BasinStatesConnectivity
-from .selection import FTPASelector
+from .selection import FPTASelector
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration

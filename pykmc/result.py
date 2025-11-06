@@ -212,6 +212,11 @@ class ReconstructionOutput :
     saddle_positions: np.ndarray 
     min2_positions: np.ndarray
 
+@dataclass 
+class BasinSelectorOutput : 
+    """"Store the result of the selector"""
+    t_exit: float 
+    exit_state: int 
 
 @dataclass 
 class BasinExitTimeSolverOutput : 
