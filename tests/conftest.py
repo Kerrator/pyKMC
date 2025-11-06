@@ -19,9 +19,10 @@ def test_logger():
 
     if not logger.handlers:
         handler = logging.StreamHandler()  
-        formatter = logging.Formatter("[%(levelname)s] %(message)s")
+        formatter = logging.Formatter("[\033[1;36m %(levelname)s \033[0m]  %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+        logger.propagate = False
 
     return logger
 

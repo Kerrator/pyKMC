@@ -4,10 +4,11 @@ import numpy as np
 from unittest.mock import Mock, MagicMock, patch
 import os
 import copy
-from pykmc.basins import  StatesConnectivity, BasinStatesConnectivity, BasinGenericEventExplorer, BasinsGenericEvents
+from pykmc.basins import  StatesConnectivity, BasinStatesConnectivity, BasinGenericEventExplorer, BasinsGenericEvents, FTPASelector, BisectionSolver
 import logging
 from pykmc.enginemanager.lmpi.pool import ManagerFactory
 from .conftest import mpi_test
+import numpy.testing as npt
 
 
 logger = logging.getLogger("tests")
@@ -55,6 +56,108 @@ class TestBasinExplorer :
         basin_explorer.explore(state=mock_state_data)
 
         test_logger.debug("connexion_table : \n{}".format(basin_explorer.get_connectivity_table()))
+
+
+class TestSolver : 
+
+    def test_solve_master_equation(self, test_logger):
+
+        #Mock reduced matric 
+        M_abs_reduced = np.array([
+            [+0.17 ,  -0.30 , - 0.20 ,  0.00],
+            [- 0.05 , 0.48 ,  -0.25 ,  0.00],
+            [- 0.10 ,  -0.10 , 0.45 ,  0.00],
+            [- 0.02 ,  -0.08 ,  -0.00 ,  0.00]])
+        
+        p0 = np.array([1,0,0,0])
+        t0 = 1.0/np.sum(np.diag(M_abs_reduced))
+        r = 0.5
+
+        solver = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=False) 
+
+        test_logger.debug("Solve Master Equation for : ")
+        test_logger.debug("M = \n {}".format(M_abs_reduced))
+        test_logger.debug("p0 = \n {}".format(p0))
+        test_logger.debug("t = {}".format(t0))
+        p = solver.solve_master_equation(t0)
+        test_logger.debug("found p = \n {}".format(p))
+
+        #computed with gnu octave
+        res_expected = np.array([0.869014, 0.041671, 0.070828, 0.018488])
+        test_logger.debug("Expected p = \n {}".format(res_expected))
+
+        npt.assert_allclose(p, res_expected, rtol=1e-4)
+        
+        solver = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=True) 
+        test_logger.debug("Solve Master Equation Using Sprectral Decomposition for : ")
+        test_logger.debug("M = \n {}".format(M_abs_reduced))
+        test_logger.debug("p0 = \n {}".format(p0))
+        test_logger.debug("t = {}".format(t0))
+        p = solver.solve_master_equation(t0)
+        test_logger.debug("found p = \n {}".format(p))
+
+        test_logger.debug("Expected p = \n {}".format(res_expected))
+
+        npt.assert_allclose(p, res_expected, rtol=1e-4)
+
+    def test_find_texit(self, test_logger) : 
+        
+        M_abs_reduced = np.array([[ 1.89645002e-02,-9.48225009e-03,-9.48225009e-03, 0.00000000e+00],
+ [-9.48225009e-03, 1.89645002e-02,-9.48225009e-03, 0.00000000e+00],
+ [-9.48225009e-03,-9.48225009e-03, 1.89645002e-02, 0.00000000e+00],
+ [-2.83934789e-10,-2.83934789e-10,-2.83934789e-10, 0.00000000e+00]])
+        
+        p0 = np.array([1,0,0,0])
+        r = 0.9
+
+        solver = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=True) 
+
+        test_logger.debug("Find t_exit for r = {}".format(r))
+        test_logger.debug("With M = \n {}".format(M_abs_reduced))
+        test_logger.debug("And p0 = \n {}".format(p0))
+
+        res = solver.solve()
+
+        if res.is_ok() : 
+            t_exit = res.ok_value().t_exit
+            test_logger.debug("Find t_exit = {}ps".format(t_exit))
+        else : 
+            err = res.err_value()
+            test_logger.debug("Err while searching t_exit : {}".format(err))
+
+
+class TestSelector : 
+
+    def test_ftpa_bisection(self, test_logger) : 
+
+        #Mock reduced matric 
+        M_abs_reduced = np.array([
+            [0.8, -0.3, -0.2, -0.3], 
+            [-0.05, 0.6, -0.25, -0.3], 
+            [-0.1, -0.1, 0.5, -0.3],
+            [-0.02, -0.18, -0.2, 0.4]]) 
+        
+        p0 = np.array([1,0,0,0])
+        t0 = 1.0/np.diag(M_abs_reduced)[-1]
+        r = 0.5
+
+        solver = BisectionSolver(M=M_abs_reduced, p0=p0, r=r) 
+
+        test_logger.debug("Solve Master Equation for : ")
+        test_logger.debug("M = \n {}".format(M_abs_reduced))
+        test_logger.debug("p0 = \n {}".format(p0))
+        test_logger.debug("t = {}".format(t0))
+        p = solver.solve_master_equation(t0)
+        test_logger.debug("found p = \n {}".format(p))
+
+        #computed with gnu octave
+        res_expected = np.array([0.172586, 0.054168, 0.071085, 0.042176])
+        test_logger.debug("Expected p = \n {}".format(res_expected))
+
+        npt.assert_allclose(p, res_expected, rtol=1e-4)
+         
+        
+
 
 class TestBasin : 
 

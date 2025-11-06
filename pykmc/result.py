@@ -113,6 +113,7 @@ class ErrorType(Enum):
     REFINEMENT_INVALID_MINIMA = 32
     RECONSTRUCTION_INVALID_MIN1 = 41 
     RECONSTRUCTION_INVALID_MIN2 = 42
+    BASIN_TEXIT_NOT_FOUND = 51
 
 
 # Dataclass to store operation outputs
@@ -210,6 +211,12 @@ class ReconstructionOutput :
     min1_positions: np.ndarray 
     saddle_positions: np.ndarray 
     min2_positions: np.ndarray
+
+
+@dataclass 
+class BasinExitTimeSolverOutput : 
+    """Sotre the results of exit time solver"""
+    t_exit: float
 
 
 @dataclass
