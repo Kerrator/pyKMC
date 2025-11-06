@@ -2,6 +2,7 @@ import numpy as np
 from scipy.sparse.linalg import expm
 from numpy.linalg import eig, inv
 from pykmc.result import Result, Ok, Err, ErrorInfo, ErrorType,  BasinExitTimeSolverOutput
+from .utils import solve_master_equation_last_value
 
 #TODO : Use an abstract Solver (if implement new one)
 #TODO : Might need to move solve_master_equation and solve_master_equation_last_value has independant function (if implement new solver)
@@ -120,7 +121,7 @@ class BisectionSolver() :
 
         iterations = 0
         while iterations < max_iterations : 
-            p_abs = self.solve_master_equation_last_value(t=self.t_max)
+            p_abs = solve_master_equation_last_value(M=self.M, t=self.t_max, p0=self.p0, spectral_decomposition=self.spectral_decomposition, Valeig=self.Valeig, Veceig=self.Veceig, Veceiginv=self.Veceiginv)
             if p_abs - self.r > 0 : 
                 break 
             else : 
@@ -161,7 +162,7 @@ class BisectionSolver() :
             if abs(self.t_max - self.t_min) / ((self.t_max + self.t_min) / 2) < self.tolerance: #tmax and tmin good
                 break
             
-            p_abs = self.solve_master_equation_last_value(t=t_mid)
+            p_abs = solve_master_equation_last_value(M=self.M, t=t_mid, p0=self.p0, spectral_decomposition=self.spectral_decomposition, Valeig=self.Valeig, Veceig=self.Veceig, Veceiginv=self.Veceiginv)
 
             if p_abs-self.r < 0:
                 self.t_min = t_mid
@@ -176,60 +177,60 @@ class BisectionSolver() :
         return Ok(None)
 
 
-    def solve_master_equation(self, t:float) -> np.ndarray : 
-        """
-        Compute p(t) = exp(-M t) p0.
-
-        If spectral_decomposition is True:
-            p(t) = V diag(exp(-lambda_i t)) V^{-1} p0
-
-        Otherwise:
-            p(t) = expm(-M t) p0
-
-        Parameters
-        ----------
-        t : float
-            Time value
-
-        Returns
-        -------
-        np.ndarray
-            Probability vector p(t) of size n
-        """
-
-        if self.spectral_decomposition : 
-            exp_lambdasxt = np.array([np.exp(-t * val) for val in self.Valeig])
-            p = self.Veceig @ np.diag(exp_lambdasxt) @ self.Veceiginv @ self.p0
-        else : 
-            p = expm(-self.M*t) @ self.p0
-        return p
-    
-    def solve_master_equation_last_value(self, t:float) -> float: 
-        """
-        Compute only the absorbing probability p_abs(t),
-        i.e. the last component of p(t).
-
-        Optimized to avoid constructing the full vector if spectral
-        decomposition is used.
-
-        Parameters
-        ----------
-        t : float
-            Time value
-
-        Returns
-        -------
-        float
-            p_abs(t) = p(t)[-1]
-        """
-        if self.spectral_decomposition : 
-            exp_lambdasxt = np.array([np.exp(-t * val) for val in self.Valeig])
-            p_abs = np.dot(self.Veceig[-1], np.diag(exp_lambdasxt) @ self.Veceiginv @ self.p0)
-        else : 
-            p = expm(-self.M*t) @ self.p0
-            p_abs = p[-1]
-        return p_abs
-
+#    def solve_master_equation(self, t:float) -> np.ndarray : 
+#        """
+#        Compute p(t) = exp(-M t) p0.
+#
+#        If spectral_decomposition is True:
+#            p(t) = V diag(exp(-lambda_i t)) V^{-1} p0
+#
+#        Otherwise:
+#            p(t) = expm(-M t) p0
+#
+#        Parameters
+#        ----------
+#        t : float
+#            Time value
+#
+#        Returns
+#        -------
+#        np.ndarray
+#            Probability vector p(t) of size n
+#        """
+#
+#        if self.spectral_decomposition : 
+#            exp_lambdasxt = np.array([np.exp(-t * val) for val in self.Valeig])
+#            p = self.Veceig @ np.diag(exp_lambdasxt) @ self.Veceiginv @ self.p0
+#        else : 
+#            p = expm(-self.M*t) @ self.p0
+#        return p
+#    
+#    def solve_master_equation_last_value(self, t:float) -> float: 
+#        """
+#        Compute only the absorbing probability p_abs(t),
+#        i.e. the last component of p(t).
+#
+#        Optimized to avoid constructing the full vector if spectral
+#        decomposition is used.
+#
+#        Parameters
+#        ----------
+#        t : float
+#            Time value
+#
+#        Returns
+#        -------
+#        float
+#            p_abs(t) = p(t)[-1]
+#        """
+#        if self.spectral_decomposition : 
+#            exp_lambdasxt = np.array([np.exp(-t * val) for val in self.Valeig])
+#            p_abs = np.dot(self.Veceig[-1], np.diag(exp_lambdasxt) @ self.Veceiginv @ self.p0)
+#        else : 
+#            p = expm(-self.M*t) @ self.p0
+#            p_abs = p[-1]
+#        return p_abs
+#
 
 
 
