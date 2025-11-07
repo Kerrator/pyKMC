@@ -4,7 +4,7 @@ from .connectivity import BasinStatesConnectivity
 from .selection import FPTASelector
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration
+from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match
 from typing import Optional
 from ..utils import geometry
 import pandas as pd
@@ -13,6 +13,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 #TODO : After merge do minimization and refinement with manager
+#TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
+#TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
 
 @dataclass
 class StateData:
@@ -24,7 +26,7 @@ class StateData:
 
 class BasinsGenericEvents() : 
 
-    def __init__(self, config: Config, reference_table,known_environments, manager ) : 
+    def __init__(self, config: Config, reference_table,known_environments, manager ) -> None :  
         self.config = config #Config object with basins parameters
         self.explorer = None #object to explore a state in the basin 
         self.reference_table = reference_table #Object with reference generic events
@@ -39,20 +41,35 @@ class BasinsGenericEvents() :
         self.known_environments = known_environments 
 
     def detection(self, params) -> bool : 
-        """ 
-        """
+        """Utility method."""
         return self.detector.detection(**params) 
-
-    def _initialize(self, system) : 
+    
+    def execute(self, system) : 
         """ 
-        Initialize necessary component after entering in basin
+        run the basin exploration and select an event from a system, corresponding to the first state in the basin, it is assumed that this state is transient.
+        """
+        #initialize the basin
+        self._initialize(system)
+        #explore the basin
+        self.construct_connexion_table()
+        #reorder states index 
+        mapping = self.connectivity_table.reorder_states_index()
+        self.states = {mapping[old]: val for old, val in self.states.items()}
+        #apply selector algorithm to find t_exit and exit_state
+        result = self.selector.select_from_connectivity(self.connectivity_table)
+        return result
+        
+
+    def _initialize(self, system) -> None: 
+        """ 
+        Initialize necessary component after entering in basin. We always enter in state == 0.
         """
         self.current_state = 0
         self.states_to_explore = [0] 
         self.explored_states = [] 
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
-        self.selector = FTPASelector()
+        self.selector = FPTASelector()
         self._add_state(state_index=0, system=system)  #add current state 0 to self.states
 
 
@@ -67,10 +84,9 @@ class BasinsGenericEvents() :
 
             if to_explore not in self.states : #always true except at the start (to_explore = 0) 
                 #We need to create the state 
-                    #find state to state transition
-                    #NOTE : HERE NEED TO CHANGE TO HAVE LIST OF TRANSITION TO NOT SAVE EVERY SYSTEMS POSITIONS 
+                    #find a state and an event from which we go to the state that we want to create
                 from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=to_explore)
-                    #Create new system 
+                    #Create new system by applying the generic event to the from_state
                 new_system = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
 
                     #Check if it is a new_system or already in states 
@@ -101,8 +117,6 @@ class BasinsGenericEvents() :
 
             #Explore state 
             self.current_state = to_explore
-            print(self.current_state, to_explore)
-            print(self.states)
             last_state_connectivity = self.get_last_state_index()
             self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
             
@@ -115,22 +129,6 @@ class BasinsGenericEvents() :
             #Clrean explorer connectivity table
             self.explorer.clear()
             self.update_to_explore()
-
-
-
-            
-    def run(self, system) : 
-        """ 
-        run the basin exploration and select an event
-        """
-        #initialize the basin
-        self._initialize_basins(system)
-        #explore the basin
-        self.construct_connexion_table()
-        #reorder states index 
-        mapping = self.connectivity_table.reorder_states_index()
-        self.states = {mapping[old]: val for old, val in self.basin.states.items()}
-
 
     def select_event(self) : 
         """ 
@@ -148,7 +146,7 @@ class BasinsGenericEvents() :
         if self.current_state == 0 : #connextion table is empty
             new_state_connexion = 1 
         else : #last state connexion +1
-            new_state_connexion = int(self.connectivity_table.get_table().tail(1)['state_connexion']+1)
+            new_state_connexion = int(self.connectivity_table.get_table()['state_connexion'].iloc[-1]+1)
         return new_state_connexion
     
     def update_to_explore(self) : 
@@ -165,47 +163,40 @@ class BasinsGenericEvents() :
 
         #Apply the generic event to the current state 
 
-        #TODO : When merged with lammps manager minimize from the SADDLE POINT and check
+            #We start from the from_state
         new_system = copy.deepcopy(self.states[from_state].system)
 
-        psr_output = PointSetRegistration(self.config, new_system, ref_event , self.states[from_state].neighbors_list, central_atom).match()
-        if psr_output.is_ok():
-            psr_output = psr_output.ok_value()
-
+            #Apply PSR between event initial position and environment positions of the central_atoms
+        result = PointSetRegistration(self.config, new_system, ref_event , self.states[from_state].neighbors_list, central_atom).match()
+        if not result.is_ok(): #PSR Err
+            return result
+            # Check if PointSetRegistration match is valid 
+        result = check_match(result, self.config.psr.matching_score_thr)
+        if not result.is_ok() : #PSR matching score not valid : 
+            return result
         else : 
-            raise ValueError("Basin: PSR failed")
-
-        # Check if PointSetRegistration finds a match
-        if psr_output.matching_score < self.config.psr.matching_score_thr :
-
+            psr_output = result.ok_value() #get psr results
+            
             # Apply PSR to generic event
-            final_positions = ref_event['final_positions']
+        final_positions = ref_event['final_positions']
             
-            # Apply symmetry matrix if sym != 0
-            if sym_idx != 0 :
-                sym_matrices = ref_event['sym_matrix']
-                sym_matrix = sym_matrices[sym_idx]
-                final_positions = geometry.transform_positions(final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-            final_positions = geometry.transform_positions(final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+        # Apply symmetry matrix if sym != 0
+        if sym_idx != 0 :
+            sym_matrices = ref_event['sym_matrix']
+            sym_matrix = sym_matrices[sym_idx]
+            final_positions = geometry.transform_positions(final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
+        final_positions = geometry.transform_positions(final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
 
-            
+        # Move system do final positions
+        neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
 
-            # Move system do final positions
-            neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
-
-            ####################
-            ####################
-            ####################
-            new_system.update_positions(final_positions, atom_idx = neighbors)
-            future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
-            min_pos, _ = future.result()
-            new_system.update_positions(min_pos)
+        new_system.update_positions(final_positions, atom_idx = neighbors)
+        future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
+        min_pos, _ = future.result()
+        new_system.update_positions(min_pos)
 
 
-            return new_system
-
-        else : 
-            raise ValueError("Basin: PSR matching score > matching score threshold")
+        return new_system
 
 
     def is_new_state(self, system) : 

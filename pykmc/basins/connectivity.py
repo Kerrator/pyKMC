@@ -271,6 +271,6 @@ class BasinStatesConnectivity(StatesConnectivity)  :
         - This operation does not remove duplicates; ensure uniqueness if required.
         """
         if self.df.empty: 
-            self.df = states_connectivity.copy()
+            self.df = states_connectivity.df.copy()
         else : 
             self.df = pd.concat([self.df, states_connectivity.df], ignore_index=True)
