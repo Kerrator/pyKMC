@@ -3,7 +3,7 @@ initial_config = ./initial_config.xyz
 n_steps = 1
 engine = lammps
 verbosity = 2
-n_sessions = 7
+n_sessions = 1
 engine_use_rank_0 = False
 #reference_table = reference_table_fake.pickle 
 #visited_environments = visited_environments.pickle
@@ -23,7 +23,7 @@ rcut = 8.0
 
 [EventSearch] 
 style = partn
-nsearch = 10
+nsearch = 2
 emax_event = 5.0
 emin_event = 0.0
 
@@ -33,7 +33,7 @@ forc_thr = 0.001
 
 [RateConstant] 
 style = constant
-k0 = 1.0
+k0 = 10.0
 T = 300.0
 
 [PSR] 
