@@ -3,7 +3,7 @@
 This module defines the `KMC` class.
 """
 
-from pykmc import NeighborsList, AtomicEnvironment, ActiveEventTable, Config
+from pykmc import NeighborsList, AtomicEnvironment, ActiveEventTable, Config, Reconstruction
 import random
 from .result import (
     EventSearchOutput,
@@ -43,10 +43,8 @@ import ase.geometry
 import copy
 
 
-# TODO fix reconstruction = False
 # NOTE can maybe reimplment tries if empty catalog
-# TODO add select histo refinement
-
+#TODO: Add reconstruction info
 
 class KMC:
     """Manage and execute the Kinetic Monte Carlo (KMC) simulation.
@@ -454,62 +452,19 @@ class KMC:
             return result_reconstruction, delta_t, ktot, idx_selected_event
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
-        """Try to reconstruct the selected active event 
-        """
-        #event data
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
         neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
         saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
+        supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
-        #Current positions
-        tmp_positions = copy.deepcopy(self.system.positions)
+        #Move the system to the saddle point 
+        self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
 
-
-        #positions towards min1 
-        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.15, cell = self.system.cell)
-        tmp_positions[neighbors] = saddle_toward_min1_pos 
-        future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        min1_pos, _ = future.result()
-
-        #compaire min1_pos with system current positions
-        t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = self.system.cell, pbc = True)
-        delr1 = compute_delr(self.system.positions[neighbors], t1[neighbors], self.system.cell) 
-        if delr1 > self.config.psr.matching_score_thr : 
-            return Err(
-                    ErrorInfo(
-                        type=ErrorType.RECONSTRUCTION_INVALID_MIN1,
-                        message="did not retreive initial minimum : delr1 = {}".format(delr1),
-                        variables={"delr1": delr1},
-                    )
-                )
-        else : 
-            #positions towards min2 : 
-            saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=0.15, cell = self.system.cell)
-            tmp_positions[neighbors] = saddle_toward_min2_pos
-            future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-            min2_pos, _ = future.result()
-
-            #Compare min2pos with expected final_positions
-            delr2 = compute_delr(supposed_final_positions, min2_pos[neighbors], self.system.cell)
-            if delr2 > self.config.psr.matching_score_thr : 
-                return Err(
-                    ErrorInfo(
-                        type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
-                        message="did not retreive expected final minimum : delr2 = {}".format(delr2),
-                        variables={"delr2": delr2},
-                    )
-                )
-
-            else : 
-                return Ok(
-                    ReconstructionOutput(
-                        min1_positions=min1_pos,
-                        saddle_positions=tmp_positions,
-                        min2_positions=min2_pos
-                    )
-                ) 
-
+        #try to reconstruct
+        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
+        #result with min1, saddle, min2 pos
+        return result
 
     def _apply_event(
         self, idx_selected_event: int, active_table: ActiveEventTable
