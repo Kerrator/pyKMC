@@ -23,5 +23,7 @@ class TestBasin :
                 test_logger.debug("Find Exit State : ")
                 test_logger.debug("Exit time t_exit = {}ps".format(result.ok_value().t_exit))
                 test_logger.debug("Exit state n : {}".format(result.ok_value().exit_state))
+            else : 
+                test_logger.debug("Error: {}".format(result.err_value()))
             
             manager.close_all()
