@@ -4,17 +4,19 @@ from .connectivity import BasinStatesConnectivity
 from .selection import FPTASelector
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match
+from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match, Reconstruction
 from typing import Optional
 from ..utils import geometry
 import pandas as pd
 import copy
 import numpy as np
 from scipy.spatial import cKDTree
+from pykmc.result import Ok
 
 #TODO : After merge do minimization and refinement with manager
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
+#TODO: Think about parallized the exploration 
 
 @dataclass
 class StateData:
@@ -51,7 +53,9 @@ class BasinsGenericEvents() :
         #initialize the basin
         self._initialize(system)
         #explore the basin
-        self.construct_connexion_table()
+        result = self.construct_connexion_table()
+        if not result.is_ok() : 
+            return result
         #reorder states index 
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
@@ -86,8 +90,11 @@ class BasinsGenericEvents() :
                 #We need to create the state 
                     #find a state and an event from which we go to the state that we want to create
                 from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=to_explore)
-                    #Create new system by applying the generic event to the from_state
-                new_system = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
+                    #Create new system by applying (reconstruction) the generic event to the from_state
+                result = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
+                if not result.is_ok() : 
+                    return result
+                new_system = result.ok_value()
 
                     #Check if it is a new_system or already in states 
                 is_new_state = self.is_new_state(new_system) 
@@ -129,6 +136,7 @@ class BasinsGenericEvents() :
             #Clrean explorer connectivity table
             self.explorer.clear()
             self.update_to_explore()
+        return Ok(None)
 
     def select_event(self) : 
         """ 
@@ -156,10 +164,14 @@ class BasinsGenericEvents() :
 
 
     def system_from_state(self, from_state, event_idx, central_atom, sym_idx) : 
-        """ Move to state index
+        """ Reconstruct the generic event to generate new state from state
         """
 
         ref_event = self.reference_table.table.iloc[event_idx].copy()
+
+        supposed_initial_positions = ref_event["initial_positions"]
+        supposed_final_positions = ref_event["final_positions"]
+        saddle_positions = ref_event['saddle_positions']
 
         #Apply the generic event to the current state 
 
@@ -177,26 +189,34 @@ class BasinsGenericEvents() :
         else : 
             psr_output = result.ok_value() #get psr results
             
-            # Apply PSR to generic event
-        final_positions = ref_event['final_positions']
+        # Apply PSR to generic event to move 
             
         # Apply symmetry matrix if sym != 0
         if sym_idx != 0 :
             sym_matrices = ref_event['sym_matrix']
             sym_matrix = sym_matrices[sym_idx]
-            final_positions = geometry.transform_positions(final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-        final_positions = geometry.transform_positions(final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+            supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
+            saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
+            supposed_final_positions = geometry.transform_positions(supposed_final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
+        supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+        saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+        supposed_final_positions= geometry.transform_positions(supposed_final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
 
-        # Move system do final positions
+        # Move system do saddle positions
         neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
+        new_system.update_positions(saddle_positions, atom_idx = neighbors)
 
-        new_system.update_positions(final_positions, atom_idx = neighbors)
-        future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
-        min_pos, _ = future.result()
-        new_system.update_positions(min_pos)
+        #Reconstruct the event
+        #future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
+        #min_pos, _ = future.result()
 
+        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors)
+        if not result.is_ok() : 
+            return result
 
-        return new_system
+        new_system.update_positions(result.ok_value().min2_positions)
+
+        return Ok(new_system)
 
 
     def is_new_state(self, system) : 
