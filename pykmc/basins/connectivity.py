@@ -1,10 +1,36 @@
 import pandas as pd
 
+#TODO: See if separated StatesConnectivity and BasinsStateConnectivity is really usefull.
+#TODO: See if self.gaph is needed, if only used for analysis we can remove it.
+
+
 class StatesConnectivity() : 
+    """
+    Store connectivity DateFrame describing transitions between visited system states.
 
-    def __init__(self) : 
-        """Connectivity between system states"""
+    This class stores a pandas DataFrame that records transitions discovered
+    during basin exploration. 
+    Each row represents a directed transition from a `state` to a `state_connexion`,
+    associated with a given generic event, symmetry, and transition rates.
 
+    The class provides utilities to:
+    - Append new transitions
+    - Retrieve transitions leading to a given state
+    - Convert data to tuple format
+    - Reorder state indices (e.g., to keep transient states first)
+    - Save, merge, and clear the table
+
+    Attributes
+    ----------
+    df : pd.DataFrame
+        Internal table containing transition information with columns:
+        ['state', 'state_connexion', 'event_connexion', 'central_atom', 'sym',
+         'transient', 'dE_forward', 'k_forward', 'dE_backward', 'k_backward'].
+    graph : optional
+        Placeholder for future graph-based operations (e.g., visualization, path finding).
+    """
+
+    def __init__(self) -> None : 
         self.df = pd.DataFrame(columns=['state', 
                                         'state_connexion', 
                                         'event_connexion',
@@ -17,7 +43,33 @@ class StatesConnectivity() :
                                         'k_backward']) 
         self.graph = None # Placeholder for later if needed to generate a connectivity graph from the dataframe, for path finding and vizualization
 
-    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE_forward, k_forward, dE_backward, k_backward )  : 
+    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE_forward, k_forward, dE_backward, k_backward ) -> None : 
+        """
+        Add a new connectivity entry to the internal DataFrame.
+
+        Parameters
+        ----------
+        state : int
+            Source state index.
+        state_connexion : int
+            Target state index reached after applying the event.
+        event_connexion : int
+            Index of the event in the reference event table.
+        central_atom : int
+            Atom on which the event is applied.
+        sym : int
+            Symmetry index of the event.
+        transient : bool
+            Whether the state_connexion is transient (True) or absorbing (False).
+        dE_forward : float
+            Forward energy barrier.
+        k_forward : float
+            Forward transition rate.
+        dE_backward : float
+            Backward energy barrier.
+        k_backward : float
+            Backward transition rate.
+        """
         new_row = pd.DataFrame([{'state': state, 
                                  'state_connexion': state_connexion, 
                                  'event_connexion': event_connexion, 
@@ -28,11 +80,13 @@ class StatesConnectivity() :
                                  'k_forward': k_forward, 
                                  'dE_backward': dE_backward,
                                  'k_backward': k_backward}])
-        self.df = pd.concat([self.df, new_row], ignore_index=True)
+        if self.df.empty : 
+            self.df = new_row
+        else :
+            self.df = pd.concat([self.df, new_row], ignore_index=True)
 
 
-    def get_transition_to_state(self, target_state:int, as_tuples: bool = True, return_all:bool = False) : 
-
+    def get_transition_to_state(self, target_state:int, as_tuples: bool = True, return_all:bool = False) -> tuple|list[tuple]|pd.DataFrame: 
         """Return the transition(s) leading to the specified target state.
 
         This method filters the internal connectivity dataframe to find all transitions
@@ -74,14 +128,18 @@ class StatesConnectivity() :
         else : 
             return self.to_tuples(sub_df) if as_tuples else sub_df
 
+    def get_table(self) -> pd.DataFrame: 
+        """
+        Return the full connectivity table.
 
-    
-
-    def get_table(self) : 
+        Returns
+        -------
+        pd.DataFrame
+        """
         return self.df 
     
 
-    def to_tuples(self, df:pd.DataFrame):
+    def to_tuples(self, df:pd.DataFrame) -> list[tuple]:
         """Convert a DataFrame to a list of tuples.
 
         Parameters
@@ -96,8 +154,15 @@ class StatesConnectivity() :
         """
         return list(df[['state', 'event_connexion', 'central_atom', 'sym', 'transient']].itertuples(index=False, name=None))
     
-    def reorder_states_index(self) : 
-        """Reorder index so that there is no jump, transient are first"""
+    def reorder_states_index(self) -> dict[int, int]: 
+        """
+        Reassign state indices so that transient states come first and numbering is compact and continuous.
+
+        Returns
+        -------
+        dict[int, int]
+            Mapping from old state index to new state index.
+        """
 
         #All states : 
         unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
@@ -126,35 +191,19 @@ class StatesConnectivity() :
 
         return mapping
 
-    def reorder_states_index2(self) : 
-        """Reorder state index so If the connectivity table has non continuous state index, reorder them"""
-
-        unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
-
-        mapping = {old: new for new, old in enumerate(unique_states)}
-
-        # Étape 3 : appliquer au DataFrame
-        df_new = self.df.copy()
-        df_new["state"] = df_new["state"].map(mapping)
-        df_new["state_connexion"] = df_new["state_connexion"].map(mapping)
-
-        self.df = df_new 
-
-        return  mapping
-    
     def save(self, outfile: str = "basin_connectivity.pickle") -> None:
-        """Save the connectivity DataFrame to a pickle file.
+        """
+        Save the connectivity DataFrame to a pickle file.
 
         Parameters
         ----------
         outfile : str, optional
-            path to the output file, by default 'basin_connectivity.pickle'.
-
+            Output filename. Default is 'basin_connectivity.pickle'.
         """
         self.df.to_pickle(outfile)
 
     def clear(self) : 
-        """Clear the connectivity DataFrame"""
+        """Reset the connectivity table to an empty DataFrame."""
         self.df = pd.DataFrame(columns=['state', 
                                         'state_connexion', 
                                         'event_connexion',
@@ -188,8 +237,19 @@ class BasinStatesConnectivity(StatesConnectivity)  :
         self.df.loc[self.df['state'] == current_index, 'state'] = new_index
         self.df.loc[self.df['state_connexion'] == current_index, 'state_connexion'] = new_index
 
-    def change_state_to_absorbing(self, state_connexion) : 
-        """ """
+    def change_state_to_absorbing(self, state_connexion) :
+        """
+        Mark a state as absorbing in the connectivity table.
+
+        Sets the `transient` flag to `False` for all transitions whose
+        destination (`state_connexion`) equals the given index. 
+        This is mainly used when a state has unknown local atomic environments and should not be explored further.
+
+        Parameters
+        ----------
+        state_connexion : int
+            Index of the state to mark as absorbing.
+        """ 
         self.df.loc[self.df['state_connexion']== state_connexion, 'transient'] = False
 
     def merge(self, states_connectivity: "StatesConnectivity") : 
@@ -210,5 +270,7 @@ class BasinStatesConnectivity(StatesConnectivity)  :
         - The index of the resulting DataFrame is reset.
         - This operation does not remove duplicates; ensure uniqueness if required.
         """
-
-        self.df = pd.concat([self.df, states_connectivity.df], ignore_index=True)
+        if self.df.empty: 
+            self.df = states_connectivity.copy()
+        else : 
+            self.df = pd.concat([self.df, states_connectivity.df], ignore_index=True)
