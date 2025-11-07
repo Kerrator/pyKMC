@@ -1,6 +1,6 @@
 import pytest 
 import os 
-from pykmc.basins import BasinStatesConnectivity, StateData
+from pykmc.basins import BasinStatesConnectivity, StateData, StatesConnectivity, BasinStatesConnectivity
 from pykmc import NeighborsList, AtomicEnvironment
 import pandas as pd
 
@@ -29,3 +29,31 @@ def mock_state_data_Cu(system_Cu):
         visited=False
     )
     return state
+
+@pytest.fixture
+def fake_connectivity_df():
+    """Fake connectivity table shared across StatesConnectivity fixtures."""
+    return pd.DataFrame({
+        "state": [0, 0, 1, 2],
+        "state_connexion": [1, 2, 0, 0],
+        "event_connexion": [12, 34, 13, 35],
+        "central_atom": [345, 7, 911, 20],
+        "sym": [0, 1, 0, 0],
+        "transient": [True, False, True, False],
+        "dE_forward" : [0.2, 0.1, 0.8, 1.1],
+        "k_forward" : [2, 1, 8, 1],
+        "dE_backward" : [0.09, 0.13, 0.7, 1.3],
+        "k_backward" : [1, 2, 3, 4]
+    })
+
+@pytest.fixture
+def mock_statesconnectivity(fake_connectivity_df):
+    sc = StatesConnectivity()
+    sc.df = fake_connectivity_df.copy()
+    return sc
+
+@pytest.fixture
+def mock_basinstatesconnectivity(fake_connectivity_df):
+    sc = BasinStatesConnectivity()
+    sc.df = fake_connectivity_df.copy()
+    return sc

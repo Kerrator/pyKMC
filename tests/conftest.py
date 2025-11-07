@@ -89,41 +89,7 @@ def system_single_type_fcc_vacancy(system_single_type_fcc: System) -> System:
 
     return system
 
-@pytest.fixture
-def mock_statesconnectivity():
-    """Fixture returning a real StatesConnectivity instance with a fake connectivity table."""
-    state_connectivity = StatesConnectivity()
 
-    fake_df = pd.DataFrame({
-        "state": [0, 0, 1, 2],
-        "state_connexion": [1, 2, 0, 0],
-        "event_connexion": [12, 34, 13, 35],
-        "central_atom": [345, 7, 911, 20],
-        "sym": [0, 1, 0, 0],
-        "transient": [True, False, True, False],
-    })
-
-    state_connectivity.df = fake_df
-
-    return state_connectivity
-
-@pytest.fixture
-def mock_basinstatesconnectivity():
-    """Fixture returning a real BasinStatesConnectivity instance with a fake connectivity table."""
-    state_connectivity = BasinStatesConnectivity()
-
-    fake_df = pd.DataFrame({
-        "state": [0, 0, 1, 2],
-        "state_connexion": [1, 2, 0, 0],
-        "event_connexion": [12, 34, 13, 35],
-        "central_atom": [345, 7, 911, 20],
-        "sym": [0, 1, 0, 0],
-        "transient": [True, False, True, False],
-    })
-
-    state_connectivity.df = fake_df
-
-    return state_connectivity
 
 @pytest.fixture
 def mock_state_data(system_Ni_4000at_monovacancy_sia):
