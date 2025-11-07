@@ -140,20 +140,7 @@ def mock_state_data(system_Ni_4000at_monovacancy_sia):
     )
     return state
 
-@pytest.fixture
-def mock_state_data_Cu(system_Cu):
-    """Fixture returning a dummy StateData for testing basin exploration."""
-    system = system_Cu
-    nl = NeighborsList(system=system, rnei=2.9, rcut=6.5)
-    ae = AtomicEnvironment(style='cna/graph', neighbors_list=nl.neighbors_list["rnei"], environment_list=nl.neighbors_list["rcut"])
-    state = StateData(
-        system=system_Cu,
-        environment =ae,
-        neighbors_list=nl,
-        transient=True,
-        visited=False
-    )
-    return state
+
 
 @pytest.fixture 
 def system_Ni_4000at_monovacancy_sia()-> System : 
