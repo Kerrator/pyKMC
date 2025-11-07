@@ -1,6 +1,7 @@
 import pytest 
 import os 
-from pykmc.basins import BasinStatesConnectivity
+from pykmc.basins import BasinStatesConnectivity, StateData
+from pykmc import NeighborsList, AtomicEnvironment
 import pandas as pd
 
 @pytest.fixture 
@@ -13,3 +14,18 @@ def connectivity_table_Cu() :
     connectivity_table.df = pd.read_pickle(filepath)
 
     return connectivity_table
+
+@pytest.fixture
+def mock_state_data_Cu(system_Cu):
+    """Fixture returning a dummy StateData for testing basin exploration."""
+    system = system_Cu
+    nl = NeighborsList(system=system, rnei=2.9, rcut=6.5)
+    ae = AtomicEnvironment(style='cna/graph', neighbors_list=nl.neighbors_list["rnei"], environment_list=nl.neighbors_list["rcut"])
+    state = StateData(
+        system=system_Cu,
+        environment =ae,
+        neighbors_list=nl,
+        transient=True,
+        visited=False
+    )
+    return state
