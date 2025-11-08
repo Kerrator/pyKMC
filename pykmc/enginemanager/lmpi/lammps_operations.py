@@ -71,12 +71,17 @@ def minimize(engine, config) :
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
-def get_total_energy(engine) : 
+def get_total_energy(engine, positions=None) : 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
+        engine.command("run 0")
     #Get total energy
     result = engine.lmp.get_thermo("etotal")
     return result
 
-def get_potential_energy(engine) : 
+def get_potential_energy(engine, positions=None) : 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
     #get potential energy 
     engine.command("compute c1 all pe")
     engine.command("run 0")

@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match, Reconstruction
 from typing import Optional
 from ..utils import geometry
+from ..rate_constant import compute_rate_Eyring
 import pandas as pd
 import copy
 import numpy as np
@@ -16,7 +17,8 @@ from pykmc.result import Ok
 #TODO : After merge do minimization and refinement with manager
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
-#TODO: Think about parallized the exploration 
+#TODO: Think about parallized exploration 
+#TODO: Could think of refining transient -> absorbing event when exploring
 
 @dataclass
 class StateData:
@@ -59,6 +61,13 @@ class BasinsGenericEvents() :
         #reorder states index 
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
+
+        #Refine absorbing states
+        print(self.connectivity_table.df)
+        result =self.refine_absorbing()
+        print(self.connectivity_table.df)
+        if not result.is_ok() : 
+            return result
         #apply selector algorithm to find t_exit and exit_state
         result = self.selector.select_from_connectivity(self.connectivity_table)
         return result
@@ -169,9 +178,9 @@ class BasinsGenericEvents() :
 
         ref_event = self.reference_table.table.iloc[event_idx].copy()
 
-        supposed_initial_positions = ref_event["initial_positions"]
-        supposed_final_positions = ref_event["final_positions"]
-        saddle_positions = ref_event['saddle_positions']
+        supposed_initial_positions = ref_event["initial_positions"].copy()
+        supposed_final_positions = ref_event["final_positions"].copy()
+        saddle_positions = ref_event['saddle_positions'].copy()
 
         #Apply the generic event to the current state 
 
@@ -217,6 +226,67 @@ class BasinsGenericEvents() :
         new_system.update_positions(result.ok_value().min2_positions)
 
         return Ok(new_system)
+
+    def refine_absorbing(self) : 
+        """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
+        #compute the energy of the state 
+        #for all row in connectivity table where we need to refine
+        futures_context = {} #idx → { "min": f_min, "saddle": f_sad }
+        for idx, row in self.connectivity_table.df.iterrows() : 
+            if row['transient']  == False : #need to refine
+                tmp_system = copy.deepcopy(self.states[row["state"]].system)
+                #get tmp_system energy 
+                future1 = self.manager.get_total_energy(positions=tmp_system.positions.copy()) #Send copy not reference
+                #move to generic saddle positions 
+                ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
+                saddle_positions = ref_event['saddle_positions'].copy()
+                #Apply PSR between event initial position and environment positions of the central_atoms
+                result = PointSetRegistration(self.config, tmp_system, ref_event , self.states[row["state"]].neighbors_list, row["central_atom"]).match()
+                if not result.is_ok(): #PSR Err
+                    return result
+                    # Check if PointSetRegistration match is valid 
+                result = check_match(result, self.config.psr.matching_score_thr)
+                if not result.is_ok() : #PSR matching score not valid : 
+                    return result
+                else : 
+                    psr_output = result.ok_value() #get psr results
+
+                # Apply symmetry matrix if sym != 0
+                if row["sym"] != 0 :
+                    sym_matrices = ref_event['sym_matrix']
+                    sym_matrix = sym_matrices[row["sym"]]
+                    saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][row["sym"]])
+                saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+
+                # Move system do saddle positions
+                neighbors = self.states[row["state"]].neighbors_list.get_neighbors('rcut', row["central_atom"])
+                tmp_system.update_positions(saddle_positions, atom_idx = neighbors)
+
+                #refine 
+                future2 = self.manager.partn_refine(self.config, row["central_atom"], tmp_system.positions.copy()) #send copy not reference !
+                
+                #save future in context : 
+                futures_context[idx] = {
+            "min": future1,
+            "saddle": future2}
+        #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
+        print(futures_context)
+        for idx, ctx in futures_context.items():
+            E_min    = ctx["min"].result()
+            result = ctx["saddle"].result()
+            print(result)
+            print("HDFQGIKSETGQS")
+            if not result.is_ok() : 
+                return result
+            E_sad = result.ok_value().E_saddle
+
+            dE = E_sad - E_min
+            k = compute_rate_Eyring(dE, self.config)
+
+            # update connectivity table row
+            self.connectivity_table.df.loc[idx, "dE_forward"] = dE
+            self.connectivity_table.df.loc[idx, "k_forward"] = k
+        return Ok(None)
 
 
     def is_new_state(self, system) : 
