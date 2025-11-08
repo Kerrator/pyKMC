@@ -63,9 +63,7 @@ class BasinsGenericEvents() :
         self.states = {mapping[old]: val for old, val in self.states.items()}
 
         #Refine absorbing states
-        print(self.connectivity_table.df)
         result =self.refine_absorbing()
-        print(self.connectivity_table.df)
         if not result.is_ok() : 
             return result
         #apply selector algorithm to find t_exit and exit_state
@@ -270,12 +268,9 @@ class BasinsGenericEvents() :
             "min": future1,
             "saddle": future2}
         #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
-        print(futures_context)
         for idx, ctx in futures_context.items():
             E_min    = ctx["min"].result()
             result = ctx["saddle"].result()
-            print(result)
-            print("HDFQGIKSETGQS")
             if not result.is_ok() : 
                 return result
             E_sad = result.ok_value().E_saddle
