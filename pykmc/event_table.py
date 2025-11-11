@@ -63,7 +63,7 @@ class ReferenceEventTable:
                 )
             results_is_valid_events.append(res)
             if res.is_ok() : 
-                self.add(res.ok_value()) 
+                self.add(res.ok_value())
         #df_valid_events = self.get_valid_events(results_is_valid_events)
 
 

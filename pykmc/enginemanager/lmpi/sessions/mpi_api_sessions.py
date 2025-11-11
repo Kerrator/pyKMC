@@ -76,7 +76,13 @@ class MpiApiSession :
         """
         return self._is_busy
     
-    #ACTIONS 
+    #ACTIONS
+    def clear(self) -> None:
+        """
+        Clears lammps session data
+        """
+        self.send_message({"type": "clear"})
+
     def initialize_parameters(self) -> None : 
         """ 
         Initialize LAMMPS engine with default parameters
@@ -169,11 +175,11 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    def partn_search(self, config, central_atom_idx, system) :
+    def partn_search(self, config, central_atom_idx, cell, positions) :
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
         try : 
-            self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "system": system}})
+            self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "cell": cell, "positions": positions}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]
@@ -182,11 +188,11 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    def partn_refine(self, config, central_atom_idx, system) :
+    def partn_refine(self, config, central_atom_idx, cell, positions, saddle_positions, saddle_idx) :
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
         try : 
-            self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "system": system}})
+            self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "cell": cell, "positions": positions, "saddle_positions": saddle_positions, "saddle_idx": saddle_idx}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]

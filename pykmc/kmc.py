@@ -142,6 +142,9 @@ class KMC:
                 new_environments, nsearch
             )
 
+            ##==> Clear lammps instances to ensure no cross over of energy values
+            self.manager.reset(self.config,self.system)
+
             ##=>Perform event search on each atom in central_atom_research_list
             event_search = self.execute_event_searches(central_atom_research_list)
 
@@ -166,10 +169,11 @@ class KMC:
                 set(l_ids).difference(self.visited_environments)
             )
             # == Refinement ==
-            ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
+            ##=>Subset of reference_event_table with generic event that can be applied to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
             )
+
             ##=>Refines all event in subset
             refinement = self.execute_refinements(subset_reference_event_table)
 
@@ -464,11 +468,11 @@ class KMC:
 
         #Current positions
         tmp_positions = copy.deepcopy(self.system.positions)
-
-
         #positions towards min1
         saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.15, cell = self.system.cell)
         tmp_positions[neighbors] = saddle_toward_min1_pos
+
+
         future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = future.result()
 

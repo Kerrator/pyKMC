@@ -83,7 +83,7 @@ class Refinement:
                 dfevent["event_id"]
             )
 
-            for at_idx in atoms_refine_idx:
+            for at_idx in atoms_refine_idx: #This sends the index of the atom to be set as the center atom
                 ###=>refine single generic
                 futures = self.refine_single(
                     at_idx, dfevent, idx, total_refinements,  future_context, total_energy, e_thr
@@ -95,7 +95,7 @@ class Refinement:
                 #self.results += result_single
                 #count = len(all_futures)
 
-        #Get results and update values : 
+        #Get results and update values :
         for f in all_futures:
             #get results
             res = f.result()
@@ -108,11 +108,11 @@ class Refinement:
             _ = future_context.pop(f)
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
-            #update result 
-            if res.is_ok() : 
+            #update result
+            if res.is_ok() :
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
+                res.ok_value().dE_forward = res.ok_value().E_saddle #- total_energy
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
                 res = self.check_refinement_energy(res,
@@ -122,6 +122,7 @@ class Refinement:
                             ),
                             self.config.eventsearch.refined_energy_thr,
                         )
+
             self.results.append(res)
 
         #Need to compare activation energies between each other
@@ -139,7 +140,7 @@ class Refinement:
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
 
-        If a reference event has symmetries, it also refine those symmetric events.
+        If a reference event has symmetries, it also refines those symmetric events.
 
         Parameters
         ----------
@@ -214,30 +215,33 @@ class Refinement:
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
 
                 #move to saddle point
-                self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
                 if dfevent.at["energy_barrier"] > e_thr : #dont refine
+                    self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
                     f = concurrent.futures.Future()
                     f.set_result(Ok(EventRefinementOutput(
                         central_atom_index=at_idx,
-                        saddle_positions=self.system.positions,
-                        E_saddle=total_energy+dfevent["energy_barrier"]
+                        saddle_positions=self.system.positions.copy(),
+                        E_saddle=dfevent["energy_barrier"] #+total_energy
                     )))
                 else :
+                    #
+                    # #add a job to manager queue
 
-                    #add a job to manager queue
-                    new_system = self.system
-                    test_image=Atoms(new_system.types,positions=new_system.positions,cell=new_system.cell,pbc=new_system.pbc)
-                    test_image.write('updated_system.xyz',format='xyz')
-                    f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                    #NEW PLAN:
+                        #SEND CURRENT POSITIONS, THEN THE POSITIONS WILL BE UPDATED IN PARTN WITH THE NEW SADDLE POSITIONS
+                    f = self.manager.partn_refine(self.config,
+                                                  at_idx,
+                                                  self.system.cell.copy(),
+                                                  self.system.positions.copy(),
+                                                  new_positions_saddle.copy(),
+                                                  neighbors.copy()) #send copy not reference !
                 futures.append(f)
 
 
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
                 #Update Result : 
                 #        #Apply psr to generic final positions
-                #final_positions = dfevent.at["final_positions"] + new_displacement
-                #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                #self.system.update_positions(new_positions, atom_idx=neighbors )
+
                 future_context[f] = {
                     #"min2_positions": self.system.positions.copy()[neighbors],
                     "min2_positions": new_positions_final,

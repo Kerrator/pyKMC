@@ -46,6 +46,17 @@ class Manager:
             session.initialize_system(system)
             session.initialize_potential(config)
 
+    def reset(self, config, system):
+        """
+        Reset system for next kmc step. Essentially a repeat of initialize
+        """
+        for session in self.sessions:
+            session.clear()
+            session.initialize_parameters()
+            session.initialize_system(system)
+            session.initialize_potential(config)
+
+
 
     def _dispatcher(self) : 
         while True : 
@@ -106,15 +117,15 @@ class Manager:
         future = self.submit_job("get_potential_energy")
         return future
 
-    def partn_search(self, config, central_atom: list[int], system) -> list[Future] :
+    def partn_search(self, config, central_atom: list[int], cell, positions) -> list[Future] :
         futures = []
         for atom in central_atom :
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "system": system})
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "cell": cell, "positions": positions})
             futures.append(f) 
         return futures
 
-    def partn_refine(self, config, central_atom: int, system) -> list[Future] :
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "system": system})
+    def partn_refine(self, config, central_atom: int, cell, positions, saddle_positions, saddle_idx) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "cell": cell, "positions": positions, "saddle_positions": saddle_positions, "saddle_idx": saddle_idx})
         return future
 
     def close_all(self):
