@@ -12,7 +12,7 @@ import pandas as pd
 import copy
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok
+from pykmc.result import Ok, BasinOutput
 
 #TODO : After merge do minimization and refinement with manager
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
@@ -43,6 +43,7 @@ class BasinsGenericEvents() :
         self.explored_states = None #List of state that we already explored
         self.states: dict[int, StateData] = {}  #Dictionnary of StateDate
         self.known_environments = known_environments 
+        self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
 
     def detection(self, params) -> bool : 
         """Utility method."""
@@ -61,14 +62,29 @@ class BasinsGenericEvents() :
         #reorder states index 
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
-
+        print(self.connectivity_table.df)
         #Refine absorbing states
         result =self.refine_absorbing()
         if not result.is_ok() : 
             return result
         #apply selector algorithm to find t_exit and exit_state
         result = self.selector.select_from_connectivity(self.connectivity_table)
-        return result
+        if not result.is_ok() : 
+            return result
+        #Construct output KMC needs 
+        t_exit = result.ok_value().t_exit
+        exit_state = result.ok_value().exit_state
+        from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
+        neighbors = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
+        return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions, 
+                              central_atom=central_atom, 
+                              saddle_positions=self.absorbing_saddle_positions[exit_state], 
+                              final_positions=self.states[exit_state].system.positions[neighbors], 
+                              neighbors=neighbors,
+                              energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"], 
+                              k_tot = self.connectivity_table.df.loc[self.connectivity_table.df["transient"] == False, "k_forward"].sum(),
+                              t_exit = t_exit, 
+                              num_reference_event= event_idx))
         
 
     def _initialize(self, system) -> None: 
@@ -277,6 +293,11 @@ class BasinsGenericEvents() :
 
             dE = E_sad - E_min
             k = compute_rate_Eyring(dE, self.config)
+
+            #also save saddle positions refined 
+            idx_state = self.connectivity_table.df.loc[idx].at['state_connexion']
+            central_atom = self.connectivity_table.df.loc[idx].at['central_atom']
+            self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
 
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
