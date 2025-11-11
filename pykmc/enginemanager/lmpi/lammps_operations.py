@@ -135,6 +135,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     # SETUP ARTN
     artn.reset_input()
     # Control 
+    artn.set("filout", "artn.out."+str(engine.engine_id))
     artn.set("engine_units", "lammps/metal")
     artn.set("verbose", config.partn.verbosity)
     artn.set("struc_format_out", "none")
@@ -272,6 +273,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
     # SETUP ARTN
     artn.reset_input()
     #Control
+    artn.set("filout", "artn.out."+str(engine.engine_id))
     artn.set("engine_units", "lammps/metal")
     artn.set("verbose", config.partn.verbosity)
     artn.set("struc_format_out", "none")
