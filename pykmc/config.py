@@ -477,7 +477,7 @@ class BasinConfig(BaseModel):
     """Basin parameters"""
 
     energy_thr: float = Field(
-    default = 0.1,
+    default = 0.0,
     description="Energy threshold"    
     )
 

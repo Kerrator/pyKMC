@@ -223,6 +223,18 @@ class BasinExitTimeSolverOutput :
     """Sotre the results of exit time solver"""
     t_exit: float
 
+@dataclass
+class BasinOutput : 
+    """Store the results of the basin."""
+    initial_system_positions: np.ndarray
+    central_atom: int
+    saddle_positions: np.ndarray 
+    final_positions: np.ndarray 
+    neighbors: np.ndarray
+    energy_barrier: float
+    k_tot: float 
+    t_exit: float
+    num_reference_event: int 
 
 @dataclass
 class AtomicEnvironmentInfo:
