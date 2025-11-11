@@ -20,9 +20,10 @@ rcut = 6.5
 
 [EventSearch] 
 style = partn
-nsearch = 10
+nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
+nnewchance = 3
 
 [pARTn] 
 path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
