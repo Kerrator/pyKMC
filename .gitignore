@@ -54,3 +54,4 @@ examples/tutorial/input.in
 *SOURCES.txt 
 *requires.txt
 *__pycache__
+*artn.out.*
