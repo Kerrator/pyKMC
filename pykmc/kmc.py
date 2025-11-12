@@ -249,7 +249,7 @@ class KMC:
             if set(list(self.atomic_environment.atomic_environment_list)) == {
                 "crystal"
             }:
-                self.loggers.info("log", ":=> Only atoms with cristalline environment")
+                self.loggers.info("log", ":=> Only atoms with crystalline environment")
                 self._close()
         self._close()
 

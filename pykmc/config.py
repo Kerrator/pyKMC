@@ -339,7 +339,7 @@ class PartnConfig(BaseModel):
 
     #Lanczos
     r_lanczos_min_size: float = Field(
-        default=20, 
+        default=5,
         description="Refinement: Enforce Lanczos to always do at least this number of iterations."
     )
 

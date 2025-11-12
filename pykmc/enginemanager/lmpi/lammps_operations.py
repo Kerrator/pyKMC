@@ -299,7 +299,7 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     This was added in order to get the activation energy for an event, as the traditional method does not work for
     Active Volumes.
     '''
-
+    engine.command('plugin clear')
 
 
     #Define active volume
@@ -315,8 +315,11 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
 
 
     #Now update positions of atoms in lammps, only those needed for the refinement
+    core_idx=[]
     for i, atom_idx in enumerate(saddle_idx):
-        av_positions[np.where(atom_map-1 == atom_idx)[0]]=saddle_positions[i]
+        index=int(np.where(atom_map-1 == atom_idx)[0])
+        av_positions[index]=saddle_positions[i]
+        core_idx.append(index+1) #Makes sure its in lammps indexing
 
     #Now we have the atoms at the saddle point
     set_positions(engine, av_positions)
@@ -325,9 +328,15 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     engine.command('run 0')
     engine.command('unfix 1')
 
+    #Want to minimize initially to speed up refinement process
+    engine.command(f"group core id {' '.join(map(str, core_idx))}")
+    engine.command('fix f_core core setforce 0.0 0.0 0.0')
+    engine.command("min_style {}".format(config.lammps.min_style))
+    engine.command("minimize 1.0e-6 1.0e-8 10 10")
+    engine.command('unfix f_core')
+
     # INITILIZE ARTN
     artn = pypARTn2.artn(engine="lmp")
-    engine.command('plugin clear')
 
     engine.command("plugin load {}".format(config.partn.path_artnso))
     # LAMMPS COMMANDS

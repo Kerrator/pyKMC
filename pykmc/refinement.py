@@ -14,10 +14,6 @@ import numpy as np
 import pandas as pd
 import concurrent.futures
 
-#Troubleshooting
-from ase.io import write
-from ase import Atoms
-
 
 class Refinement:
     """Perfrom event refinements and deal with results.
@@ -229,12 +225,16 @@ class Refinement:
 
                     #NEW PLAN:
                         #SEND CURRENT POSITIONS, THEN THE POSITIONS WILL BE UPDATED IN PARTN WITH THE NEW SADDLE POSITIONS
+
+                    #Checking time for refinement
+
                     f = self.manager.partn_refine(self.config,
                                                   at_idx,
                                                   self.system.cell.copy(),
                                                   self.system.positions.copy(),
                                                   new_positions_saddle.copy(),
                                                   neighbors.copy()) #send copy not reference !
+
                 futures.append(f)
 
 
