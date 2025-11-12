@@ -234,6 +234,8 @@ class BasinOutput :
     energy_barrier: float
     k_tot: float 
     t_exit: float
+    exit_state: int
+    from_state: int
     num_reference_event: int 
 
 @dataclass
