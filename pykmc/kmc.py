@@ -181,7 +181,7 @@ class KMC:
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly 
             detector = DetectorThreshold()
                 #IF selected event shows we are in a basin
-            if detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
+            if self.config.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
                 self.loggers.info("log","\t :=> System is in a Basin." )
                 self.loggers.info("log","\t :=> Exploring the Basin." )
                 #get basin info/explore
@@ -191,14 +191,16 @@ class KMC:
                 if result_basin.is_ok() : #Basin did no fail
                 #move system to a state connected to the exit_state 
                     self.system.update_positions(result_basin.ok_value().initial_system_positions)
+                    self.neighbors_list = basin.states[result_basin.ok_value().from_state].neighbors_list
                 #construct new active table with only event : new_actual_state - > exit_state
-                    tmp_active_table = ActiveEventTable()
+                    tmp_active_table = ActiveEventTable(self.config)
                     tmp_event = EventRefinementOutput(central_atom_index=result_basin.ok_value().central_atom, 
                                                       saddle_positions=result_basin.ok_value().saddle_positions, 
                                                       E_saddle=-1, 
                                                       min2_positions=result_basin.ok_value().final_positions, 
                                                       dE_forward=result_basin.ok_value().energy_barrier, 
                                                       num_reference_event=result_basin.ok_value().num_reference_event)
+                    neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
                 #reconstruct event
                     result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
@@ -208,7 +210,7 @@ class KMC:
                         ktot = result_basin.ok_value().k_tot
                         idx_selected_event = result_basin.ok_value().num_reference_event
                     else : 
-                       self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails, back to original event") 
+                       self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value())) 
                        self.system.update_positions(basin.states[0].system.positions)
                        self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
                 else : 
@@ -498,6 +500,9 @@ class KMC:
         saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
+        
+        
+
 
         #Move the system to the saddle point 
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)

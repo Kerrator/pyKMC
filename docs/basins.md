@@ -1,57 +1,84 @@
-# Basins 
+# Basins
 
-The basins parameters are defined with a `[Basin]` section in the input file. What needs to be specified is the energy threshold where we consider to be in the basin. 
-You also need to activate the basin mode in the `[Control]` section. 
-Those sections will look like : 
-```INI 
+Basin settings are defined in the `[Basin]` section of the input file.
+The only required parameter is the energy threshold below which a state is considered part of the basin.
+You must also enable basin mode in the `[Control]` section.
+
+Example:
+
+```INI
 [Control]
 ...
-basin = True 
-... 
+basin = True
+...
 
-.
-.
-.
-
-[Basin] 
+[Basin]
 energy_thr = 0.1
+```
 
-.
-.
-.
-``` 
-_Note: currently only one way to deal with basin is implemented, the use of a basin's section in the input file is for future implementation, if multiple algorithms will be available (e.g. FTPA, MRT, ..) or local basins._
+*Note: currently only one basin-handling strategy is implemented.
+The `[Basin]` section is intended for future extensions when multiple algorithms (e.g., FTPA, MRT, local basins, …) will be available.*
 
-**Note : In the following part, we explain how the current global basin is implemented, that use generic events to explore the basin**
+---
 
-## Workflow : 
+## General Idea
 
-During a KMC step, when an event, having a forward and backward energy barrier lower than the `energy_thr` is selected, we construct a Basin object, that will explore the basin, find the exit time and the exit state. 
-Then the selected event is replaced in the KMC loop. 
+During a KMC step, if the selected event has both forward and backward barriers lower than `energy_thr`, a `Basin` object is created.
+It explores the basin, computes the exit time, and determines the exit state.
+Once finished, the selected event in the KMC loop is replaced with the basin event.
 
-FIGURE 
+FIGURE
 
-When exploring the basin, the goal is to first construct a connectivity table. This is a pandas DataFrame with all needed information to apply the selected algorithm. 
-We use a Connectivity object, that store the dataframe, and has utilities method (merge, remove, find a connection between to states, ...). 
-The dataframe looks like : 
+While exploring, the main objective is to build a connectivity table containing all information required to apply the exit algorithm.
+This table is stored as a `pandas.DataFrame`, managed by a `Connectivity` object (merge, remove, search for connections, ...).
 
-TABLE 
+FIGURE
 
-It reads as follow : 
-- `state`: a transient state 
-- `state_connexion`: a state connected to the `state`
-- `event_connexion`: the number of the event in the events table to apply to go from `state` to `state_connexion`
-- `central_atom` : the atom index on which the `event_connexion` should be applied 
-- `sym` : the number of the symmetry of the `event_connexion` 
-- `transient` : a bool informing if the `state_connexion` is a transient state or not 
-- `dE_forward` : the energy barrier to go from `state` to `state_connexion`, taken from the events table
-- `k_forward` : the rate constant to go from `state` to `state_connexion`, taken from the events table
-- `dE_backward` : the energy barrier to go from `state_connexion` to `state`, taken from the events table
-- `k_backward` : the rate constant to go from `state_connexion` to `state`, taken from the events table
+Column meaning:
 
-_Note: The choice of a pandas Dataframe where made to have fast query/sorting methods. It is also easy to generate a graph from this table for analysis/caracterization_ 
+* **state**: a transient state
+* **state_connexion**: a state reachable from `state`
+* **event_connexion**: ID of the event that takes `state → state_connexion`
+* **central_atom**: atom index on which the event must be applied
+* **sym**: symmetry index of the event
+* **transient**: whether `state_connexion` is transient or not
+* **dE_forward / k_forward**: barrier and rate from `state` to `state_connexion`
+* **dE_backward / k_backward**: barrier and rate from `state_connexion` back to `state`
 
-The Basin object also use two objects, an Explorer object, that explore one state and construct a connectivity table for that staten and a Selector object, that takes the connectivity table to find the exit time and exit state. 
+_Note: Pandas Dataframe were choosen for fast querying and sorting, and it can easily be converted to a graph for analysis and characterization._
 
-_Note: This structure is made for future exploration, selection implementation._ 
+The `Basin` object uses two additional components:
+
+* **Explorer**: explores a given state by creating its connectivity table
+* **Selector**: use the connectivity table to compute the exit state and exit time
+
+*This structure is designed to support multiple future exploration/selection algorithms.*
+
+
+## Algorithm
+
+1. **Initialization**: state to explore = current state
+2. **While states remain to explore:**
+
+   1. If the state is already known (distance-based check), stop
+   2. If the state has an unknown atomic environment → mark as absorbing → stop
+   3. If the state is absorbing, stop
+   4. Find the connection (event) between a known state and this state
+   5. Apply the event (reconstruction using a generic event)
+   6. Send the state to the Explorer:
+
+      * detect applicable events
+      * build its connectivity table
+   7. Merge with the global connectivity table
+3. **Refine** all transient → absorbing transitions (update dE and k)
+4. **Selector step**:
+
+   * build matrix ( M ), solve ( P = e^{-Mt} P_0 )
+   * use bisection to find ( t_{\text{exit}} ) and the exit state
+5. Build the result and return it to the KMC loop
+6. Replace the initially chosen KMC event with the basin event
+
+
+The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
+If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
 

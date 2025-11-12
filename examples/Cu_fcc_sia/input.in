@@ -1,12 +1,12 @@
 [Control] 
-initial_config = ./initial_config_Cu.xyz 
-n_steps = 1
+initial_config = ./cu_fcc_defects.xyz 
+n_steps = 10
 engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-#reference_table = test.pickle 
-#visited_environments = visited_environments.pickle
+reference_table = reference_table_test.pickle 
+visited_environments = visited_environments_test.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -22,9 +22,9 @@ rcut = 8.0
 
 [EventSearch] 
 style = partn
-nsearch = 5
+nsearch = 10
 emax_event = 5.0
-emin_event = 0.2
+emin_event = 0.0
 r_nnewchance = 3
 
 [pARTn] 
@@ -44,4 +44,4 @@ matching_score_thr = 0.4
 kmax_factor = 2.0
 
 [BASIN]
-#energy_thr = 0.5
+energy_thr = 0.5
