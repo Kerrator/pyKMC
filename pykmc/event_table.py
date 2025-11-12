@@ -17,6 +17,8 @@ from .result import (
     EventSearchOutput,
     EventRefinementOutput,
 )
+from .point_set_registration import simple_ira, check_match
+from .utils.geometry import compute_delr
 
 
 class ReferenceEventTable:
@@ -219,14 +221,35 @@ class ReferenceEventTable:
         """
         # Only select rows with same event_id as dfenvent :
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
-        # subset of subset with rows with the same saddle_id :
-        subset = subset[subset["id_saddle"] == dfevent["id_saddle"]]
-        # subset of subset of subset with rows with the same final_id :
+        if len(subset) == 0 : 
+            return True 
+        #If same evnet id, check if same final id
         subset = subset[subset["id_final"] == dfevent["id_final"]]
-        if len(subset) == 0:
+        if len(subset) == 0 : 
+            return True 
+        #if same final id, chekc if same dE
+        tol = 0.1
+        dE = dfevent["energy_barrier"]
+        subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
+        #subset = subset[subset["energy_barrier"] == dfevent["energy_barrier"]]
+        if len(subset) == 0 : 
             return True
-        else:
-            return False
+        #if all same, check PSR Displacement saddle_initial
+        event_displacement = dfevent["saddle_positions"] - dfevent["initial_positions"]
+        nat_event = len(event_displacement)
+        #TODO I guess we should save atoms types in reference table
+        typ_event = nat_event*['X'] 
+        for _, ev in subset.iterrows() : 
+            ref_displacement = ev["saddle_positions"] - ev["initial_positions"]
+            nat_ref = len(ref_displacement)
+            typ_ref = typ_event 
+            result = simple_ira(nat_event, typ_event, event_displacement, nat_ref, typ_ref, ref_displacement, self.config.ira.kmax_factor)
+            if not result.is_ok() : #no match 
+                return True 
+            result = check_match(result, self.config.psr.matching_score_thr)
+            if not result.is_ok() : #matching score > thr
+                return True
+        return False
 
     def get_valid_events(
         self, results_is_valid_event: list[Result[pd.Series, ErrorInfo]]
@@ -576,6 +599,38 @@ class ActiveEventTable:
         """
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
+
+    def remove_duplicates(self, cell) -> None : 
+        """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
+        #Sub dataframes with events grouped by central_atom and dE 
+        tol_energy = 0.1 #eV
+        grouped = []
+
+        for idx, row in self.table.iterrows():
+            central_atom = row["atom_index"]
+            dE = row["energy_barrier"]
+
+            subset = self.table[
+                (self.table["atom_index"] == central_atom)
+                & (abs(self.table["energy_barrier"] - dE) < tol_energy)
+            ]
+            grouped.append((idx, subset))
+
+        #For each group, check duplicated by computing delr
+        duplicates = []
+
+        for idx, subset in grouped:
+            pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
+            for jdx in subset.index:
+                if jdx <= idx:
+                    continue  # dont compute twice
+                pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
+                delr = compute_delr(pos_ref, pos_comp, cell )
+                if delr < self.config.psr.matching_score_thr : 
+                    duplicates.append(jdx)
+        #remove all duplicates 
+        for dup in duplicates : 
+            self.remove(dup)
 
     def save(self, outfile: str = "active_table.pickle") -> None:
         """Save the reference event table to a pickle file.

@@ -173,6 +173,7 @@ class KMC:
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
+            active_table.remove_duplicates(self.system.cell)  #To be sure
 
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
