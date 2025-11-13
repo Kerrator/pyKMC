@@ -589,7 +589,7 @@ class ActiveEventTable:
         )
         return dfactive
     
-    def remove(self, ind: int) -> None : 
+    def remove(self, ind: int|list[int]) -> None : 
         """Remove event at row = ind
 
         Parameters
@@ -629,8 +629,7 @@ class ActiveEventTable:
                 if delr < self.config.psr.matching_score_thr : 
                     duplicates.append(jdx)
         #remove all duplicates 
-        for dup in duplicates : 
-            self.remove(dup)
+        self.remove(duplicates)
 
     def save(self, outfile: str = "active_table.pickle") -> None:
         """Save the reference event table to a pickle file.
