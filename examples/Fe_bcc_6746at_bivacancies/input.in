@@ -27,7 +27,7 @@ path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
-k0 = 1.0e12
+k0 = 10
 T = 300.0
 
 [PSR] 
@@ -36,3 +36,5 @@ matching_score_thr = 0.3
 
 [IRA]
 kmax_factor = 2.0
+
+[Basin]
