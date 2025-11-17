@@ -25,3 +25,20 @@ class TestManager:
         manager.global_session.command("dimension 3")
         manager.global_session.command("log flush")
         manager.close_all()
+
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_minimize_manager(self, system: System, config: Config)  : 
+        factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=True, has_global=True)
+        manager = factory.launch()
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        manager.global_initialize_parameters()
+        manager.global_initialize_system(system)
+        manager.global_initialize_potential(config)
+        f = manager.minimize(config)
+        re = f.result()
+        manager.global_minimize(config)
+        manager.close_all()

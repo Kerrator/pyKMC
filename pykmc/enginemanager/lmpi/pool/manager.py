@@ -138,9 +138,9 @@ class Manager:
             if not self.global_session:
                 raise RuntimeError("Global session is not available")
             
-            def global_method(**kwargs):
+            def global_method(*args, **kwargs):
                 method = getattr(self.global_session, method_name)
-                return method(**kwargs)
+                return method(*args, **kwargs)
             
             return global_method
         

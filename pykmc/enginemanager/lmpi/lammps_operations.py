@@ -67,7 +67,9 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
-def minimize(engine, config) : 
+def minimize(engine, config, positions=None) : 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
