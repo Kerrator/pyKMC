@@ -143,7 +143,7 @@ class KMC:
             )
 
             ##==> Clear lammps instances to ensure no cross over of energy values
-            self.manager.reset(self.config,self.system)
+            #self.manager.reset(self.config,self.system)
 
             ##=>Perform event search on each atom in central_atom_research_list
             event_search = self.execute_event_searches(central_atom_research_list)
@@ -179,6 +179,8 @@ class KMC:
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
+            active_table.remove_duplicates(self.system.cell)
+            #print(active_table.table)
 
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)

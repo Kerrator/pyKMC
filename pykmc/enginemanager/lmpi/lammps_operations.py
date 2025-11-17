@@ -49,6 +49,7 @@ def initialize_system(engine, system) :
         engine.command(
             "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
         )
+        print('Initializinng atoms')
         engine.command("create_box {} box".format(len(map_type)))
         engine.lmp.create_atoms(natoms, ind, types, x)
         # Set masses
@@ -121,6 +122,17 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
 
+    engine.command('plugin clear')
+    engine.command('clear')
+    initialize_parameters(engine)
+    # Create cell
+    xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
+    engine.command(
+        "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
+    )
+    engine.command('create_box 1 box')  # NEEDS TO BE UPDATED FOR ALLOYS
+    initialize_potential(engine, config)
+
     #Define active volume
     av_positions, av_indices, buffer_ind = define_active_volume(config, central_atom_idx, cell, positions)
 
@@ -133,7 +145,6 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
 
     # INITILIZE ARTN on all ranks
     artn = pypARTn2.artn(engine="lmp")
-    engine.command('plugin clear')
 
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
@@ -300,6 +311,15 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     Active Volumes.
     '''
     engine.command('plugin clear')
+    engine.command('clear')
+    initialize_parameters(engine)
+    #Create cell
+    xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
+    engine.command(
+        "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
+    )
+    engine.command('create_box 1 box') #NEEDS TO BE UPDATED FOR ALLOYS
+    initialize_potential(engine,config)
 
 
     #Define active volume
@@ -591,8 +611,10 @@ def redefine_atoms(engine, positions) -> None:
         engine.command('run 0')
         engine.command('unfix 1')
     else: #Uneven number of atoms
-        engine.command('delete_atoms group all')
+        if num_atoms!=0:
+            engine.command('delete_atoms group all')
         type=[1]*len(positions)
+        print('Creating atoms for refinement atoms')
         engine.lmp.create_atoms(len(positions), None,type,x=positions.flatten())
         engine.command('fix 1 all setforce 0.0 0.0 0.0')
         engine.command('run 0')

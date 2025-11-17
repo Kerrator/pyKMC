@@ -17,6 +17,8 @@ from .result import (
     EventSearchOutput,
     EventRefinementOutput,
 )
+from .point_set_registration import simple_ira, check_match
+from .utils.geometry import compute_delr
 
 
 class ReferenceEventTable:
@@ -34,7 +36,7 @@ class ReferenceEventTable:
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput]
+            self, events: list[EventSearchOutput]
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Events events to the table dataframe.
 
@@ -53,39 +55,35 @@ class ReferenceEventTable:
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self.is_valid_new_event(
-                    min1_positions=ev.min1_positions,
-                    saddle_positions=ev.saddle_positions,
-                    min2_positions=ev.min2_positions,
-                    move_atom_idx=ev.move_atom_index,
-                    dE_forward=ev.dE_forward,
-                    dE_backward=ev.dE_backward,
-                    cell=ev.cell,
-                )
+                min1_positions=ev.min1_positions,
+                saddle_positions=ev.saddle_positions,
+                min2_positions=ev.min2_positions,
+                move_atom_idx=ev.move_atom_index,
+                dE_forward=ev.dE_forward,
+                dE_backward=ev.dE_backward,
+                cell=ev.cell,
+            )
             results_is_valid_events.append(res)
-            if res.is_ok() : 
-                self.add(res.ok_value()) 
-        #df_valid_events = self.get_valid_events(results_is_valid_events)
+            if res.is_ok():
+                self.add(res.ok_value())
+                # df_valid_events = self.get_valid_events(results_is_valid_events)
 
+        # Check if events in results are not the same :
 
-        #Check if events in results are not the same : 
-
-
-
-
-        #for df in df_valid_events:
+        # for df in df_valid_events:
         #    self.add(df)
 
         return results_is_valid_events
 
     def is_valid_new_event(
-        self,
-        min1_positions: np.ndarray,
-        saddle_positions: np.ndarray,
-        min2_positions: np.ndarray,
-        move_atom_idx: int,
-        dE_forward: float,
-        dE_backward: float,
-        cell: np.ndarray,
+            self,
+            min1_positions: np.ndarray,
+            saddle_positions: np.ndarray,
+            min2_positions: np.ndarray,
+            move_atom_idx: int,
+            dE_forward: float,
+            dE_backward: float,
+            cell: np.ndarray,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -141,7 +139,7 @@ class ReferenceEventTable:
             )
 
         elif (
-            dE_backward < emin
+                dE_backward < emin
         ):  # backard reaction energy barrier too low, reject the event
             return Err(
                 ErrorInfo(
@@ -155,7 +153,7 @@ class ReferenceEventTable:
 
         # TODO Maybe REMOVE THIS, IT SHOULD NOT HAPPEN
         elif (dE_forward > energy_asymmetry * backward_emin) and (
-            dE_backward < backward_emin
+                dE_backward < backward_emin
         ):  # Asymmetric event, reject
             return Err(
                 ErrorInfo(
@@ -178,13 +176,16 @@ class ReferenceEventTable:
                 cell=cell,
             )
             if self.is_new_event(
-                dfevent=dfevent_forward
+                    dfevent=dfevent_forward
             ):  # check if event not already in the catalog
                 if (
-                    dfevent_forward["event_id"] == dfevent_forward["id_final"]
+                        dfevent_forward["event_id"] == dfevent_forward["id_final"]
                 ):  # backward reaction same as forward
+                    dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
                 else:
+                    dfevent_forward["idx_backward"] = len(self.table) + 1
+                    dfevent_backward["idx_backward"] = len(self.table)
                     dfevent = pd.concat(
                         [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
                         ignore_index=True,
@@ -216,17 +217,43 @@ class ReferenceEventTable:
         """
         # Only select rows with same event_id as dfenvent :
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
-        # subset of subset with rows with the same saddle_id :
-        subset = subset[subset["id_saddle"] == dfevent["id_saddle"]]
-        # subset of subset of subset with rows with the same final_id :
-        subset = subset[subset["id_final"] == dfevent["id_final"]]
         if len(subset) == 0:
+            #print('Check 1 pass')
             return True
-        else:
-            return False
+            # If same evnet id, check if same final id
+            # BELAND REQUESTED THIS BE REMOVED
+        # subset = subset[subset["id_final"] == dfevent["id_final"]]
+        # if len(subset) == 0:
+        #     print('Check 2 pass')
+        #     return True
+        #     # if same final id, chekc if same dE
+        tol = 0.1
+        dE = dfevent["energy_barrier"]
+        subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
+        # subset = subset[subset["energy_barrier"] == dfevent["energy_barrier"]]
+        if len(subset) == 0:
+            #print('Check 2 pass')
+            return True
+        # if all same, check PSR Displacement saddle_initial
+        event_displacement = dfevent["saddle_positions"] - dfevent["initial_positions"]
+        nat_event = len(event_displacement)
+        # TODO I guess we should save atoms types in reference table
+        typ_event = nat_event * ['X']
+        for _, ev in subset.iterrows():
+            ref_displacement = ev["saddle_positions"] - ev["initial_positions"]
+            nat_ref = len(ref_displacement)
+            typ_ref = typ_event
+            result = simple_ira(nat_event, typ_event, event_displacement, nat_ref, typ_ref, ref_displacement,
+                                self.config.ira.kmax_factor)
+            if not result.is_ok():  # no match
+                return True
+            result = check_match(result, self.config.psr.matching_score_thr)
+            if not result.is_ok():  # matching score > thr
+                return True
+        return False
 
     def get_valid_events(
-        self, results_is_valid_event: list[Result[pd.Series, ErrorInfo]]
+            self, results_is_valid_event: list[Result[pd.Series, ErrorInfo]]
     ) -> list[pd.Series]:
         """Return the list of successful Result.
 
@@ -271,14 +298,14 @@ class ReferenceEventTable:
         return self.table[self.table["event_id"].isin(ids)]
 
     def _build_event_series(
-        self,
-        min1_positions: np.ndarray,
-        saddle_positions: np.ndarray,
-        min2_positions: np.ndarray,
-        index_move: int,
-        dE_forward: float,
-        dE_backward: float,
-        cell: np.ndarray,
+            self,
+            min1_positions: np.ndarray,
+            saddle_positions: np.ndarray,
+            min2_positions: np.ndarray,
+            index_move: int,
+            dE_forward: float,
+            dE_backward: float,
+            cell: np.ndarray,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -375,6 +402,7 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
+                "idx_backward": -1  # unknown yet
             }
         )
 
@@ -396,6 +424,7 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
+                "idx_backward": -1  # unknown yet
             }
         )
 
@@ -422,8 +451,20 @@ class ReferenceEventTable:
                     "move_atom_idx",
                     "sym_matrix",
                     "sym_perm",
+                    "idx_backward"
                 ]
             )
+
+    def remove(self, ind: int) -> None:
+        """Remove event at row = ind
+
+        Parameters
+        ----------
+        ind : int
+            index of the row to be removed
+        """
+        self.table = self.table.drop(ind)
+        self.table = self.table.reset_index(drop=True)
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
@@ -459,6 +500,7 @@ class ActiveEventTable:
         else:
             columns = {
                 "atom_index": pd.Series(dtype="int64"),
+                "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
@@ -520,7 +562,7 @@ class ActiveEventTable:
         self.table = pd.concat([self.table, df_to_add], ignore_index=True)
 
     def build_event_series(
-        self, event_search_output: EventRefinementOutput
+            self, event_refinement_output: EventRefinementOutput
     ) -> pd.Series:
         """Build an event Series based on the EventRefinementOuput dataclass.
 
@@ -535,14 +577,68 @@ class ActiveEventTable:
             The pd.Series of the event.
 
         """
-        
+
         dfactive = pd.Series(
             {
-                "atom_index": event_search_output.central_atom_index,
-                "final_positions": event_search_output.min2_positions,
-                "energy_barrier": event_search_output.dE_forward,
-                "k": compute_rate_Eyring(event_search_output.dE_forward, self.config),
-                "num_reference_event": event_search_output.num_reference_event,
+                "atom_index": event_refinement_output.central_atom_index,
+                "saddle_positions": event_refinement_output.saddle_positions,
+                "final_positions": event_refinement_output.min2_positions,
+                "energy_barrier": event_refinement_output.dE_forward,
+                "k": compute_rate_Eyring(event_refinement_output.dE_forward, self.config),
+                "num_reference_event": event_refinement_output.num_reference_event,
             }
         )
         return dfactive
+
+    def remove(self, ind: int|list[int]) -> None :
+        """Remove event at row = ind
+
+        Parameters
+        ----------
+        ind : int
+            index of the row to be removed
+        """
+        self.table = self.table.drop(ind)
+        self.table = self.table.reset_index(drop=True)
+
+    def remove_duplicates(self, cell) -> None:
+        """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
+        # Sub dataframes with events grouped by central_atom and dE
+        tol_energy = 0.1  # eV
+        grouped = []
+
+        for idx, row in self.table.iterrows():
+            central_atom = row["atom_index"]
+            dE = row["energy_barrier"]
+
+            subset = self.table[
+                (self.table["atom_index"] == central_atom)
+                & (abs(self.table["energy_barrier"] - dE) < tol_energy)
+                ]
+            grouped.append((idx, subset))
+
+        # For each group, check duplicated by computing delr
+        duplicates = []
+
+        for idx, subset in grouped:
+            pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
+            for jdx in subset.index:
+                if jdx <= idx:
+                    continue  # dont compute twice
+                pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
+                delr = compute_delr(pos_ref, pos_comp, cell)
+                if delr < self.config.psr.matching_score_thr:
+                    duplicates.append(jdx)
+        self.remove(duplicates)
+        #print('There is ',len(duplicates),'duplicate events')
+
+    def save(self, outfile: str = "active_table.pickle") -> None:
+        """Save the reference event table to a pickle file.
+
+        Parameters
+        ----------
+        outfile : str, optional
+            path to the output file, by default 'active_table.pickle'.
+
+        """
+        self.table.to_pickle(outfile)

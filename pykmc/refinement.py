@@ -111,6 +111,7 @@ class Refinement:
                 res.ok_value().dE_forward = res.ok_value().E_saddle #- total_energy
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
+                #print('Reference Energy:', ctx["reference_energy_barrier"],'Refined Energy:', res.ok_value().dE_forward)
                 res = self.check_refinement_energy(res,
                             abs(
                                 res.ok_value().dE_forward
@@ -227,6 +228,8 @@ class Refinement:
                         #SEND CURRENT POSITIONS, THEN THE POSITIONS WILL BE UPDATED IN PARTN WITH THE NEW SADDLE POSITIONS
 
                     #Checking time for refinement
+
+                    #self.manager.reset(self.config, self.system)
 
                     f = self.manager.partn_refine(self.config,
                                                   at_idx,

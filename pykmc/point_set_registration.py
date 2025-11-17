@@ -187,3 +187,27 @@ def check_match(
             )
         else:
             return result_match  # Ok(PSROutput)
+
+def simple_ira(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor) :
+    # Run ira to find transformation matrices
+    ira = ira_mod.IRA()
+    try:
+        rmat, tr, perm, dh = ira.match(
+            nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor
+        )
+
+        return Ok(
+            PSROutput(
+                rotation_matrix=rmat,
+                translation_matrix=tr,
+                permutation_matrix=perm,
+                matching_score=dh,
+            )
+        )
+    except Exception:
+        return Err(
+            ErrorInfo(
+                type=ErrorType.PSR_NO_MATCH_FOUND,
+                message="IRA did not find a match",
+            )
+        )

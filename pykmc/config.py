@@ -85,6 +85,11 @@ class ControlConfig(BaseModel):
         description="Event constributing to this percent of ktot are refined."
     )
 
+    active_volumes: Optional[bool] = Field(
+        default=True,
+        description="If enabled, active volumes are built for event searches and refinement"
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
