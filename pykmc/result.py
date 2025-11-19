@@ -211,6 +211,7 @@ class ReconstructionOutput :
     min1_positions: np.ndarray 
     saddle_positions: np.ndarray 
     min2_positions: np.ndarray
+    min2_etot: float
 
 @dataclass 
 class BasinSelectorOutput : 
