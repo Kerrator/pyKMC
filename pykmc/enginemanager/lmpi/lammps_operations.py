@@ -76,7 +76,9 @@ def get_total_energy(engine) :
     result = engine.lmp.get_thermo("etotal")
     return result
 
-def get_potential_energy(engine) : 
+def get_potential_energy(engine, positions = None) : 
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
     #get potential energy 
     engine.command("compute c1 all pe")
     engine.command("run 0")
@@ -97,7 +99,6 @@ def set_positions(engine, positions) :
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
-
 
 def minimize_with_results(engine, config, positions=None) : 
     """ 
