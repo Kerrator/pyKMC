@@ -181,7 +181,7 @@ class KMC:
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly 
             detector = DetectorThreshold()
                 #IF selected event shows we are in a basin
-            if self.config.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
+            if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
                 self.loggers.info("log","\t :=> System is in a Basin." )
                 self.loggers.info("log","\t :=> Exploring the Basin." )
                 #get basin info/explore

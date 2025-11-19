@@ -288,10 +288,10 @@ class BasinsGenericEvents() :
         #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
         for idx, ctx in futures_context.items():
             E_min    = ctx["min"].result()
-            result = ctx["saddle"].result()
-            if not result.is_ok() : 
-                return result
-            E_sad = result.ok_value().E_saddle
+            result_sad = ctx["saddle"].result()
+            if not result_sad.is_ok() : 
+                return result_sad
+            E_sad = result_sad.ok_value().E_saddle
 
             dE = E_sad - E_min
             k = compute_rate_Eyring(dE, self.config)
@@ -300,7 +300,7 @@ class BasinsGenericEvents() :
             idx_state = self.connectivity_table.df.loc[idx].at['state_connexion']
             central_atom = self.connectivity_table.df.loc[idx].at['central_atom']
             #self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
-            self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[ctx["neighbors"]]
+            self.absorbing_saddle_positions[idx_state] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
             self.connectivity_table.df.loc[idx, "k_forward"] = k
