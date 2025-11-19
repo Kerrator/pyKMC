@@ -503,7 +503,6 @@ class LogKMC(LogManager):
         # Compute percentage
         percent = (current_step / total_steps) * 100
 
-        static_text_color = Colors.WHITE.value
         # Dynamical bar colors
         bar_fill_color = Colors.WHITE.value
 
@@ -519,9 +518,9 @@ class LogKMC(LogManager):
         # all bar
         bar_segment = "#" * filled_length + "-" * (bar_length - filled_length)
         progress_message = (
-            f"{static_text_color}\r\t Progression: "
+            f"\r\t Progression: "
             f"{bar_fill_color}[{bar_segment}]{Colors.RESET.value}"
-            f"{static_text_color} {percent:.1f}% "
+            f" {percent:.1f}% "
         )
 
         # Envoi du message via le logger
