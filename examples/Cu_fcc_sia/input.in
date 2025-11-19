@@ -5,7 +5,7 @@ engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-basin = True
+basin = False
 reference_table = ./reference_table_Cu_fake.pickle
 visited_environments = ./visited_environments_Cu.pickle
 
