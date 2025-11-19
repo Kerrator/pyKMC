@@ -223,32 +223,34 @@ class ReferenceEventTable:
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
         if len(subset) == 0 : 
             return True 
-        #If same evnet id, check if same final id
-        subset = subset[subset["id_final"] == dfevent["id_final"]]
-        if len(subset) == 0 : 
-            return True 
-        #if same final id, chekc if same dE
+
+        #if same  id, chekc if same dE
         tol = 0.1
         dE = dfevent["energy_barrier"]
         subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
-        #subset = subset[subset["energy_barrier"] == dfevent["energy_barrier"]]
         if len(subset) == 0 : 
             return True
-        #if all same, check PSR Displacement saddle_initial
-        event_displacement = dfevent["saddle_positions"] - dfevent["initial_positions"]
-        nat_event = len(event_displacement)
+
+        #if all same, check PSR  saddle_initial
+        event_saddle = dfevent['saddle_positions']
+        nat_event = len(event_saddle)
         #TODO I guess we should save atoms types in reference table
         typ_event = nat_event*['X'] 
+
         for _, ev in subset.iterrows() : 
-            ref_displacement = ev["saddle_positions"] - ev["initial_positions"]
-            nat_ref = len(ref_displacement)
+
+            ref_saddle = ev['saddle_positions']
+            nat_ref = len(ref_saddle)
             typ_ref = typ_event 
-            result = simple_ira(nat_event, typ_event, event_displacement, nat_ref, typ_ref, ref_displacement, self.config.ira.kmax_factor)
+            result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
+
             if not result.is_ok() : #no match 
                 return True 
+
             result = check_match(result, self.config.psr.matching_score_thr)
             if not result.is_ok() : #matching score > thr
                 return True
+
         return False
 
     def get_valid_events(
