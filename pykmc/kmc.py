@@ -178,6 +178,7 @@ class KMC:
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
             self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
+            self.total_energy = result_reconstruction.ok_value().min2_etot
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions 
@@ -372,7 +373,8 @@ class KMC:
             self.atomic_environment,
             self.manager,
         )
-        refinement.execute(df_reference_events, self.potential_energy)
+        #refinement.execute(df_reference_events, self.potential_energy)
+        refinement.execute(df_reference_events, self.total_energy)
         return refinement
 
     def add_active_events(
