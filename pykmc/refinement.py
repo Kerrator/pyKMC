@@ -68,7 +68,6 @@ class Refinement:
         total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
         e_thr = self.get_energy_thr_refine(df_reference_events, supposed_ktot)
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
-        #count = 0
 
         all_futures = []
         future_context = {}  # mapping future -> contexte
@@ -88,8 +87,6 @@ class Refinement:
                     all_futures.extend(futures)
                 else:
                     all_futures.append(futures)
-                #self.results += result_single
-                #count = len(all_futures)
 
         #Get results and update values : 
         for f in all_futures:
