@@ -261,6 +261,12 @@ LOGGING_CONFIG = {
             "level": "DEBUG",
             "filename": "pykmc.info",
         },
+        "events_output":{
+            "class": "logging.FileHandler",
+            "formatter": "file_formatter", 
+            "level": "DEBUG", 
+            "filename" : "pykmc.events",
+        },
         "progress_bar_handler": {
             "class": "pykmc.log.ProgressHandler",
             "formatter": "default_formatter",
@@ -277,6 +283,7 @@ LOGGING_CONFIG = {
             "handlers": ["general_output_file"],
         },
         "info": {"handlers": ["step_informations"]},
+        "events" : {"handlers": ["events_output"]},
         "progress": {
             #"handlers": ["log_file", "progress_bar_handler"],
             "handlers": ["progress_bar_handler"],
@@ -467,6 +474,27 @@ class LogKMC(LogManager):
             for fmt, e in zip_longest(formats, args, fillvalue=None)
         ]
         self.info(logger_name, " ".join(formatted_values))
+
+    def events_file_header(self, logger_name:str) -> None : 
+        """Write header of the events file
+
+        Parameters
+        ----------
+        logger_name: str
+            The logger name.
+        """
+        self.info(logger_name, "#Actif Events Informations File")
+        self.new_line(logger_name)
+
+    def events_file_step_first_line(self, logger_name:str, step: int, selected_event:int) -> None : 
+        """Write the first line with step informations 
+
+        Parameters
+        ----------
+        logger_name: str
+            The logger name.
+        """
+        self.info(logger_name, "#Step: {} \t Selected Event: {}".format(step, selected_event))
 
     def new_line(self, logger_name: str) -> None:
         """Write a new line in the logger.

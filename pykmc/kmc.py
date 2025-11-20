@@ -174,6 +174,10 @@ class KMC:
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
             active_table.remove_duplicates(self.system.cell)  #To be sure
+            cols = ["atom_index", "energy_barrier", "refined"]
+            rename_map = {"atom_index": "Atom Index", "energy_barrier": "dE", "refined": "R"}
+
+            self.loggers.info("events", active_table.table[cols].rename(columns=rename_map).to_string(index=False))
 
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  

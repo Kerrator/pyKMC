@@ -334,7 +334,8 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
                 EventRefinementOutput(
                     central_atom_index=central_atom_idx,
                     saddle_positions=saddlepositions,
-                    E_saddle= E_sad
+                    E_saddle= E_sad,
+                    refined='T'
                 )
             )
 

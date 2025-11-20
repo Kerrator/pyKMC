@@ -171,7 +171,8 @@ class EventRefinementOutput:
         Refined forward energy barrier (if matched).
     num_reference_event : Optional[int]
         Index of the corresponding reference event (if matched).
-
+    refined: Optional[str] 
+        If the event has been refined (T: True, F: False, B: In basin)
     """
 
     central_atom_index: int
@@ -180,6 +181,7 @@ class EventRefinementOutput:
     min2_positions: Optional[np.ndarray] = None
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
+    refined: Optional[str] = None
 
 
 @dataclass

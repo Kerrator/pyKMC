@@ -506,6 +506,7 @@ class ActiveEventTable:
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
+                "refined": pd.Series(dtype="str")
             }
             self.table = pd.DataFrame(columns)
 
@@ -587,6 +588,7 @@ class ActiveEventTable:
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": compute_rate_Eyring(event_refinement_output.dE_forward, self.config),
                 "num_reference_event": event_refinement_output.num_reference_event,
+                "refined": event_refinement_output.refined
             }
         )
         return dfactive
