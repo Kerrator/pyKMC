@@ -82,9 +82,15 @@ class PointSetRegistration:
         neighbor_list = self.neighbors_list.get_neighbors("rcut", central_atom_index)
 
         coords1 = self.system.positions[neighbor_list]
-        typ1 = np.array(self.system.types)[neighbor_list]
 
-        typ2 = typ1  # If they have same topology id should be always true ?
+
+        #GREY ALLOY
+        typ1 = ['X']*len(coords1)
+        typ2 = typ1 
+
+        #typ1 = np.array(self.system.types)[neighbor_list]
+
+        #typ2 = typ1  # If they have same topology id should be always true ?
 
         # unwrap if close to cell limits :
         alat = self.system.cell[0][0]
