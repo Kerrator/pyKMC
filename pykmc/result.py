@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import numpy as np
 import yaml
+import pandas as pd
 
 # Construction of the Result Type :
 
@@ -294,6 +295,36 @@ class RefinementsInfo:
     n_sucesses: int
     n_fails: dict[str, int]
 
+@dataclass
+class EventsInfo: 
+    """Active events informations."""
+
+    types: list[str] 
+    central_atom: list[int]
+    initial_topologies: list[str|bytes]
+    reference_events: list[int]
+    dE_forward: list[float]
+    dE_backward: list[float]
+    dE_asym: list[float]
+    k: list[float]
+    dra_i: list[float]
+    dra_f: list[float]
+    refined: list[str]
+
+    def output_msg(self) -> str: 
+
+        df = pd.DataFrame({
+                'Types': self.types,
+                'Central Atom': self.central_atom,
+                'Ref Event': self.reference_events,
+                'dE forward': self.dE_forward,
+                'dE backward': self.dE_backward,
+                'dE asym': self.dE_asym,
+                'k': self.k,
+                'dra_i': self.dra_i,
+                'dra_f': self.dra_f,
+                'Refined': self.refined,})
+        return df.to_string(index=True)        
 
 @dataclass
 class KMCLoopInfo:

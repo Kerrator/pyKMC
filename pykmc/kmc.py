@@ -33,6 +33,7 @@ from .info_simulation import (
     info_reference_event_searches,
     info_is_valid_reference_events,
     info_refinements,
+    info_active_events
 )
 from .eventsearch import EventSearch
 from .refinement import Refinement
@@ -174,16 +175,22 @@ class KMC:
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
             active_table.remove_duplicates(self.system.cell)  #To be sure
-            cols = ["atom_index", "energy_barrier", "refined"]
-            rename_map = {"atom_index": "Atom Index", "energy_barrier": "dE", "refined": "R"}
-
-            self.loggers.info("events", active_table.table[cols].rename(columns=rename_map).to_string(index=False))
+            
 
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
             self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
             self.total_energy = result_reconstruction.ok_value().min2_etot
             total_time += delta_t * 10**-12  # time is in seconds
+            
+            cols = ["atom_index", "num_reference_event", "energy_barrier", "k", "refined"]
+            rename_map = {"atom_index": "Atom Index", "num_reference_event": "Ref event", "energy_barrier": "dE", "k": "k", "refined": "R"}
+
+            self.loggers.events_file_step_first_line("events", step, idx_selected_event) 
+
+            events_info = info_active_events(self.system.types, self.reference_table, active_table) 
+            self.loggers.info("events", events_info.output_msg())
+
 
             ###=> Synchronise all lammps instances with new positions 
             self.manager.set_all_positions(positions=self.system.positions)

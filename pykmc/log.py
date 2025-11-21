@@ -484,6 +484,15 @@ class LogKMC(LogManager):
             The logger name.
         """
         self.info(logger_name, "#Actif Events Informations File")
+        self.info(logger_name, "\t #Type: The central atom's type.")
+        self.info(logger_name, "\t #Central Atom: Index of the central atom of the event.")
+        self.info(logger_name, "\t #Ref Event: Index of reference event in the reference table.")
+        self.info(logger_name, "\t #dE forward: Energy barrier of the forward reaction (eV).")
+        self.info(logger_name, "\t #dE backward: Energy barrier of the backward reaction (eV).")
+        self.info(logger_name, "\t #dE asym: |dE forward - dE backward| (eV).")
+        self.info(logger_name, "\t #k: rate of the forward reaction (ps-1)")
+        self.info(logger_name, "\t #dra_i: displacement between the initial positions and the saddle positions.")
+        self.info(logger_name, "\t #dra_i: displacement between the final positions and the saddle positions.")
         self.new_line(logger_name)
 
     def events_file_step_first_line(self, logger_name:str, step: int, selected_event:int) -> None : 
