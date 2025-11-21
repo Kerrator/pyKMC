@@ -390,6 +390,13 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_forwward],
             self.config.ira.sym_thr,
         )
+
+        #dr : 
+        move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
+        dra_forward = np.linalg.norm(min1_positions[neighbor_list_forwward][move_atom_idx_forward]-saddle_positions[neighbor_list_forwward][move_atom_idx_forward])
+        move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
+        dra_backward = np.linalg.norm(min1_positions[neighbor_list_backward][move_atom_idx_backward]-saddle_positions[neighbor_list_backward][move_atom_idx_backward])
+
         dfevent_forward = pd.Series(
             {
                 "event_id": id_min1,
@@ -403,7 +410,8 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
-                "idx_backward" : -1 #unknown yet
+                "idx_backward" : -1, #unknown yet, 
+                "dra": dra_forward
             }
         )
 
@@ -425,7 +433,8 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
-                "idx_backward": -1 #unknown yet
+                "idx_backward": -1, #unknown yet
+                "dra": dra_backward,
             }
         )
 
@@ -452,7 +461,8 @@ class ReferenceEventTable:
                     "move_atom_idx",
                     "sym_matrix",
                     "sym_perm",
-                    "idx_backward"
+                    "idx_backward",
+                    "dra"
                 ]
             )
 
@@ -506,6 +516,7 @@ class ActiveEventTable:
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
+                "refined": pd.Series(dtype="str")
             }
             self.table = pd.DataFrame(columns)
 
@@ -587,6 +598,7 @@ class ActiveEventTable:
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": compute_rate_Eyring(event_refinement_output.dE_forward, self.config),
                 "num_reference_event": event_refinement_output.num_reference_event,
+                "refined": event_refinement_output.refined
             }
         )
         return dfactive

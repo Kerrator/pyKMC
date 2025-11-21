@@ -118,6 +118,8 @@ class Refinement:
             self.results.append(res)
 
 
+
+
     def refine_single(
         self,
         at_idx: int,
@@ -211,7 +213,8 @@ class Refinement:
                     f.set_result(Ok(EventRefinementOutput(
                         central_atom_index=at_idx, 
                         saddle_positions=self.system.positions,
-                        E_saddle=total_energy+dfevent["energy_barrier"]
+                        E_saddle=total_energy+dfevent["energy_barrier"],
+                        refined='F'
                     )))
                 else : 
 
