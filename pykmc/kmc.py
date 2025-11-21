@@ -40,8 +40,9 @@ from .refinement import Refinement
 from .log import Colors
 import time
 from .utils import push_towards, compute_delr
-import ase.geometry
 import copy
+from .basins.detection import DetectorThreshold 
+from .basins import BasinsGenericEvents
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -178,8 +179,49 @@ class KMC:
             
 
             # == Update System ==
-            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)  
-            self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
+            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
+                #TODO: Temporary, need to unified kmc main loop and basin operations + ugly 
+            detector = DetectorThreshold()
+                #IF selected event shows we are in a basin
+            if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
+                self.loggers.info("log","\t :=> System is in a Basin." )
+                self.loggers.info("log","\t :=> Exploring the Basin." )
+                #get basin info/explore
+                basin = BasinsGenericEvents(self.config, self.reference_table, self.visited_environments, self.manager)
+                self.system.update_positions(result_reconstruction.ok_value().min1_positions)
+                result_basin = basin.execute(self.system)
+                if result_basin.is_ok() : #Basin did no fail
+                #move system to a state connected to the exit_state 
+                    self.system.update_positions(result_basin.ok_value().initial_system_positions)
+                    self.neighbors_list = basin.states[result_basin.ok_value().from_state].neighbors_list
+                #construct new active table with only event : new_actual_state - > exit_state
+                    tmp_active_table = ActiveEventTable(self.config)
+                    tmp_event = EventRefinementOutput(central_atom_index=result_basin.ok_value().central_atom, 
+                                                      saddle_positions=result_basin.ok_value().saddle_positions, 
+                                                      E_saddle=-1, 
+                                                      min2_positions=result_basin.ok_value().final_positions, 
+                                                      dE_forward=result_basin.ok_value().energy_barrier, 
+                                                      num_reference_event=result_basin.ok_value().num_reference_event)
+                    neighbors = result_basin.ok_value().neighbors
+                    tmp_active_table.add_events(tmp_event)
+                #reconstruct event
+                    result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
+                    if result_basin_reconstruction.is_ok() : 
+                        self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
+                        delta_t = result_basin.ok_value().t_exit
+                        ktot = result_basin.ok_value().k_tot
+                        idx_selected_event = result_basin.ok_value().num_reference_event
+                    else : 
+                       self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value())) 
+                       self.system.update_positions(basin.states[0].system.positions)
+                       self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
+                else : 
+                    self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
+                    self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
+
+                #update delta_t, ktot (use basin infos)
+            else : 
+                self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
             self.total_energy = result_reconstruction.ok_value().min2_etot
             total_time += delta_t * 10**-12  # time is in seconds
             
@@ -471,6 +513,9 @@ class KMC:
         saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
+        
+        
+
 
         #Move the system to the saddle point 
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
@@ -617,3 +662,4 @@ class KMC:
         self.loggers.info("log", ":=> End of simulation")
         self.manager.close_all()
         sys.exit()
+

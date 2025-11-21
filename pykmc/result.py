@@ -114,6 +114,7 @@ class ErrorType(Enum):
     REFINEMENT_INVALID_MINIMA = 32
     RECONSTRUCTION_INVALID_MIN1 = 41 
     RECONSTRUCTION_INVALID_MIN2 = 42
+    BASIN_TEXIT_NOT_FOUND = 51
 
 
 # Dataclass to store operation outputs
@@ -215,6 +216,31 @@ class ReconstructionOutput :
     min2_positions: np.ndarray
     min2_etot: float
 
+@dataclass 
+class BasinSelectorOutput : 
+    """"Store the result of the selector"""
+    t_exit: float 
+    exit_state: int 
+
+@dataclass 
+class BasinExitTimeSolverOutput : 
+    """Sotre the results of exit time solver"""
+    t_exit: float
+
+@dataclass
+class BasinOutput : 
+    """Store the results of the basin."""
+    initial_system_positions: np.ndarray
+    central_atom: int
+    saddle_positions: np.ndarray 
+    final_positions: np.ndarray 
+    neighbors: np.ndarray
+    energy_barrier: float
+    k_tot: float 
+    t_exit: float
+    exit_state: int
+    from_state: int
+    num_reference_event: int 
 
 @dataclass
 class AtomicEnvironmentInfo:

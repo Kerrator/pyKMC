@@ -4,6 +4,8 @@ n_steps = 20
 engine = lammps
 verbosity = 2
 n_sessions = 7
+engine_use_rank_0 = False
+
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -37,3 +39,5 @@ matching_score_thr = 0.3
 
 [IRA]
 kmax_factor = 2.0
+
+[Basin]

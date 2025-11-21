@@ -105,6 +105,10 @@ class Manager:
     def get_potential_energy(self, positions=None) : 
         future = self.submit_job("get_potential_energy", {"positions": positions})
         return future
+    
+    def get_total_energy(self, positions=None) : 
+        future = self.submit_job("get_total_energy", {"positions": positions})
+        return future
 
     def partn_search(self, config, central_atom: list[int], positions=None) -> list[Future] : 
         futures = []

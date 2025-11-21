@@ -156,6 +156,19 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
+    def get_total_energy(self, positions=None) : 
+        self._is_busy = True
+        #print(f"[Session n°{self.session_id}]  get potential energy")
+        try : 
+            self.send_message({"type": "get_total_energy", "value": {"positions": positions}})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result" : 
+                return msg["value"]
+            else : 
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally : 
+            self._is_busy = False
+
     def get_potential_energy(self, positions=None) : 
         self._is_busy = True
         #print(f"[Session n°{self.session_id}]  get potential energy")
