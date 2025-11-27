@@ -200,12 +200,12 @@ class PartnConfig(BaseModel):
     )
 
     #Lanczos 
-    lanczos_min_size: float = Field(
+    lanczos_min_size: int = Field(
         default=10, 
         description="Enforce Lanczos to always do at least this number of iterations."
     )
 
-    lanczos_max_size: float = Field(
+    lanczos_max_size: int = Field(
         default=20, 
         description="Maximum number of Lanczos iterations."
     )
@@ -327,12 +327,12 @@ class PartnConfig(BaseModel):
     )
 
     #Lanczos
-    r_lanczos_min_size: float = Field(
+    r_lanczos_min_size: int = Field(
         default=20, 
         description="Refinement: Enforce Lanczos to always do at least this number of iterations."
     )
 
-    r_lanczos_max_size: float = Field(
+    r_lanczos_max_size: int = Field(
         default=50, 
         description="Refinement: Maximum number of Lanczos iterations."
     )
