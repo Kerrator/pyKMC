@@ -225,7 +225,7 @@ class ReferenceEventTable:
             return True 
 
         #if same  id, chekc if same dE
-        tol = 0.1
+        tol = 0.25
         dE = dfevent["energy_barrier"]
         subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
         if len(subset) == 0 : 
@@ -245,13 +245,14 @@ class ReferenceEventTable:
             result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
             if not result.is_ok() : #no match 
-                return True 
+                continue
 
             result = check_match(result, self.config.psr.matching_score_thr)
             if not result.is_ok() : #matching score > thr
-                return True
-
-        return False
+                continue
+            
+            return False
+        return True
 
     def get_valid_events(
         self, results_is_valid_event: list[Result[pd.Series, ErrorInfo]]
@@ -611,6 +612,9 @@ class ActiveEventTable:
         ind : int
             index of the row to be removed
         """
+        print("REMOVING {} ACTIVE EVENTS DUPLICATES".format(len(set(ind))))
+        l = [self.table.loc[i].at['num_reference_event'] for i in ind]
+        print(set(l))
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
 
