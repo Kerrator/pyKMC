@@ -80,7 +80,7 @@ class ControlConfig(BaseModel):
         default=1, description="Controls the level of detail in the simulation output."
     )
 
-    refine_thr: Optional[int] = Field(
+    refine_thr: Optional[float] = Field(
         default=0.99,
         description="Event constributing to this percent of ktot are refined."
     )
