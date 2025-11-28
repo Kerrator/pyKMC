@@ -218,7 +218,8 @@ class KMC:
                 else : 
                     self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
                     self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
-
+                if basin.connectivity_table is not None : 
+                    basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
                 #update delta_t, ktot (use basin infos)
             else : 
                 self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
@@ -293,7 +294,7 @@ class KMC:
             # == Save Reference Table and List visited environment :
             self._save()
             self._append_snapshot_to_trajectory()
-
+            del active_table
             # == Check if only cristalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
                 "crystal"
@@ -523,6 +524,9 @@ class KMC:
         #try to reconstruct
         result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
         #result with min1, saddle, min2 pos
+
+        #Back to original positions, in case reconstruction fails 
+        self.system.update_positions(new_positions = supposed_initial_positions, atom_idx = neighbors)
         return result
 
     def _apply_event(
