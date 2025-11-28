@@ -28,6 +28,19 @@ class StateData:
     transient: bool = False
     visited: bool = False
 
+    def release_heavy_objects(self) -> None : 
+        """Release heavy objects"""
+        self.neighbors_list = None 
+        self.environment = None
+    
+    def ensure_full_state(self, config: Config) -> None : 
+        if self.system is not None : 
+            if self.neighbors_list is None : 
+                self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)  
+            if self.environment is None : 
+                self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add)
+
+
 class BasinsGenericEvents() : 
 
     def __init__(self, config: Config, reference_table,known_environments, manager ) -> None :  
@@ -73,7 +86,11 @@ class BasinsGenericEvents() :
         #Construct output KMC needs 
         t_exit = result.ok_value().t_exit
         exit_state = result.ok_value().exit_state
+
         from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
+        #Ensure from_state is state are full 
+        self.states[from_state].ensure_full_state(self.config)
+
         neighbors = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
         return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions, 
                               central_atom=central_atom, 
@@ -98,7 +115,8 @@ class BasinsGenericEvents() :
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
         self.selector = FPTASelector()
-        self._add_state(state_index=0, system=system)  #add current state 0 to self.states
+        new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
+        self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
 
 
     def construct_connexion_table(self) : 
@@ -106,7 +124,8 @@ class BasinsGenericEvents() :
         explore the basin and construct the connextion table
         """
         #Loop over state to explore 
-        while len(self.states_to_explore) != 0 : 
+        while len(self.states_to_explore) != 0 :
+            print(len(self.states)) 
             #next state to explore : 
             to_explore = self.states_to_explore[0]
 
@@ -114,6 +133,7 @@ class BasinsGenericEvents() :
                 #We need to create the state 
                     #find a state and an event from which we go to the state that we want to create
                 from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=to_explore)
+
                     #Create new system by applying (reconstruction) the generic event to the from_state
                 result = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
                 if not result.is_ok() : 
@@ -127,11 +147,16 @@ class BasinsGenericEvents() :
                     self.connectivity_table.change_state_index(current_index=to_explore, new_index=is_new_state)
                     self.explored_states.append(to_explore)
                     self.states_to_explore.remove(to_explore)
+
+                    #Cleaning
+                    self.states[from_state].release_heavy_objects()
                     continue #Skip the rest
 
                 #add state
                 self._add_state(state_index=to_explore, system=new_system, transient=is_transient)
 
+                #ENSURE FULL STATE TO EXPLORE 
+                self.states[to_explore].ensure_full_state(self.config)
                 #Check if unknown atomic environments
                 if self.is_states_has_unknown_environments(self.states[to_explore]) : 
                     #We consider that this state is an absorbing one because we need to search new events (in main KMC loop) 
@@ -143,12 +168,26 @@ class BasinsGenericEvents() :
                 if not is_transient : 
                     self.states_to_explore.remove(to_explore)
                     self.explored_states.append(to_explore)
+
+                    #Cleaning
+                    self.states[from_state].release_heavy_objects()
+                    self.states[to_explore].release_heavy_objects()
+
+
                     continue #We dont explore/skip the rest
+
+                #Release heavy objet memory
+                self.states[from_state].release_heavy_objects()
+
+            
 
 
             #Explore state 
             self.current_state = to_explore
             last_state_connectivity = self.get_last_state_index()
+
+            #Ensure full state to explore 
+            self.states[to_explore].ensure_full_state(self.config)
             self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
             
             #to_explore has been explored : 
@@ -160,6 +199,12 @@ class BasinsGenericEvents() :
             #Clrean explorer connectivity table
             self.explorer.clear()
             self.update_to_explore()
+            #Clean heaby state object : 
+            self.states[to_explore].release_heavy_objects()
+            
+            if to_explore == 1 : #TESTST 
+                self.connectivity_table.save("test.pickle")
+
         return Ok(None)
 
     def select_event(self) : 
@@ -199,8 +244,12 @@ class BasinsGenericEvents() :
 
         #Apply the generic event to the current state 
 
+        #ENSURE FULL STATE FOR FROM STATE 
+        self.states[from_state].ensure_full_state(self.config)
+
             #We start from the from_state
-        new_system = copy.deepcopy(self.states[from_state].system)
+        new_system = System(positions=self.states[from_state].system.positions.copy(), types=self.states[from_state].system.types, cell=self.states[from_state].system.cell, pbc=True, index=np.arange(len(self.states[from_state].system.types)))
+        #new_system = copy.deepcopy(self.states[from_state].system)
 
             #Apply PSR between event initial position and environment positions of the central_atoms
         result = PointSetRegistration(self.config, new_system, ref_event , self.states[from_state].neighbors_list, central_atom).match()
@@ -249,13 +298,19 @@ class BasinsGenericEvents() :
         futures_context = {} #idx → { "min": f_min, "saddle": f_sad }
         for idx, row in self.connectivity_table.df.iterrows() : 
             if row['transient']  == False : #need to refine
-                tmp_system = copy.deepcopy(self.states[row["state"]].system)
+                #tmp_system = copy.deepcopy(self.states[row["state"]].system)
+                tmp_system = System(positions=self.states[row["state"]].system.positions.copy(), types=self.states[row["state"]].system.types, cell=self.states[row["state"]].system.cell, pbc=True, index=np.arange(len(self.states[row["state"]].system.types)))
                 #get tmp_system energy 
                 future1 = self.manager.get_total_energy(positions=tmp_system.positions.copy()) #Send copy not reference
                 #move to generic saddle positions 
                 ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
                 saddle_positions = ref_event['saddle_positions'].copy()
                 #Apply PSR between event initial position and environment positions of the central_atoms
+
+
+                #ENSURE "STATE" FULL 
+                self.states[row["state"]].ensure_full_state(self.config)
+
                 result = PointSetRegistration(self.config, tmp_system, ref_event , self.states[row["state"]].neighbors_list, row["central_atom"]).match()
                 if not result.is_ok(): #PSR Err
                     return result
@@ -285,6 +340,10 @@ class BasinsGenericEvents() :
             "min": future1,
             "saddle": future2, 
             "neighbors": neighbors}
+                
+                #RELEASE MEMORY : 
+                self.states[row["state"]].release_heavy_objects()
+
         #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
         for idx, ctx in futures_context.items():
             E_min    = ctx["min"].result()
@@ -317,7 +376,7 @@ class BasinsGenericEvents() :
         return -1 
 
 
-    def are_structures_equivalent(self, pos1, pos2, cell, tol=0.1):
+    def are_structures_equivalent(self, pos1, pos2, cell, tol=0.3):
 
         if len(pos1) != len(pos2):
             return False
@@ -334,16 +393,18 @@ class BasinsGenericEvents() :
         else : 
             return False
 
-    def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False ) :
+    def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False, full=False ) :
         """Add a new state in the `self.states` dictionnary."""
         #to fit typing 
         neighbors_list  = []
         atomic_environment = []
 
-        if system is not None : 
+        if full == True : 
             neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)  
             atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list['rnei'], neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
-            
+        else : 
+            neighbors_list = None 
+            atomic_environment = None 
         new_state =  StateData(system=system, environment=atomic_environment, neighbors_list=neighbors_list, transient=transient,  visited=visited)
 
         self.states[state_index]= new_state
