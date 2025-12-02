@@ -493,6 +493,9 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t #k: rate of the forward reaction (ps-1)")
         self.info(logger_name, "\t #dra_i: displacement between the initial positions and the saddle positions.")
         self.info(logger_name, "\t #dra_i: displacement between the final positions and the saddle positions.")
+        self.info(logger_name, "\t #Refined: - T : The event has been refined.")
+        self.info(logger_name, "\t           - F : The event has not been refined.")
+        self.info(logger_name, "\t           - B : When in a basin, the event is an exit event.")
         self.new_line(logger_name)
 
     def events_file_step_first_line(self, logger_name:str, step: int, selected_event:int) -> None : 
