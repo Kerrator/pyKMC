@@ -17,7 +17,7 @@ def cna(neighbors_list: list[list[int]]) -> list[str] :
         'crystal' or 'noncrystal' classification for each atom.
 
     """
-    crystals = [12, 8, 6] 
+    crystals = [14,12, 8, 6] 
     hash = [] 
     for neighbors in neighbors_list : 
         if len(neighbors) in crystals : 
@@ -25,5 +25,4 @@ def cna(neighbors_list: list[list[int]]) -> list[str] :
         else : 
             hash.append("noncrystal")
     return hash
-
 
