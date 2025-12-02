@@ -612,9 +612,6 @@ class ActiveEventTable:
         ind : int
             index of the row to be removed
         """
-        print("REMOVING {} ACTIVE EVENTS DUPLICATES".format(len(set(ind))))
-        l = [self.table.loc[i].at['num_reference_event'] for i in ind]
-        print(set(l))
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
 
