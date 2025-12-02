@@ -19,6 +19,7 @@ from pykmc.result import Ok, BasinOutput
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
 #TODO: Think about parallized exploration 
 #TODO: Could think of refining transient -> absorbing event when exploring
+#TODO : Exit if state 0 leads to all absorbing states because all unknown environments, here FTPA fails but because only have 1 transient state (0)
 
 @dataclass
 class StateData:
