@@ -217,7 +217,7 @@ def info_basin_events(system_types, reference_table, connectivity_table) -> Even
     """Construct dataclass with exit basin events"""
 
     #Only exit state 
-    data = connectivity_table[connectivity_table.df['transient'] == False]
+    data = connectivity_table.df[connectivity_table.df['transient'] == False]
 
     central_atom = data['central_atom'].to_numpy(dtype=int, copy=True)
     types = np.array(system_types)[central_atom] 
