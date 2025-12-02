@@ -185,7 +185,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     artn.set("push_over", config.partn.push_over)
 
     # RUN
-    engine.command("minimize 1e-6 1e-8 1000 1000")
+    engine.command("minimize 1e-6 1e-8 10000 10000")
     
     # Restore original stdout (fd 1)
     os.dup2(original_stdout_fd, 1)
@@ -325,7 +325,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
 
 
     # RUN
-    engine.command("minimize 1e-6 1e-8 1000 1000")
+    engine.command("minimize 1e-6 1e-8 10000 10000")
     engine.command("unfix 10") #Otherwise, if you use other minimization style for the system minimization error "min_style fire must be use with fix ART"
 
     # EXTRACT DATA
