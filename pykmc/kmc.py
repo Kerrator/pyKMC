@@ -183,6 +183,13 @@ class KMC:
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
             events_info = info_active_events(self.system.types, self.reference_table, active_table) 
             events_info = events_info.output_msg()
+
+
+            #INFO : 
+            self.loggers.events_file_step_first_line("events", step) 
+            self.loggers.events_applicable_info_line("events", idx_selected_event)
+            self.loggers.info("events", events_info)
+
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly 
             detector = DetectorThreshold()
                 #IF selected event shows we are in a basin
@@ -211,14 +218,19 @@ class KMC:
                     result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
                     if result_basin_reconstruction.is_ok() : 
                         self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
+                        self.total_energy = result_basin_reconstruction.ok_value().min2_etot
                         delta_t = result_basin.ok_value().t_exit
                         ktot = result_basin.ok_value().k_tot
-                        idx_selected_event = result_basin.ok_value().num_reference_event
-                        active_table = tmp_active_table
-                        basin_info = info_basin_events(self.system.types, self.reference_table, basin.connectivity_table)
+                        idx_selected_event = 0
+                        active_table.table = tmp_active_table.table
+
+                        #INFO 
+                        idx_exit_event, basin_info = info_basin_events(self.system.types, self.reference_table, basin.connectivity_table, result_basin.ok_value().exit_state)
                         basin_info = basin_info.output_msg() 
-                        basin_info = "\n Entering a basin \n" + basin_info
-                        events_info += basin_info
+                        self.loggers.events_basin_info_line("events",idx_exit_event )
+                        self.loggers.info("events", basin_info)
+
+                        
                     else : 
                        self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value())) 
                        self.system.update_positions(basin.states[0].system.positions)
@@ -231,17 +243,8 @@ class KMC:
                 #update delta_t, ktot (use basin infos)
             else : 
                 self.system.update_positions(result_reconstruction.ok_value().min2_positions)  
-            self.total_energy = result_reconstruction.ok_value().min2_etot
+                self.total_energy = result_reconstruction.ok_value().min2_etot
             total_time += delta_t * 10**-12  # time is in seconds
-            
-            cols = ["atom_index", "num_reference_event", "energy_barrier", "k", "refined"]
-            rename_map = {"atom_index": "Atom Index", "num_reference_event": "Ref event", "energy_barrier": "dE", "k": "k", "refined": "R"}
-
-
-            self.loggers.events_file_step_first_line("events", step, idx_selected_event) 
-
-            self.loggers.info("events", events_info)
-
 
             ###=> Synchronise all lammps instances with new positions 
             self.manager.set_all_positions(positions=self.system.positions)

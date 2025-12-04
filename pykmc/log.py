@@ -494,11 +494,10 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t #dra_i: displacement between the initial positions and the saddle positions.")
         self.info(logger_name, "\t #dra_i: displacement between the final positions and the saddle positions.")
         self.info(logger_name, "\t #Refined: - T : The event has been refined.")
-        self.info(logger_name, "\t           - F : The event has not been refined.")
-        self.info(logger_name, "\t           - B : When in a basin, the event is an exit event.")
+        self.info(logger_name, "\t #         - F : The event has not been refined.")
         self.new_line(logger_name)
 
-    def events_file_step_first_line(self, logger_name:str, step: int, selected_event:int) -> None : 
+    def events_file_step_first_line(self, logger_name:str, step: int) -> None : 
         """Write the first line with step informations 
 
         Parameters
@@ -506,7 +505,14 @@ class LogKMC(LogManager):
         logger_name: str
             The logger name.
         """
-        self.info(logger_name, "#Step: {} \t Selected Event: {}".format(step, selected_event))
+        self.info(logger_name, "#Step: {}".format(step))
+
+    def events_applicable_info_line(self, logger_name:str, selected_event:int) -> None : 
+        self.info(logger_name, "========== Applicable Events (Selected={}) ==========".format(selected_event))
+
+    def events_basin_info_line(self, logger_name:str, selected_event: int) -> None : 
+
+        self.info(logger_name, "========== Basin Exit Events (Selected={}) ==========".format(selected_event))
 
     def new_line(self, logger_name: str) -> None:
         """Write a new line in the logger.

@@ -213,11 +213,12 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
                       dra_f=dra_f, 
                       refined=refined)
 
-def info_basin_events(system_types, reference_table, connectivity_table) -> EventsInfo: 
+def info_basin_events(system_types, reference_table, connectivity_table, exit_state) -> EventsInfo: 
     """Construct dataclass with exit basin events"""
 
     #Only exit state 
     data = connectivity_table.df[connectivity_table.df['transient'] == False]
+    idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
 
     central_atom = data['central_atom'].to_numpy(dtype=int, copy=True)
     types = np.array(system_types)[central_atom] 
@@ -229,9 +230,9 @@ def info_basin_events(system_types, reference_table, connectivity_table) -> Even
     dE_backward = reference_table.table['energy_barrier'][backward_events].to_numpy(copy=True)
     dE_asym = np.abs(dE_forward-dE_backward)
     dra_f = reference_table.table['dra'][backward_events].to_numpy(copy=True)
-    refined = len(central_atom)*['B']
+    refined = len(central_atom)*['T']
 
-    return EventsInfo(types=types, 
+    return idx_selected_event, EventsInfo(types=types, 
                       central_atom=central_atom, 
                       initial_topologies=None, 
                       reference_events=reference_events, 
