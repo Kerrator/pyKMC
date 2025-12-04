@@ -126,7 +126,6 @@ class BasinsGenericEvents() :
         """
         #Loop over state to explore 
         while len(self.states_to_explore) != 0 :
-            print(len(self.states)) 
             #next state to explore : 
             to_explore = self.states_to_explore[0]
 

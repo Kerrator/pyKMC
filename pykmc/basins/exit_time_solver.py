@@ -47,7 +47,7 @@ class BisectionSolver() :
     wrapped in a `Result` object.
     """
 
-    def __init__(self, M: np.ndarray, p0: np.ndarray, r: float,  spectral_decomposition = True, tolerance:float = 1e-5) -> None:
+    def __init__(self, M: np.ndarray, p0: np.ndarray, r: float,  spectral_decomposition = True, tolerance:float = 1e-3) -> None:
 
         self.M = M 
         self.p0 = p0 
@@ -91,7 +91,7 @@ class BisectionSolver() :
         return Ok(BasinExitTimeSolverOutput(t_exit=self.t_exit))
 
 
-    def determine_tmax(self, max_iterations:int = 200) -> Result[None, ErrorInfo]: 
+    def determine_tmax(self, max_iterations:int = 2000) -> Result[None, ErrorInfo]: 
         """
         Determine a finite upper bound t_max such that:
 
@@ -128,12 +128,12 @@ class BisectionSolver() :
                 self.t_max *= 2
             iterations +=1 
         else : #No breack so we reached max_iterations
-            return Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message=("Basin: could not find t_max using bijection method after {} iterations".format(iterations)))
+            return Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message=("Basin: could not find t_max using bisection method after {} iterations".format(iterations)))
                        )
         return Ok(None)
         
     
-    def determine_texit(self, max_iterations: int = 200) -> Result[None, ErrorInfo]: 
+    def determine_texit(self, max_iterations: int = 50000) -> Result[None, ErrorInfo]: 
         """
         Compute t_exit such that p_abs(t_exit) = r using bisection.
 
@@ -171,7 +171,7 @@ class BisectionSolver() :
                 
             iterations += 1
         else : #No break so we reached max_iterations
-            return Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message=("Basins: could not find t_exit using bijection method after {} iterations".format(iterations))))
+            return Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message=("Basins: could not find t_exit using bisection method after {} iterations".format(iterations)), variables={"tmin":self.t_min, "tmax": self.t_max, "tmid": t_mid, "r": self.r}))
 
         self.t_exit = t_mid
         return Ok(None)
