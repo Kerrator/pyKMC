@@ -46,6 +46,10 @@ class Manager:
             session.initialize_parameters() 
             session.initialize_system(system)
             session.initialize_potential(config)
+        if self.global_session is not None : 
+            self.global_initialize_parameters() 
+            self.global_initialize_system(system)
+            self.global_initialize_potential(config)
 
 
     def _dispatcher(self) : 

@@ -486,8 +486,9 @@ class KMC:
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
         self.loggers.info("log", ":=> Minimizing the system")
-        future = self.manager.minimize_with_results(self.config, positions=positions)
-        new_positions, total_energy = future.result()
+        #future = self.manager.global_minimize_with_results(self.config, positions=positions)
+        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
+#        new_positions, total_energy = future.result()
         #new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
