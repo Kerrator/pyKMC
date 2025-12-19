@@ -13,7 +13,7 @@ class MpiApiSession :
     It should live on the rank 0 of the MPI World communicator.
     It should knows on which ranks the LAMMPS engine is running.
     """
-    def __init__(self, messenger, engine_ranks, session_id) -> None:
+    def __init__(self, messenger: MpiMessenger, engine_ranks, session_id) -> None:
         self.messenger = messenger
         self.engine_ranks = engine_ranks
         self.engine_master_rank = engine_ranks[0]
@@ -56,12 +56,17 @@ class MpiApiSession :
         self.send_message({"type": "command", "value": cmd})
 
 
-    def close(self) -> None:
+    def close(self, wait_status: bool = False) -> None:
         """
         Instruct the engine to shut down.
+        Parameters
+        ----------
+        wait_status : bool, default False
+            If True, wait for the engine to send a status message (for normal sessions).
+            If False, just send the close message (for global / long-running engines).
         """
         print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
-        self.send_message({"type": "close"})
+        self.send_message({"type": "close"}, expect_status=wait_status)
         self._is_alive = False
 
     def is_alive(self) -> bool:
