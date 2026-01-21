@@ -2,7 +2,7 @@ import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes 
-import pypARTn2
+import pypARTn
 import os
 
 from ...result import  (
@@ -138,7 +138,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     engine.command("min_style fire")
 
     # INITILIZE ARTN on all ranks
-    artn = pypARTn2.artn(engine="lmp")
+    artn = pypARTn.artn(engine="lmp")
     # SETUP ARTN
     artn.reset_input()
     # Control 
@@ -197,9 +197,9 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
 
     # EXTRACT DATA
     if engine.rank == 0 : 
-        err = artn.get_runparam("error_message")
 
-        if not err:
+        err = artn.get_error()
+        if err[0]==0:
             # Results
             delr1 = artn.extract("delr_min1")
             delr2 = artn.extract("delr_min2")
@@ -270,7 +270,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
         set_positions(engine=engine, positions=positions)
 
     # INITILIZE ARTN
-    artn = pypARTn2.artn(engine="lmp")
+    artn = pypARTn.artn(engine="lmp")
 
     # LAMMPS COMMANDS
     engine.command("plugin load {}".format(config.partn.path_artnso))
@@ -332,8 +332,8 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
 
     # EXTRACT DATA
     if engine.rank == 0 : 
-        err = artn.get_runparam("error_message")
-        if not err:
+        err = artn.get_error()
+        if err[0]==0:
             E_sad = artn.extract("etot_sad")
             saddlepositions = artn.extract("tau_sad")
             return Ok(
