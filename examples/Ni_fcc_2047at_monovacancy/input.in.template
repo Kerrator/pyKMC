@@ -1,0 +1,41 @@
+[Control] 
+initial_config = ./initial_config.xyz 
+n_steps = 100
+engine = lammps
+verbosity = 2
+n_sessions = 7
+engine_use_rank_0 = False
+
+[Lammps] 
+pair_style = eam/alloy 
+pair_coeff = * * ./Ni_v6_2.0_LKBeland2016.eam Ni
+min_style = cg 
+minimize = 1e-10 1e-12 10000 10000
+
+[AtomicEnvironment] 
+style = cna/graph
+rnei = 3.0
+rcut = 6.5
+
+[EventSearch] 
+style = partn
+nsearch = 20
+emax_event = 5.0
+emin_event = 0.0
+
+[pARTn] 
+path_artnso = /your/path/to/artn-plugin/lib/libartn-lmp.so
+
+[RateConstant] 
+style = constant
+k0 = 10.0
+T = 300.0
+
+[PSR] 
+style = ira 
+matching_score_thr = 0.4
+
+[IRA]
+kmax_factor = 2.0
+
+[BASIN]
