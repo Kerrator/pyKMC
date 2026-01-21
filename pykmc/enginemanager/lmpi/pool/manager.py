@@ -60,10 +60,10 @@ class Manager:
                 if session is not None : 
                     #print(f"[PoolManager] Found available session: {session.session_id}")
                     threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
-                    threading.Event().wait(0.05) # Wait a bit to allow the job to be processed
+                    threading.Event().wait(0.1) # Wait a bit to allow the job to be processed
                     break #job is submited
                 else : 
-                    threading.Event().wait(0.05)
+                    threading.Event().wait(0.1)
 
 
     def _get_available_engine(self) : 

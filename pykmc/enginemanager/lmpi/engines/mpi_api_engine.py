@@ -90,7 +90,7 @@ class MpiApiEngine() :
         while self._is_alive:
             if self.rank == 0:
                 try:
-                    msg = self.message_queue.get(timeout=0.01)  # wait for a message
+                    msg = self.message_queue.get(timeout=0.1)  # wait for a message
                 except queue.Empty:
                     continue
             else:
