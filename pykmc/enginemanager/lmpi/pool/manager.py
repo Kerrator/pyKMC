@@ -26,8 +26,18 @@ class Manager:
         self.global_session = global_session
         self.job_queue: queue.Queue[Job] = queue.Queue()
         #Thread that dispatch job to workers
-        self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
-        self.dispatcher_thread.start()
+        #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
+        #self.dispatcher_thread.start()
+        
+#####
+        #Création d'un pool de workers fixes
+        self.workers = []
+        for session in self.sessions:
+            # Chaque thread worker est lié à UNE session spécifique
+            t = threading.Thread(target=self._worker_loop, args=(session,), daemon=True)
+            t.start()
+            self.workers.append(t)
+#####
 
     def broadcast_command(self, cmd: str):
         """
@@ -51,40 +61,70 @@ class Manager:
             self.global_initialize_system(system)
             self.global_initialize_potential(config)
 
+    def _worker_loop(self, session: MpiApiSession):
+        """Boucle infinie tournant dans un thread dédié à 'session'."""
+        while True:
+            # Bloque ici jusqu'à ce qu'un job soit disponible. 
+            # C'est l'OS qui réveille le thread, pas de polling CPU !
+            job = self.job_queue.get()
 
-    def _dispatcher(self) : 
-        while True : 
-            job = self.job_queue.get() #block until a job is get 
-            while True : 
-                session = self._get_available_engine() 
-                if session is not None : 
-                    #print(f"[PoolManager] Found available session: {session.session_id}")
-                    threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
-                    threading.Event().wait(0.1) # Wait a bit to allow the job to be processed
-                    break #job is submited
-                else : 
-                    threading.Event().wait(0.1)
+            if job is None: # Signal de fermeture (Sentinel)
+                break
+
+            try:
+                # On cherche la méthode sur la session (ex: 'minimize')
+                method = getattr(session, job.operation_name)
+
+                # Exécution du job. 
+                # Note: session_locked garantit la sécurité si on appelle 
+                # une commande hors-queue (ex: broadcast)
+                if job.params is None:
+                    result = method()
+                else:
+                    result = method(**job.params)
+
+                # On remplit le Future pour débloquer l'utilisateur
+                job.future.set_result(result)
+
+            except Exception as e:
+                job.future.set_exception(e)
+            finally:
+                # Indique à la queue que le job est fini
+                self.job_queue.task_done()
+
+    #def _dispatcher(self) : 
+    #    while True : 
+    #        job = self.job_queue.get() #block until a job is get 
+    #        while True : 
+    #            session = self._get_available_engine() 
+    #            if session is not None : 
+    #                #print(f"[PoolManager] Found available session: {session.session_id}")
+    #                threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
+    #                threading.Event().wait(0.1) # Wait a bit to allow the job to be processed
+    #                break #job is submited
+    #            else : 
+    #                threading.Event().wait(0.1)
 
 
-    def _get_available_engine(self) : 
-        """Check if worker is available, if yes return worker, if not, return None"""
-        for session in self.sessions : 
-            if session._is_busy == False : 
-                return session
-        return None
+    #def _get_available_engine(self) : 
+    #    """Check if worker is available, if yes return worker, if not, return None"""
+    #    for session in self.sessions : 
+    #        if session._is_busy == False : 
+    #            return session
+    #    return None
 
-    def _run_job(self, session, job: Job) : 
-        try : 
-            #find method session having job.method_name
-            method = getattr(session, job.operation_name)
-            #print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
-            if job.params is None : 
-                result = method()
-            else : 
-                result = method(**job.params) 
-            job.future.set_result(result)
-        except Exception as e : 
-            job.future.set_exception(e)
+    #def _run_job(self, session, job: Job) : 
+    #    try : 
+    #        #find method session having job.method_name
+    #        method = getattr(session, job.operation_name)
+    #        #print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
+    #        if job.params is None : 
+    #            result = method()
+    #        else : 
+    #            result = method(**job.params) 
+    #        job.future.set_result(result)
+    #    except Exception as e : 
+    #        job.future.set_exception(e)
 
     def set_all_positions(self, positions) : 
         #print("[Manager] Setting positions to all sessions.")

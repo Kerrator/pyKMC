@@ -59,7 +59,7 @@ class MpiApiSession :
         else:
             raise RuntimeError(f"Unexpected message type received: {msg}, expected 'status' but got '{msg.get('type')}'")
 
-    @session_locked
+    #@session_locked
     def command(self, cmd: str) -> None: 
         """
         Send a LAMMPS command to the engine.
@@ -67,7 +67,7 @@ class MpiApiSession :
         #print(f"[Session] Sending command: {cmd}")
         self.send_message({"type": "command", "value": cmd})
 
-    @session_locked
+    #@session_locked
     def close(self, wait_status: bool = False) -> None:
         """
         Instruct the engine to shut down.
@@ -94,7 +94,7 @@ class MpiApiSession :
         return self._is_busy
     
     #ACTIONS 
-    @session_locked
+    #@session_locked
     def initialize_parameters(self) -> None : 
         """ 
         Initialize LAMMPS engine with default parameters
@@ -102,7 +102,7 @@ class MpiApiSession :
         #print(f"[Session] Initializing Lammps parameters")
         self.send_message({"type": "initialize_parameters"})
 
-    @session_locked
+    #@session_locked
     def initialize_system(self, system) -> None : 
         """ 
         Initialize Lammps system
@@ -110,7 +110,7 @@ class MpiApiSession :
         #print(f"[Session] Initializing Lammps System")
         self.send_message({"type": "initialize_system", "value": system})
     
-    @session_locked
+    #@session_locked
     def initialize_potential(self, config) -> None : 
         """ 
         Initialize Lammps potential
@@ -118,7 +118,7 @@ class MpiApiSession :
         #print(f"[Session] Initializing Lammps Potential")
         self.send_message({"type": "initialize_potential", "value": config})
     
-    @session_locked
+    #@session_locked
     def minimize(self, config, positions=None) -> None : 
         """ 
         Minimize the system
@@ -126,7 +126,7 @@ class MpiApiSession :
         #print(f"[Session] Minimizing the system")
         self.send_message({"type": "minimize", "value" : {"config": config, "positions": positions}})
 
-    @session_locked
+    #@session_locked
     def get_total_energy(self) -> float : 
         """ 
         """
@@ -142,7 +142,7 @@ class MpiApiSession :
         finally:
             self._is_busy = False
     
-    @session_locked
+    #@session_locked
     def get_positions(self) -> np.ndarray[float] : 
         self._is_busy = True
         #print(f"[Session] Get Positions")
@@ -156,7 +156,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def set_positions(self, positions: np.ndarray[float]) -> None : 
         self._is_busy = True 
         #print(f"[Session] Set new positions")
@@ -165,7 +165,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def minimize_with_results(self, config, positions=None) : 
         """Minimize and return the minimized positions and the total energy.
         """
@@ -181,7 +181,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def get_total_energy(self, positions=None) : 
         self._is_busy = True
         #print(f"[Session n°{self.session_id}]  get potential energy")
@@ -195,7 +195,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def get_potential_energy(self, positions=None) : 
         self._is_busy = True
         #print(f"[Session n°{self.session_id}]  get potential energy")
@@ -209,7 +209,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def partn_search(self, config, central_atom_idx, positions=None) : 
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
@@ -223,7 +223,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def partn_refine(self, config, central_atom_idx, positions = None) : 
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
