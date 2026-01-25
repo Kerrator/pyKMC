@@ -45,6 +45,8 @@ class Manager:
             session.initialize_parameters() 
             session.initialize_system(system)
             session.initialize_potential(config)
+            session.command("plugin load {}".format(config.partn.path_artnso))
+            print('Plugin loaded')
 
     def reset(self, config, system):
         """
@@ -109,8 +111,8 @@ class Manager:
         future = self.submit_job("minimize", {"config" : config})
         return future
     
-    def minimize_with_results(self, config, positions=None) : 
-        future = self.submit_job("minimize_with_results", {"config": config, "positions": positions})
+    def minimize_with_results(self, config, positions=None, cell=None) :
+        future = self.submit_job("minimize_with_results", {"config": config, "positions": positions, "cell" : cell})
         return future
     
     def get_potential_energy(self) : 

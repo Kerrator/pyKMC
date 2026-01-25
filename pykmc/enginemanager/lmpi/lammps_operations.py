@@ -2,9 +2,10 @@ import numpy as np
 from ase.geometry import find_mic
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
-import ctypes 
-import pypARTn2
+import pypARTn
+import ctypes
 import os
+import sys
 
 from ...result import  (
     Result,
@@ -16,6 +17,9 @@ from ...result import  (
     EventRefinementOutput,
 )
 
+from ase import Atoms
+from ase.io import write
+
 
 
 def initialize_parameters(engine) : 
@@ -24,7 +28,8 @@ def initialize_parameters(engine) :
     engine.command("dimension 3")
     engine.command("boundary p p p")
     engine.command("atom_modify map array") #! necessary for scatter atoms
-    engine.command("atom_modify sort 0 0.0") #! necessary for partn
+    #engine.command("atom_modify sort 0 0.0") #! necessary for partn
+    #engine.command("processors 1 1 *")
 
 def initialize_system(engine, system) : 
 
@@ -49,7 +54,6 @@ def initialize_system(engine, system) :
         engine.command(
             "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
         )
-        print('Initializinng atoms')
         engine.command("create_box {} box".format(len(map_type)))
         engine.lmp.create_atoms(natoms, ind, types, x)
         # Set masses
@@ -87,13 +91,22 @@ def get_potential_energy(engine) :
     engine.command("uncompute c1")
     return result
 
-def get_positions(engine) : 
-    result = engine.lmp.gather_atoms("x", 1, 3)
+# def get_positions(engine) :
+#     result = engine.lmp.gather_atoms("x", 1, 3)
+#     if engine.rank == 0:
+#         # convert ctype positions into a numpy array
+#         result = np.ctypeslib.as_array(result)
+#         result = np.reshape(result, (-1, 3))
+#         return result
+
+def get_positions(engine) :
+    x = engine.lmp.gather_atoms("x", 1, 3)
+    #ids = engine.lmp.gather_atoms("id", 0, 1)
     if engine.rank == 0:
         # convert ctype positions into a numpy array
-        result = np.ctypeslib.as_array(result)
-        result = np.reshape(result, (-1, 3))
-        return result
+        x = np.ctypeslib.as_array(x)
+        x = np.reshape(x, (-1, 3))
+        return x
     
 def set_positions(engine, positions) : 
     positions = positions.flatten().astype(np.float64)
@@ -102,54 +115,47 @@ def set_positions(engine, positions) :
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
 
-def minimize_with_results(engine, config, positions=None) :
+def minimize_with_results(engine, config, positions=None, cell=None) :
     """ 
     Minimize and return the minimized positions and the total energy.
     """
+    reset(engine, config, cell)
     if positions is not None :
         redefine_atoms(engine=engine, positions=positions)
+
     minimize(engine, config)
     new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
         return new_positions, total_energy
 
 
 def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
 
-    original_stdout_fd = os.dup(1)
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
-    os.dup2(devnull, 1)
+    # original_stdout_fd = os.dup(1)
+    # devnull = os.open(os.devnull, os.O_WRONLY)
+    # # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
+    # os.dup2(devnull, 1)
 
-    engine.command('plugin clear')
-    engine.command('clear')
-    initialize_parameters(engine)
-    # Create cell
-    xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
-    engine.command(
-        "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
-    )
-    engine.command('create_box 1 box')  # NEEDS TO BE UPDATED FOR ALLOYS
-    initialize_potential(engine, config)
+    #engine.command('plugin clear')
+    reset(engine, config, cell)
 
     #Define active volume
-    av_positions, av_indices, buffer_ind = define_active_volume(config, central_atom_idx, cell, positions)
+    av_positions, av_idx, buffer_idx = define_active_volume(config, central_atom_idx, cell, positions)
 
-    #Update lammps to only have these atoms
+    #-------------------------STEP 1: CREATE ATOMS------------------------
+    # Update lammps to only have these atoms
     if av_positions is not None:
         redefine_atoms(engine=engine, positions=av_positions)
 
     #Define map based on past atom positions and the new index
-    atom_map = make_active_volume(engine, av_positions, av_indices, buffer_ind)
+    atom_map = make_active_volume(engine, av_positions, av_idx, buffer_idx) #Issues in atom_map
 
     # INITILIZE ARTN on all ranks
-    artn = pypARTn2.artn(engine="lmp")
+    artn = pypARTn.artn(engine="lmp")
 
-    # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
-    # LAMMPS COMMANDS
-    engine.command("plugin load {}".format(config.partn.path_artnso))
+
 
     engine.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     engine.command("min_style fire")
@@ -174,7 +180,7 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.push_dist_thr)
     artn.set("push_step_size", config.partn.push_step_size)
-    artn.set("push_ids", (np.where(atom_map == central_atom_idx+1)[0]+1))
+    artn.set("push_ids", (np.where(atom_map == central_atom_idx)[0]+1))
     artn.set("ninit", config.partn.ninit)
 
     #Lanczos
@@ -201,23 +207,25 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
     artn.set("push_over", config.partn.push_over)
 
     # RUN
+
+    engine.command('run 0')
     engine.command("minimize 1e-6 1e-8 1000 1000")
 
     #Prep for next run
+    engine.command("unfix 10")
     engine.command("unfix f_buffer")
 
-    #Restore original stdout (fd 1)
-    os.dup2(original_stdout_fd, 1)
-    os.close(original_stdout_fd)
-    os.close(devnull)
+    # #Restore original stdout (fd 1)
+    # os.dup2(original_stdout_fd, 1)
+    # os.close(original_stdout_fd)
+    # os.close(devnull)
 
 
     # EXTRACT DATA
     if engine.rank == 0 :
-        err = artn.get_runparam("error_message")
+        ierr = artn.get_error()
+        if ierr[0]==0:
 
-        if not err:
-            # Results
             delr1 = artn.extract("delr_min1")
             delr2 = artn.extract("delr_min2")
             # Checks if one minimum is close to the original configuration
@@ -243,24 +251,24 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
                 )
                 index_move = np.argmax(dist)
 
-                index_move_mapped=atom_map[index_move]-1
+                index_move_mapped=atom_map[index_move]
 
                 min1positions_mapped = positions.copy()
                 min2positions_mapped = positions.copy()
                 saddlepositions_mapped = positions.copy()
 
                 for i, atom_idx in enumerate(atom_map):
-                    saddlepositions_mapped[atom_idx - 1][0] = saddlepositions[i][0]
-                    saddlepositions_mapped[atom_idx - 1][1] = saddlepositions[i][1]
-                    saddlepositions_mapped[atom_idx - 1][2] = saddlepositions[i][2]
+                    saddlepositions_mapped[atom_idx][0] = saddlepositions[i][0]
+                    saddlepositions_mapped[atom_idx][1] = saddlepositions[i][1]
+                    saddlepositions_mapped[atom_idx][2] = saddlepositions[i][2]
 
-                    min1positions_mapped[atom_idx - 1][0] = min1positions[i][0]
-                    min1positions_mapped[atom_idx - 1][1] = min1positions[i][1]
-                    min1positions_mapped[atom_idx - 1][2] = min1positions[i][2]
+                    min1positions_mapped[atom_idx][0] = min1positions[i][0]
+                    min1positions_mapped[atom_idx][1] = min1positions[i][1]
+                    min1positions_mapped[atom_idx][2] = min1positions[i][2]
 
-                    min2positions_mapped[atom_idx - 1][0] = min2positions[i][0]
-                    min2positions_mapped[atom_idx - 1][1] = min2positions[i][1]
-                    min2positions_mapped[atom_idx - 1][2] = min2positions[i][2]
+                    min2positions_mapped[atom_idx][0] = min2positions[i][0]
+                    min2positions_mapped[atom_idx][1] = min2positions[i][1]
+                    min2positions_mapped[atom_idx][2] = min2positions[i][2]
 
                 if delr1 < delr2:  # necessary for no reconstruction option
                     return Ok(
@@ -297,7 +305,7 @@ def partn_search(engine, config, central_atom_idx: int, cell, positions=None) :
         else:
             return Err(
                 ErrorInfo(
-                    type=ErrorType.EVENT_NOT_FOUND, message="No event found", details=err
+                    type=ErrorType.EVENT_NOT_FOUND, message="No event found", details=ierr
                 )
             )
 
@@ -310,36 +318,37 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     This was added in order to get the activation energy for an event, as the traditional method does not work for
     Active Volumes.
     '''
-    engine.command('plugin clear')
-    engine.command('clear')
-    initialize_parameters(engine)
-    #Create cell
-    xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
-    engine.command(
-        "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
-    )
-    engine.command('create_box 1 box') #NEEDS TO BE UPDATED FOR ALLOYS
-    initialize_potential(engine,config)
+    #engine.command('plugin clear')
 
+    # if engine.rank==0:
+    #     print('Neighbors', saddle_idx)
+    reset(engine, config, cell)
 
     #Define active volume
-    av_positions, av_indices, buffer_ind = define_active_volume(config, central_atom_idx, cell, positions)
+    av_positions, av_idx, buffer_idx = define_active_volume(config, central_atom_idx, cell, positions)
+
+
     # Update lammps to only have these atoms
     if positions is not None:
         redefine_atoms(engine=engine, positions=av_positions)
     # Define map based on past atom positions and the new index
-    atom_map = make_active_volume(engine, av_positions, av_indices, buffer_ind)
+    atom_map = make_active_volume(engine, av_positions, av_idx, buffer_idx)
+
+    engine.command('write_dump all atom pre_core.dump')
 
     #Now get Active Volume energy to store for later
     E_init=get_potential_energy(engine)
 
-
     #Now update positions of atoms in lammps, only those needed for the refinement
     core_idx=[]
+    core_ids=[]
+
+
     for i, atom_idx in enumerate(saddle_idx):
-        index=int(np.where(atom_map-1 == atom_idx)[0])
+        index=int(np.where(atom_map == atom_idx)[0]) #index in atom map where this value is true
         av_positions[index]=saddle_positions[i]
-        core_idx.append(index+1) #Makes sure its in lammps indexing
+        core_idx.append(index) #Atom id
+        core_ids.append(index+1)
 
     #Now we have the atoms at the saddle point
     set_positions(engine, av_positions)
@@ -348,15 +357,16 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     engine.command('run 0')
     engine.command('unfix 1')
 
+    engine.command('write_dump all atom post_core.dump')
     #Want to minimize initially to speed up refinement process
-    engine.command(f"group core id {' '.join(map(str, core_idx))}")
+    engine.command(f"group core id {' '.join(map(str, core_ids))}")
     engine.command('fix f_core core setforce 0.0 0.0 0.0')
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize 1.0e-6 1.0e-8 10 10")
     engine.command('unfix f_core')
 
     # INITILIZE ARTN
-    artn = pypARTn2.artn(engine="lmp")
+    artn = pypARTn.artn(engine="lmp")
 
     engine.command("plugin load {}".format(config.partn.path_artnso))
     # LAMMPS COMMANDS
@@ -379,16 +389,16 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     )  # if true fortran runtime error when event not found
     artn.set("zseed", config.partn.zseed)
 
-    #Initial push : Should not happen when refining 
+    #Initial push : Should not happen when refining
     artn.set("push_mode", config.partn.r_push_mode)
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.r_push_dist_thr)
     artn.set("push_step_size", config.partn.r_push_step_size)
 
-    artn.set("push_ids", (np.where(atom_map == central_atom_idx+1)[0]+1))
+    artn.set("push_ids", (np.where(atom_map == central_atom_idx)[0]+1))
     artn.set("ninit", config.partn.r_ninit)
 
-    #Lanczos 
+    #Lanczos
     artn.set("lanczos_min_size", config.partn.r_lanczos_min_size)
     artn.set("lanczos_max_size", config.partn.r_lanczos_max_size)
     artn.set("lanczos_disp", config.partn.r_lanczos_disp)
@@ -419,8 +429,8 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
     engine.command("unfix f_buffer")
 
     if engine.rank == 0 :
-        err = artn.get_runparam("error_message")
-        if not err:
+        ierr = artn.get_error()
+        if ierr[0] == 0:
             E_sad = artn.extract("etot_sad")
 
             E_diff=E_sad-E_init
@@ -428,9 +438,9 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
             saddlepositions = artn.extract("tau_sad")
             saddlepositions_mapped = positions.copy()
             for i, atom_idx in enumerate(atom_map):
-                saddlepositions_mapped[atom_idx - 1][0] = saddlepositions[i][0]
-                saddlepositions_mapped[atom_idx - 1][1] = saddlepositions[i][1]
-                saddlepositions_mapped[atom_idx - 1][2] = saddlepositions[i][2]
+                saddlepositions_mapped[atom_idx][0] = saddlepositions[i][0]
+                saddlepositions_mapped[atom_idx][1] = saddlepositions[i][1]
+                saddlepositions_mapped[atom_idx][2] = saddlepositions[i][2]
 
             return Ok(
                 EventRefinementOutput(
@@ -442,7 +452,7 @@ def partn_refine(engine, config, central_atom_idx:int, cell, positions, saddle_p
         else:
             return Err(
                 ErrorInfo(
-                    type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err,
+                    type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=ierr,
                 )
             )
 
@@ -473,10 +483,10 @@ def define_active_volume(config, central_atom_idx: int, cell, positions):
 
     center = positions[central_atom_idx]
 
-    inner_movable_indices = []
-    buffer_indices = []
-    total_active_indices = []
-    non_active_indices = []
+    inner_movable_idx = []
+    buffer_idx = []
+    total_active_idx = []
+    non_active_idx = []
 
 
 
@@ -484,80 +494,115 @@ def define_active_volume(config, central_atom_idx: int, cell, positions):
         diff = pos - center
         diff_mic, distance = find_mic(diff, cell, pbc=True)
         if np.abs(distance) <= r_m:
-            inner_movable_indices.append(i)
-            total_active_indices.append(i)  # Inner is also part of total active
+            inner_movable_idx.append(i)
+            total_active_idx.append(i)  # Inner is also part of total active
         elif np.abs(distance) > r_m and np.abs(distance) <= r_a: #Can change to make it between r_m and r_a
-            buffer_indices.append(i)
-            total_active_indices.append(i)
+            buffer_idx.append(i)
+            total_active_idx.append(i)
         else:
-            non_active_indices.append(i)
+            non_active_idx.append(i)
 
 
-    buffer_indices = np.array(sorted(buffer_indices))
-    av_indices = np.array(sorted(total_active_indices))
+    buffer_idx = np.array(sorted(buffer_idx))
+    av_idx = np.array(sorted(total_active_idx))
 
-    av_positions=positions[av_indices]
+    av_positions=positions[av_idx]
 
-    return av_positions, av_indices, buffer_indices
+    return av_positions, av_idx, buffer_idx
 
 
-def make_active_volume(engine, av_positions, av_indices, buffer_indices) :
-    '''
-    Makes active volume within lammps based on what is defined
+def make_active_volume(engine, av_positions, av_indices, buffer_indices):
+    #engine.command('reset_atoms id')
 
-    Parameters
-        -----------
-        engine: engine
-            What engine instance is being used
-        av_positions: np.array
-            Array of the positions defined within the active volume with PBC
-        av_indices: np.array
-            Indices of all the atoms defined in the active volume in old system indexing
-        buffer_indices: np.array
-            Atoms that are on the outskirts of the active volume which are unable to move
-    '''
+    # Since we used engine.lmp.create_atoms(len(positions), ... x=av_positions)
+    # The LAMMPS ID 'i+1' is exactly the atom at av_positions[i].
+    # Therefore, the map is simply the indices we used to slice the original system.
+    atom_map = np.array(av_indices, dtype=int)
 
-    # ------------------Now want refactored atoms-----------------------------
-    engine.command('reset_atoms id')
-    # ---------------------------Now Map-------------------------------
-    engine.command("atom_modify sort 0 0.0")  # ! necessary for partn
-    engine_positions = get_positions(engine)
-
-    atom_map = map_atom_indices(av_positions, av_indices, engine_positions)  # This will make the map needed for pARTn
-
-    engine_av_ids = []
+    # Define the buffer group based on the new LAMMPS IDs
+    # We need to find which index in 'av_indices' corresponds to 'buffer_indices'
     engine_buffer_ids = []
-    # Convert target arrays to sets for efficient O(1) average time lookup
+    buffer_set = set(buffer_indices)
+    for i, original_id in enumerate(av_indices):
+        if original_id in buffer_set:
+            engine_buffer_ids.append(i + 1)  # LAMMPS IDs are 1-based
 
-    av_set = set(av_indices+1)
-    buffer_set = set(buffer_indices+1)
-
-    for i in range(len(atom_map)):
-        # self.map[i] represents an original ID
-        # Check if this original ID is present in the set of inner_movable_indices
-        if atom_map[i] in av_indices:
-            engine_av_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
-
-        # Check if this original ID is present in the set of buffer_indices
-        if atom_map[i] in buffer_set:
-            engine_buffer_ids.append(i + 1)  # i is the 0-based new_ID, +1 if LAMMPS IDs are 1-based
-    #
-    # #Defining groups of atoms
-    #print('Engine buffer atoms: {}'.format(engine_buffer_ids))
-    #print('Engine active atoms: {}'.format(engine_inner_movable_ids))
-    #
-    #engine.command(f"group inner_movable id {' '.join(map(str, engine_inner_movable_ids))}")
-
-
-    if len(engine_buffer_ids) > 0:
+    if engine_buffer_ids:
         engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
     else:
+        engine.command(f"group buffer empty")
+        engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
         print('No buffer atoms defined')
 
-    engine.command('run 0')
+    engine.command('run 0 post no')
 
     return atom_map
+
+
+# def make_active_volume(engine, av_positions, av_indices, buffer_indices) :
+#     '''
+#     Makes active volume within lammps based on what is defined
+#
+#     Parameters
+#         -----------
+#         engine: engine
+#             What engine instance is being used
+#         av_positions: np.array
+#             Array of the positions defined within the active volume with PBC
+#         av_indices: np.array
+#             Indices of all the atoms defined in the active volume in old system indexing
+#         buffer_indices: np.array
+#             Atoms that are on the outskirts of the active volume which are unable to move
+#     '''
+#     # ------------------Now want refactored atoms-----------------------------
+#     engine.command('reset_atoms id')
+#     engine.command("atom_modify sort 0 0.0")  # ! necessary for partn
+#     # ---------------------------Now Map-------------------------------
+#
+#     engine_positions = get_positions(engine) #This line is the issues
+#     #print('Broadcaasting positions')
+#     # engine_positions= engine.engine_comm.bcast(engine_positions, root=0)
+#     #print(f"[rank {engine.rank}] positions = {engine_positions}", flush=True)
+#     if engine.rank == 0 :
+#         atom_map = map_atom_indices(av_positions, av_indices, engine_positions)  # This will make the map needed for pARTn
+#         atom_map = np.asarray(atom_map, dtype=int)
+#
+#         if atom_map.ndim != 1:
+#             raise RuntimeError(f"atom_map has unexpected shape: {atom_map.shape}")
+#         # No zero or negative IDs allowed
+#         if np.any(atom_map <= 0):
+#             raise RuntimeError(f"Invalid IDs in atom_map (<=0): {atom_map}")
+#     else:
+#         atom_map = None
+#
+#     atom_map= engine.engine_comm.bcast(atom_map, root=0)
+#     engine_av_ids = []
+#     engine_buffer_ids = []
+#     # Convert target arrays to sets for efficient O(1) average time lookup
+#
+#     # atom_map is an array of old IDs (1-based). Make a 1-based set for comparison.
+#     print('Making atom map: 3')
+#     av_set = set(av_indices)          # now 1-based
+#     buffer_set = set(buffer_indices)  # now 1-based
+#
+#     for new_id_zero_based, old_id in enumerate(atom_map):
+#         if old_id in av_set:
+#             engine_av_ids.append(new_id_zero_based + 1)   # new LAMMPS IDs are 1-based
+#         if old_id in buffer_set:
+#             engine_buffer_ids.append(new_id_zero_based + 1)
+#
+#     if len(engine_buffer_ids) > 0:
+#         engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
+#         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+#     else:
+#         engine.command(f"group buffer empty")
+#         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+#         print('No buffer atoms defined')
+#
+#     engine.command('run 0 post no')
+#     #print('atoms defined')
+#     return atom_map
 
 
 def map_atom_indices(positions, idx, engine_positions) :
@@ -577,7 +622,7 @@ def map_atom_indices(positions, idx, engine_positions) :
         ---------
         new_to_old (dict): {new_ID: old_ID}
     """
-    old_IDs = idx+1
+    old_IDs = idx
     old_positions = positions
 
     # Round positions to avoid floating-point mismatch issues
@@ -593,7 +638,6 @@ def map_atom_indices(positions, idx, engine_positions) :
 
     # Build a dictionary from position → old ID
     pos_to_old = {tuple(p): id_ for p, id_ in zip(old_struct, old_IDs)}
-
     # Map each new position to old ID
     new_to_old = np.array([pos_to_old[tuple(p)] for p in new_struct], dtype=int)
 
@@ -604,26 +648,53 @@ def redefine_atoms(engine, positions) -> None:
     Check to see if current lammps system has enough atoms
     If not, deletes all atoms then redefines them
     '''
-    num_atoms = engine.lmp.get_natoms()
-    if len(positions) == num_atoms: # Enough atoms in system
-        set_positions(engine, positions)
-        engine.command('fix 1 all setforce 0.0 0.0 0.0')
-        engine.command('run 0')
-        engine.command('unfix 1')
-    else: #Uneven number of atoms
-        if num_atoms!=0:
-            engine.command('delete_atoms group all')
-        type=[1]*len(positions)
-        print('Creating atoms for refinement atoms')
-        engine.lmp.create_atoms(len(positions), None,type,x=positions.flatten())
-        engine.command('fix 1 all setforce 0.0 0.0 0.0')
-        engine.command('run 0')
-        engine.command('unfix 1')
 
-def clear(engine) -> None:
+    # if hasattr(engine, 'engine_comm'):
+    #     engine.engine_comm.Barrier()
+
+    #num_atoms = engine.lmp.get_natoms()
+    # if len(positions) == num_atoms: # Enough atoms in system
+    #     set_positions(engine, positions)
+    #     engine.command('fix 1 all setforce 0.0 0.0 0.0')
+    #     engine.command('run 0')
+    #     engine.command('unfix 1')
+    # else: #Uneven number of atoms
+        # if num_atoms!=0:
+        #     engine.command('delete_atoms group all')
+    type=[1]*len(positions)
+    #print('Creating atoms for refinement atoms')
+    new_positions = positions.flatten().astype(np.float64)
+    ids = np.arange(1, len(positions)+1, dtype=np.int32)
+    engine.lmp.create_atoms(len(positions),ids,type,x=new_positions)
+    engine.command("comm_style tiled")
+    engine.command("balance 1.1 rcb")
+    engine.command("neigh_modify every 1 delay 0 check yes")
+    engine.command('fix 1 all setforce 0.0 0.0 0.0')
+    engine.command('run 0')
+    engine.command('unfix 1')
+
+    # if hasattr(engine, 'engine_comm'):
+    #     engine.engine_comm.Barrier()
+
+def reset(engine, config, cell) -> None:
     """
-    Clear lammps instance
+    Clear lammps instance, preps it for the new sim:
     """
+
+    engine.command('clear')
+    initialize_parameters(engine)
+    # Create cell
+    xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
+    engine.command(
+        "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
+    )
+    engine.command('create_box 1 box')  # NEEDS TO BE UPDATED FOR ALLOYS
+    initialize_potential(engine, config)
+
+def clear(engine):
+    '''
+    Clears lammps instance
+    '''
     engine.command('clear')
 
 # def redefine_atoms(engine, positions) -> None:
@@ -648,5 +719,4 @@ def clear(engine) -> None:
 #     engine.command('run 0')
 #     #niegh_modify (
 #     engine.command('unfix 1')
-
 

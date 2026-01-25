@@ -91,12 +91,15 @@ class KMC:
         self.total_energy = None
         self.potential_energy = None
 
+        np.set_printoptions(threshold=np.inf)  #FOR TROUBLESHOOTING
+
     def run(self) -> None:
         """Run the simulation."""
         # Initialize the simulation, KMC attributes and minimize the system
         #self._initialize()
+        start_time=time.time()
         self.manager.initialize_sessions(self.config, self.system)
-        self.minimize_system()
+        self.minimize_system(self.system.positions)
         self.neighbors_list = NeighborsList(
                 self.system,
                 self.config.atomicenvironment.rnei,
@@ -119,7 +122,6 @@ class KMC:
         total_time = 0.0  # in seconds
         nsearch = self.config.eventsearch.nsearch
 
-        
 
         # KMC LOOP
         for step in range(nkmc_steps):
@@ -180,7 +182,6 @@ class KMC:
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
             active_table.remove_duplicates(self.system.cell)
-            #print(active_table.table)
 
             # == Update System ==
             result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
@@ -253,6 +254,9 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with crystalline environment")
                 self._close()
+        end_time=time.time()
+        total_time=end_time-start_time
+        print('TOTAL SIM TIME FOR 2000 steps of SIA diffusion is:', total_time)
         self._close()
 
     def get_new_environments(self) -> list[str | bytes]:
@@ -435,6 +439,7 @@ class KMC:
                 ##=>Select event
                 idx_selected_event, delta_t, ktot = self._select_event(active_table)
                 ##=>Reconstruct event
+                print('EVENT ID:', idx_selected_event)
                 self.loggers.info("log", "\t :=> Event Reconstruction")
                 result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
                 if result_reconstruction.is_ok() :
@@ -468,20 +473,32 @@ class KMC:
         saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
 
-        #Current positions
+        #Current position
+
         tmp_positions = copy.deepcopy(self.system.positions)
         #positions towards min1
-        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.15, cell = self.system.cell)
+        saddle_toward_min1_pos = push_towards(saddle_positions, tmp_positions[neighbors], fraction=0.1, cell = self.system.cell)
         tmp_positions[neighbors] = saddle_toward_min1_pos
 
-
-        future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
+        atoms2 = Atoms(symbols="Cu" * len(tmp_positions), positions=tmp_positions, cell=self.system.cell, pbc=True)
+        atoms2.write("sent_positions.xyz", append=True)
+        #Minimize
+        future = self.manager.minimize_with_results(self.config, positions=tmp_positions, cell = self.system.cell)
         min1_pos, _ = future.result()
 
-        #compaire min1_pos with system current positions
+        #Compare min1_pos with system current positions
         t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = self.system.cell, pbc = True)
+        atoms=Atoms(symbols="Cu"*len(t1), positions=t1, cell=self.system.cell, pbc=True)
+        atoms1 = Atoms(symbols="Cu" * len(self.system.positions), positions=self.system.positions, cell=self.system.cell, pbc=True)
+
         delr1 = compute_delr(self.system.positions[neighbors], t1[neighbors], self.system.cell)
         if delr1 > self.config.psr.matching_score_thr :
+            print('================DELR 1 FAILURE================')
+            print(print(neighbors))
+
+            atoms.write("Reconstruction_atoms.xyz", append=True)
+            atoms1.write("supposed_position.xyz", append=True)
+
             return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN1,
@@ -492,13 +509,28 @@ class KMC:
         else :
             #positions towards min2 :
             saddle_toward_min2_pos = push_towards(saddle_positions,supposed_final_positions, fraction=0.15, cell = self.system.cell)
+            dist_check = np.linalg.norm(saddle_toward_min2_pos - saddle_positions, axis=1)
+            if np.any(dist_check > 1.0):  # If any atom moved more than 1 Angstrom just from a 5% push
+                print("DELR 2 WARNING: Coordinate mapping is broken. Atoms are jumping!", max(dist_check))
+            tmp_positions = copy.deepcopy(self.system.positions)
             tmp_positions[neighbors] = saddle_toward_min2_pos
-            future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
+            atoms2= Atoms(symbols="Cu" * len(tmp_positions), positions=tmp_positions, cell=self.system.cell, pbc=True)
+            future = self.manager.minimize_with_results(self.config, positions=tmp_positions, cell=self.system.cell)
             min2_pos, _ = future.result()
 
+            test_positions= copy.deepcopy(self.system.positions)
+            test_positions[neighbors] = supposed_final_positions
+            t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=self.system.cell, pbc=True)
+            atoms = Atoms(symbols="Cu" * len(t2), positions=t2, cell=self.system.cell, pbc=True)
+            atoms1 = Atoms(symbols="Cu" * len(test_positions), positions=test_positions, cell=self.system.cell, pbc=True)
+
             #Compare min2pos with expected final_positions
-            delr2 = compute_delr(supposed_final_positions, min2_pos[neighbors], self.system.cell)
+            delr2 = compute_delr(supposed_final_positions, t2[neighbors], self.system.cell)
             if delr2 > self.config.psr.matching_score_thr :
+                print('idx of failed reconstruction:', idx_selected_event)
+                atoms2.write("sent_positions.xyz", append=True)
+                atoms.write("reconstruction_atoms.xyz", append=True)
+                atoms1.write("supposed_position.xyz", append=True)
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
@@ -536,7 +568,7 @@ class KMC:
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
         self.loggers.info("log", ":=> Minimizing the system")
-        future = self.manager.minimize_with_results(self.config, positions=positions)
+        future = self.manager.minimize_with_results(self.config, positions=positions, cell=self.system.cell)
         new_positions, total_energy = future.result()
         #new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)

@@ -147,13 +147,13 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    def minimize_with_results(self, config, positions=None) : 
+    def minimize_with_results(self, config, positions=None, cell=None) :
         """Minimize and return the minimized positions and the total energy.
         """
         self._is_busy = True
         #print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
         try : 
-            self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions}})
+            self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions, "cell":cell}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]

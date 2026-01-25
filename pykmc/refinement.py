@@ -92,7 +92,7 @@ class Refinement:
                 #count = len(all_futures)
 
         #Get results and update values :
-        for f in all_futures:
+        for i, f in enumerate(all_futures):
             #get results
             res = f.result()
             job_queue_len = self.manager.job_queue.qsize()
@@ -111,7 +111,6 @@ class Refinement:
                 res.ok_value().dE_forward = res.ok_value().E_saddle #- total_energy
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
-                #print('Reference Energy:', ctx["reference_energy_barrier"],'Refined Energy:', res.ok_value().dE_forward)
                 res = self.check_refinement_energy(res,
                             abs(
                                 res.ok_value().dE_forward
@@ -119,7 +118,7 @@ class Refinement:
                             ),
                             self.config.eventsearch.refined_energy_thr,
                         )
-
+                print('Refinement number', i)
             self.results.append(res)
 
         #Need to compare activation energies between each other
@@ -210,6 +209,7 @@ class Refinement:
                 )
                 new_positions_final = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
+
 
                 #move to saddle point
                 if dfevent.at["energy_barrier"] > e_thr : #dont refine

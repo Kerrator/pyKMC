@@ -43,7 +43,6 @@ def graph(
     #else:
     #    split = np.array_split(atom_idx, nprocs)  # when using cna/graph
     #local_index = split[rank]
-
     list_g = make_graph(local_index, neighbors_list, environment_list)
 
     list_hash = []
@@ -93,7 +92,6 @@ def make_graph(
             for neighbor in neighbors_list[at]:
                 if neighbor in environment_list[idx]:
                     adjacency_dict[i].append(global_to_local[neighbor])
-
         graph = pynauty.Graph(
             number_of_vertices=len(environment_list[idx]),
             adjacency_dict=adjacency_dict,
