@@ -9,12 +9,31 @@ class MpiApiEngine() :
     """ 
     """
     
-    def __init__(self, messenger, engine_comm: MPI.Comm, engine_id: int) -> None : 
-        self.messenger = messenger
-        self.engine_comm = engine_comm 
-        self.rank = engine_comm.Get_rank() #Ranks of the current process in the engine communicator 
-        self.engine_id = engine_id #Identifier
-        self.lmp = None #Placeholder for Lammps instance 
+    def __init__(
+        self,
+        local_messenger, local_engine_comm: MPI.Comm, local_engine_id: int,
+        global_messenger, global_engine_comm: MPI.Comm, global_engine_id: int
+    ) -> None :
+        self.local_messenger = local_messenger
+        self.local_engine_comm = local_engine_comm
+        if local_engine_comm is not None:
+            self.local_rank = local_engine_comm.Get_rank() #Ranks of the current process in the engine communicator
+        else:
+            self.local_rank = 0 #Ranks of the current process in the engine communicator
+        self.local_engine_id = local_engine_id #Identifier
+        self.local_lmp = None #Placeholder for Lammps instance
+
+        self.global_messenger = global_messenger
+        self.global_engine_comm = global_engine_comm
+        if global_engine_comm is not None:
+            self.global_rank = global_engine_comm.Get_rank() #Ranks of the current process in the engine communicator
+        else:
+            self.global_rank = 0
+        self.global_engine_id = global_engine_id #Identifier
+        self.global_lmp = None #Placeholder for Lammps instance
+
+        self.use_global()   #Start with active properties mapped to global Lammps
+
         self._is_alive = False 
         self._is_busy = False 
         self.message_reader_thread = None 
@@ -22,6 +41,8 @@ class MpiApiEngine() :
 
         # Dispatch map of possible lammps operation
         self._operations_map = {
+            "use_global": self.use_global,
+            "use_local": self.use_local,
             "close" : self.close,
             "command": self.command,
             "initialize_parameters": initialize_parameters,
@@ -42,77 +63,85 @@ class MpiApiEngine() :
     def start(self) -> None : 
         """Start Lammps"""
         self.start_engine() 
-        self.start_reader_thread() 
         if self.rank == 0 and isinstance(self.messenger, QueueMessenger):
+            # TODO: this only with engine_use_rank_0=True so can probably cut without that option
             t = threading.Thread(target=self.run_engine_loop, daemon=True)
             t.start()
         else:
             self.run_engine_loop()
 
-    def start_engine(self) -> None : 
-        if self.engine_comm is None : 
-            raise RuntimeError("Missing engine_comm for LAMMPS")
+    def start_engine(self) -> None :
+        if self.global_engine_comm is None :
+            raise RuntimeError("Missing engine_comm for global LAMMPS")
+        if self.local_engine_comm is None :
+            raise RuntimeError("Missing engine_comm for local LAMMPS")
 
-        self.lmp = lammps(comm=self.engine_comm, cmdargs=['-screen', 'none', '-log', 'lammps.log.'+str(self.engine_id)])
+
+        self.global_lmp = lammps(comm=self.global_engine_comm, cmdargs=['-screen', 'none', '-log', 'lammps.log.'+str(self.global_engine_id)])
+        self.local_lmp = lammps(comm=self.local_engine_comm, cmdargs=['-screen', 'none', '-log', 'lammps.log.'+str(self.local_engine_id)])
+        self.lmp = self.global_lmp
         self._is_alive = True
-
-    def start_reader_thread(self) -> None : 
-        """Start the message reader thread on the master rank"""
-        if self.rank == 0 and self.message_reader_thread is None : 
-            self.message_reader_thread = threading.Thread(target=self._read_messages, daemon=True)
-            self.message_reader_thread.start()
 
     #RUN ON RANK 0
     def _read_messages(self):
-        """Read messages from the LAMMPS session. it is run in a separate thread on the master rank.
+        """Read messages from the LAMMPS session. it is run in on the master rank.
         The message is a dictionnary of the form : {'type': str, 'value', str}"""
-        while self._is_alive:
-            if isinstance(self.messenger, MpiMessenger):
-            #  MPI
-                if self.messenger.comm.Iprobe(source=MPI.ANY_SOURCE, tag=2):
-                    msg = self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
-                    self.message_queue.put(msg)
-                else:
-                    threading.Event().wait(0.01)
-        
-            elif isinstance(self.messenger, QueueMessenger):
-                # Queue : block until reception
-                msg = self.messenger.recv(tag=2)
-                self.message_queue.put(msg)
-        
+        if isinstance(self.messenger, MpiMessenger):
+            #  MPI : use blocking calls
+            if self.messenger.comm.probe(source=MPI.ANY_SOURCE, tag=2):
+                msg = self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
             else:
-                raise RuntimeError("Unsupported messenger type")
-        
+                msg = None
+
+        elif isinstance(self.messenger, QueueMessenger):
+            # Queue : block until reception
+            msg = self.messenger.recv(tag=2)
+
+        else:
+            raise RuntimeError("Unsupported messenger type")
+
+        return msg
+
 
     #RUN ON ALL RANKS
     def run_engine_loop(self):
         """All ranks run this while lammps is alive, when a message is broadcaster from the master rank, execute the command."""
         while self._is_alive:
+            entry_global_mode = self.global_mode    # store for consistent behaviour when switching
+
             if self.rank == 0:
-                try:
-                    msg = self.message_queue.get(timeout=0.1)  # wait for a message
-                except queue.Empty:
+                msg = self._read_messages()
+                if msg is None:
                     continue
             else:
                 msg = None
+
             # broadcast to all ranks in engine_comm
             msg = self.engine_comm.bcast(msg, root=0)
             if msg is None:
                 continue
             
+
             result = self._handle_message(msg)
-            if self.rank == 0:
-                self._send_status()
+
+            if entry_global_mode and self.global_rank == 0:
+                self._send_status(self.global_messenger)
+            if (not entry_global_mode) and self.local_rank == 0:
+                self._send_status(self.local_messenger)
+
             #Check if engine was told to shutdown
             if not self._is_alive:
                 break
 
-            if self.rank == 0 : 
-                if result is not None :
-                    self.messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
-#                    MPI.COMM_WORLD.send({"type": "result", "value": result}, dest=0, tag=1)  # Send result to the session on rank 0 
+            if result is not None:
+                if entry_global_mode:
+                    if self.global_rank == 0 :
+                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                else:
+                    if self.local_rank == 0 :
+                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
 
-    def _send_status(self) : 
+    def _send_status(self, messenger) :
         """Send the status of the engine to the session."""
         status_msg = {
         "type": "status",
@@ -121,8 +150,7 @@ class MpiApiEngine() :
             "busy": self._is_busy,
             }
         }
-        self.messenger.send(status_msg, dest=0, tag=0)
-#        MPI.COMM_WORLD.send(status_msg, dest=0, tag=0)  # Rank 0 du world: session 
+        messenger.send(status_msg, dest=0, tag=0)
 
 
     def _handle_message(self, msg: dict) -> None:
@@ -137,7 +165,8 @@ class MpiApiEngine() :
         else : 
             #Call method of function (and so check if self needs to be provided or not)
             value = msg.get("value", None)
-            self.engine_comm.barrier()
+            entry_engine_comm = self.engine_comm    # needed for when msg is use_global
+            entry_engine_comm.barrier()
             try :
                 if value is None : 
                     args = () 
@@ -159,9 +188,9 @@ class MpiApiEngine() :
             except Exception as e:
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
             finally : 
-                self.engine_comm.barrier()
+                entry_engine_comm.barrier()
 
-        
+
 
     def command(self, cmd: str) -> None:
         """Send a command to the LAMMPS"""
@@ -180,14 +209,37 @@ class MpiApiEngine() :
         finally:
             self._is_busy = False
 
+    def use_global(self) -> None:
+        """Switch to global LAMMPS"""
+        self.global_mode = True
+        self.messenger = self.global_messenger
+        self.engine_comm = self.global_engine_comm
+        self.engine_id = self.global_engine_id
+        self.rank = self.global_rank
+        self.lmp = self.global_lmp
+
+    def use_local(self) -> None:
+        """Switch to local LAMMPS"""
+        self.global_mode = False
+        self.messenger = self.local_messenger
+        self.engine_comm = self.local_engine_comm
+        self.engine_id = self.local_engine_id
+        self.rank = self.local_rank
+        self.lmp = self.local_lmp
 
     def close(self) -> None:    
         """Close the LAMMPS engine."""
         print(f"[Engine Rank {self.rank}] Closing LAMMPS engine.")
-        if self.lmp is not None:
-            self.lmp.close()
-            self.lmp = None
+        if self.local_lmp is not None:
+            self.local_lmp.close()
+            self.local_lmp = None
+
+        if self.global_lmp is not None:
+            self.global_lmp.close()
+            self.global_lmp = None
+
         self._is_alive = False
+
         if self.message_reader_thread is not None :
             self.message_reader_thread.join(timeout=1)
             self.message_reader_thread = None
@@ -198,4 +250,4 @@ class MpiApiEngine() :
     
     def is_busy(self) -> bool:
         """Check if the LAMMPS engine is busy."""
-        return self._is_busy 
+        return self._is_busy

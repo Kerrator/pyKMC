@@ -77,6 +77,7 @@ class BasinsGenericEvents() :
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
         #Refine absorbing states
+        self.manager.use_local()
         result =self.refine_absorbing()
         if not result.is_ok() : 
             return result
