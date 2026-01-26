@@ -180,9 +180,16 @@ class KMC:
             
 
             # == Update System ==
-            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
+            result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae = self.reconstruction(active_table)
             events_info = info_active_events(self.system.types, self.reference_table, active_table) 
+            if len(err_reference) != 0 : 
+                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
+                self.reference_table.remove(list(set(err_reference)))
+                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
+                self.visited_environments = self.visited_environments.difference(set(err_ae))
             events_info = events_info.output_msg()
+            
+
 
 
             #INFO : 
@@ -488,6 +495,7 @@ class KMC:
 
 
     def reconstruction(self, active_table) : 
+            #TODO make a Result
             
             err_reference = []
             err_ae = []
@@ -511,14 +519,7 @@ class KMC:
             else : 
                 self.loggers.error("log", "All event reconstuctions failed.")
                 self._close()
-
-            if len(err_reference) != 0 : 
-                #TODO : Move this part after event_info, 
-                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
-                self.reference_table.remove(list(set(err_reference)))
-                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
-                self.visited_environments = self.visited_environments.difference(set(err_ae))
-            return result_reconstruction, delta_t, ktot, idx_selected_event
+            return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
