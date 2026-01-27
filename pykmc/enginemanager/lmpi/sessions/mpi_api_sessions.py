@@ -67,6 +67,20 @@ class MpiApiSession :
         #print(f"[Session] Sending command: {cmd}")
         self.send_message({"type": "command", "value": cmd})
 
+    def use_local(self) -> None:
+        """
+        Instruct the engine to use local pool
+        """
+        #print(f"[Session {self.session_id}] sending 'use local' to rank {self.engine_master_rank}")
+        self.send_message({"type": "use_local"})
+
+    def use_global(self) -> None:
+        """
+        Instruct the engine to use global pool
+        """
+        #print(f"[Session {self.session_id}] sending 'use global' to rank {self.engine_master_rank}")
+        self.send_message({"type": "use_global"})
+
     @session_locked
     def close(self, wait_status: bool = False) -> None:
         """
@@ -99,7 +113,7 @@ class MpiApiSession :
         """ 
         Initialize LAMMPS engine with default parameters
         """
-        #print(f"[Session] Initializing Lammps parameters")
+        #print(f"[Session {self.session_id}] Initializing Lammps parameters")
         self.send_message({"type": "initialize_parameters"})
 
     @session_locked
@@ -107,7 +121,7 @@ class MpiApiSession :
         """ 
         Initialize Lammps system
         """
-        #print(f"[Session] Initializing Lammps System")
+        #print(f"[Session {self.session_id}] Initializing Lammps System")
         self.send_message({"type": "initialize_system", "value": system})
     
     @session_locked
@@ -115,7 +129,7 @@ class MpiApiSession :
         """ 
         Initialize Lammps potential
         """
-        #print(f"[Session] Initializing Lammps Potential")
+        #print(f"[Session {self.session_id}] Initializing Lammps Potential")
         self.send_message({"type": "initialize_potential", "value": config})
     
     @session_locked

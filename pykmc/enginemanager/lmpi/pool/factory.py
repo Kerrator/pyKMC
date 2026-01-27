@@ -20,14 +20,14 @@ class ManagerFactory:
         self.has_global = has_global
 
         if self.use_rank_0 : 
-            start_rank = 0 
+            self.start_rank = 0
         else : 
-            start_rank = 1
+            self.start_rank = 1
 
-        if self.world_size < n_sessions + start_rank:
+        if self.world_size < n_sessions + self.start_rank:
             raise ValueError("Not enough MPI ranks to allocate sessions")
 
-        self.available_ranks = list(range(start_rank, self.world_size))  
+        self.available_ranks = list(range(self.start_rank, self.world_size))
         self.chunks = self._split_ranks()
 
     def _split_ranks(self) -> list[list[int]]:
@@ -59,33 +59,24 @@ class ManagerFactory:
             else:
                 messengers.append(MpiMessenger(comm=self.world))
 
-        # ---  Engine (all rank) ---
         
-        if self.has_global : 
-            print("global")
-            global_comm = self.world.Dup()  # clone de COMM_WORLD, pour isolation
-            #global_messenger = MpiMessenger(comm=global_comm)
-            #global_color = 0
-            #global_comm = self.world.Split(color=global_color, key=self.world_rank)
-            global_messenger = MpiMessenger(comm=global_comm)
-            #global_messenger = QueueMessenger()
-            global_engine = MpiApiEngine(
-                messenger=global_messenger, 
-                engine_comm=global_comm, 
-                engine_id=0
-            )
-            # --- Lancer global_engine dans un thread ---
-            threading.Thread(target=global_engine.start, daemon=True).start()
-            #global_engine.start()
+        # communicator and messenger for global
+        if self.world_rank < self.start_rank:
+            global_comm = self.world.Split(color=MPI.UNDEFINED, key=self.world_rank)
+        else:
+            global_comm = self.world.Split(color=1, key=self.world_rank)
+        global_messenger = MpiMessenger(comm=self.world)
 
 
         if engine_id is not None:  #  rank in a chunk
-            print("yes")
             messenger = messengers[engine_id]
             engine = MpiApiEngine(
-                messenger=messenger,
-                engine_comm=engine_comm,
-                engine_id=engine_id+1
+                local_messenger=messenger,
+                local_engine_comm=engine_comm,
+                local_engine_id=engine_id+1,
+                global_messenger=global_messenger,
+                global_engine_comm=global_comm,
+                global_engine_id=0
             )
             engine.start()   # bloque ici
 
@@ -104,8 +95,6 @@ class ManagerFactory:
                     session_id=session_id+1
                 )
                 sessions.append(session)
-            if self.has_global : 
-                global_session = MpiApiSession(messenger=global_messenger, engine_ranks=list(range(0, self.world_size)), session_id=0) 
-                return Manager(sessions=sessions, global_session=global_session)
-            else :
-                return Manager(sessions=sessions)
+
+            global_session = MpiApiSession(messenger=global_messenger, engine_ranks=list(range(self.start_rank, self.world_size)), session_id=0)
+            return Manager(sessions=sessions, global_session=global_session)
