@@ -110,6 +110,7 @@ class KMC:
                 self.config.atomicenvironment.neighbors_add,
             )
         #Set new positions to all sessions/engine : 
+        self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)  
 
         # Write initial step to file
@@ -180,9 +181,17 @@ class KMC:
             
 
             # == Update System ==
-            result_reconstruction, delta_t, ktot, idx_selected_event = self.reconstruction(active_table)
+            self.manager.use_global()
+            result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae = self.reconstruction(active_table)
             events_info = info_active_events(self.system.types, self.reference_table, active_table) 
+            if len(err_reference) != 0 : 
+                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
+                self.reference_table.remove(list(set(err_reference)))
+                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
+                self.visited_environments = self.visited_environments.difference(set(err_ae))
             events_info = events_info.output_msg()
+            
+
 
 
             #INFO : 
@@ -215,6 +224,7 @@ class KMC:
                     neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
                 #reconstruct event
+                    self.manager.use_global()
                     result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
                     if result_basin_reconstruction.is_ok() : 
                         self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
@@ -247,6 +257,7 @@ class KMC:
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions 
+            self.manager.use_local()
             self.manager.set_all_positions(positions=self.system.positions)
             ##=>Minimize
             #self.minimize_system()
@@ -488,6 +499,7 @@ class KMC:
 
 
     def reconstruction(self, active_table) : 
+            #TODO make a Result
             
             err_reference = []
             err_ae = []
@@ -511,14 +523,7 @@ class KMC:
             else : 
                 self.loggers.error("log", "All event reconstuctions failed.")
                 self._close()
-
-            if len(err_reference) != 0 : 
-                #TODO : Move this part after event_info, 
-                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
-                self.reference_table.remove(list(set(err_reference)))
-                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
-                self.visited_environments = self.visited_environments.difference(set(err_ae))
-            return result_reconstruction, delta_t, ktot, idx_selected_event
+            return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
@@ -560,14 +565,10 @@ class KMC:
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
         self.loggers.info("log", ":=> Minimizing the system")
-        #future = self.manager.global_minimize_with_results(self.config, positions=positions)
         new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
-#        new_positions, total_energy = future.result()
-        #new_positions, total_energy = self.engine.minimize(self.system)
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
-        future = self.manager.get_potential_energy()
-        self.potential_energy = future.result()
+        self.potential_energy = self.manager.global_get_potential_energy()
 
     def get_info_atomic_environments(
         self, new_environments: list[str | bytes]

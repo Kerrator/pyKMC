@@ -24,6 +24,7 @@ class Manager:
         """
         self.sessions = sessions
         self.global_session = global_session
+        self.using_global = True
         self.job_queue: queue.Queue[Job] = queue.Queue()
         #Thread that dispatch job to workers
         #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
@@ -51,16 +52,38 @@ class Manager:
         """ 
         Initialize engines with the same system and config
         """
+        print("[Manager] use local")
+        self.use_local()
         print("[Manager] Initializing all Lammps engines")
         for session in self.sessions : 
             session.initialize_parameters() 
             session.initialize_system(system)
             session.initialize_potential(config)
+        print("[Manager] use global")
+        self.use_global()
+        print("[Manager] Initializing global Lammps engines")
         if self.global_session is not None : 
             self.global_initialize_parameters() 
             self.global_initialize_system(system)
             self.global_initialize_potential(config)
 
+
+    def use_local(self):
+        """
+        Have engines switch from global pool to local pools
+        """
+        if self.using_global:
+            self.global_session.use_local()
+            self.using_global = False
+
+    def use_global(self):
+        """
+        Have engines switch from local pools to global pool
+        """
+        if not self.using_global:
+            for session in self.sessions :
+                session.use_global()
+            self.using_global = True
     def _worker_loop(self, session: MpiApiSession):
         """Boucle infinie tournant dans un thread dédié à 'session'."""
         while True:
