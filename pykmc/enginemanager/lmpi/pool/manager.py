@@ -30,15 +30,12 @@ class Manager:
         #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
         #self.dispatcher_thread.start()
         
-#####
-        #Création d'un pool de workers fixes
+        #pool de workers
         self.workers = []
         for session in self.sessions:
-            # Chaque thread worker est lié à UNE session spécifique
             t = threading.Thread(target=self._worker_loop, args=(session,), daemon=True)
             t.start()
             self.workers.append(t)
-#####
 
     def broadcast_command(self, cmd: str):
         """
@@ -87,32 +84,24 @@ class Manager:
     def _worker_loop(self, session: MpiApiSession):
         """Boucle infinie tournant dans un thread dédié à 'session'."""
         while True:
-            # Bloque ici jusqu'à ce qu'un job soit disponible. 
-            # C'est l'OS qui réveille le thread, pas de polling CPU !
             job = self.job_queue.get()
 
-            if job is None: # Signal de fermeture (Sentinel)
+            if job is None:  
                 break
 
             try:
-                # On cherche la méthode sur la session (ex: 'minimize')
                 method = getattr(session, job.operation_name)
 
-                # Exécution du job. 
-                # Note: session_locked garantit la sécurité si on appelle 
-                # une commande hors-queue (ex: broadcast)
                 if job.params is None:
                     result = method()
                 else:
                     result = method(**job.params)
 
-                # On remplit le Future pour débloquer l'utilisateur
                 job.future.set_result(result)
 
             except Exception as e:
                 job.future.set_exception(e)
             finally:
-                # Indique à la queue que le job est fini
                 self.job_queue.task_done()
 
     #def _dispatcher(self) : 
