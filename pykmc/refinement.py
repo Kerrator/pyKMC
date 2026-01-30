@@ -105,16 +105,23 @@ class Refinement:
             if res.is_ok() : 
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy 
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
-                #Now check if energy barrier consistent with generic one 
-                res = self.check_refinement_energy(res,
-                            abs(
-                                res.ok_value().dE_forward
-                                - ctx["reference_energy_barrier"] 
-                            ),
-                            self.config.eventsearch.refined_energy_thr,
-                        )
+                #Now check if energy barrier consistent with generic one
+                if self.config.control.active_volume==True:
+                    res.ok_value().dE_forward = res.ok_value().E_saddle
+                    res = self.check_refinement_energy(res,
+                                                       abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
+                                                       self.config.eventsearch.refined_energy_thr,
+                                                       )
+                else:
+                    res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
+                    res = self.check_refinement_energy(res,
+                                                       abs(
+                                                           res.ok_value().dE_forward
+                                                           - ctx["reference_energy_barrier"]
+                                                       ),
+                                                       self.config.eventsearch.refined_energy_thr,
+                                                       )
             self.results.append(res)
 
 
@@ -207,20 +214,39 @@ class Refinement:
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
 
                 #move to saddle point
-                self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-                if dfevent.at["energy_barrier"] > e_thr : #dont refine 
-                    f = concurrent.futures.Future()
-                    f.set_result(Ok(EventRefinementOutput(
-                        central_atom_index=at_idx, 
-                        saddle_positions=self.system.positions,
-                        E_saddle=total_energy+dfevent["energy_barrier"],
-                        refined='F'
-                    )))
-                else : 
+                if self.config.control.active_volume==True:
+                    if dfevent.at["energy_barrier"] > e_thr:  # dont refine
+                        f = concurrent.futures.Future()
+                        f.set_result(Ok(EventRefinementOutput(
+                            central_atom_index=at_idx,
+                            saddle_positions=self.system.positions,
+                            E_saddle=dfevent["energy_barrier"],
+                            refined='F'
+                        )))
+                    else:
+                        # add a job to manager queue
+                        f = self.manager.partn_refine(self.config, at_idx,
+                                                      self.system.positions.copy(),
+                                                      self.system.cell,
+                                                      self.system.types,
+                                                      neighbors,
+                                                      new_positions_saddle)  # send copy not reference !
+                    futures.append(f)
+                else:
+                    self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
+                    if dfevent.at["energy_barrier"] > e_thr : #dont refine
+                        f = concurrent.futures.Future()
+                        f.set_result(Ok(EventRefinementOutput(
+                            central_atom_index=at_idx,
+                            saddle_positions=self.system.positions,
+                            E_saddle=total_energy+dfevent["energy_barrier"],
+                            refined='F'
+                        )))
+                    else :
 
-                    #add a job to manager queue
-                    f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
-                futures.append(f)
+                        #add a job to manager queue
+                        f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                    futures.append(f)
 
 
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
@@ -289,6 +315,7 @@ class Refinement:
 
         """
         if energy_mismatch > refined_energy_thr:
+            print("ENERGY MISMATCH")
             return Err(
                 ErrorInfo(
                     type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER,

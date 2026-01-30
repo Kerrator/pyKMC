@@ -152,6 +152,7 @@ class EventSearchOutput:
     dE_forward: float
     dE_backward: float
     move_atom_index: int
+    #map: np.ndarray
     cell: Optional[np.ndarray] = None
 
 

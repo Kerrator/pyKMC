@@ -56,7 +56,7 @@ class MpiApiEngine() :
             "partn_refine" : partn_refine, 
             "minimize_with_results" : minimize_with_results, 
             "get_potential_energy" : get_potential_energy
-        } 
+        }
 
 
 

@@ -47,9 +47,14 @@ class EventSearch:
                 len(central_atom_research_list)
             ),
         )
-        futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions) 
-
-        for f in futures : 
+        if self.config.control.active_volume==True:
+            if self.config.activevolume.r_act <= self.config.atomicenvironment.rcut:
+                raise ValueError('Active Volume radius is smaller than cutoff radius. Please increase r_act or decrease rcut')
+            futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions, cell=self.system.cell, type=self.system.types)
+        else:
+            futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list,
+                                                positions=self.system.positions)
+        for f in futures :
             self.results.append(f.result())
 
             self.loggers.progress_bar("progress", len(self.results), len(central_atom_research_list))

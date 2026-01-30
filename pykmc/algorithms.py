@@ -24,7 +24,7 @@ def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float]:
     """
     # compute cumulative rate constant
     k_cumulative = [np.sum(l_k[:i]) for i in range(1, len(l_k) + 1)]
-
+    print('Length k_cumulative',len(k_cumulative))
     rand = random.random()
     # find event index satisfy ki-1<rand1ktot<ki
     idx_selected_event = np.searchsorted(

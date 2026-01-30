@@ -185,11 +185,11 @@ class ReferenceEventTable:
                 if (
                     dfevent_forward["event_id"] == dfevent_forward["id_final"]
                 ):  # backward reaction same as forward
-                    dfevent_forward["idx_backward"] = len(self.table) 
+                    dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
                 else:
                     dfevent_forward["idx_backward"] = len(self.table) + 1
-                    dfevent_backward["idx_backward"] = len(self.table) 
+                    dfevent_backward["idx_backward"] = len(self.table)
                     dfevent = pd.concat(
                         [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
                         ignore_index=True,
@@ -221,36 +221,36 @@ class ReferenceEventTable:
         """
         # Only select rows with same event_id as dfenvent :
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
-        if len(subset) == 0 : 
-            return True 
+        if len(subset) == 0 :
+            return True
 
         #if same  id, chekc if same dE
         tol = 0.25
         dE = dfevent["energy_barrier"]
         subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
-        if len(subset) == 0 : 
+        if len(subset) == 0 :
             return True
 
         #if all same, check PSR  saddle_initial
         event_saddle = dfevent['saddle_positions']
         nat_event = len(event_saddle)
         #TODO I guess we should save atoms types in reference table
-        typ_event = nat_event*['X'] 
+        typ_event = nat_event*['X']
 
-        for _, ev in subset.iterrows() : 
+        for _, ev in subset.iterrows() :
 
             ref_saddle = ev['saddle_positions']
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event 
+            typ_ref = typ_event
             result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
-            if not result.is_ok() : #no match 
+            if not result.is_ok() : #no match
                 continue
 
             result = check_match(result, self.config.psr.matching_score_thr)
             if not result.is_ok() : #matching score > thr
                 continue
-            
+
             return False
         return True
 
@@ -392,7 +392,7 @@ class ReferenceEventTable:
             self.config.ira.sym_thr,
         )
 
-        #dr : 
+        #dr :
         move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
         dra_forward = np.linalg.norm(min1_positions[neighbor_list_forwward][move_atom_idx_forward]-saddle_positions[neighbor_list_forwward][move_atom_idx_forward])
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
@@ -411,7 +411,7 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
-                "idx_backward" : -1, #unknown yet, 
+                "idx_backward" : -1, #unknown yet,
                 "dra": dra_forward
             }
         )
@@ -604,7 +604,7 @@ class ActiveEventTable:
         )
         return dfactive
     
-    def remove(self, ind: int|list[int]) -> None : 
+    def remove(self, ind: int|list[int]) -> None :
         """Remove event at row = ind
 
         Parameters
@@ -615,9 +615,9 @@ class ActiveEventTable:
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
 
-    def remove_duplicates(self, cell) -> None : 
+    def remove_duplicates(self, cell) -> None :
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
-        #Sub dataframes with events grouped by central_atom and dE 
+        #Sub dataframes with events grouped by central_atom and dE
         tol_energy = 0.1 #eV
         grouped = []
 
@@ -641,9 +641,10 @@ class ActiveEventTable:
                     continue  # dont compute twice
                 pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
                 delr = compute_delr(pos_ref, pos_comp, cell )
-                if delr < self.config.psr.matching_score_thr : 
+                if delr < self.config.psr.matching_score_thr :
+                    #print('Removing event with delr',delr)
                     duplicates.append(jdx)
-        #remove all duplicates 
+        #remove all duplicates
         self.remove(duplicates)
 
     def save(self, outfile: str = "active_table.pickle") -> None:

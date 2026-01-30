@@ -27,9 +27,9 @@ class Manager:
         self.using_global = True
         self.job_queue: queue.Queue[Job] = queue.Queue()
         #Thread that dispatch job to workers
-        #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
+        #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True)
         #self.dispatcher_thread.start()
-        
+
         #pool de workers
         self.workers = []
         for session in self.sessions:
@@ -59,8 +59,8 @@ class Manager:
         print("[Manager] use global")
         self.use_global()
         print("[Manager] Initializing global Lammps engines")
-        if self.global_session is not None : 
-            self.global_initialize_parameters() 
+        if self.global_session is not None :
+            self.global_initialize_parameters()
             self.global_initialize_system(system)
             self.global_initialize_potential(config)
 
@@ -86,7 +86,7 @@ class Manager:
         while True:
             job = self.job_queue.get()
 
-            if job is None:  
+            if job is None:
                 break
 
             try:
@@ -104,38 +104,38 @@ class Manager:
             finally:
                 self.job_queue.task_done()
 
-    #def _dispatcher(self) : 
-    #    while True : 
-    #        job = self.job_queue.get() #block until a job is get 
-    #        while True : 
-    #            session = self._get_available_engine() 
-    #            if session is not None : 
+    #def _dispatcher(self) :
+    #    while True :
+    #        job = self.job_queue.get() #block until a job is get
+    #        while True :
+    #            session = self._get_available_engine()
+    #            if session is not None :
     #                #print(f"[PoolManager] Found available session: {session.session_id}")
     #                threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
     #                threading.Event().wait(0.1) # Wait a bit to allow the job to be processed
     #                break #job is submited
-    #            else : 
+    #            else :
     #                threading.Event().wait(0.1)
 
 
-    #def _get_available_engine(self) : 
+    #def _get_available_engine(self) :
     #    """Check if worker is available, if yes return worker, if not, return None"""
-    #    for session in self.sessions : 
-    #        if session._is_busy == False : 
+    #    for session in self.sessions :
+    #        if session._is_busy == False :
     #            return session
     #    return None
 
-    #def _run_job(self, session, job: Job) : 
-    #    try : 
+    #def _run_job(self, session, job: Job) :
+    #    try :
     #        #find method session having job.method_name
     #        method = getattr(session, job.operation_name)
-    #        #print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}") 
-    #        if job.params is None : 
+    #        #print(f"[PoolManager] Running job: {job.operation_name}  on session: {session.session_id}")
+    #        if job.params is None :
     #            result = method()
-    #        else : 
-    #            result = method(**job.params) 
+    #        else :
+    #            result = method(**job.params)
     #        job.future.set_result(result)
-    #    except Exception as e : 
+    #    except Exception as e :
     #        job.future.set_exception(e)
 
     def set_all_positions(self, positions) : 
@@ -150,8 +150,8 @@ class Manager:
         #print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
         self.job_queue.put(job)
         return future
-    
-    # API 
+
+    # API
 
     def minimize(self, config ) : 
         future = self.submit_job("minimize", {"config" : config})
@@ -161,23 +161,23 @@ class Manager:
         future = self.submit_job("minimize_with_results", {"config": config, "positions": positions})
         return future
     
-    def get_potential_energy(self, positions=None) : 
+    def get_potential_energy(self, positions=None) :
         future = self.submit_job("get_potential_energy", {"positions": positions})
         return future
-    
-    def get_total_energy(self, positions=None) : 
+
+    def get_total_energy(self, positions=None) :
         future = self.submit_job("get_total_energy", {"positions": positions})
         return future
 
-    def partn_search(self, config, central_atom: list[int], positions=None) -> list[Future] : 
+    def partn_search(self, config, central_atom: list[int], positions=None, cell=None, type=None) -> list[Future] :
         futures = []
         for atom in central_atom :
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions})
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "type":type})
             futures.append(f) 
         return futures
 
-    def partn_refine(self, config, central_atom: int, positions=None) -> list[Future] : 
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions})
+    def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
         return future
 
     def close_all(self):
@@ -185,26 +185,26 @@ class Manager:
         Close all sessions and their underlying engines.
         """
         #print("[PoolManager] Closing all sessions.")
-        if self.global_session is not None : 
+        if self.global_session is not None :
             self.global_session.close(wait_status=False)
         for session in self.sessions:
-            session.close(wait_status=True)   
-        
+            session.close(wait_status=True)
 
-    def __getattr__(self, name:str) : 
-        """Check if method start with global_, if yes, then return global_session.method""" 
+
+    def __getattr__(self, name:str) :
+        """Check if method start with global_, if yes, then return global_session.method"""
         if name.startswith('global_'):
             method_name = name[7:]  # remove prefixe 'global_'
             if not self.global_session:
                 raise RuntimeError("Global session is not available")
-            
+
             def global_method(*args, **kwargs):
                 method = getattr(self.global_session, method_name)
                 return method(*args, **kwargs)
-            
+
             return global_method
-        
+
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
-    
+

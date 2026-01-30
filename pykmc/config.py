@@ -72,7 +72,7 @@ class ControlConfig(BaseModel):
     )
 
     engine_use_rank_0: Optional[bool] = Field(
-        default=False, 
+        default=False,
         description="Deprecated : If use mpi rank 0 or not."
     )
 
@@ -81,13 +81,18 @@ class ControlConfig(BaseModel):
     )
 
     refine_thr: Optional[float] = Field(
-        default=0.99,
+        default=0.9999,
         description="Event constributing to this percent of ktot are refined."
     )
 
     basin: Optional[bool] = Field(
         default=False,
         description="Basin mode"
+    )
+
+    active_volume: Optional[bool] = Field(
+        default=False,
+        description="Incorporate AV's into simulations, recommended for large systems"
     )
 
 class AtomicEnvironmentConfig(BaseModel):
@@ -446,6 +451,18 @@ class PSRConfig(BaseModel):
         description="Maximum value of the matching score of the algorithm used.",
     )
 
+class ActiveVolume(BaseModel):
+    """ Active Volume Parameters"""
+
+    r_act: float = Field(
+        default=6.0,
+        description="Radius of entire active volume, spherical"
+    )
+
+    r_mov: float = Field(
+        default=4.0,
+        description="Radius of movable atoms in active volume, spherical"
+    )
 
 class LammpsConfig(BaseModel):
     """Lammps parameters."""
@@ -478,7 +495,7 @@ class BasinConfig(BaseModel):
 
     energy_thr: float = Field(
     default = 0.0,
-    description="Energy threshold"    
+    description="Energy threshold"
     )
 
 class Config(BaseModel):
@@ -519,6 +536,8 @@ class Config(BaseModel):
     ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
+
+    activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:

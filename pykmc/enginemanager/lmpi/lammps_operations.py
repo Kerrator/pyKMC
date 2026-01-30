@@ -4,6 +4,7 @@ from mpi4py import MPI
 import ctypes 
 import pypARTn
 import os
+from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
 
 from ...result import  (
     Result,
@@ -67,23 +68,23 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
-def minimize(engine, config, positions=None) : 
-    if positions is not None : 
+def minimize(engine, config, positions=None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
-def get_total_energy(engine, positions=None) : 
-    if positions is not None : 
+def get_total_energy(engine, positions=None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     #Get total energy
     engine.command("run 0")
     result = engine.lmp.get_thermo("etotal")
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
         return result
 
-def get_potential_energy(engine, positions = None) : 
-    if positions is not None : 
+def get_potential_energy(engine, positions = None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     #get potential energy 
     engine.command("compute c1 all pe")
@@ -106,7 +107,7 @@ def set_positions(engine, positions) :
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
-def minimize_with_results(engine, config, positions=None) : 
+def minimize_with_results(engine, config, positions=None) :
     """ 
     Minimize and return the minimized positions and the total energy.
     """
@@ -119,15 +120,23 @@ def minimize_with_results(engine, config, positions=None) :
         return new_positions, total_energy
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None) : 
+def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
-    
-    #Set positions 
-    if positions is not None : 
-        set_positions(engine=engine, positions=positions)
+
+    print('Central Atom', central_atom_idx)
+    #Check to see if system is in AV mode:
+    if config.control.active_volume == True:
+        atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, type)
+
+    else:
+        #Set positions
+        atom_map = None
+        central_lammps_id=[central_atom_idx+1]
+        if positions is not None :
+            set_positions(engine=engine, positions=positions)
 
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
@@ -160,7 +169,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.push_dist_thr)
     artn.set("push_step_size", config.partn.push_step_size)
-    artn.set("push_ids", [central_atom_idx + 1])
+    artn.set("push_ids", central_lammps_id)
     artn.set("ninit", config.partn.ninit)
 
     #Lanczos
@@ -196,7 +205,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
 
 
     # EXTRACT DATA
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
 
         err = artn.get_error()
         if err[0]==0:
@@ -212,18 +221,21 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
                 dE_forward = E_sad - E_min1
                 dE_backward = E_sad - E_min2
 
-                min1positions = artn.extract("tau_min1")
-                min2positions = artn.extract("tau_min2")
-                saddlepositions = artn.extract("tau_sad")
+                if config.control.active_volume==True:
+                    min1positions, min2positions, saddlepositions, index_move= position_results_AV(config, artn, atom_map, positions)
+                else:
+                    min1positions = artn.extract("tau_min1")
+                    min2positions = artn.extract("tau_min2")
+                    saddlepositions = artn.extract("tau_sad")
 
-                # find atom that moves the most
-                dist = (min1positions - saddlepositions) ** 2
-                dist = dist.sum(axis=-1)
-                dist = np.sqrt(dist)
-                dist[dist > config.atomicenvironment.rcut] = (
-                    0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
-                )
-                index_move = np.argmax(dist)
+                    # find atom that moves the most
+                    dist = (min1positions - saddlepositions) ** 2
+                    dist = dist.sum(axis=-1)
+                    dist = np.sqrt(dist)
+                    dist[dist > config.atomicenvironment.rcut] = (
+                        0  # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
+                    )
+                    index_move = np.argmax(dist)
                 if delr1 < delr2:  # necessary for no reconstruction option
                     return Ok(
                         EventSearchOutput(
@@ -263,11 +275,17 @@ def partn_search(engine, config, central_atom_idx: int, positions = None) :
                 )
             )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None) : 
+def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None) :
 
-    #Set positions 
-    if positions is not None : 
-        set_positions(engine=engine, positions=positions)
+    #Set positions
+    if config.control.active_volume==True:
+        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, type, saddle_idx, saddle_positions)
+    else:
+        central_lammps_id=[central_atom_idx+1]
+        E_init=0
+        atom_map=None
+        if positions is not None :
+            set_positions(engine=engine, positions=positions)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
@@ -298,7 +316,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.r_push_dist_thr)
     artn.set("push_step_size", config.partn.r_push_step_size)
-    artn.set("push_ids", [central_atom_idx + 1]) #fortran start at 1
+    artn.set("push_ids", central_lammps_id) #fortran start at 1
     artn.set("ninit", config.partn.r_ninit)
 
     #Lanczos 
@@ -335,12 +353,23 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
         err = artn.get_error()
         if err[0]==0:
             E_sad = artn.extract("etot_sad")
+            E_result=E_sad-E_init #If AV's are on, will return the activation energy of the event. If not, jsut saddle energy
             saddlepositions = artn.extract("tau_sad")
+
+            if config.control.active_volume==True:
+                saddlepositions_results=positions.copy()
+                for i, atom_idx in enumerate(atom_map):
+                    saddlepositions_results[atom_idx][0] = saddlepositions[i][0]
+                    saddlepositions_results[atom_idx][1] = saddlepositions[i][1]
+                    saddlepositions_results[atom_idx][2] = saddlepositions[i][2]
+            else:
+                saddlepositions_results=saddlepositions
+
             return Ok(
                 EventRefinementOutput(
                     central_atom_index=central_atom_idx,
-                    saddle_positions=saddlepositions,
-                    E_saddle= E_sad,
+                    saddle_positions=saddlepositions_results,
+                    E_saddle= E_result,
                     refined='T'
                 )
             )
@@ -351,4 +380,4 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None) :
                     type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
                 )
             )
-    
+

@@ -75,6 +75,7 @@ class AtomicEnvironment:
         """ 
         Return list of atomic environment ID that are in the current self.environment_list but not in visited_environments
         """
+        #return list([]) #Set if you want to only test refinements
         return list(set(self.atomic_environment_list).difference(visited_environments))
 
     def compute_cna(self) -> list[str]:
@@ -107,7 +108,6 @@ class AtomicEnvironment:
         """
         # Compute CNA ID
         list_hash = cna(neighbors_list)
-
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
         )
@@ -121,7 +121,6 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
         # Compute graph topo for all non cristalline atoms
-
         list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
