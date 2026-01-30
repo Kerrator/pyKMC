@@ -68,7 +68,6 @@ class Refinement:
         total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
         e_thr = self.get_energy_thr_refine(df_reference_events, supposed_ktot)
         self.loggers.info("log", "\t :=> Refining {} events".format(total_refinements))
-        #count = 0
 
         all_futures = []
         future_context = {}  # mapping future -> contexte
@@ -78,8 +77,8 @@ class Refinement:
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["event_id"]
             )
-
-            for at_idx in atoms_refine_idx: #This sends the index of the atom to be set as the center atom
+            
+            for at_idx in atoms_refine_idx:
                 ###=>refine single generic
                 futures = self.refine_single(
                     at_idx, dfevent, idx, total_refinements,  future_context, total_energy, e_thr
@@ -88,11 +87,9 @@ class Refinement:
                     all_futures.extend(futures)
                 else:
                     all_futures.append(futures)
-                #self.results += result_single
-                #count = len(all_futures)
 
-        #Get results and update values :
-        for i, f in enumerate(all_futures):
+        #Get results and update values : 
+        for f in all_futures:
             #get results
             res = f.result()
             job_queue_len = self.manager.job_queue.qsize()
@@ -104,24 +101,30 @@ class Refinement:
             _ = future_context.pop(f)
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
-            #update result
-            if res.is_ok() :
+            #update result 
+            if res.is_ok() : 
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().dE_forward = res.ok_value().E_saddle #- total_energy
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
-                res = self.check_refinement_energy(res,
-                            abs(
-                                res.ok_value().dE_forward
-                                - ctx["reference_energy_barrier"] 
-                            ),
-                            self.config.eventsearch.refined_energy_thr,
-                        )
-                print('Refinement number', i)
+                if self.config.control.active_volume==True:
+                    res.ok_value().dE_forward = res.ok_value().E_saddle
+                    res = self.check_refinement_energy(res,
+                                                       abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
+                                                       self.config.eventsearch.refined_energy_thr,
+                                                       )
+                else:
+                    res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
+                    res = self.check_refinement_energy(res,
+                                                       abs(
+                                                           res.ok_value().dE_forward
+                                                           - ctx["reference_energy_barrier"]
+                                                       ),
+                                                       self.config.eventsearch.refined_energy_thr,
+                                                       )
             self.results.append(res)
 
-        #Need to compare activation energies between each other
+
 
 
     def refine_single(
@@ -130,13 +133,13 @@ class Refinement:
         dfevent: pd.Series,
         cat_idx: int,
         total_refinements: int,
-        future_context: dict,
-        total_energy: float,
+        future_context: dict, 
+        total_energy: float, 
         e_thr: float
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
 
-        If a reference event has symmetries, it also refines those symmetric events.
+        If a reference event has symmetries, it also refine those symmetric events.
 
         Parameters
         ----------
@@ -158,7 +161,7 @@ class Refinement:
 
         """
 
-
+        
 
         ##=>PSR between generic event and at_idx environments
         result_psr = PointSetRegistration(
@@ -210,41 +213,48 @@ class Refinement:
                 new_positions_final = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
 
-
                 #move to saddle point
-                if dfevent.at["energy_barrier"] > e_thr : #dont refine
+                if self.config.control.active_volume==True:
+                    if dfevent.at["energy_barrier"] > e_thr:  # dont refine
+                        f = concurrent.futures.Future()
+                        f.set_result(Ok(EventRefinementOutput(
+                            central_atom_index=at_idx,
+                            saddle_positions=self.system.positions,
+                            E_saddle=dfevent["energy_barrier"],
+                            refined='F'
+                        )))
+                    else:
+                        # add a job to manager queue
+                        f = self.manager.partn_refine(self.config, at_idx,
+                                                      self.system.positions.copy(),
+                                                      self.system.cell,
+                                                      self.system.types,
+                                                      neighbors,
+                                                      new_positions_saddle)  # send copy not reference !
+                    futures.append(f)
+                else:
                     self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-                    f = concurrent.futures.Future()
-                    f.set_result(Ok(EventRefinementOutput(
-                        central_atom_index=at_idx,
-                        saddle_positions=self.system.positions.copy(),
-                        E_saddle=dfevent["energy_barrier"] #+total_energy
-                    )))
-                else :
-                    #
-                    # #add a job to manager queue
+                    if dfevent.at["energy_barrier"] > e_thr : #dont refine
+                        f = concurrent.futures.Future()
+                        f.set_result(Ok(EventRefinementOutput(
+                            central_atom_index=at_idx,
+                            saddle_positions=self.system.positions,
+                            E_saddle=total_energy+dfevent["energy_barrier"],
+                            refined='F'
+                        )))
+                    else :
 
-                    #NEW PLAN:
-                        #SEND CURRENT POSITIONS, THEN THE POSITIONS WILL BE UPDATED IN PARTN WITH THE NEW SADDLE POSITIONS
-
-                    #Checking time for refinement
-
-                    #self.manager.reset(self.config, self.system)
-
-                    f = self.manager.partn_refine(self.config,
-                                                  at_idx,
-                                                  self.system.cell.copy(),
-                                                  self.system.positions.copy(),
-                                                  new_positions_saddle.copy(),
-                                                  neighbors.copy()) #send copy not reference !
-
-                futures.append(f)
+                        #add a job to manager queue
+                        f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
+                    futures.append(f)
 
 
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
                 #Update Result : 
                 #        #Apply psr to generic final positions
-
+                #final_positions = dfevent.at["final_positions"] + new_displacement
+                #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
+                #self.system.update_positions(new_positions, atom_idx=neighbors )
                 future_context[f] = {
                     #"min2_positions": self.system.positions.copy()[neighbors],
                     "min2_positions": new_positions_final,
@@ -335,21 +345,21 @@ class Refinement:
             n_atoms = len(
                 self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
             ) * len(dfevent["sym_matrix"])
-            total += n_atoms
+            total += n_atoms 
             supposed_ktot += dfevent.at["k"]*n_atoms
         return total, supposed_ktot
-
-    def get_energy_thr_refine(self, df_reference_events, supposed_ktot) :
+    
+    def get_energy_thr_refine(self, df_reference_events, supposed_ktot) : 
         tol = self.config.control.refine_thr
         k_thr = supposed_ktot*tol
-
+        
         #get energy corresponding to the first k value just under k_thr
         mask = df_reference_events["k"] <  k_thr
         if mask.any():
             e_value = df_reference_events.loc[mask].sort_values("k").iloc[-1]["energy_barrier"]
         else: #refine no event
-            e_value = 0.0
-        e_value += 0.1 #to be sure want using condition
+            e_value = 0.0 
+        e_value += 0.1 #to be sure want using condition 
         return e_value
 
     def get_successes_results(self) -> list[EventRefinementOutput]:

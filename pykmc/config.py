@@ -80,16 +80,20 @@ class ControlConfig(BaseModel):
         default=1, description="Controls the level of detail in the simulation output."
     )
 
-    refine_thr: Optional[int] = Field(
+    refine_thr: Optional[float] = Field(
         default=0.99,
         description="Event constributing to this percent of ktot are refined."
     )
 
-    active_volumes: Optional[bool] = Field(
-        default=True,
-        description="If enabled, active volumes are built for event searches and refinement"
+    basin: Optional[bool] = Field(
+        default=False,
+        description="Basin mode"
     )
 
+    active_volume: Optional[bool] = Field(
+        default=False,
+        description="Incorporate AV's into simulations, recommended for large systems"
+    )
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
@@ -150,13 +154,8 @@ class EventSearchConfig(BaseModel):
     )
 
     delr_thr: float = Field(
-        default=0.1,
+        default=0.5,
         description="delr threshold between one minima and the intial configuration to consider the event valid.",
-    )
-
-    refined_energy_difference_thr: float = Field(
-        default=0.05,
-        description="Energy threshold for what is defined as a unique event during refinement. If the difference between other values in the active table is less than this, it's disregarded"
     )
 
     
@@ -206,12 +205,12 @@ class PartnConfig(BaseModel):
     )
 
     #Lanczos 
-    lanczos_min_size: float = Field(
+    lanczos_min_size: int = Field(
         default=10, 
         description="Enforce Lanczos to always do at least this number of iterations."
     )
 
-    lanczos_max_size: float = Field(
+    lanczos_max_size: int = Field(
         default=20, 
         description="Maximum number of Lanczos iterations."
     )
@@ -255,7 +254,7 @@ class PartnConfig(BaseModel):
     )
 
     nnewchance: int = Field(
-        default=2,  #This should be increased
+        default=0, 
         description="Number of times a research is allowed to cross a convex region (without counting the starting convex region)."
     )
 
@@ -277,7 +276,7 @@ class PartnConfig(BaseModel):
     )
 
     nevalf_max: int = Field(
-        default=100000,
+        default=9999, 
         description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
     )
 
@@ -300,16 +299,6 @@ class PartnConfig(BaseModel):
     path_artnso: str = Field(
         default=...,
         description="Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'",
-    )
-
-    r_act: float = Field(
-        default=6,
-        description="Radius of active volume in Angstrom",
-    )
-
-    r_mov: float = Field(
-        default=4,
-        description="Radius within the active volume that contains movable atoms in Angstrom",
     )
 
 #################
@@ -343,12 +332,12 @@ class PartnConfig(BaseModel):
     )
 
     #Lanczos
-    r_lanczos_min_size: float = Field(
-        default=5,
+    r_lanczos_min_size: int = Field(
+        default=20, 
         description="Refinement: Enforce Lanczos to always do at least this number of iterations."
     )
 
-    r_lanczos_max_size: float = Field(
+    r_lanczos_max_size: int = Field(
         default=50, 
         description="Refinement: Maximum number of Lanczos iterations."
     )
@@ -462,6 +451,18 @@ class PSRConfig(BaseModel):
         description="Maximum value of the matching score of the algorithm used.",
     )
 
+class ActiveVolume(BaseModel):
+    """ Active Volume Parameters"""
+
+    r_act: float = Field(
+        default=6.0,
+        description="Radius of entire active volume, spherical"
+    )
+
+    r_mov: float = Field(
+        default=4.0,
+        description="Radius of movable atoms in active volume, spherical"
+    )
 
 class LammpsConfig(BaseModel):
     """Lammps parameters."""
@@ -489,6 +490,13 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+class BasinConfig(BaseModel):
+    """Basin parameters"""
+
+    energy_thr: float = Field(
+    default = 0.0,
+    description="Energy threshold"    
+    )
 
 class Config(BaseModel):
     """Config for the KMC simulations."""
@@ -526,6 +534,10 @@ class Config(BaseModel):
     )
 
     ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
+
+    basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
+
+    activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:

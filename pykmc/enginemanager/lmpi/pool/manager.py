@@ -18,11 +18,12 @@ class Job:
 class Manager:
     """A class to manage a pool of Lammps sessions."""
 
-    def __init__(self, sessions: list[MpiApiSession]) -> None:
+    def __init__(self, sessions: list[MpiApiSession], global_session: MpiApiSession = None) -> None:
         """
         Initialize the LammpsPoolManager with a specified number of sessions.
         """
         self.sessions = sessions
+        self.global_session = global_session
         self.job_queue: queue.Queue[Job] = queue.Queue()
         #Thread that dispatch job to workers
         self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True) 
@@ -45,19 +46,10 @@ class Manager:
             session.initialize_parameters() 
             session.initialize_system(system)
             session.initialize_potential(config)
-            session.command("plugin load {}".format(config.partn.path_artnso))
-            print('Plugin loaded')
-
-    def reset(self, config, system):
-        """
-        Reset system for next kmc step. Essentially a repeat of initialize
-        """
-        for session in self.sessions:
-            session.clear()
-            session.initialize_parameters()
-            session.initialize_system(system)
-            session.initialize_potential(config)
-
+        if self.global_session is not None : 
+            self.global_initialize_parameters() 
+            self.global_initialize_system(system)
+            self.global_initialize_potential(config)
 
 
     def _dispatcher(self) : 
@@ -68,10 +60,10 @@ class Manager:
                 if session is not None : 
                     #print(f"[PoolManager] Found available session: {session.session_id}")
                     threading.Thread(target=self._run_job, args=(session, job), daemon=True).start()
-                    threading.Event().wait(0.05) # Wait a bit to allow the job to be processed
+                    threading.Event().wait(0.1) # Wait a bit to allow the job to be processed
                     break #job is submited
                 else : 
-                    threading.Event().wait(0.05)
+                    threading.Event().wait(0.1)
 
 
     def _get_available_engine(self) : 
@@ -106,28 +98,34 @@ class Manager:
         #print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
         self.job_queue.put(job)
         return future
+    
+    # API 
 
     def minimize(self, config ) : 
         future = self.submit_job("minimize", {"config" : config})
         return future
     
     def minimize_with_results(self, config, positions=None, cell=None) :
-        future = self.submit_job("minimize_with_results", {"config": config, "positions": positions, "cell" : cell})
+        future = self.submit_job("minimize_with_results", {"config": config, "positions": positions, "cell":cell})
         return future
     
-    def get_potential_energy(self) : 
-        future = self.submit_job("get_potential_energy")
+    def get_potential_energy(self, positions=None) : 
+        future = self.submit_job("get_potential_energy", {"positions": positions})
+        return future
+    
+    def get_total_energy(self, positions=None) : 
+        future = self.submit_job("get_total_energy", {"positions": positions})
         return future
 
-    def partn_search(self, config, central_atom: list[int], cell, positions) -> list[Future] :
+    def partn_search(self, config, central_atom: list[int], positions=None, cell=None, type=None) -> list[Future] :
         futures = []
         for atom in central_atom :
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "cell": cell, "positions": positions})
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "type":type})
             futures.append(f) 
         return futures
 
-    def partn_refine(self, config, central_atom: int, cell, positions, saddle_positions, saddle_idx) -> list[Future] :
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "cell": cell, "positions": positions, "saddle_positions": saddle_positions, "saddle_idx": saddle_idx})
+    def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
         return future
 
     def close_all(self):
@@ -135,5 +133,26 @@ class Manager:
         Close all sessions and their underlying engines.
         """
         #print("[PoolManager] Closing all sessions.")
+        if self.global_session is not None : 
+            self.global_session.close(wait_status=False)
         for session in self.sessions:
-            session.close()    
+            session.close(wait_status=True)   
+        
+
+    def __getattr__(self, name:str) : 
+        """Check if method start with global_, if yes, then return global_session.method""" 
+        if name.startswith('global_'):
+            method_name = name[7:]  # remove prefixe 'global_'
+            if not self.global_session:
+                raise RuntimeError("Global session is not available")
+            
+            def global_method(*args, **kwargs):
+                method = getattr(self.global_session, method_name)
+                return method(*args, **kwargs)
+            
+            return global_method
+        
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+
+    

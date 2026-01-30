@@ -1,21 +1,22 @@
 [Control] 
-initial_config = /root/pyKMC/examples/Ni_fcc_2047at_monovacancy/initial_config.xyz 
+initial_config = ./initial_config_frenkel_pair.xyz
 n_steps = 100
 engine = lammps
-n_sessions = 7
-#engine_use_rank_0 = True
 verbosity = 2
-#reference_table = reference_table.pickle
-#visited_environments =visited_environments.pickle
+n_sessions = 3
+engine_use_rank_0 = False
+active_volume=True
 
 [Lammps] 
 pair_style = eam/alloy 
 pair_coeff = * * ./Ni_v6_2.0_LKBeland2016.eam Ni
+min_style = cg 
+minimize = 1e-10 1e-12 10000 10000
 
 [AtomicEnvironment] 
 style = cna/graph
-rnei = 3.01
-rcut = 6.0
+rnei = 3.0
+rcut = 9
 
 [EventSearch] 
 style = partn
@@ -24,13 +25,23 @@ emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+path_artnso = /home/lpmsmyth/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
-k0 = 1
+k0 = 10.0
 T = 300.0
 
 [PSR] 
 style = ira 
+matching_score_thr = 0.4
+
 [IRA]
+kmax_factor = 2.0
+
+[BASIN]
+
+[ActiveVolume]
+r_act=18
+r_mov=13
+
