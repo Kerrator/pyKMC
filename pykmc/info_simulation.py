@@ -10,9 +10,10 @@ from .result import (
     ReferenceValidEventsInfo,
     RefinementsInfo,
     EventRefinementOutput,
+    EventsInfo,
 )
 from typing import TYPE_CHECKING
-
+import numpy as np
 if TYPE_CHECKING:
     from .kmc import KMC
 import pandas as pd
@@ -182,3 +183,63 @@ def info_refinements(
                     n_fails["event not found"] += 1
 
     return RefinementsInfo(n_attempts, n_successes, n_fails)
+
+
+def info_active_events(system_types, reference_table, active_table) -> EventsInfo: 
+    """Construct dataclass with active events information"""
+
+    central_atom = active_table.table['atom_index'].to_numpy(dtype=int, copy=True)
+    types = np.array(system_types)[central_atom] 
+    reference_events = active_table.table['num_reference_event'].to_numpy(copy=True)
+    initial_topologies = reference_table.table['event_id'][reference_events].to_numpy(copy=True)
+    dE_forward = active_table.table['energy_barrier'].to_numpy(copy=True)
+    k = active_table.table["k"].to_numpy(copy=True)
+    dra_i = reference_table.table['dra'][reference_events].to_numpy(copy=True)
+    backward_events = reference_table.table['idx_backward'][reference_events].to_numpy(copy=True)
+    dE_backward = reference_table.table['energy_barrier'][backward_events].to_numpy(copy=True)
+    dE_asym = np.abs(dE_forward-dE_backward)
+    dra_f = reference_table.table['dra'][backward_events].to_numpy(copy=True)
+    refined = active_table.table['refined'].to_numpy(copy=True)
+
+    return EventsInfo(types=types, 
+                      central_atom=central_atom, 
+                      initial_topologies=initial_topologies, 
+                      reference_events=reference_events,
+                      dE_forward=dE_forward, 
+                      dE_backward=dE_backward, 
+                      dE_asym=dE_asym, 
+                      k=k, 
+                      dra_i=dra_i, 
+                      dra_f=dra_f, 
+                      refined=refined)
+
+def info_basin_events(system_types, reference_table, connectivity_table, exit_state) -> EventsInfo: 
+    """Construct dataclass with exit basin events"""
+
+    #Only exit state 
+    data = connectivity_table.df[connectivity_table.df['transient'] == False]
+    idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
+
+    central_atom = data['central_atom'].to_numpy(dtype=int, copy=True)
+    types = np.array(system_types)[central_atom] 
+    reference_events = data['event_connexion'].to_numpy(copy=True)
+    dE_forward = data['dE_forward'].to_numpy(copy=True)
+    k = data["k_forward"].to_numpy(copy=True)
+    dra_i = reference_table.table['dra'][reference_events].to_numpy(copy=True)
+    backward_events = reference_table.table['idx_backward'][reference_events].to_numpy(copy=True)
+    dE_backward = reference_table.table['energy_barrier'][backward_events].to_numpy(copy=True)
+    dE_asym = np.abs(dE_forward-dE_backward)
+    dra_f = reference_table.table['dra'][backward_events].to_numpy(copy=True)
+    refined = len(central_atom)*['T']
+
+    return idx_selected_event, EventsInfo(types=types, 
+                      central_atom=central_atom, 
+                      initial_topologies=None, 
+                      reference_events=reference_events, 
+                      dE_forward=dE_forward, 
+                      dE_backward=dE_backward, 
+                      dE_asym=dE_asym, 
+                      k=k, 
+                      dra_i = dra_i, 
+                      dra_f = dra_f, 
+                      refined=refined)    

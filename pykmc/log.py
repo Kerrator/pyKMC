@@ -261,6 +261,12 @@ LOGGING_CONFIG = {
             "level": "DEBUG",
             "filename": "pykmc.info",
         },
+        "events_output":{
+            "class": "logging.FileHandler",
+            "formatter": "file_formatter", 
+            "level": "DEBUG", 
+            "filename" : "pykmc.events",
+        },
         "progress_bar_handler": {
             "class": "pykmc.log.ProgressHandler",
             "formatter": "default_formatter",
@@ -277,6 +283,7 @@ LOGGING_CONFIG = {
             "handlers": ["general_output_file"],
         },
         "info": {"handlers": ["step_informations"]},
+        "events" : {"handlers": ["events_output"]},
         "progress": {
             #"handlers": ["log_file", "progress_bar_handler"],
             "handlers": ["progress_bar_handler"],
@@ -468,6 +475,45 @@ class LogKMC(LogManager):
         ]
         self.info(logger_name, " ".join(formatted_values))
 
+    def events_file_header(self, logger_name:str) -> None : 
+        """Write header of the events file
+
+        Parameters
+        ----------
+        logger_name: str
+            The logger name.
+        """
+        self.info(logger_name, "#Actif Events Informations File")
+        self.info(logger_name, "\t #Type: The central atom's type.")
+        self.info(logger_name, "\t #Central Atom: Index of the central atom of the event.")
+        self.info(logger_name, "\t #Ref Event: Index of reference event in the reference table.")
+        self.info(logger_name, "\t #dE forward: Energy barrier of the forward reaction (eV).")
+        self.info(logger_name, "\t #dE backward: Energy barrier of the backward reaction (eV).")
+        self.info(logger_name, "\t #dE asym: |dE forward - dE backward| (eV).")
+        self.info(logger_name, "\t #k: rate of the forward reaction (ps-1)")
+        self.info(logger_name, "\t #dra_i: displacement between the initial positions and the saddle positions.")
+        self.info(logger_name, "\t #dra_i: displacement between the final positions and the saddle positions.")
+        self.info(logger_name, "\t #Refined: - T : The event has been refined.")
+        self.info(logger_name, "\t #         - F : The event has not been refined.")
+        self.new_line(logger_name)
+
+    def events_file_step_first_line(self, logger_name:str, step: int) -> None : 
+        """Write the first line with step informations 
+
+        Parameters
+        ----------
+        logger_name: str
+            The logger name.
+        """
+        self.info(logger_name, "#Step: {}".format(step))
+
+    def events_applicable_info_line(self, logger_name:str, selected_event:int) -> None : 
+        self.info(logger_name, "========== Applicable Events (Selected={}) ==========".format(selected_event))
+
+    def events_basin_info_line(self, logger_name:str, selected_event: int) -> None : 
+
+        self.info(logger_name, "========== Basin Exit Events (Selected={}) ==========".format(selected_event))
+
     def new_line(self, logger_name: str) -> None:
         """Write a new line in the logger.
 
@@ -503,7 +549,6 @@ class LogKMC(LogManager):
         # Compute percentage
         percent = (current_step / total_steps) * 100
 
-        static_text_color = Colors.WHITE.value
         # Dynamical bar colors
         bar_fill_color = Colors.WHITE.value
 
@@ -519,9 +564,9 @@ class LogKMC(LogManager):
         # all bar
         bar_segment = "#" * filled_length + "-" * (bar_length - filled_length)
         progress_message = (
-            f"{static_text_color}\r\t Progression: "
+            f"\r\t Progression: "
             f"{bar_fill_color}[{bar_segment}]{Colors.RESET.value}"
-            f"{static_text_color} {percent:.1f}% "
+            f" {percent:.1f}% "
         )
 
         # Envoi du message via le logger

@@ -72,8 +72,8 @@ class ControlConfig(BaseModel):
     )
 
     engine_use_rank_0: Optional[bool] = Field(
-        default=True, 
-        description="If use mpi rank 0 or not."
+        default=False,
+        description="Deprecated : If use mpi rank 0 or not."
     )
 
     verbosity: Optional[int] = Field(
@@ -495,7 +495,7 @@ class BasinConfig(BaseModel):
 
     energy_thr: float = Field(
     default = 0.0,
-    description="Energy threshold"    
+    description="Energy threshold"
     )
 
 class Config(BaseModel):

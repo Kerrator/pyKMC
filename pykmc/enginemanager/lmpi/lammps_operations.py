@@ -68,23 +68,23 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
-def minimize(engine, config, positions=None) : 
-    if positions is not None : 
+def minimize(engine, config, positions=None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
-def get_total_energy(engine, positions=None) : 
-    if positions is not None : 
+def get_total_energy(engine, positions=None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     #Get total energy
     engine.command("run 0")
     result = engine.lmp.get_thermo("etotal")
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
         return result
 
-def get_potential_energy(engine, positions = None) : 
-    if positions is not None : 
+def get_potential_energy(engine, positions = None) :
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
     #get potential energy 
     engine.command("compute c1 all pe")
@@ -107,19 +107,13 @@ def set_positions(engine, positions) :
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
-def minimize_with_results(engine, config, positions=None, cell=None) :
+def minimize_with_results(engine, config, positions=None) :
     """ 
     Minimize and return the minimized positions and the total energy.
     """
-    if cell and positions is not None:
-        #AV's being used, need to reset system
-        reset(engine, config, cell)
-        redefine_atoms(engine, positions)
-    else:
-        #AV not being used, can just reset positions
-        if positions is not None :
-            set_positions(engine=engine, positions=positions)
-    minimize(engine, config)
+    if positions is not None : 
+        set_positions(engine=engine, positions=positions)
+    minimize(engine, config) 
     new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
     if engine.rank == 0 : 
@@ -127,10 +121,10 @@ def minimize_with_results(engine, config, positions=None, cell=None) :
 
 
 def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
-    # original_stdout_fd = os.dup(1)
-    # devnull = os.open(os.devnull, os.O_WRONLY)
-    # # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
-    # os.dup2(devnull, 1)
+    original_stdout_fd = os.dup(1)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
+    os.dup2(devnull, 1)
 
     print('Central Atom', central_atom_idx)
     #Check to see if system is in AV mode:
@@ -175,7 +169,6 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     if config.partn.push_mode == "rad":
         artn.set("push_dist_thr", config.partn.push_dist_thr)
     artn.set("push_step_size", config.partn.push_step_size)
-    print('Lammps Push id', central_lammps_id)
     artn.set("push_ids", central_lammps_id)
     artn.set("ninit", config.partn.ninit)
 
@@ -205,13 +198,14 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # RUN
     engine.command("minimize 1e-6 1e-8 10000 10000")
     
-    # # Restore original stdout (fd 1)
-    # os.dup2(original_stdout_fd, 1)
-    # os.close(original_stdout_fd)
-    # os.close(devnull)
+    # Restore original stdout (fd 1)
+    os.dup2(original_stdout_fd, 1)
+    os.close(original_stdout_fd)
+    os.close(devnull)
+
 
     # EXTRACT DATA
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
 
         err = artn.get_error()
         if err[0]==0:
@@ -359,7 +353,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     if engine.rank == 0 : 
         err = artn.get_error()
         if err[0]==0:
-            print("no error")
             E_sad = artn.extract("etot_sad")
             E_result=E_sad-E_init #If AV's are on, will return the activation energy of the event. If not, jsut saddle energy
             saddlepositions = artn.extract("tau_sad")
@@ -388,4 +381,4 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                     type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
                 )
             )
-    
+

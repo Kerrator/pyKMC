@@ -59,10 +59,7 @@ class Reconstruction:
         saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=0.15, cell = cell)
         tmp_positions[neighbors] = saddle_toward_min1_pos 
         #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        if self.config.control.active_volume==True:
-            min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, cell=cell)
-        else:
-            min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
+        min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
 #        min1_pos, _ = future.result()
 
         #compaire min1_pos with system current positions
@@ -81,10 +78,7 @@ class Reconstruction:
             saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=0.15, cell = cell)
             tmp_positions[neighbors] = saddle_toward_min2_pos
             #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-            if self.config.control.active_volume == True:
-                min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, cell=cell)
-            else:
-                min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
+            min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
 #            min2_pos, _ = future.result()
 
             #Compare min2pos with expected final_positions

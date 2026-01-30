@@ -201,11 +201,11 @@ Each time an event is added to either the reference or the active event table, a
 Currently, the only implemented style is : `style = constant`. This method computes the rate constant using the following equation. 
 
 $$
-k = k_{0} \frac{k_{b}T}{h}e^{-\frac{dE_{forward}}{{k_{b}T}}}
+k = k_{0} e^{-\frac{dE_{forward}}{{k_{b}T}}}
 $$
 Where:
 - $k$ is the rate constant,
-- $k_{0}$ is a user-defined pre-exponential factor,
+- $k_{0}$ is a user-defined pre-exponential factor (typically $10^{13}s^{-1}=10ps^{-1}$),
 - $T$ is the system temperature, defined by the user.
 - $dE_{forward}$ is the forward energy barrier,
 - $k_{b}$​ is the Boltzmann constant,
@@ -218,7 +218,7 @@ Typically, it will gives :
 ```INI 
 [RateConstant]
 style = constant 
-k0 = 1e12 
+k0 = 10
 T = 300 
 ``` 
 

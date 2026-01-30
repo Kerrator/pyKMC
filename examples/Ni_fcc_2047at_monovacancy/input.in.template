@@ -1,11 +1,10 @@
 [Control] 
-initial_config = ./initial_config_frenkel_pair.xyz
+initial_config = ./initial_config.xyz 
 n_steps = 100
 engine = lammps
 verbosity = 2
-n_sessions = 3
+n_sessions = 7
 engine_use_rank_0 = False
-active_volume=True
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -16,7 +15,7 @@ minimize = 1e-10 1e-12 10000 10000
 [AtomicEnvironment] 
 style = cna/graph
 rnei = 3.0
-rcut = 9
+rcut = 6.5
 
 [EventSearch] 
 style = partn
@@ -25,7 +24,7 @@ emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
-path_artnso = /home/lpmsmyth/artn-plugin/lib/libartn-lmp.so
+path_artnso = /your/path/to/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
@@ -40,8 +39,3 @@ matching_score_thr = 0.4
 kmax_factor = 2.0
 
 [BASIN]
-
-[ActiveVolume]
-r_act=18
-r_mov=13
-

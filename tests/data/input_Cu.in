@@ -1,37 +1,38 @@
 [Control] 
 initial_config = ./initial_config.xyz 
-n_steps = 100
+n_steps = 50
 engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
+reference_table = reference_table_fake.pickle 
+visited_environments = visited_environments.pickle
+reference_table_output = a.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
-pair_coeff = * * ./Ni_v6_2.0_LKBeland2016.eam Ni
+pair_coeff = * * ./tests/data/Cu01.eam.alloy Cu
 min_style = cg 
 minimize = 1e-10 1e-12 10000 10000
 
 [AtomicEnvironment] 
 style = cna/graph
-rnei = 3.0
+rnei = 2.9
 rcut = 6.5
-#neighbors_add = 1
 
 [EventSearch] 
 style = partn
 nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
-nnewchance = 3
-forc_thr = 0.01
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
+path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+forc_thr = 0.001
 
 [RateConstant] 
 style = constant
-k0 = 10.0
+k0 = 1.0
 T = 300.0
 
 [PSR] 
@@ -42,3 +43,4 @@ matching_score_thr = 0.4
 kmax_factor = 2.0
 
 [BASIN]
+energy_thr = 0.5

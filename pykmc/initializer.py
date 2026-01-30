@@ -53,6 +53,7 @@ class Initializer:
         self.kmc.loggers.title("log")
         self.kmc.loggers.write_parameters("log", self.kmc.config)
         self.kmc.loggers.output_file_header("output")
+        self.kmc.loggers.events_file_header("events")
 
     def initialize_system(self) -> None:
         """Read and initialize the system from the intial configuration file."""

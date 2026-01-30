@@ -1,8 +1,12 @@
 [Control] 
-initial_config = ./initial_config.xyz 
-n_steps = 10
+initial_config = ./test.xyz
+n_steps = 1
 engine = lammps
 verbosity = 2
+n_sessions = 7
+engine_use_rank_0 = False
+#reference_table = ./reference_table.pickle 
+#visited_environments = ./visited_environments.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -23,13 +27,15 @@ emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
-k0 = 1e12
+k0 = 10
 T = 300.0
 
 [PSR] 
 style = ira 
 [IRA]
+
+[Basin]
