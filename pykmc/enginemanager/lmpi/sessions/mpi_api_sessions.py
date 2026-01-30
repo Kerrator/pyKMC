@@ -238,7 +238,7 @@ class MpiApiSession :
         finally : 
             self._is_busy = False
 
-    @session_locked
+    #@session_locked
     def partn_refine(self, config, central_atom_idx, positions = None, cell=None, type=None, saddle_idx=None, saddle_positions=None) :
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")

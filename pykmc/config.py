@@ -81,7 +81,7 @@ class ControlConfig(BaseModel):
     )
 
     refine_thr: Optional[float] = Field(
-        default=0.99,
+        default=0.9999,
         description="Event constributing to this percent of ktot are refined."
     )
 

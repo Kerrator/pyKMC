@@ -279,7 +279,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     #Set positions
     if config.control.active_volume==True:
-        print("Test 1")
         E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, type, saddle_idx, saddle_positions)
     else:
         central_lammps_id=[central_atom_idx+1]
