@@ -566,6 +566,11 @@ class KMC:
         """Minimize the system and update its positions."""
         self.loggers.info("log", ":=> Minimizing the system")
         new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
+        #TEST 
+        #future = self.manager.minimize_with_results(self.config, positions=positions)
+        #new_positions, total_energy = future.result()
+        #np.savetxt('before_min.dat', self.system.positions)
+        #np.savetxt('after_min.dat', new_positions)
         self.system.update_positions(new_positions)
         self.total_energy = total_energy
         self.potential_energy = self.manager.global_get_potential_energy()

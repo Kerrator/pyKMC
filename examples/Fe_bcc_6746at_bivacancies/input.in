@@ -5,7 +5,7 @@ engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-
+basin = True
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -21,12 +21,13 @@ neighbors_add = 1
 
 [EventSearch] 
 style = partn
-nsearch = 10
+nsearch = 50
 emax_event = 5.0
 emin_event = 0.0
+nnew_chance = 3
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
@@ -41,3 +42,4 @@ matching_score_thr = 0.3
 kmax_factor = 2.0
 
 [Basin]
+energy_thr = 0.6

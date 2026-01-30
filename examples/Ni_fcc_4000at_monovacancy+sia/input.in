@@ -24,9 +24,10 @@ nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
 nnewchance = 3
+forc_thr = 0.01
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
