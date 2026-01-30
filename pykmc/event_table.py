@@ -642,6 +642,7 @@ class ActiveEventTable:
                 pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
                 delr = compute_delr(pos_ref, pos_comp, cell )
                 if delr < self.config.psr.matching_score_thr :
+                    #print('Removing event with delr',delr)
                     duplicates.append(jdx)
         #remove all duplicates
         self.remove(duplicates)

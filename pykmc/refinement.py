@@ -315,6 +315,7 @@ class Refinement:
 
         """
         if energy_mismatch > refined_energy_thr:
+            print("ENERGY MISMATCH")
             return Err(
                 ErrorInfo(
                     type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER,

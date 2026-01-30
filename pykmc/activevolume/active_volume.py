@@ -43,6 +43,8 @@ def define_AV(config, central_atom_idx: int, positions, cell):
 
     av_positions = positions[av_idx]
 
+    #print(len(av_idx)," atoms in AV,", len(av_idx)-len(buffer_idx), "movable atoms")
+
     return av_positions, av_idx, buffer_idx
 
 def make_AV(engine, av_indices, buffer_indices):
@@ -146,8 +148,14 @@ def partn_refine_AV(engine, config, central_atom_idx:int, positions, cell, type,
 
     redefine_atoms(engine, av_positions, av_type)
     make_AV(engine, av_idx, buffer_idx)
+    E_before = get_potential_energy(engine)
+
+    engine.command("min_style {}".format(config.lammps.min_style))
+    engine.command("minimize 1.0e-6 1.0e-8 10 10")
 
     E_init=get_potential_energy(engine)
+
+    #print("Before minimization: ", E_before, "After minimization: ", E_init)
 
     core_idx=[]
     core_ids=[]
