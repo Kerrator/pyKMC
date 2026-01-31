@@ -13,9 +13,9 @@ from ..config import Config
 def define_AV(config, central_atom_idx: int, positions, cell):
     # Defining parameters
     # Radius of whole active volume in Ang
-    r_a = config.activevolume.r_act  # Ensure AV is larger than topology analysis
+    r_a = config.activevolume.ract  # Ensure AV is larger than topology analysis
     # Defines the radius of atoms that can move.
-    r_m = config.activevolume.r_mov
+    r_m = config.activevolume.rmov
 
     # NEED TO ADD WARNING IF R_A<R_M
 
@@ -148,14 +148,16 @@ def partn_refine_AV(engine, config, central_atom_idx:int, positions, cell, type,
 
     redefine_atoms(engine, av_positions, av_type)
     make_AV(engine, av_idx, buffer_idx)
-    E_before = get_potential_energy(engine)
 
-    engine.command("min_style {}".format(config.lammps.min_style))
-    engine.command("minimize 1.0e-6 1.0e-8 10 10")
-
-    E_init=get_potential_energy(engine)
-
-    #print("Before minimization: ", E_before, "After minimization: ", E_init)
+    if config.activevolume.AV_debug == True:
+        E_before = get_potential_energy(engine)
+        engine.command("min_style {}".format(config.lammps.min_style))
+        engine.command("minimize 1.0e-6 1.0e-8 10 10")
+        E_init=get_potential_energy(engine)
+        print("Before minimization: ", E_before, "After minimization: ", E_init)
+        print("% Difference:", abs((E_before - E_init)/E_init*100),"%")
+    else:
+        E_init=get_potential_energy(engine)
 
     core_idx=[]
     core_ids=[]
