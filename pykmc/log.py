@@ -314,6 +314,7 @@ class LogKMC(LogManager):
         # apply verbosity option modifying logger and handlers level
         self._apply_verbosity_level()
 
+    #TODO : set level should be more robust, especially for the progress bar
     def _apply_verbosity_level(self) -> None:
         """Modify loggers and their handlers levels.
 
@@ -335,10 +336,10 @@ class LogKMC(LogManager):
         for logger_name in self._logger:
             logger = self._get_active_logger(logger_name)
             logger.setLevel(level)
-            if logger_name == "progress":  # To pass debug level for progress bar
+            if logger_name == "progress" and self._verbosity >= 2 :  # To pass debug level for progress bar
                 logger.setLevel(logging.DEBUG)
             for handler in logger.handlers:
-                if logger_name == "progress" and isinstance(handler, ProgressHandler):
+                if logger_name == "progress" and isinstance(handler, ProgressHandler) and self._verbosity >= 2 :
                     handler.setLevel(
                         logging.DEBUG
                     )  # always display bar in stdout bug only debug level for log_file

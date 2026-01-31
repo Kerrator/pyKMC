@@ -49,7 +49,7 @@ class Initializer:
 
     def initialize_loggers(self) -> None:
         """Initialize the loggers and create their files."""
-        self.kmc.loggers = LogKMC(LOGGING_CONFIG)
+        self.kmc.loggers = LogKMC(LOGGING_CONFIG, verbosity=self.kmc.config.control.verbosity)
         self.kmc.loggers.title("log")
         self.kmc.loggers.write_parameters("log", self.kmc.config)
         self.kmc.loggers.output_file_header("output")
