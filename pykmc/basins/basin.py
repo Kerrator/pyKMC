@@ -332,7 +332,7 @@ class BasinsGenericEvents() :
 
                 if self.config.control.active_volume==True:
                     # add a job to manager queue
-                    f = self.manager.partn_refine(self.config, row["central_atom"],
+                    future2 = self.manager.partn_refine(self.config, row["central_atom"],
                                                   system.positions.copy(),
                                                   system.cell,
                                                   system.types,
@@ -360,8 +360,10 @@ class BasinsGenericEvents() :
             if not result_sad.is_ok() : 
                 return result_sad
             E_sad = result_sad.ok_value().E_saddle
-
-            dE = E_sad - E_min
+            if self.config.control.active_volume==True:
+                dE = E_sad
+            else:
+                dE = E_sad - E_min
             k = compute_rate_Eyring(dE, self.config)
 
             #also save saddle positions refined 
@@ -371,6 +373,7 @@ class BasinsGenericEvents() :
             self.absorbing_saddle_positions[idx_state] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
+            print('Basin refined dE', dE)
             self.connectivity_table.df.loc[idx, "k_forward"] = k
         return Ok(None)
 

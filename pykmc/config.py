@@ -454,14 +454,19 @@ class PSRConfig(BaseModel):
 class ActiveVolume(BaseModel):
     """ Active Volume Parameters"""
 
-    r_act: float = Field(
+    ract: float = Field(
         default=6.0,
         description="Radius of entire active volume, spherical"
     )
 
-    r_mov: float = Field(
+    rmov: float = Field(
         default=4.0,
         description="Radius of movable atoms in active volume, spherical"
+    )
+
+    AV_debug: bool = Field(
+        default=False,
+        description="Debug flag for active volume size checks",
     )
 
 class LammpsConfig(BaseModel):

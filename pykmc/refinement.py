@@ -229,8 +229,8 @@ class Refinement:
                                                       self.system.positions.copy(),
                                                       self.system.cell,
                                                       self.system.types,
-                                                      neighbors,
-                                                      new_positions_saddle)  # send copy not reference !
+                                                      neighbors.copy(),
+                                                      new_positions_saddle.copy())  # send copy not reference !
                     futures.append(f)
                 else:
                     self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
@@ -315,7 +315,6 @@ class Refinement:
 
         """
         if energy_mismatch > refined_energy_thr:
-            print("ENERGY MISMATCH")
             return Err(
                 ErrorInfo(
                     type=ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER,
