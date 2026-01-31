@@ -634,7 +634,7 @@ class Config(BaseModel):
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True) : ["basin"], 
-            ("control.active_volume", True) : ["active_volume"]
+            ("control.active_volume", True) : ["activevolume"]
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():
