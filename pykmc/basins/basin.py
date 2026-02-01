@@ -333,11 +333,11 @@ class BasinsGenericEvents() :
                 if self.config.control.active_volume==True:
                     # add a job to manager queue
                     future2 = self.manager.partn_refine(self.config, row["central_atom"],
-                                                  system.positions.copy(),
-                                                  system.cell,
-                                                  system.types,
-                                                  neighbors,
-                                                  saddle_positions)
+                                                  tmp_system.positions.copy(),
+                                                  tmp_system.cell,
+                                                  tmp_system.types.copy(),
+                                                  neighbors.copy(),
+                                                  saddle_positions.copy())
                 # Move system do saddle positions
                 else:
                     tmp_system.update_positions(saddle_positions, atom_idx = neighbors)
