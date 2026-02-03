@@ -188,18 +188,29 @@ def info_refinements(
 def info_active_events(system_types, reference_table, active_table) -> EventsInfo: 
     """Construct dataclass with active events information"""
 
+    # active table data
     central_atom = active_table.table['atom_index'].to_numpy(dtype=int, copy=True)
     types = np.array(system_types)[central_atom] 
     reference_events = active_table.table['num_reference_event'].to_numpy(copy=True)
-    initial_topologies = reference_table.table['event_id'][reference_events].to_numpy(copy=True)
     dE_forward = active_table.table['energy_barrier'].to_numpy(copy=True)
     k = active_table.table["k"].to_numpy(copy=True)
-    dra_i = reference_table.table['dra'][reference_events].to_numpy(copy=True)
-    backward_events = reference_table.table['idx_backward'][reference_events].to_numpy(copy=True)
-    dE_backward = reference_table.table['energy_barrier'][backward_events].to_numpy(copy=True)
-    dE_asym = np.abs(dE_forward-dE_backward)
-    dra_f = reference_table.table['dra'][backward_events].to_numpy(copy=True)
     refined = active_table.table['refined'].to_numpy(copy=True)
+    
+    # Needed mapping to access reference table info
+    idx_ref = reference_table.table['idx_ref'].values
+    mapping_event_id = dict(zip(idx_ref, reference_table.table['event_id'].values))
+    mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
+    mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
+    mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
+    
+    #get info applying mapping 
+    initial_topologies = np.array([mapping_event_id[ref] for ref in reference_events])
+    dra_i = np.array([mapping_dra[ref] for ref in reference_events])
+    backward_events = np.array([mapping_backward[ref] for ref in reference_events])
+    dE_backward = np.array([mapping_energy[ref] for ref in backward_events])
+    dra_f = np.array([mapping_dra[ref] for ref in backward_events])
+    
+    dE_asym = np.abs(dE_forward - dE_backward)
 
     return EventsInfo(types=types, 
                       central_atom=central_atom, 
@@ -216,21 +227,33 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
 def info_basin_events(system_types, reference_table, connectivity_table, exit_state) -> EventsInfo: 
     """Construct dataclass with exit basin events"""
 
-    #Only exit state 
-    data = connectivity_table.df[connectivity_table.df['transient'] == False]
-    idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
 
+    # Only exit state 
+    data = connectivity_table.df[connectivity_table.df['transient'] == False].reset_index(drop=True)
+    idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
+    
+    #Connectivity table data 
     central_atom = data['central_atom'].to_numpy(dtype=int, copy=True)
     types = np.array(system_types)[central_atom] 
     reference_events = data['event_connexion'].to_numpy(copy=True)
     dE_forward = data['dE_forward'].to_numpy(copy=True)
     k = data["k_forward"].to_numpy(copy=True)
-    dra_i = reference_table.table['dra'][reference_events].to_numpy(copy=True)
-    backward_events = reference_table.table['idx_backward'][reference_events].to_numpy(copy=True)
-    dE_backward = reference_table.table['energy_barrier'][backward_events].to_numpy(copy=True)
-    dE_asym = np.abs(dE_forward-dE_backward)
-    dra_f = reference_table.table['dra'][backward_events].to_numpy(copy=True)
     refined = len(central_atom)*['T']
+    
+    #Needed mapping to extract reference table info
+    idx_ref = reference_table.table['idx_ref'].values
+    mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
+    mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
+    mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
+    
+    # Apply mapping
+    dra_i = np.array([mapping_dra[ref] for ref in reference_events])
+    backward_events = np.array([mapping_backward[ref] for ref in reference_events])
+    dE_backward = np.array([mapping_energy[ref] for ref in backward_events])
+    dra_f = np.array([mapping_dra[ref] for ref in backward_events])
+    
+    dE_asym = np.abs(dE_forward - dE_backward)
+
 
     return idx_selected_event, EventsInfo(types=types, 
                       central_atom=central_atom, 

@@ -258,7 +258,8 @@ class Refinement:
                 future_context[f] = {
                     #"min2_positions": self.system.positions.copy()[neighbors],
                     "min2_positions": new_positions_final,
-                    "num_reference_event": cat_idx, 
+                    #"num_reference_event": cat_idx, 
+                    "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "neighbors": neighbors
                 }

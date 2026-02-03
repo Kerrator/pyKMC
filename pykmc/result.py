@@ -350,7 +350,7 @@ class EventsInfo:
                 'k': self.k,
                 'dra_i': self.dra_i,
                 'dra_f': self.dra_f,
-                'Refined': self.refined,})
+                'Refined': self.refined,}).reset_index(drop=True)
         return df.to_string(index=True)        
 
 @dataclass

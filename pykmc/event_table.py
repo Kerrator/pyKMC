@@ -185,11 +185,11 @@ class ReferenceEventTable:
                 if (
                     dfevent_forward["event_id"] == dfevent_forward["id_final"]
                 ):  # backward reaction same as forward
-                    dfevent_forward["idx_backward"] = len(self.table)
+                    #dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
                 else:
-                    dfevent_forward["idx_backward"] = len(self.table) + 1
-                    dfevent_backward["idx_backward"] = len(self.table)
+                    #dfevent_forward["idx_backward"] = len(self.table) + 1
+                    #dfevent_backward["idx_backward"] = len(self.table)
                     dfevent = pd.concat(
                         [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
                         ignore_index=True,
@@ -281,6 +281,17 @@ class ReferenceEventTable:
             The event series.
 
         """
+        #Check if only one or two events (if event is its own backard or not)
+        ref = self.max_idx_ref()
+        if len(dfevent) == 1 : 
+            dfevent["idx_ref"] = ref
+            dfevent["idx_backward"] = ref 
+        else : 
+            dfevent.loc[0].at["idx_ref"] = ref
+            dfevent.loc[0].at["idx_backward"] = ref+1
+            dfevent.loc[1].at["idx_ref"] = ref +1
+            dfevent.loc[1].at["idx_backward"] = ref
+
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 
     def has_id_subset_table(self, ids: list[str | bytes]) -> pd.DataFrame:
@@ -400,6 +411,7 @@ class ReferenceEventTable:
 
         dfevent_forward = pd.Series(
             {
+               "idx_ref": -1, #unknown yet
                 "event_id": id_min1,
                 "initial_positions": min1_positions[neighbor_list_forwward],
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
@@ -423,6 +435,7 @@ class ReferenceEventTable:
         )
         dfevent_backward = pd.Series(
             {
+                "idx_ref": -1, #unknown yet
                 "event_id": id_min2,
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
@@ -440,6 +453,13 @@ class ReferenceEventTable:
         )
 
         return dfevent_forward, dfevent_backward
+    
+    def max_idx_ref(self) -> int : 
+        """ Return max value of idx_ref"""
+        if len(self.table) == 0 : 
+            return 0 
+        else :
+            return int(self.table["idx_ref"].max()) + 1
 
     def _initialize_table(self) -> None:
         """Initialize the reference event table.
@@ -449,34 +469,38 @@ class ReferenceEventTable:
         if self.config.control.reference_table is not None:
             self.table = pd.read_pickle(self.config.control.reference_table)
         else:
-            self.table = pd.DataFrame(
-                columns=[
-                    "event_id",
-                    "initial_positions",
-                    "saddle_positions",
-                    "final_positions",
-                    "energy_barrier",
-                    "k",
-                    "id_saddle",
-                    "id_final",
-                    "move_atom_idx",
-                    "sym_matrix",
-                    "sym_perm",
-                    "idx_backward",
-                    "dra"
-                ]
-            )
+            self.table = pd.DataFrame({
+                    "idx_ref": pd.Series(dtype="int64"),
+                    "event_id": pd.Series(dtype="str"),
+                    "initial_positions": pd.Series(dtype="object"),
+                     "saddle_positions": pd.Series(dtype="object"),
+                    "final_positions": pd.Series(dtype="object"),
+                    "energy_barrier": pd.Series(dtype="float64"),
+                    "k": pd.Series(dtype="float64"), 
+                    "id_saddle": pd.Series(dtype="str"),
+                    "id_final": pd.Series(dtype="str"),
+                    "move_atom_idx": pd.Series(dtype='int64'),
+                    "sym_matrix": pd.Series(dtype="object"), 
+                    "sym_perm": pd.Series(dtype="object"),
+                    "idx_backward": pd.Series(dtype="int64"),
+                    "dra" : pd.Series(dtype="float64")})
 
-    def remove(self, ind: int) -> None : 
-        """Remove event at row = ind
+    def remove(self, idx_refs: list[int]) -> None : 
+        """Remove events with ind == idx_ref as well as its backward event
 
         Parameters
         ----------
         ind : int
-            index of the row to be removed
+            index of the event to be removed
         """
-        self.table = self.table.drop(ind)
-        self.table = self.table.reset_index(drop=True)
+
+        idx_refs = set(idx_refs) #make a set if there are doublons
+
+        backward_refs = set(self.table.loc[self.table["idx_ref"].isin(idx_refs), "idx_backward"].astype(int)) #find set idx backwards
+
+        all_refs = idx_refs | backward_refs #all ref to remove
+
+        self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(drop=True) #keep event not (~) in all refs
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
@@ -618,6 +642,7 @@ class ActiveEventTable:
     def remove_duplicates(self, cell) -> None :
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
         #Sub dataframes with events grouped by central_atom and dE
+        #TODO check if there is not a problem with event apply on different atoms but path are the same.
         tol_energy = 0.1 #eV
         grouped = []
 

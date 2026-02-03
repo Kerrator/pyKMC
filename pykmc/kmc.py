@@ -514,7 +514,7 @@ class KMC:
                 else : 
                     self.loggers.info("log", "\t :=> Reconstruction fails : {}".format(result_reconstruction.err_value().message))
                     num_ref_event = active_table.table.loc[idx_selected_event].at['num_reference_event']
-                    ae_topo = self.reference_table.table.loc[num_ref_event].at['event_id']
+                    ae_topo = self.reference_table.table[self.reference_table.table['idx_ref'] == num_ref_event]['event_id'].values[0]
                     err_reference.append(num_ref_event)
                     err_ae.append(ae_topo)
 

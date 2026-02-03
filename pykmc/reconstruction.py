@@ -85,7 +85,7 @@ class Reconstruction:
             t2 = ase.geometry.wrap_positions(positions = min2_pos, cell = cell, pbc = True)
             #delr2 = compute_delr(supposed_min2_positions, min2_pos[neighbors], cell)
             delr2 = compute_delr(supposed_min2_positions, t2[neighbors], cell)
-            if delr2 > self.config.psr.matching_score_thr : 
+            if delr2 > self.config.psr.matching_score_thr :
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN2,

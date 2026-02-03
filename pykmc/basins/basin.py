@@ -14,12 +14,12 @@ import numpy as np
 from scipy.spatial import cKDTree
 from pykmc.result import Ok, BasinOutput
 
-#TODO : After merge do minimization and refinement with manager
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
 #TODO: Think about parallized exploration 
 #TODO: Could think of refining transient -> absorbing event when exploring
-#TODO : Exit if state 0 leads to all absorbing states because all unknown environments, here FTPA fails but because only have 1 transient state (0)
+#TODO : Exit if state 0 leads to all absorbing states because all unknown environments, here FTPA fails but because only have 1 transient state (0), should be a different ERROR.TYPE
+#TODO should also check if we apply same event to different central atoms but same saddle position meaning that it s a duplicate event, so remove.
 
 @dataclass
 class StateData:
@@ -237,11 +237,21 @@ class BasinsGenericEvents() :
         """ Reconstruct the generic event to generate new state from state
         """
 
-        ref_event = self.reference_table.table.iloc[event_idx].copy()
+        ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx] #event where event_idx == idx_ref
+        if ref_event.empty:
+            raise ValueError(f"idx_ref={event_idx} not found in reference table")
+        ref_event = ref_event.iloc[0].copy()
+        print("TETESTETSTESTES System from state")
+        print(ref_event)
+#        ref_event = self.reference_table.table.iloc[event_idx].copy()
 
-        supposed_initial_positions = ref_event["initial_positions"].copy()
-        supposed_final_positions = ref_event["final_positions"].copy()
-        saddle_positions = ref_event['saddle_positions'].copy()
+        #supposed_initial_positions = ref_event["initial_positions"].copy()
+        #supposed_final_positions = ref_event["final_positions"].copy()
+        #saddle_positions = ref_event['saddle_positions'].copy()
+
+        supposed_initial_positions = np.array(ref_event["initial_positions"], copy=True)
+        supposed_final_positions = np.array(ref_event["final_positions"], copy=True)
+        saddle_positions = np.array(ref_event['saddle_positions'], copy=True)
 
         #Apply the generic event to the current state 
 
@@ -285,9 +295,8 @@ class BasinsGenericEvents() :
         #min_pos, _ = future.result()
 
         result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors)
-        if not result.is_ok() : 
+        if not result.is_ok() :
             return result
-
         new_system.update_positions(result.ok_value().min2_positions)
 
         return Ok(new_system)
@@ -304,7 +313,11 @@ class BasinsGenericEvents() :
                 #get tmp_system energy 
                 future1 = self.manager.get_total_energy(positions=tmp_system.positions.copy()) #Send copy not reference
                 #move to generic saddle positions 
-                ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
+                ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == row["event_connexion"]] 
+                if ref_event.empty:
+                    raise ValueError(f"idx_ref={row['event_connexion']} not found in reference table")
+                ref_event = ref_event.iloc[0].copy()
+                #ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
                 saddle_positions = ref_event['saddle_positions'].copy()
                 #Apply PSR between event initial position and environment positions of the central_atoms
 
@@ -373,13 +386,12 @@ class BasinsGenericEvents() :
             self.absorbing_saddle_positions[idx_state] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
-            print('Basin refined dE', dE)
             self.connectivity_table.df.loc[idx, "k_forward"] = k
         return Ok(None)
 
 
     def is_new_state(self, system) : 
-        #Loop over all other system in self.states to see if system is already known 
+        #Loop over all other system in self.states to see if system is already known
 
         for state_index, state_data in self.states.items():
             are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell) 
