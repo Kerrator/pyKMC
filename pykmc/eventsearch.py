@@ -50,10 +50,10 @@ class EventSearch:
         if self.config.control.active_volume==True:
             if self.config.activevolume.ract <= self.config.atomicenvironment.rcut:
                 raise ValueError('Active Volume radius is smaller than cutoff radius. Please increase ract or decrease rcut')
-            futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions, cell=self.system.cell, type=self.system.types)
+            futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions.copy(), cell=self.system.cell.copy(), type=self.system.types.copy())
         else:
             futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list,
-                                                positions=self.system.positions)
+                                                positions=self.system.positions.copy())
         for f in futures :
             self.results.append(f.result())
 
