@@ -7,8 +7,8 @@ n_sessions = 7
 engine_use_rank_0 = False
 basin = False
 active_volume = True
-reference_table = ./reference_table.pickle 
-visited_environments = ./visited_environments.pickle
+#reference_table = ./reference_table.pickle 
+#visited_environments = ./visited_environments.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
