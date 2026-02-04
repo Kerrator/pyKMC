@@ -149,7 +149,7 @@ class EventSearchConfig(BaseModel):
         description="Refinement is accepted only if the central atom moves less than this distance between the current position and the refined minimum."
     )
     refined_energy_thr: float = Field(
-        default=0.2,
+        default=0.05,
         description="Maximumallowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
     )
 
