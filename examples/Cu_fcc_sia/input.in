@@ -1,13 +1,14 @@
 [Control] 
 initial_config = ./cu_fcc_defects.xyz 
-n_steps = 10
+n_steps = 100
 engine = lammps
-verbosity = 2
+verbosity = 1
 n_sessions = 7
 engine_use_rank_0 = False
 basin = False
-reference_table = ./reference_table_Cu_fake.pickle
-visited_environments = ./visited_environments_Cu.pickle
+active_volume = True
+reference_table = ./reference_table.pickle 
+visited_environments = ./visited_environments.pickle
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -28,7 +29,7 @@ emin_event = 0.0
 r_nnewchance = 3
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
+path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
 forc_thr = 0.001
 
 [RateConstant] 
@@ -45,3 +46,7 @@ kmax_factor = 2.0
 
 [BASIN]
 energy_thr = 0.5
+
+[ActiveVolume]
+ract = 20.0 
+rmov = 14.0

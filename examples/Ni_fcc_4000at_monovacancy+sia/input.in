@@ -5,6 +5,8 @@ engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
+basin = False 
+active_volume = True
 
 [Lammps] 
 pair_style = eam/alloy 
@@ -23,8 +25,6 @@ style = partn
 nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
-nnewchance = 3
-forc_thr = 0.01
 
 [pARTn] 
 path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
@@ -42,3 +42,7 @@ matching_score_thr = 0.4
 kmax_factor = 2.0
 
 [BASIN]
+
+[ActiveVolume]
+ract = 16.0 
+rmov = 9.0
