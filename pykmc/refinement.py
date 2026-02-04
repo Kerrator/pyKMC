@@ -216,21 +216,30 @@ class Refinement:
                 #move to saddle point
                 if self.config.control.active_volume==True:
                     if dfevent.at["energy_barrier"] > e_thr:  # dont refine
+
+                        self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
+
+
                         f = concurrent.futures.Future()
                         f.set_result(Ok(EventRefinementOutput(
                             central_atom_index=at_idx,
-                            saddle_positions=self.system.positions,
+                            saddle_positions=self.system.positions.copy(),
                             E_saddle=dfevent["energy_barrier"],
                             refined='F'
                         )))
                     else:
                         # add a job to manager queue
+                        #TODO : TEST wrap new_position_saddle. 
+                        self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
+
+
+
                         f = self.manager.partn_refine(self.config, at_idx,
-                                                      self.system.positions.copy(),
+                                                      current_positions.copy(),
                                                       self.system.cell,
-                                                      self.system.types,
+                                                      self.system.types.copy(),
                                                       neighbors.copy(),
-                                                      new_positions_saddle.copy())  # send copy not reference !
+                                                      self.system.positions.copy()[neighbors.copy()])  # send copy not reference !
                     futures.append(f)
                 else:
                     self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
@@ -238,7 +247,8 @@ class Refinement:
                         f = concurrent.futures.Future()
                         f.set_result(Ok(EventRefinementOutput(
                             central_atom_index=at_idx,
-                            saddle_positions=self.system.positions,
+                            #saddle_positions=self.system.positions.copy(),
+                            saddle_positions=self.system.positions.copy(),
                             E_saddle=total_energy+dfevent["energy_barrier"],
                             refined='F'
                         )))
@@ -255,13 +265,14 @@ class Refinement:
                 #final_positions = dfevent.at["final_positions"] + new_displacement
                 #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
                 #self.system.update_positions(new_positions, atom_idx=neighbors )
+                from ase.geometry import wrap_positions
                 future_context[f] = {
-                    #"min2_positions": self.system.positions.copy()[neighbors],
-                    "min2_positions": new_positions_final,
+                    #"min2_positions": new_positions_final.copy(),
+                    "min2_positions": wrap_positions(new_positions_final.copy(), cell = self.system.cell, pbc=True),
                     #"num_reference_event": cat_idx, 
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
-                    "neighbors": neighbors
+                    "neighbors": neighbors.copy()
                 }
 
 
