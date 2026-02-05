@@ -385,14 +385,17 @@ class LogKMC(LogManager):
             logger_name, "\n{}\n{}\n{}".format(separator, centered_title, separator)
         )
 
-        max_key_len = max(
-            len(str(key)) for section, model in config for key, value in model if key is not None
-        )
+        max_key_len = 0 
+        for section, model in config :
+            if model is not None : 
+                for key, value in model : 
+                    max_key_len = max(max_key_len, len(str(key)))
 
         for section, model in config:
             self.info(logger_name, section)
-            for key, value in model:
-                self.info(
+            if model is not None : 
+                for key, value in model:
+                    self.info(
                     logger_name,
                     "{}{:<{}} : {}".format(" " * indent, key, max_key_len, value),
                 )
