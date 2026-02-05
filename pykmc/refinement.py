@@ -71,18 +71,15 @@ class Refinement:
 
         all_futures = []
         future_context = {}  # mapping future -> contexte
+
         #Launch all refine Jobs 
         for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
-            atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
-                dfevent["event_id"]
-            )
+            atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
             
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
-                futures = self.refine_single(
-                    at_idx, dfevent, idx, total_refinements,  future_context, total_energy, e_thr
-                )
+                futures = self.refine_single(at_idx, dfevent, future_context, e_thr)
                 if isinstance(futures,list): #If symmetries
                     all_futures.extend(futures)
                 else:
@@ -92,49 +89,33 @@ class Refinement:
         for f in all_futures:
             #get results
             res = f.result()
-            job_queue_len = self.manager.job_queue.qsize()
-            #if job_queue_len != 0 : 
-                #self.loggers.progress_bar("progress", total_refinements-job_queue_len, total_refinements)
             #get specific results info
             ctx = future_context[f]
-
             _ = future_context.pop(f)
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
+
             #update result 
             if res.is_ok() : 
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
+                #TODO partn should not return different things depending on AV or not. We get the total energy at the saddle point or dE, but not both.
+                #TODO and to be consistent, you should modify res.ok_value().E_saddle.
                 if self.config.control.active_volume==True:
                     res.ok_value().dE_forward = res.ok_value().E_saddle
-                    res = self.check_refinement_energy(res,
-                                                       abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
-                                                       self.config.eventsearch.refined_energy_thr,
-                                                       )
                 else:
                     res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
-                    res = self.check_refinement_energy(res,
-                                                       abs(
-                                                           res.ok_value().dE_forward
-                                                           - ctx["reference_energy_barrier"]
-                                                       ),
-                                                       self.config.eventsearch.refined_energy_thr,
-                                                       )
+                res = self.check_refinement_energy(res,abs(res.ok_value().dE_forward- ctx["reference_energy_barrier"]),self.config.eventsearch.refined_energy_thr,)
+
             self.results.append(res)
-
-
-
 
     def refine_single(
         self,
         at_idx: int,
         dfevent: pd.Series,
-        cat_idx: int,
-        total_refinements: int,
         future_context: dict, 
-        total_energy: float, 
         e_thr: float
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
         """Perform a single reference event refinement.
@@ -147,10 +128,6 @@ class Refinement:
             index of the central atom for which we perform the refinement.
         dfevent : pd.Series
             a Series of the reference event to refine.
-        cat_idx : int
-            index of the event in the reference event table.
-        total_refinements : int
-            total refinements to do.
         count : int
             number of refinements already done.
 
@@ -158,15 +135,13 @@ class Refinement:
         -------
         list[Result[EventRefinementOutput, ErrorInfo]]
             list of Result of the refinements.
-
         """
-
-        
 
         ##=>PSR between generic event and at_idx environments
         result_psr = PointSetRegistration(
             self.config, self.system, dfevent, self.neighbors_list, at_idx
         ).match()
+
         ##=>Check results if match or match < matching_score
         result_psr = check_match(result_psr, self.config.psr.matching_score_thr)
         if not result_psr.is_ok():
@@ -177,128 +152,80 @@ class Refinement:
             f.set_result(result_psr)
             future_context[f] = {}
             return f
-#            return [result_psr]  # Err()
+
         else:
+
+        ##=> Get Saddle positions to refine 
+
             output_psr = result_psr.ok_value()
 
-            displacement_saddle = (
-                dfevent.at["saddle_positions"] - dfevent.at["initial_positions"]
-            )
-
-            displacement_final = dfevent.at["final_positions"] - dfevent.at["initial_positions"]
+            displacement_saddle = dfevent.at["saddle_positions"].copy() - dfevent.at["initial_positions"].copy()
+            displacement_final = dfevent.at["final_positions"].copy() - dfevent.at["initial_positions"].copy()
 
             #all_results = []
             futures = []
-            # Apply symmetries :
 
-            current_positions = self.system.positions.copy()
-            #initial_potential_energy = self.system.total_energy
-            for sym_matrix, perm_matrix in zip(
-                dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
-            ):
-                new_displacement_saddle = geometry.transform_positions(
-                    displacement_saddle, sym_matrix, 0, perm_matrix
-                )
+            ###=>Apply symmetries 
+
+            current_positions = self.system.positions.copy() #save to restore system after
+
+            for sym_matrix, perm_matrix in zip(dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False):
+                
+                ###=> Apply symmetries to displacements
+                new_displacement_saddle = geometry.transform_positions(displacement_saddle, sym_matrix, 0, perm_matrix)
                 new_displacement_final = geometry.transform_positions(displacement_final, sym_matrix, 0, perm_matrix)
 
-                saddle_positions = dfevent.at["initial_positions"] + new_displacement_saddle
-                final_positions = dfevent.at["initial_positions"] + new_displacement_final
+                ###=> Get symmetric saddle and final positions
+                saddle_positions = dfevent.at["initial_positions"].copy() + new_displacement_saddle
+                final_positions = dfevent.at["initial_positions"].copy() + new_displacement_final
 
-                new_positions_saddle = geometry.transform_positions(
-                    saddle_positions,
-                    output_psr.rotation_matrix,
-                    output_psr.translation_matrix,
-                    output_psr.permutation_matrix,
-                )
+                ###=> Apply PSR to the saddle and final positions do get specific saddle and final positions (before refinement)
+                new_positions_saddle = geometry.transform_positions(saddle_positions,output_psr.rotation_matrix,output_psr.translation_matrix,output_psr.permutation_matrix)
                 new_positions_final = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                neighbors = self.neighbors_list.get_neighbors("rcut", at_idx)
+                neighbors = self.neighbors_list.get_neighbors("rcut", at_idx).copy()
 
-                #move to saddle point
-                if self.config.control.active_volume==True:
-                    if dfevent.at["energy_barrier"] > e_thr:  # dont refine
+                ###=> move the system to the saddle point
+                self.system.update_positions(new_positions=new_positions_saddle, atom_idx=neighbors)
+                if dfevent.at["energy_barrier"] > e_thr : #We dont refine, we use generic date 
+                    #create a fake future to store the result
+                    f = concurrent.futures.Future()
+                    f.set_result(Ok(EventRefinementOutput(
+                        central_atom_index=at_idx,
+                        saddle_positions=self.system.positions.copy(),
+                        E_saddle=dfevent["energy_barrier"],
+                        refined='F'
+                    )))
 
-                        self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-
-
-                        f = concurrent.futures.Future()
-                        f.set_result(Ok(EventRefinementOutput(
-                            central_atom_index=at_idx,
-                            saddle_positions=self.system.positions.copy(),
-                            E_saddle=dfevent["energy_barrier"],
-                            refined='F'
-                        )))
-                    else:
+                else : #we refine
+                    #TODO : same here, we should send the same information to the partn_refine function 
+                    #TODO : when AV, partn_refine needs the minimum positions to compute the initial energy with AV
+                    #TODO : but this is the third parameter here, and without AV, the third parameter is the saddle positions. 
+                    #TODO : and with AV, you only need to send saddle positions in the rcut, while without we send all saddle positions, this is just too confusing
+                    if self.config.control.active_volume==True:
                         # add a job to manager queue
-                        #TODO : TEST wrap new_position_saddle. 
-                        self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-
-
-
                         f = self.manager.partn_refine(self.config, at_idx,
                                                       current_positions.copy(),
                                                       self.system.cell,
                                                       self.system.types.copy(),
                                                       neighbors.copy(),
                                                       self.system.positions.copy()[neighbors.copy()])  # send copy not reference !
-                    futures.append(f)
-                else:
-                    self.system.update_positions(new_positions_saddle, atom_idx=neighbors)
-                    if dfevent.at["energy_barrier"] > e_thr : #dont refine
-                        f = concurrent.futures.Future()
-                        f.set_result(Ok(EventRefinementOutput(
-                            central_atom_index=at_idx,
-                            #saddle_positions=self.system.positions.copy(),
-                            saddle_positions=self.system.positions.copy(),
-                            E_saddle=total_energy+dfevent["energy_barrier"],
-                            refined='F'
-                        )))
-                    else :
-
-                        #add a job to manager queue
+                    else:
+                    #add a job to manager queue
                         f = self.manager.partn_refine(self.config, at_idx, self.system.positions.copy()) #send copy not reference !
-                    futures.append(f)
+                futures.append(f)
 
 
                 #NOTE: TEMPORARY, NEED TO FIND A BETTER WAY
-                #Update Result : 
-                #        #Apply psr to generic final positions
-                #final_positions = dfevent.at["final_positions"] + new_displacement
-                #new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                #self.system.update_positions(new_positions, atom_idx=neighbors )
-                from ase.geometry import wrap_positions
                 future_context[f] = {
-                    #"min2_positions": new_positions_final.copy(),
-                    "min2_positions": wrap_positions(new_positions_final.copy(), cell = self.system.cell, pbc=True),
-                    #"num_reference_event": cat_idx, 
+                    "min2_positions": ase.geometry.wrap_positions(new_positions_final, cell = self.system.cell, pbc=True),
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "neighbors": neighbors.copy()
                 }
 
 
-                #if result_refine.is_ok():
-                #    #Update Result : 
-                #        #Apply psr to generic final positions
-                #    final_positions = dfevent.at["final_positions"] + new_displacement
-                #    new_positions = geometry.transform_positions(final_positions, output_psr.rotation_matrix, output_psr.translation_matrix, output_psr.permutation_matrix)
-                #    self.system.update_positions(new_positions, atom_idx=neighbors )
-                #    result_refine.ok_value().min2_positions = self.system.positions 
-                #        #Compute dE 
-                #    result_refine.ok_value().dE_forward = result_refine.ok_value().E_saddle - initial_potential_energy  
-
-                #    result_refine.ok_value().num_reference_event = cat_idx
-
-                #        #Check if energy barrier consistent with generic one
-                #    result_refine = self.check_refinement_energy(
-                #            result_refine,
-                #            abs(
-                #                result_refine.ok_value().dE_forward
-                #                - dfevent["energy_barrier"]
-                #            ),
-                #            self.config.eventsearch.refined_energy_thr,
-                #        )
+                #=> Restore the system to its initial state 
                 self.system.update_positions(current_positions)
-                #all_results.append(result_refine)
             return futures
 
 
