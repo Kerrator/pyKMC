@@ -305,6 +305,18 @@ class PartnConfig(BaseModel):
 #Refinement part#
 #################
 
+    #Max single refinement attempt
+    r_max_attempts: int = Field(
+        default=5, 
+        description="When adjusting the saddle energy and positions, in some rare cases partn has trouble finding the saddle point and goes back to the minium."
+        "In that case, we do another attempt with a different seed."
+    )
+
+    r_delr_sad_thr: float = Field(
+        default = 0.4, 
+        description="When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt."
+    )
+
     #Initial_push 
     r_push_mode: Literal["list", "rad"] = Field(
         default="list",

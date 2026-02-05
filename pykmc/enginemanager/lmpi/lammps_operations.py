@@ -289,12 +289,9 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
-
     # LAMMPS COMMANDS
     engine.command("plugin load {}".format(config.partn.path_artnso))
-    engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
-    engine.command("min_style fire")
-
+    
     # SETUP ARTN
     artn.reset_input()
     #Control
@@ -342,40 +339,57 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
 
 
+    #MAX attempt based on delr_sad (from initial position)
+    #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
+    #When using a different seed it solves the problem
 
+    max_attemps = config.partn.r_max_attempts
+    attempt = 0
 
-    # RUN
-    engine.command("minimize 1e-6 1e-8 10000 10000")
-    engine.command("unfix 10") #Otherwise, if you use other minimization style for the system minimization error "min_style fire must be use with fix ART"
+    while attempt < max_attemps :
+        engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
+        engine.command("min_style fire")
+                # RUN
+        engine.command("minimize 1e-6 1e-8 10000 10000")
+        engine.command("unfix 10")
 
-    # EXTRACT DATA
-    if engine.rank == 0 : 
-        err = artn.get_error()
-        if err[0]==0:
-            E_sad = artn.extract("etot_sad")
-            E_result=E_sad-E_init #If AV's are on, will return the activation energy of the event. If not, jsut saddle energy
-            saddlepositions = artn.extract("tau_sad")
+        # EXTRACT DATA
+        if engine.rank == 0 : 
+            err = artn.get_error()
+            if err[0]==0: #No error
+                #Check if went back to minimum 
+                delr_sad = artn.extract("delr_sad")
+                if delr_sad < config.partn.r_delr_sad_thr : #Success 
 
-            if config.control.active_volume==True:
-                saddlepositions_results=positions.copy()
-                for i, atom_idx in enumerate(atom_map):
-                    saddlepositions_results[atom_idx][0] = saddlepositions[i][0]
-                    saddlepositions_results[atom_idx][1] = saddlepositions[i][1]
-                    saddlepositions_results[atom_idx][2] = saddlepositions[i][2]
-            else:
-                saddlepositions_results=saddlepositions
+                    E_sad = artn.extract("etot_sad")
+                    E_result=E_sad-E_init #If AV's are on, will return the activation energy of the event. If not, jsut saddle energy
+                    saddlepositions = artn.extract("tau_sad")
 
-            return Ok(
-                EventRefinementOutput(
-                    central_atom_index=central_atom_idx,
-                    saddle_positions=saddlepositions_results,
-                    E_saddle= E_result,
-                    refined='T'
-                )
-            )
+                    if config.control.active_volume==True:
+                        saddlepositions_results=positions.copy()
+                        for i, atom_idx in enumerate(atom_map):
+                            saddlepositions_results[atom_idx][0] = saddlepositions[i][0]
+                            saddlepositions_results[atom_idx][1] = saddlepositions[i][1]
+                            saddlepositions_results[atom_idx][2] = saddlepositions[i][2]
+                    else:
+                        saddlepositions_results=saddlepositions
 
-        else:
-            return Err(
+                    return Ok(
+                        EventRefinementOutput(
+                            central_atom_index=central_atom_idx,
+                            saddle_positions=saddlepositions_results,
+                            E_saddle= E_result,
+                            refined='T'
+                        )
+                    )
+        attempt +=1
+        artn.set("zseed", config.partn.zseed)
+        print("NEW ATTEMPT")
+
+    else: #fail after max attemps
+        if engine.rank == 0 : 
+            err = artn.get_error()
+        return Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
                 )
