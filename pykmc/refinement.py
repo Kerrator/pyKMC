@@ -79,7 +79,7 @@ class Refinement:
             
             for at_idx in atoms_refine_idx:
                 ###=>refine single generic
-                futures = self.refine_single(at_idx, dfevent, future_context, e_thr)
+                futures = self.refine_single(at_idx, dfevent, total_energy, future_context, e_thr)
                 if isinstance(futures,list): #If symmetries
                     all_futures.extend(futures)
                 else:
@@ -115,6 +115,7 @@ class Refinement:
         self,
         at_idx: int,
         dfevent: pd.Series,
+        total_energy: float,
         future_context: dict, 
         e_thr: float
     ) -> list[Result[EventRefinementOutput, ErrorInfo]]:
@@ -189,10 +190,11 @@ class Refinement:
                 if dfevent.at["energy_barrier"] > e_thr : #We dont refine, we use generic date 
                     #create a fake future to store the result
                     f = concurrent.futures.Future()
+                    #TODO I don't like that we don't gibe the same information to E_saddle depending on AV or not
                     f.set_result(Ok(EventRefinementOutput(
                         central_atom_index=at_idx,
                         saddle_positions=self.system.positions.copy(),
-                        E_saddle=dfevent["energy_barrier"],
+                        E_saddle=dfevent["energy_barrier"] if self.config.control.active_volume else total_energy + dfevent["energy_barrier"] ,
                         refined='F'
                     )))
 
