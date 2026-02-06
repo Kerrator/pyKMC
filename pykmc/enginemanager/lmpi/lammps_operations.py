@@ -343,10 +343,10 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
     #When using a different seed it solves the problem
 
-    max_attemps = config.partn.r_max_attempts
+    max_attempts = config.partn.r_max_attempts
     attempt = 0
 
-    while attempt < max_attemps :
+    while attempt < max_attempts :
         engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
         engine.command("min_style fire")
                 # RUN
@@ -384,7 +384,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                     )
         attempt +=1
         artn.set("zseed", config.partn.zseed)
-        print("NEW ATTEMPT")
 
     else: #fail after max attemps
         if engine.rank == 0 : 
