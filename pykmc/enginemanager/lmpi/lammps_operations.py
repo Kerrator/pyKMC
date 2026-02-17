@@ -187,7 +187,12 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     artn.set("nnewchance", config.partn.nnewchance)
 
     #Perpendicular relaxation 
-    artn.set("nperp", config.partn.nperp)
+    if config.partn.nperp is not None : 
+        artn.set("nperp", config.partn.nperp)
+    if config.partn.nperp_limitation is not None : 
+        artn.set("nperp_limitation", np.array(config.partn.nperp_limitation))
+    else : 
+        artn.set("lnperp_limitation", False)
 
     #Convergence
     artn.set("forc_thr", config.partn.forc_thr)
@@ -331,8 +336,12 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     artn.set("nnewchance", config.partn.r_nnewchance)
 
        #Perpendicular relaxation 
-    artn.set("nperp", config.partn.r_nperp)
-    artn.set("nperp_limitation", [200])
+    if config.partn.r_nperp is not None : 
+        artn.set("nperp", config.partn.r_nperp)
+    if config.partn.r_nperp_limitation is not None : 
+        artn.set("nperp_limitation", np.array(config.partn.r_nperp_limitation))
+    else : 
+        artn.set("lnperp_limitation", False)
 
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)

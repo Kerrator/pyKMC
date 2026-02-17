@@ -259,8 +259,8 @@ class PartnConfig(BaseModel):
     )
 
     #Perpendicular relaxation
-    nperp: int = Field(default=3, description="Control the perpendicular relaxation.")
-    nperp_limitation: list[int] = Field( 
+    nperp: Optional[int] = Field(default=3, description="Control the perpendicular relaxation.")
+    nperp_limitation: Optional[list[int]] = Field( 
         default=[ 4, 8, 12, 16, -1 ], 
         description="Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL."
     )
@@ -399,8 +399,8 @@ class PartnConfig(BaseModel):
 
 
     #Perpendicular relaxation 
-    r_nperp: int = Field(default=3, description="Refinement: Control the perpendicular relaxation.")
-    r_nperp_limitation: list[int] = Field( 
+    r_nperp: Optional[int] = Field(default=3, description="Refinement: Control the perpendicular relaxation.")
+    r_nperp_limitation: Optional[list[int]] = Field( 
         default=[100], 
         description="Refinement: Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL."
     )
@@ -417,11 +417,22 @@ class PartnConfig(BaseModel):
         default=1.0,
         description="Refinement: dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
     )
-    
+
+
+    #To deal with nperp None if only using nperp_limitation : 
+    @field_validator("nperp", "r_nperp", mode="before")
+    @classmethod
+    def parse_optional_int(cls, v):
+        if v is None or (isinstance(v, str) and v.strip().lower() == "none"):
+            return None
+        return v 
+
     #To deal with list
     @field_validator("nperp_limitation", "r_nperp_limitation", mode="before")
     @classmethod
     def parse_list_of_ints(cls, v):
+        if v is None or (isinstance(v, str) and v.strip().lower() == "none"): 
+            return None
         if isinstance(v, str):
             v = v.strip("[]")
             try:
