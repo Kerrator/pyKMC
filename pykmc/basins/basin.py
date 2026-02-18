@@ -241,8 +241,6 @@ class BasinsGenericEvents() :
         if ref_event.empty:
             raise ValueError(f"idx_ref={event_idx} not found in reference table")
         ref_event = ref_event.iloc[0].copy()
-        print("TETESTETSTESTES System from state")
-        print(ref_event)
 #        ref_event = self.reference_table.table.iloc[event_idx].copy()
 
         #supposed_initial_positions = ref_event["initial_positions"].copy()
