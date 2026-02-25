@@ -184,17 +184,51 @@ class ReferenceEventTable:
             ):  # check if event not already in the catalog
                 if (
                     dfevent_forward["event_id"] == dfevent_forward["id_final"]
-                ):  # backward reaction same as forward
+                ):  # We are sure that the backward reaction same as forward
                     #dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
+                
+
+
+                #TODO : this is the same logic as is_new_event(), it is a quick fix but need to unify this 
+                #TODO : will be easier when refacto ReferenceTable with Event dataclass
+                # backward event could still be the same as the forward one : 
+
+                elif dfevent_forward["event_id"] == dfevent_backward["event_id"] : #same topo 
+                    if abs(dfevent_forward["energy_barrier"]-dfevent_backward["energy_barrier"]) < 0.25 : #maybe same event so IRA check
+                        ref_saddle = dfevent_forward['saddle_positions'].copy()
+                        nat_ref = len(ref_saddle)
+                        typ_event = nat_ref*['X']
+                        typ_ref = typ_event
+                        result = simple_ira(nat_ref, typ_event, dfevent_backward["saddle_positions"].copy(), nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
+
+                        #if match 
+                        if result.is_ok() : 
+                            #if matching score 
+                            result = check_match(result, self.config.psr.matching_score_thr)
+                            if result.is_ok() : #same backward and forward event
+                                return Ok(dfevent_forward.to_frame().T)
+                        else : 
+                            if self.is_new_event(dfevent=dfevent_backward) : 
+                                dfevent = pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],ignore_index=True)
+                                return Ok(dfevent) #return both
+                            else : 
+                                return Ok(dfevent_forward.to_frame().T)
+
+
+                #we know they are different
                 else:
-                    #dfevent_forward["idx_backward"] = len(self.table) + 1
-                    #dfevent_backward["idx_backward"] = len(self.table)
-                    dfevent = pd.concat(
-                        [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
-                        ignore_index=True,
-                    )
-                    return Ok(dfevent)  # return foward and backward event
+                    #to the atomic environment of the forward event
+                    if self.is_new_event(dfevent=dfevent_backward) : 
+                        #backward is also new
+                        dfevent = pd.concat(
+                            [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
+                            ignore_index=True,
+                        )
+                        return Ok(dfevent)  # return foward and backward event
+                    else : 
+                        #backard is already known 
+                        return Ok(dfevent_forward.to_frame().T) #return only forward
 
             else:
                 return Err(

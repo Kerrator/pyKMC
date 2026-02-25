@@ -136,7 +136,7 @@ class EventSearchConfig(BaseModel):
         description="Minimum energy forward and backward barrier (in eV) for an event to be added to the reference table.",
     )
     backward_emin_event: float = Field(
-        default=0.05,
+        default=0.0,
         description="To be used with `energy_assymetry`.",
     )
     energy_asymmetry: int = Field(
