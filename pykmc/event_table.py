@@ -673,10 +673,12 @@ class ActiveEventTable:
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
 
-    def remove_duplicates(self, cell) -> None :
+    def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None :
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
+
+        duplicates = []
+        #1. Check duplicates on central atoms : to be sure
         #Sub dataframes with events grouped by central_atom and dE
-        #TODO check if there is not a problem with event apply on different atoms but path are the same.
         tol_energy = 0.1 #eV
         grouped = []
 
@@ -691,7 +693,6 @@ class ActiveEventTable:
             grouped.append((idx, subset))
 
         #For each group, check duplicated by computing delr
-        duplicates = []
 
         for idx, subset in grouped:
             pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
@@ -703,7 +704,58 @@ class ActiveEventTable:
                 if delr < self.config.psr.matching_score_thr :
                     #print('Removing event with delr',delr)
                     duplicates.append(jdx)
-        #remove all duplicates
+        
+        #2. Check duplicates due to symmetric events applied on different central atoms. 
+        #Group by same generic event if generic event has symmetries meaning that the same generic event has been applied to same central atom
+        if neighbors_list is not None : #need neighbors list to remove symmetric duplicates 
+
+            counts = (self.table.groupby(["atom_index", "num_reference_event"]).size())
+            symmetric_num_ref = counts[counts > 1].index.get_level_values(1).unique()
+
+            #Loop on all num_ref symmetric event 
+            for num_ref in symmetric_num_ref:
+
+                subset = self.table[self.table["num_reference_event"] == num_ref]
+                indices = subset.index.to_list() 
+
+                for i, idx in enumerate(indices) : #Loop over indice of subset 
+                    central_atom1 = subset.loc[idx, "atom_index"]
+                    env1 = neighbors_list.get_neighbors('rcut', central_atom1) #list of atom in env1 
+                    
+                    for jdx in indices[i+1:] : #to not compare two times 
+                        central_atom2 = subset.loc[jdx, "atom_index"] 
+                        if central_atom1 != central_atom2 : #if yes already done in part 1. 
+                            env2 = neighbors_list.get_neighbors('rcut', central_atom2) 
+                            #intersection of atoms in atomic environments 
+                            common = set(env1) & set(env2)
+                            
+                            if not common : #it's not a duplicate since they don't share atoms in their atomic environments
+                                continue
+
+                            if central_atom1 not in env2 : #TODO : To check, but should not be a duplicate
+                                continue
+
+                            #extract saddle positions 
+                            sad_pos1 = subset.loc[idx, 'saddle_positions'] 
+                            sad_pos2 = subset.loc[jdx, 'saddle_positions']
+
+                            #know we want to compare positions of share atoms, need to map. 
+                            map1 = {a:k for k, a in enumerate(env1)} #so we know that the first position is atom xxx, ect, eg {345:0, 439:1, ....}
+                            map2 = {a:k for k, a in enumerate(env2)} #same for env2 
+
+                            #map atom when they are in common 
+                            index1 = [map1[a] for a in common]
+                            index2 = [map2[a] for a in common]
+
+                            #get subarray of sad_pos 
+                            sad_pos1 = sad_pos1[index1]
+                            sad_pos2 = sad_pos2[index2]
+
+                            #now we can compare 
+                            delr = compute_delr(sad_pos1, sad_pos2, cell )
+                            if delr < self.config.psr.matching_score_thr :
+                                duplicates.append(jdx)
+
         self.remove(duplicates)
 
     def save(self, outfile: str = "active_table.pickle") -> None:

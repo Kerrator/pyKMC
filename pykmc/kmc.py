@@ -177,7 +177,7 @@ class KMC:
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
-            active_table.remove_duplicates(self.system.cell)  #To be sure
+            active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
             self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
 
 
@@ -261,7 +261,6 @@ class KMC:
             self.manager.use_local()
             self.manager.set_all_positions(positions=self.system.positions)
             ##=>Minimize
-            #self.minimize_system()
 
             # == Log informations ==
             atomic_environment_info = self.get_info_atomic_environments(

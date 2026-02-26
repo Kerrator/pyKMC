@@ -221,7 +221,7 @@ class PartnConfig(BaseModel):
     )
 
     lanczos_eval_conv_thr: float = Field(
-        default=0.01, 
+        default=0.001, 
         description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits."
     )
 
@@ -360,7 +360,7 @@ class PartnConfig(BaseModel):
     )
 
     r_lanczos_eval_conv_thr: float = Field(
-        default=0.01, 
+        default=0.001, 
         description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits."
     )
 
