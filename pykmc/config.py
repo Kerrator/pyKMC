@@ -53,6 +53,16 @@ class ControlConfig(BaseModel):
         description="Path to a list of visited environment generated from a previous simulation."
     )
 
+    restart: bool = Field( 
+        default = False, 
+        description="If restart from previous simulation."
+    )
+
+    last_step: int = Field( 
+        default = 0, 
+        description="To use when restart == True."
+    )
+
     reconstruction: Optional[bool] = Field(
         default=True, description="If at each KMC step we reconstruct generic events.\n NOT WORKING"
     )
