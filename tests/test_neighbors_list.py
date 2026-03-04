@@ -11,8 +11,8 @@ class TestNeighborsList :
 
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc", lf("system_single_type_fcc"), lf("config_system_single_type"))])
-    def test_get_neighbors_list(self, system_name: str, system: System, config: Config) : 
-        nl = NeighborsList(system, config)
+    def test_get_neighbors_list(self, system_name: str, system: System, config: Config) :
+        nl = NeighborsList(system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
 
         expected_nb_neighbors = expected_neighbors[system_name]
 

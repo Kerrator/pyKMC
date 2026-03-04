@@ -2,7 +2,7 @@ import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes 
-import pypARTn2 as pypARTn
+import pypARTn
 import os
 from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
 
