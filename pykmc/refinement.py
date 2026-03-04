@@ -110,7 +110,10 @@ class Refinement:
                 res = self.check_refinement_energy(res,abs(res.ok_value().dE_forward- ctx["reference_energy_barrier"]),self.config.eventsearch.refined_energy_thr,)
 
             else : 
-                res.err_value().variables["n_ref_event"] =  ctx["num_reference_event"]
+                err = res.err_value()
+                if not isinstance(err.variables, dict):
+                    err.variables = {}
+                err.variables["n_ref_event"] = ctx["num_reference_event"]
 
 
             self.results.append(res)
