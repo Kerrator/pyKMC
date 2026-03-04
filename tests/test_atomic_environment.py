@@ -11,11 +11,10 @@ expected_results = {
 class TestAtomicEnvironment : 
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_cna(self, system_name:str, system: System, config: Config) : 
+    def test_cna(self, system_name:str, system: System, config: Config) :
 
-        config['AtomicEnvironment']['style'] = 'cna'
-        nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut']) 
+        nl = NeighborsList(system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+        ae = AtomicEnvironment('cna', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
 
         hash_count = Counter(ae.atomic_environment_list)
 
@@ -25,11 +24,10 @@ class TestAtomicEnvironment :
         assert expected['noncrystal'] in hash_count.values()
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_graph(self, system_name:str, system: System, config: Config) : 
+    def test_graph(self, system_name:str, system: System, config: Config) :
 
-        config['AtomicEnvironment']['style'] = 'graph'
-        nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut']) 
+        nl = NeighborsList(system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+        ae = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
 
         hash_count = Counter(ae.atomic_environment_list)
 
@@ -40,11 +38,10 @@ class TestAtomicEnvironment :
 
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_cna_graph(self, system_name:str, system: System, config: Config) : 
+    def test_cna_graph(self, system_name:str, system: System, config: Config) :
 
-        config['AtomicEnvironment']['style'] = 'cna/graph'
-        nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut']) 
+        nl = NeighborsList(system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+        ae = AtomicEnvironment('cna/graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
 
         hash_count = Counter(ae.atomic_environment_list)
 
@@ -52,3 +49,34 @@ class TestAtomicEnvironment :
 
         assert len(hash_count) == expected['different']
         assert expected['noncrystal'] in hash_count.values()
+
+
+class TestAtomColoringMode :
+
+    def test_grey_mode_ignores_types(self, system_binary_fcc, config_system_single_type) :
+        """In grey mode, Ni and Fe atoms with same geometry get the same environment ID."""
+        config = config_system_single_type
+        nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+
+        # Grey mode: types=None
+        ae_grey = AtomicEnvironment('cna/graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'], types=None)
+
+        # All atoms in perfect FCC are crystal regardless of type
+        assert all(e == "crystal" for e in ae_grey.atomic_environment_list)
+
+    def test_full_mode_graph_distinguishes_types(self, system_binary_fcc, config_system_single_type) :
+        """Graph mode with types produces more distinct IDs than without."""
+        config = config_system_single_type
+        nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+
+        # Grey mode graph
+        ae_grey = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'], types=None)
+        grey_ids = set(ae_grey.atomic_environment_list)
+
+        # Full mode graph
+        ae_full = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
+                                    types=list(system_binary_fcc.types))
+        full_ids = set(ae_full.atomic_environment_list)
+
+        # Full mode should produce more distinct IDs than grey mode
+        assert len(full_ids) > len(grey_ids)
