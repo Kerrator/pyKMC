@@ -13,6 +13,9 @@ import copy
 import numpy as np
 from scipy.spatial import cKDTree
 from pykmc.result import Ok, BasinOutput
+import logging
+
+logger = logging.getLogger(__name__)
 
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
@@ -53,12 +56,13 @@ class BasinsGenericEvents() :
 
         self.connectivity_table = None #Dataframe of basin connexion state
         self.selected_event = None #The selected event after basin exploration
-        self.current_state = None #Current state where we're at 
-        self.states_to_explore = None #List of state to explore 
+        self.current_state = None #Current state where we're at
+        self.states_to_explore = None #List of state to explore
         self.explored_states = None #List of state that we already explored
         self.states: dict[int, StateData] = {}  #Dictionnary of StateDate
-        self.known_environments = known_environments 
+        self.known_environments = known_environments
         self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
+        self._next_state_index = 1  # Monotonic counter for state indices (0 is the initial state)
 
     def detection(self, params) -> bool : 
         """Utility method."""
@@ -72,23 +76,47 @@ class BasinsGenericEvents() :
         self._initialize(system)
         #explore the basin
         result = self.construct_connexion_table()
-        if not result.is_ok() : 
+        if not result.is_ok() :
             return result
-        #reorder states index 
+
+        # Sanity check: every state in the connectivity table must be in self.states
+        table_states = set(self.connectivity_table.df["state"]) | set(self.connectivity_table.df["state_connexion"])
+        missing_from_states = table_states - set(self.states.keys())
+        if missing_from_states:
+            raise RuntimeError(f"[Basin] BUG: {len(missing_from_states)} states in connectivity table but not in self.states: {sorted(missing_from_states)[:10]}...")
+
+        #reorder states index
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
+
+        # Fix transient flags: after reordering, state classification is by index range.
+        # change_state_index() during BFS can merge transient transitions to absorbing-range
+        # states, leaving stale transient=True flags. Normalize based on reordered indices.
+        n_transient = len(set(self.connectivity_table.df['state']))
+        self.connectivity_table.df['transient'] = self.connectivity_table.df['state_connexion'].apply(lambda x: x < n_transient)
+
+        all_states_set = set(self.connectivity_table.df["state"]) | set(self.connectivity_table.df["state_connexion"])
+        n_absorbing_states = len(all_states_set) - n_transient
+        n_absorbing_rows = len(self.connectivity_table.df[self.connectivity_table.df["transient"] == False])
+        logger.info("[Basin] Reordered: %d transient + %d absorbing states | %d absorbing rows to refine",
+                    n_transient, n_absorbing_states, n_absorbing_rows)
+
         #Refine absorbing states
         self.manager.use_local()
-        result =self.refine_absorbing(system)
-        if not result.is_ok() : 
+        result = self.refine_absorbing(system)
+        if not result.is_ok() :
             return result
+
+        logger.info("[Basin] Refined %d absorbing states", len(self.absorbing_saddle_positions))
+
         #apply selector algorithm to find t_exit and exit_state
         result = self.selector.select_from_connectivity(self.connectivity_table)
-        if not result.is_ok() : 
+        if not result.is_ok() :
             return result
-        #Construct output KMC needs 
+        #Construct output KMC needs
         t_exit = result.ok_value().t_exit
         exit_state = result.ok_value().exit_state
+        logger.info("[Basin] FPTA selected: exit_state=%d, t_exit=%.6e", exit_state, t_exit)
 
         from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
         #Ensure from_state is state are full 
@@ -113,8 +141,9 @@ class BasinsGenericEvents() :
         Initialize necessary component after entering in basin. We always enter in state == 0.
         """
         self.current_state = 0
-        self.states_to_explore = [0] 
-        self.explored_states = [] 
+        self.states_to_explore = [0]
+        self.explored_states = []
+        self._next_state_index = 1  # State 0 is already assigned
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
         self.selector = FPTASelector()
@@ -122,33 +151,47 @@ class BasinsGenericEvents() :
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
 
 
-    def construct_connexion_table(self) : 
-        """ 
+    def construct_connexion_table(self) :
+        """
         explore the basin and construct the connextion table
         """
-        #Loop over state to explore 
+        import time
+        t_start = time.perf_counter()
+        n_explored = 0
+        n_duplicates = 0
+        n_absorbing = 0
+        n_processed = 0
+
+        #Loop over state to explore
         while len(self.states_to_explore) != 0 :
-            #next state to explore : 
+            #next state to explore :
             to_explore = self.states_to_explore[0]
 
-            if to_explore not in self.states : #always true except at the start (to_explore = 0) 
-                #We need to create the state 
+            if to_explore not in self.states : #always true except at the start (to_explore = 0)
+                n_processed += 1
+                #We need to create the state
                     #find a state and an event from which we go to the state that we want to create
                 from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=to_explore)
 
                     #Create new system by applying (reconstruction) the generic event to the from_state
-                result = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
-                if not result.is_ok() : 
+                result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
+                if not result.is_ok() :
                     return result
                 new_system = result.ok_value()
 
-                    #Check if it is a new_system or already in states 
-                is_new_state = self.is_new_state(new_system) 
-                if is_new_state != -1 : #It already exists 
+                    #Check if it is a new_system or already in states
+                is_new_state = self.is_new_state(new_system)
+                if is_new_state != -1 : #It already exists
                     #update table
                     self.connectivity_table.change_state_index(current_index=to_explore, new_index=is_new_state)
                     self.explored_states.append(to_explore)
                     self.states_to_explore.remove(to_explore)
+                    n_duplicates += 1
+
+                    if n_duplicates % 20 == 0:
+                        elapsed = time.perf_counter() - t_start
+                        logger.debug("[Basin] processed=%d | duplicates=%d | absorbing=%d | explored=%d | to_explore=%d | %.1fs",
+                                     n_processed, n_duplicates, n_absorbing, n_explored, len(self.states_to_explore), elapsed)
 
                     #Cleaning
                     self.states[from_state].release_heavy_objects()
@@ -157,55 +200,74 @@ class BasinsGenericEvents() :
                 #add state
                 self._add_state(state_index=to_explore, system=new_system, transient=is_transient)
 
-                #ENSURE FULL STATE TO EXPLORE 
+                #Ensure full state to explore
                 self.states[to_explore].ensure_full_state(self.config)
                 #Check if unknown atomic environments
-                if self.is_states_has_unknown_environments(self.states[to_explore]) : 
-                    #We consider that this state is an absorbing one because we need to search new events (in main KMC loop) 
-                    #Need to update the connectivity table 
-                    self.connectivity_table.change_state_to_absorbing(to_explore) 
+                if self.is_states_has_unknown_environments(self.states[to_explore]) :
+                    #We consider that this state is an absorbing one because we need to search new events (in main KMC loop)
+                    #Need to update the connectivity table
+                    self.connectivity_table.change_state_to_absorbing(to_explore)
                     self.states[to_explore].transient = False
                     is_transient = False
-                
-                if not is_transient : 
+
+                if not is_transient :
                     self.states_to_explore.remove(to_explore)
                     self.explored_states.append(to_explore)
+                    n_absorbing += 1
+
+                    if n_absorbing % 20 == 0:
+                        elapsed = time.perf_counter() - t_start
+                        logger.debug("[Basin] processed=%d | absorbing=%d | duplicates=%d | explored=%d | to_explore=%d | %.1fs",
+                                     n_processed, n_absorbing, n_duplicates, n_explored, len(self.states_to_explore), elapsed)
 
                     #Cleaning
                     self.states[from_state].release_heavy_objects()
                     self.states[to_explore].release_heavy_objects()
-
 
                     continue #We dont explore/skip the rest
 
                 #Release heavy objet memory
                 self.states[from_state].release_heavy_objects()
 
-            
 
-
-            #Explore state 
+            #Explore state
             self.current_state = to_explore
             last_state_connectivity = self.get_last_state_index()
 
-            #Ensure full state to explore 
+            #Ensure full state to explore
             self.states[to_explore].ensure_full_state(self.config)
             self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
-            
-            #to_explore has been explored : 
+
+            # Update monotonic counter: advance past all newly assigned indices
+            if not self.explorer.connectivity_table.df.empty:
+                max_new = int(self.explorer.connectivity_table.df["state_connexion"].max())
+                self._next_state_index = max(self._next_state_index, max_new + 1)
+
+            #to_explore has been explored :
             self.states_to_explore.remove(to_explore)
             self.explored_states.append(to_explore)
 
-            #Merge state connectivity table to basin connectivity table 
+            #Merge state connectivity table to basin connectivity table
             self.connectivity_table.merge(self.explorer.connectivity_table)
-            #Clrean explorer connectivity table
+            #Clean explorer connectivity table
             self.explorer.clear()
             self.update_to_explore()
-            #Clean heaby state object : 
+            #Clean heavy state object :
             self.states[to_explore].release_heavy_objects()
-            
-            if to_explore == 1 : #TESTST 
-                self.connectivity_table.save("test.pickle")
+
+            # Progress tracking
+            n_explored += 1
+            elapsed = time.perf_counter() - t_start
+            logger.debug("[Basin] explored=%d | to_explore=%d | unique_states=%d | duplicates=%d | absorbing=%d | conn_rows=%d | %.1fs",
+                         n_explored, len(self.states_to_explore), len(self.states), n_duplicates, n_absorbing, len(self.connectivity_table.df), elapsed)
+
+        # Basin exploration complete
+        elapsed = time.perf_counter() - t_start
+        n_transient = len(set(self.connectivity_table.df['state']))
+        all_states = set(self.connectivity_table.df["state"]) | set(self.connectivity_table.df["state_connexion"])
+        n_absorbing_final = len(all_states) - n_transient
+        logger.info("[Basin] COMPLETE: %d transient + %d absorbing states | %d connectivity rows | processed=%d | duplicates=%d | %.1fs",
+                    n_transient, n_absorbing_final, len(self.connectivity_table.df), n_processed, n_duplicates, elapsed)
 
         return Ok(None)
 
@@ -221,12 +283,14 @@ class BasinsGenericEvents() :
         """
         pass
 
-    def get_last_state_index(self) : 
-        if self.current_state == 0 : #connextion table is empty
-            new_state_connexion = 1 
-        else : #last state connexion +1
-            new_state_connexion = int(self.connectivity_table.get_table()['state_connexion'].iloc[-1]+1)
-        return new_state_connexion
+    def get_last_state_index(self) :
+        """Return the next available state index (monotonically increasing).
+
+        Using a monotonic counter prevents index reuse when change_state_index()
+        remaps high-valued indices to lower ones, which would cause the table max
+        to drop and subsequent explorations to reuse indices already in explored_states.
+        """
+        return self._next_state_index
     
     def update_to_explore(self) : 
         #Find all state index in the connexion table : 
@@ -242,8 +306,6 @@ class BasinsGenericEvents() :
         if ref_event.empty:
             raise ValueError(f"idx_ref={event_idx} not found in reference table")
         ref_event = ref_event.iloc[0].copy()
-        print("TETESTETSTESTES System from state")
-        print(ref_event)
 #        ref_event = self.reference_table.table.iloc[event_idx].copy()
 
         #supposed_initial_positions = ref_event["initial_positions"].copy()
