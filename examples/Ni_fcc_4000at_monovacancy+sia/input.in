@@ -27,7 +27,7 @@ emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin-1501/lib/libartn-lmp.so
+path_artnso = /home/kerr/pykmc/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant] 
 style = constant
