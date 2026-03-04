@@ -118,7 +118,26 @@ def minimize_with_results(engine, config, positions=None) :
     total_energy = get_total_energy(engine)
     if engine.rank == 0 : 
         return new_positions, total_energy
+    
+def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) : 
+    """ 
+    Minimize with fix atom around central atom up to rcut
+    """
 
+    #define core region and group
+    engine.command(f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}")
+    engine.command("group frozen_group region sphere_region")
+
+    #freeze core region 
+    engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+
+    #minimization 
+    engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
+
+    #unfreeze/delte
+    engine.command("unfix freeze")
+    engine.command("group frozen_group delete")
+    engine.command("region sphere_region delete")
 
 def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
     original_stdout_fd = os.dup(1)
@@ -280,7 +299,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                 )
             )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None) :
+def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
@@ -291,6 +310,9 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
         atom_map=None
         if positions is not None :
             set_positions(engine=engine, positions=positions)
+        #small minimization with fix core atoms around central atom
+            if minimize_outter_atoms : 
+                minimize_freeze_core(engine, positions[central_atom_idx], config.atomicenvironment.rcut, maxiter = 10)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
