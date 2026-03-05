@@ -53,14 +53,9 @@ class ControlConfig(BaseModel):
         description="Path to a list of visited environment generated from a previous simulation."
     )
 
-    restart: bool = Field( 
-        default = False, 
-        description="If restart from previous simulation."
-    )
-
-    last_step: int = Field( 
-        default = 0, 
-        description="To use when restart == True."
+    restart_file: Optional[str] = Field( 
+        default = None, 
+        description="File with restart informations."
     )
 
     reconstruction: Optional[bool] = Field(

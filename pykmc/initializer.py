@@ -43,7 +43,7 @@ class Initializer:
         self.kmc.loggers.info("log", "= Starting KMC simulation =")
         self.kmc.loggers.info("log", "===========================")
 
-        if not self.kmc.config.control.restart : 
+        if self.kmc.config.control.restart_file is None : 
             self.kmc.loggers.table_line_info_kmc(
             "output", 0, 0.0, 0.0, None, None, None, None, self.kmc.total_energy
         )
@@ -55,7 +55,7 @@ class Initializer:
         self.kmc.loggers = LogKMC(LOGGING_CONFIG, verbosity=self.kmc.config.control.verbosity)
         self.kmc.loggers.title("log")
         self.kmc.loggers.write_parameters("log", self.kmc.config)
-        if not self.kmc.config.control.restart : 
+        if self.kmc.config.control.restart_file is None : 
             self.kmc.loggers.output_file_header("output")
             self.kmc.loggers.events_file_header("events")
 
