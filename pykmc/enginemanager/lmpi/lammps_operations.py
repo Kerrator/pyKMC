@@ -132,6 +132,7 @@ def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float
     engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
 
     #minimization 
+    engine.command(f"min_style cg")
     engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
 
     #unfreeze/delte
@@ -221,6 +222,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
 
     # RUN
     engine.command("minimize 1e-6 1e-8 10000 10000")
+    engine.command("unfix 10")
     
     # Restore original stdout (fd 1)
     os.dup2(original_stdout_fd, 1)
