@@ -552,6 +552,16 @@ class BasinConfig(BaseModel):
     description="Energy threshold"
     )
 
+    strategy: str = Field(
+    default = "serial",
+    description="Basin BFS strategy: serial | parallel_explore | batch_dedup | parallel_reconstruct | wavefront"
+    )
+
+    n_workers: int = Field(
+    default = 4,
+    description="Number of threads for parallel basin phases"
+    )
+
 class DealloyingConfig(BaseModel):
     """Dealloying event parameters.
 
