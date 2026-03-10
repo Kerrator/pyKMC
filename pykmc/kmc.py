@@ -116,18 +116,28 @@ class KMC:
         self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)
 
+        if self.config.control.restart_file is None: 
         # Write initial step to file
-        self._append_snapshot_to_trajectory()
+            self._append_snapshot_to_trajectory()
+            last_step = 0 
+            total_time = 0.0
+
+        else : #read restart file
+            self.loggers.info("log", ":=> Reading restart file")
+            restart_info = np.load(self.config.control.restart_file) 
+            last_step = restart_info["last_step"]
+            total_time = restart_info["last_time"]
+            self.loggers.info("log", ":=> last step = {}, last_end_time = {}ps".format(last_step, total_time))
 
         # LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
-        total_time = 0.0  # in seconds
+        last_step +=1 
         nsearch = self.config.eventsearch.nsearch
 
         
 
         # KMC LOOP
-        for step in range(nkmc_steps):
+        for step in range(last_step, nkmc_steps+last_step):
             start_real = time.time()
             start_cpu = time.process_time()
 
@@ -180,7 +190,7 @@ class KMC:
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
-            active_table.remove_duplicates(self.system.cell)  #To be sure
+            active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
             self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
 
             # == ADD DEALLOYING EVENTS ==
@@ -291,11 +301,10 @@ class KMC:
                     self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                     self.total_energy = result_reconstruction.ok_value().min2_etot
 
-                ###=> Synchronise all lammps instances with new positions
-                self.manager.use_local()
-                self.manager.set_all_positions(positions=self.system.positions)
-                ##=>Minimize
-                #self.minimize_system()
+            ###=> Synchronise all lammps instances with new positions
+            self.manager.use_local()
+            self.manager.set_all_positions(positions=self.system.positions)
+            ##=>Minimize
 
             total_time += delta_t * 10**-12  # time is in seconds
 
@@ -325,7 +334,7 @@ class KMC:
             
             self.loggers.table_line_info_kmc(
                 "output",
-                step + 1,
+                step,
                 delta_t * 10**-12,
                 total_time,
                 active_table.table.loc[idx_selected_event].at["num_reference_event"],
@@ -362,6 +371,7 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
+        self._save_restart_file(step, total_time)
         self._close()
 
     def get_new_environments(self) -> list[str | bytes]:
@@ -633,14 +643,18 @@ class KMC:
 
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
-        self.loggers.info("log", ":=> Minimizing the system")
+        if self.config.control.restart_file is None: 
+            self.loggers.info("log", ":=> Minimizing the system")
+        else : 
+            self.loggers.info("log", ":=> Computing energies")
         new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
         #TEST
         #future = self.manager.minimize_with_results(self.config, positions=positions)
         #new_positions, total_energy = future.result()
         #np.savetxt('before_min.dat', self.system.positions)
         #np.savetxt('after_min.dat', new_positions)
-        self.system.update_positions(new_positions)
+        if self.config.control.restart_file is None : 
+            self.system.update_positions(new_positions)
         self.total_energy = total_energy
         self.potential_energy = self.manager.global_get_potential_energy()
 
@@ -748,6 +762,15 @@ class KMC:
         self.reference_table.save("reference_table.pickle")
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
+
+    def _save_restart_file(self, last_step, last_time) : 
+        """ 
+        Save end simulation informations
+        """
+        np.savez("restart_"+str(last_step)+".npz", 
+                 last_step = last_step, 
+                 last_time = last_time)
+
 
     def _close(self) -> None:
         """Close the simulation."""

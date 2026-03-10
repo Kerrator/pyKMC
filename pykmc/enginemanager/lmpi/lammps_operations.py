@@ -133,7 +133,27 @@ def minimize_with_results(engine, config, positions=None) :
     total_energy = get_total_energy(engine)
     if engine.rank == 0 : 
         return new_positions, total_energy
+    
+def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) : 
+    """ 
+    Minimize with fix atom around central atom up to rcut
+    """
 
+    #define core region and group
+    engine.command(f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}")
+    engine.command("group frozen_group region sphere_region")
+
+    #freeze core region 
+    engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+
+    #minimization 
+    engine.command(f"min_style cg")
+    engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
+
+    #unfreeze/delte
+    engine.command("unfix freeze")
+    engine.command("group frozen_group delete")
+    engine.command("region sphere_region delete")
 
 def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
     original_stdout_fd = os.dup(1)
@@ -202,7 +222,12 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     artn.set("nnewchance", config.partn.nnewchance)
 
     #Perpendicular relaxation 
-    artn.set("nperp", config.partn.nperp)
+    if config.partn.nperp is not None : 
+        artn.set("nperp", config.partn.nperp)
+    if config.partn.nperp_limitation is not None : 
+        artn.set("nperp_limitation", np.array(config.partn.nperp_limitation))
+    else : 
+        artn.set("lnperp_limitation", False)
 
     #Convergence
     artn.set("forc_thr", config.partn.forc_thr)
@@ -212,6 +237,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
 
     # RUN
     engine.command("minimize 1e-6 1e-8 10000 10000")
+    engine.command("unfix 10")
     
     # Restore original stdout (fd 1)
     os.dup2(original_stdout_fd, 1)
@@ -538,7 +564,7 @@ def basin_explore(engine, config_dict, reference_table_data, state_positions, st
     return None
 
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None) :
+def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
@@ -549,6 +575,9 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
         atom_map=None
         if positions is not None :
             set_positions(engine=engine, positions=positions)
+        #small minimization with fix core atoms around central atom
+            if minimize_outter_atoms : 
+                minimize_freeze_core(engine, positions[central_atom_idx], config.atomicenvironment.rcut, maxiter = 10)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
@@ -594,8 +623,12 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     artn.set("nnewchance", config.partn.r_nnewchance)
 
        #Perpendicular relaxation 
-    artn.set("nperp", config.partn.r_nperp)
-    artn.set("nperp_limitation", [200])
+    if config.partn.r_nperp is not None : 
+        artn.set("nperp", config.partn.r_nperp)
+    if config.partn.r_nperp_limitation is not None : 
+        artn.set("nperp_limitation", np.array(config.partn.r_nperp_limitation))
+    else : 
+        artn.set("lnperp_limitation", False)
 
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)
@@ -610,6 +643,8 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     attempt = 0
 
     while attempt < max_attempts :
+        exit_flag = False
+        result = None #for rank > 0
         engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
         engine.command("min_style fire")
                 # RUN
@@ -637,7 +672,8 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                     else:
                         saddlepositions_results=saddlepositions
 
-                    return Ok(
+                    exit_flag = True
+                    result =  Ok(
                         EventRefinementOutput(
                             central_atom_index=central_atom_idx,
                             saddle_positions=saddlepositions_results,
@@ -645,6 +681,11 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                             refined='T'
                         )
                     )
+        # Synchronize all ranks
+        exit_flag = engine.local_engine_comm.bcast(exit_flag, root=0)
+        if exit_flag : 
+            return result 
+                
         attempt +=1
         artn.set("zseed", config.partn.zseed)
         print("NEW ATTEMPT")
@@ -652,9 +693,10 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     else: #fail after max attemps
         if engine.rank == 0 : 
             err = artn.get_error()
-        return Err(
+            return Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
                 )
             )
+        return None
 

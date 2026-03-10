@@ -335,7 +335,7 @@ class BasinsGenericEvents() :
         ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx]
         if ref_event.empty:
             raise ValueError(f"idx_ref={event_idx} not found in reference table")
-        ref_event = ref_event.iloc[0]
+        ref_event = ref_event.iloc[0].copy()
 
         self.states[from_state].ensure_full_state(self.config)
         neighbor_indices = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)

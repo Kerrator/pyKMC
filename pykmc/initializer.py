@@ -44,17 +44,21 @@ class Initializer:
         self.kmc.loggers.info("log", "= Starting KMC simulation =")
         self.kmc.loggers.info("log", "===========================")
 
-        self.kmc.loggers.table_line_info_kmc(
+        if self.kmc.config.control.restart_file is None : 
+            self.kmc.loggers.table_line_info_kmc(
             "output", 0, 0.0, 0.0, None, None, None, None, self.kmc.total_energy
         )
+        else : 
+            self.kmc.loggers.info("log", ":=> Restarting")
 
     def initialize_loggers(self) -> None:
         """Initialize the loggers and create their files."""
         self.kmc.loggers = LogKMC(LOGGING_CONFIG, verbosity=self.kmc.config.control.verbosity)
         self.kmc.loggers.title("log")
         self.kmc.loggers.write_parameters("log", self.kmc.config)
-        self.kmc.loggers.output_file_header("output")
-        self.kmc.loggers.events_file_header("events")
+        if self.kmc.config.control.restart_file is None : 
+            self.kmc.loggers.output_file_header("output")
+            self.kmc.loggers.events_file_header("events")
 
     def initialize_system(self) -> None:
         """Read and initialize the system from the intial configuration file."""
