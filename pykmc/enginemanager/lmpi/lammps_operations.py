@@ -393,7 +393,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
     #When using a different seed it solves the problem
 
-    max_attemps = config.partn.r_max_attempts
+    max_attempts = config.partn.r_max_attempts
     attempt = 0
 
     while attempt < max_attempts :
