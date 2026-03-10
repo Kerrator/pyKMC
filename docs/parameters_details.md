@@ -169,6 +169,35 @@
 
 ---
 
+## `Basin` Section (conditional)
+
+<details><summary>Section Overview</summary>
+  Basin exploration parameters. Required when <code>control.basin = True</code>.
+</details>
+
+- **`energy_thr`** : `float`, default = `0.0`
+  <details><summary>Description</summary>
+  Energy threshold (in eV) for basin membership. During a KMC step, if the selected event has both forward and backward barriers below this value, basin exploration is triggered. All transitions with barriers below this threshold are considered intra-basin (transient); transitions with at least one barrier above it lead to absorbing (exit) states.
+  </details>
+- **`strategy`** : `str`, default = `'serial'`
+  <details><summary>Description</summary>
+  BFS parallelization strategy for basin exploration. Available strategies:
+
+  - `serial`: Sequential BFS, one state at a time
+  - `parallel_explore`: Parallel exploration of newly discovered transient states
+  - `batch_dedup`: Batched cKDTree deduplication across multiple candidates
+  - `parallel_reconstruct`: Parallel reconstruction distributing LAMMPS minimizations across all MPI sessions
+  - `wavefront`: Full wavefront BFS combining parallel reconstruction, batch dedup, and parallel exploration
+
+  For large systems (>500 atoms), `wavefront` or `parallel_reconstruct` with `n_workers >= 4` is recommended.
+  </details>
+- **`n_workers`** : `int`, default = `4`
+  <details><summary>Description</summary>
+  Number of threads used by parallel basin strategies. Has no effect when <code>strategy = serial</code>. The optimal value depends on the number of available MPI sessions (typically <code>np - 1</code>).
+  </details>
+
+---
+
 ## `Lammps` Section (optional)
 
 <details><summary>Section Overview</summary>

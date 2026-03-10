@@ -191,9 +191,6 @@ class BasinsGenericEvents() :
                 t0 = time.perf_counter()
                 result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
                 prof["reconstruct"] += time.perf_counter() - t0
-                if hasattr(self, '_last_reconstruct_profile'):
-                    prof["psr"] += self._last_reconstruct_profile["psr"]
-                    prof["minimize"] += self._last_reconstruct_profile["minimize"]
                 if not result.is_ok() :
                     return result
                 new_system = result.ok_value()
@@ -253,35 +250,21 @@ class BasinsGenericEvents() :
                 self.states[from_state].release_heavy_objects()
 
 
-            #Explore state
+            #Explore state via MPI engine
             self.current_state = to_explore
             last_state_connectivity = self.get_last_state_index()
 
-            #Ensure full state to explore
             t0 = time.perf_counter()
-            self.states[to_explore].ensure_full_state(self.config)
-            prof["ensure_state"] += time.perf_counter() - t0
-
-            t0 = time.perf_counter()
-            self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
+            self._explore_states_parallel([to_explore], n_workers=1)
             prof["explore"] += time.perf_counter() - t0
-
-            # Update monotonic counter: advance past all newly assigned indices
-            if not self.explorer.connectivity_table.df.empty:
-                max_new = int(self.explorer.connectivity_table.df["state_connexion"].max())
-                self._next_state_index = max(self._next_state_index, max_new + 1)
 
             #to_explore has been explored :
             self.states_to_explore.remove(to_explore)
             self.explored_states.append(to_explore)
 
-            #Merge state connectivity table to basin connectivity table
             t0 = time.perf_counter()
-            self.connectivity_table.merge(self.explorer.connectivity_table)
-            prof["merge"] += time.perf_counter() - t0
-            #Clean explorer connectivity table
-            self.explorer.clear()
             self.update_to_explore()
+            prof["merge"] += time.perf_counter() - t0
             #Clean heavy state object :
             self.states[to_explore].release_heavy_objects()
 
@@ -344,65 +327,71 @@ class BasinsGenericEvents() :
         self.states_to_explore =  list(unique_states.difference(set(self.explored_states)))
 
 
-    def system_from_state(self, from_state, event_idx, central_atom, sym_idx) :
-        """ Reconstruct the generic event to generate new state from state.
-        Returns Ok(new_system) along with profiling sub-timings stored in self._last_reconstruct_profile.
-        """
-        import time
+    def _prepare_reconstruct_kwargs(self, from_state, event_idx, central_atom, sym_idx):
+        """Prepare keyword arguments for manager.basin_reconstruct().
 
-        ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx] #event where event_idx == idx_ref
+        Gathers all data needed by the engine to perform PSR + minimize.
+        """
+        ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx]
         if ref_event.empty:
             raise ValueError(f"idx_ref={event_idx} not found in reference table")
-        ref_event = ref_event.iloc[0].copy()
+        ref_event = ref_event.iloc[0]
 
-        supposed_initial_positions = np.array(ref_event["initial_positions"], copy=True)
-        supposed_final_positions = np.array(ref_event["final_positions"], copy=True)
-        saddle_positions = np.array(ref_event['saddle_positions'], copy=True)
-
-        #ENSURE FULL STATE FOR FROM STATE
         self.states[from_state].ensure_full_state(self.config)
+        neighbor_indices = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
 
-        new_system = System(positions=self.states[from_state].system.positions.copy(), types=self.states[from_state].system.types, cell=self.states[from_state].system.cell, pbc=self.states[from_state].system.pbc, index=np.arange(len(self.states[from_state].system.types)))
+        return {
+            "config": self.config,
+            "from_positions": self.states[from_state].system.positions.copy(),
+            "from_types": list(self.states[from_state].system.types),
+            "cell": self.states[from_state].system.cell.copy(),
+            "pbc": self.states[from_state].system.pbc,
+            "ref_initial_positions": np.array(ref_event["initial_positions"], copy=True),
+            "ref_saddle_positions": np.array(ref_event["saddle_positions"], copy=True),
+            "ref_final_positions": np.array(ref_event["final_positions"], copy=True),
+            "ref_initial_types": ref_event.get("initial_types"),
+            "sym_matrices": ref_event["sym_matrix"],
+            "sym_perms": ref_event["sym_perm"],
+            "central_atom": central_atom,
+            "sym_idx": sym_idx,
+            "neighbor_indices": neighbor_indices,
+            "matching_score_thr": self.config.psr.matching_score_thr,
+            "kmax_factor": self.config.ira.kmax_factor,
+            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+        }
 
-        # --- PSR phase ---
-        t_psr_start = time.perf_counter()
-        result = PointSetRegistration(self.config, new_system, ref_event , self.states[from_state].neighbors_list, central_atom).match()
-        if not result.is_ok(): #PSR Err
-            return result
-        result = check_match(result, self.config.psr.matching_score_thr)
-        if not result.is_ok() : #PSR matching score not valid :
-            return result
-        else :
-            psr_output = result.ok_value() #get psr results
+    def _result_from_mpi(self, mpi_result, from_state):
+        """Convert MPI basin_reconstruct result dict to Ok(System) or Err(ErrorInfo)."""
+        from pykmc.result import Err, ErrorInfo, ErrorType
 
-        # Apply symmetry matrix if sym != 0
-        if sym_idx != 0 :
-            sym_matrices = ref_event['sym_matrix']
-            sym_matrix = sym_matrices[sym_idx]
-            supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-            saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-            supposed_final_positions = geometry.transform_positions(supposed_final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-        supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
-        saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
-        supposed_final_positions= geometry.transform_positions(supposed_final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+        if mpi_result is None or not mpi_result.get("ok"):
+            error_type_str = mpi_result.get("error_type", "UNKNOWN") if mpi_result else "UNKNOWN"
+            message = mpi_result.get("message", "Unknown error") if mpi_result else "No result from engine"
+            error_type = getattr(ErrorType, error_type_str, ErrorType.RECONSTRUCTION_INVALID_MIN2)
+            return Err(ErrorInfo(type=error_type, message=message))
 
-        neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
-        new_system.update_positions(saddle_positions, atom_idx = neighbors)
-        t_psr = time.perf_counter() - t_psr_start
-
-        # --- Minimize phase (Reconstruction) ---
-        # Use session pool during basin BFS so multiple threads can minimize in parallel
-        t_min_start = time.perf_counter()
-        result = Reconstruction(self.config, self.manager, use_session_pool=True).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors, pbc=new_system.pbc)
-        t_min = time.perf_counter() - t_min_start
-        if not result.is_ok() :
-            return result
-        new_system.update_positions(result.ok_value().min2_positions)
-
-        # Store sub-timings for profiling aggregation
-        self._last_reconstruct_profile = {"psr": t_psr, "minimize": t_min}
-
+        import ase.geometry
+        cell = self.states[from_state].system.cell
+        pbc = self.states[from_state].system.pbc
+        positions = ase.geometry.wrap_positions(
+            positions=mpi_result["min2_positions"], cell=cell, pbc=pbc)
+        new_system = System(
+            positions=positions,
+            types=self.states[from_state].system.types,
+            cell=cell,
+            pbc=pbc,
+            index=np.arange(len(self.states[from_state].system.types)))
         return Ok(new_system)
+
+    def system_from_state(self, from_state, event_idx, central_atom, sym_idx):
+        """Reconstruct a new state via MPI engine (PSR + minimize).
+
+        Submits the reconstruction task to an engine rank and blocks until complete.
+        """
+        kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
+        future = self.manager.basin_reconstruct(**kwargs)
+        mpi_result = future.result()
+        return self._result_from_mpi(mpi_result, from_state)
 
     def refine_absorbing(self, system) :
         """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
@@ -646,38 +635,62 @@ class BasinsGenericEvents() :
         # Use generous estimate since unused indices are harmless
         return len(table) * 50 * max_syms
 
+    def _prepare_explore_kwargs(self, state_idx, start_index):
+        """Prepare keyword arguments for manager.basin_explore()."""
+        import pickle
+
+        self.states[state_idx].ensure_full_state(self.config)
+        state = self.states[state_idx]
+
+        config_dict = {
+            "rnei": self.config.atomicenvironment.rnei,
+            "rcut": self.config.atomicenvironment.rcut,
+            "neighbors_add": self.config.atomicenvironment.neighbors_add,
+            "ae_style": self.config.atomicenvironment.style,
+            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+            "coordination_threshold": self.config.atomicenvironment.coordination_threshold,
+            "energy_thr": self.config.basin.energy_thr,
+        }
+
+        return {
+            "config_dict": config_dict,
+            "reference_table_data": pickle.dumps(self.reference_table.table),
+            "state_positions": state.system.positions.copy(),
+            "state_types": list(state.system.types),
+            "state_cell": state.system.cell.copy(),
+            "state_pbc": state.system.pbc,
+            "state_index": state_idx,
+            "start_index": start_index,
+        }
+
     def _explore_states_parallel(self, states_batch, n_workers=4):
-        """Explore multiple transient states in parallel using ThreadPoolExecutor.
+        """Explore multiple transient states in parallel via MPI engines.
 
-        Each worker gets its own BasinGenericEventExplorer instance and a
-        non-overlapping state index range.  Connectivity tables are merged
-        on the main thread after all workers complete.
+        Each engine rank runs its own BasinGenericEventExplorer with a
+        non-overlapping state index range. Connectivity rows are merged
+        on rank 0 after all engines complete.
         """
-        from concurrent.futures import ThreadPoolExecutor
-
         if not states_batch:
             return
 
         gap = self._estimate_max_transitions_per_state()
         base = self._next_state_index
 
-        def explore_one(worker_idx, state_idx):
-            explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
-            self.states[state_idx].ensure_full_state(self.config)
-            start = base + worker_idx * gap
-            explorer.explore(state=self.states[state_idx], state_index=state_idx, start_index=start)
-            return explorer.connectivity_table
+        # Submit all exploration tasks to MPI engines
+        futures = {}
+        for i, state_idx in enumerate(states_batch):
+            start = base + i * gap
+            kwargs = self._prepare_explore_kwargs(state_idx, start)
+            futures[state_idx] = self.manager.basin_explore(**kwargs)
 
-        with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = {state_idx: pool.submit(explore_one, i, state_idx)
-                       for i, state_idx in enumerate(states_batch)}
-
+        # Collect results and merge connectivity rows
         max_new_index = base
         for state_idx, future in futures.items():
-            table = future.result()
-            self.connectivity_table.merge(table)
-            if not table.df.empty:
-                max_new_index = max(max_new_index, int(table.df["state_connexion"].max()) + 1)
+            rows = future.result()
+            if rows:
+                self.connectivity_table.add_connectivity_batch(rows)
+                max_conn = max(r["state_connexion"] for r in rows)
+                max_new_index = max(max_new_index, max_conn + 1)
 
         self._next_state_index = max_new_index
 
@@ -777,7 +790,6 @@ class BasinsGenericEvents() :
             D. Merge and update queue
         """
         import time
-        from concurrent.futures import ThreadPoolExecutor
 
         strategy = self.config.basin.strategy
         n_workers = self.config.basin.n_workers
@@ -810,39 +822,23 @@ class BasinsGenericEvents() :
                 for state_idx in to_reconstruct:
                     transition_info[state_idx] = self.connectivity_table.get_transition_to_state(target_state=state_idx)
 
-                if strategy in ("parallel_reconstruct", "wavefront"):
-                    # Parallel reconstruction via ThreadPoolExecutor
-                    t0 = time.perf_counter()
-                    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                        futures = {}
-                        for state_idx in to_reconstruct:
-                            from_state, event_idx, central_atom, sym_idx, is_transient = transition_info[state_idx]
-                            futures[state_idx] = pool.submit(
-                                self.system_from_state, from_state, event_idx, central_atom, sym_idx)
+                # Submit all reconstruction tasks to MPI engines
+                t0 = time.perf_counter()
+                futures = {}
+                for state_idx in to_reconstruct:
+                    from_state, event_idx, central_atom, sym_idx, is_transient = transition_info[state_idx]
+                    kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
+                    futures[state_idx] = (from_state, self.manager.basin_reconstruct(**kwargs))
 
-                    for state_idx, future in futures.items():
-                        result = future.result()
-                        n_processed += 1
-                        if result.is_ok():
-                            reconstructed[state_idx] = result.ok_value()
-                        else:
-                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
-                    prof["reconstruct"] += time.perf_counter() - t0
-                else:
-                    # Serial reconstruction
-                    for state_idx in to_reconstruct:
-                        from_state, event_idx, central_atom, sym_idx, is_transient = transition_info[state_idx]
-                        t0 = time.perf_counter()
-                        result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
-                        prof["reconstruct"] += time.perf_counter() - t0
-                        if hasattr(self, '_last_reconstruct_profile'):
-                            prof["psr"] += self._last_reconstruct_profile["psr"]
-                            prof["minimize"] += self._last_reconstruct_profile["minimize"]
-                        n_processed += 1
-                        if result.is_ok():
-                            reconstructed[state_idx] = result.ok_value()
-                        else:
-                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
+                for state_idx, (from_state, future) in futures.items():
+                    mpi_result = future.result()
+                    result = self._result_from_mpi(mpi_result, from_state)
+                    n_processed += 1
+                    if result.is_ok():
+                        reconstructed[state_idx] = result.ok_value()
+                    else:
+                        logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
+                prof["reconstruct"] += time.perf_counter() - t0
 
             # ── Phase B: Batch deduplication ──
             # Always use batch dedup in the wavefront loop to catch intra-batch
@@ -903,22 +899,10 @@ class BasinsGenericEvents() :
                 if state_idx in self.states_to_explore:
                     new_transient.append(state_idx)
 
-            # ── Phase C: Parallel exploration ──
+            # ── Phase C: Exploration via MPI engines ──
             if new_transient:
                 t0 = time.perf_counter()
-                if strategy in ("parallel_explore", "wavefront") and len(new_transient) > 1:
-                    self._explore_states_parallel(new_transient, n_workers=n_workers)
-                else:
-                    # Serial exploration
-                    for state_idx in new_transient:
-                        self.states[state_idx].ensure_full_state(self.config)
-                        last_idx = self.get_last_state_index()
-                        self.explorer.explore(state=self.states[state_idx], state_index=state_idx, start_index=last_idx)
-                        if not self.explorer.connectivity_table.df.empty:
-                            max_new = int(self.explorer.connectivity_table.df["state_connexion"].max())
-                            self._next_state_index = max(self._next_state_index, max_new + 1)
-                        self.connectivity_table.merge(self.explorer.connectivity_table)
-                        self.explorer.clear()
+                self._explore_states_parallel(new_transient, n_workers=n_workers)
                 prof["explore"] += time.perf_counter() - t0
 
                 # Mark explored

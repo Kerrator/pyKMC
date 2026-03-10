@@ -190,6 +190,14 @@ class Manager:
             futures.append(f) 
         return futures
 
+    def basin_reconstruct(self, **kwargs) -> Future:
+        future = self.submit_job("basin_reconstruct", kwargs)
+        return future
+
+    def basin_explore(self, **kwargs) -> Future:
+        future = self.submit_job("basin_explore", kwargs)
+        return future
+
     def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None) -> list[Future] :
         future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
         return future

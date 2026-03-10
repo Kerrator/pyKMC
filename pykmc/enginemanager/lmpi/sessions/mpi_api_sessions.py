@@ -245,14 +245,40 @@ class MpiApiSession :
 
     #@session_locked
     def partn_refine(self, config, central_atom_idx, positions = None, cell=None, type=None, saddle_idx=None, saddle_positions=None) :
-        self._is_busy = True 
+        self._is_busy = True
         #print(f"[Session] Launching pARTn search")
-        try : 
+        try :
             self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
+            if msg.get("type") == "result" :
                 return msg["value"]
-            else : 
+            else :
                 raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+        finally :
+            self._is_busy = False
+
+    def basin_reconstruct(self, **kwargs):
+        """Send basin reconstruction task to engine and return result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_reconstruct", "value": kwargs})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result":
+                return msg["value"]
+            else:
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
+            self._is_busy = False
+
+    def basin_explore(self, **kwargs):
+        """Send basin exploration task to engine and return result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_explore", "value": kwargs})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result":
+                return msg["value"]
+            else:
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
             self._is_busy = False
