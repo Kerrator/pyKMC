@@ -64,6 +64,7 @@ class BasinsGenericEvents() :
         self.known_environments = known_environments
         self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
         self._next_state_index = 1  # Monotonic counter for state indices (0 is the initial state)
+        self._use_session_pool = False  # Set True only for parallel strategies that call use_local()
 
     def detection(self, params) -> bool : 
         """Utility method."""
@@ -825,7 +826,7 @@ class BasinsGenericEvents() :
                         if result.is_ok():
                             reconstructed[state_idx] = result.ok_value()
                         else:
-                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result)
+                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
                     prof["reconstruct"] += time.perf_counter() - t0
                 else:
                     # Serial reconstruction
@@ -841,7 +842,7 @@ class BasinsGenericEvents() :
                         if result.is_ok():
                             reconstructed[state_idx] = result.ok_value()
                         else:
-                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result)
+                            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
 
             # ── Phase B: Batch deduplication ──
             # Always use batch dedup in the wavefront loop to catch intra-batch
