@@ -42,6 +42,8 @@ class NeighborsList:
 
         if np.all(pbc):
             # Fully periodic: use boxsize (existing fast path)
+            # Wrap positions into box (cKDTree requires non-negative coords)
+            positions = np.mod(positions, cell_diag)
             tree = cKDTree(positions, boxsize=cell_diag.tolist())
             for i in range(len(positions)):
                 neighbors = tree.query_ball_point(positions[i], self.rnei)

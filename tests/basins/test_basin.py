@@ -8,34 +8,52 @@ logger = logging.getLogger("tests")
 
 class TestFingerprint:
 
-    def test_fingerprint_permutation_invariance(self):
-        """Fingerprint should be invariant to atom permutation."""
+    def test_com_fingerprint_permutation_invariance(self):
+        """COM fingerprint should be invariant to atom permutation."""
         positions = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
-        fp1 = BasinsGenericEvents._compute_fingerprint(positions, cell, pbc)
-        fp2 = BasinsGenericEvents._compute_fingerprint(positions[[2,0,3,1]], cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(positions, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(positions[[2,0,3,1]], cell, pbc)
         assert np.allclose(fp1, fp2)
 
-    def test_fingerprint_translation_invariance(self):
-        """Fingerprint should be invariant to uniform translation (no boundary crossing)."""
+    def test_com_fingerprint_translation_invariance(self):
+        """COM fingerprint should be invariant to uniform translation (no boundary crossing)."""
         positions = np.array([[1,1,1],[2,1,1],[1,2,1],[1,1,2]], dtype=float)
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
-        fp1 = BasinsGenericEvents._compute_fingerprint(positions, cell, pbc)
-        # Translate by 3.0 in each direction — no atoms cross boundary
-        fp2 = BasinsGenericEvents._compute_fingerprint(positions + [3.0, 3.0, 3.0], cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(positions, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(positions + [3.0, 3.0, 3.0], cell, pbc)
         assert np.allclose(fp1, fp2)
 
-    def test_fingerprint_different_structures(self):
-        """Different structures should produce different fingerprints."""
+    def test_com_fingerprint_different_structures(self):
+        """Different structures should produce different COM fingerprints."""
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
         pos1 = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
         pos2 = np.array([[0,0,0],[3,0,0],[0,3,0],[0,0,3]], dtype=float)
-        fp1 = BasinsGenericEvents._compute_fingerprint(pos1, cell, pbc)
-        fp2 = BasinsGenericEvents._compute_fingerprint(pos2, cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(pos1, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(pos2, cell, pbc)
         assert not np.allclose(fp1, fp2, atol=0.3)
+
+    def test_atoms_of_interest_fingerprint_permutation_invariance(self):
+        """Atoms of interest fingerprint should be invariant to atom permutation."""
+        positions = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(positions, cell, pbc, rnei=1.5, coord_thr=10)
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(positions[[2,0,3,1]], cell, pbc, rnei=1.5, coord_thr=10)
+        assert np.allclose(fp1, fp2)
+
+    def test_atoms_of_interest_fingerprint_different_structures(self):
+        """Different structures should produce different atoms of interest fingerprints."""
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        pos1 = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
+        pos2 = np.array([[0,0,0],[3,0,0],[0,3,0],[0,0,3]], dtype=float)
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(pos1, cell, pbc, rnei=1.5, coord_thr=10)
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(pos2, cell, pbc, rnei=1.5, coord_thr=10)
+        assert not np.allclose(fp1, fp2)
 
 
 class TestBasin :

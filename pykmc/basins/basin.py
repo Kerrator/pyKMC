@@ -482,9 +482,18 @@ class BasinsGenericEvents() :
         return Ok(None)
 
 
+    def _fingerprint_tolerance(self) -> float:
+        """Return the max element-wise diff for fingerprint pre-filtering."""
+        if (self.config.basin is not None
+                and self.config.basin.fingerprint_tolerance is not None):
+            return self.config.basin.fingerprint_tolerance
+        # COM-distance tolerance (used by full COM and coordination-COM hybrid)
+        return 0.5
+
     def is_new_state(self, system) :
         #Loop over all other system in self.states to see if system is already known
         fp_new = self._compute_fingerprint(system.positions, system.cell, system.pbc)
+        fp_tol = self._fingerprint_tolerance()
 
         # Vectorized fingerprint rejection: compare against all states at once
         fp_items = [
@@ -496,7 +505,7 @@ class BasinsGenericEvents() :
             indices, fps = zip(*fp_items)
             fp_matrix = np.vstack(fps)  # (N_states, N_atoms)
             max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
-            candidates = [indices[i] for i in np.where(max_diffs <= 0.5)[0]]
+            candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
         else:
             candidates = list(self.states.keys())
 
@@ -517,9 +526,13 @@ class BasinsGenericEvents() :
 
         if pbc is None or np.all(pbc):
             # Fully periodic: use boxsize (existing fast path)
-            box = np.diag(cell).tolist()
-            tree2 = cKDTree(pos2, boxsize=box)
-            distances, _ = tree2.query(pos1, k=1)
+            box_arr = np.diag(cell).astype(np.float64)
+            box = box_arr.tolist()
+            # Wrap positions into box (cKDTree requires non-negative coords)
+            p1 = np.mod(pos1, box_arr)
+            p2 = np.mod(pos2, box_arr)
+            tree2 = cKDTree(p2, boxsize=box)
+            distances, _ = tree2.query(p1, k=1)
         else:
             # Mixed PBC: manual minimum-image distance
             box = np.diag(cell)
@@ -540,13 +553,8 @@ class BasinsGenericEvents() :
             return False
 
     @staticmethod
-    def _compute_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
-        """Compute a cheap structural fingerprint for fast inequality rejection.
-
-        Returns sorted per-atom distances from center of mass. Rotationally and
-        permutationally invariant — ideal for quickly ruling out non-equivalent
-        structures before the expensive cKDTree comparison.
-        """
+    def _com_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
+        """Sorted per-atom distances from center of mass (legacy fallback)."""
         box = np.diag(cell).astype(np.float64)
         pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
         pos = np.array(positions, dtype=np.float64, copy=True)
@@ -559,6 +567,74 @@ class BasinsGenericEvents() :
             if pbc_array[dim] and box[dim] > 0:
                 diffs[:, dim] -= np.round(diffs[:, dim] / box[dim]) * box[dim]
         return np.sort(np.linalg.norm(diffs, axis=1))
+
+    @staticmethod
+    def _atoms_of_interest_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray,
+                                        rnei: float, coord_thr: int) -> np.ndarray:
+        """Atoms of interest fingerprint: sorted COM distances for undercoordinated atoms.
+
+        Identifies 'atoms of interest' — those with fewer than coord_thr neighbors
+        within rnei (near defects, surfaces, vacancies). Computes their sorted
+        distances from the system center of mass, producing a short, continuous-valued
+        fingerprint vector with high discriminating power.
+        """
+        pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
+        cell_diag = np.diag(cell).astype(np.float64)
+        pos = np.array(positions, dtype=np.float64, copy=True)
+
+        # Wrap positions for PBC
+        for dim in range(3):
+            if pbc_array[dim] and cell_diag[dim] > 0:
+                pos[:, dim] = np.mod(pos[:, dim], cell_diag[dim])
+
+        # Build tree and count neighbors
+        if np.all(pbc_array):
+            tree = cKDTree(pos, boxsize=cell_diag.tolist())
+        else:
+            tree = cKDTree(pos)
+
+        neighbor_lists = tree.query_ball_point(pos, rnei)
+        counts = np.array([len(n) - 1 for n in neighbor_lists], dtype=np.int32)
+
+        # Find interesting atom indices (undercoordinated)
+        interesting_mask = counts < coord_thr
+        if not np.any(interesting_mask):
+            return np.array([], dtype=np.float64)
+
+        # COM of full system, distances for interesting atoms only
+        com = pos.mean(axis=0)
+        diffs = pos[interesting_mask] - com
+        for dim in range(3):
+            if pbc_array[dim] and cell_diag[dim] > 0:
+                diffs[:, dim] -= np.round(diffs[:, dim] / cell_diag[dim]) * cell_diag[dim]
+
+        return np.sort(np.linalg.norm(diffs, axis=1))
+
+    def _compute_fingerprint(self, positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
+        """Compute a structural fingerprint for fast inequality rejection.
+
+        Dispatches to:
+        1. Atoms of interest fingerprint if fingerprint_coordination_thr is set (explicit override)
+        2. Atoms of interest fingerprint if AtomicEnvironment uses coordination style
+        3. Full COM-distance fingerprint otherwise
+        """
+        # Explicit override from [BASIN] config
+        if (self.config.basin is not None
+                and self.config.basin.fingerprint_coordination_thr is not None):
+            return self._atoms_of_interest_fingerprint(
+                positions, cell, pbc,
+                rnei=self.config.atomicenvironment.rnei,
+                coord_thr=self.config.basin.fingerprint_coordination_thr,
+            )
+        # Auto-detect from AtomicEnvironment style
+        if (self.config.atomicenvironment.style in ("coordination", "coordination/graph")
+                and self.config.atomicenvironment.coordination_threshold is not None):
+            return self._atoms_of_interest_fingerprint(
+                positions, cell, pbc,
+                rnei=self.config.atomicenvironment.rnei,
+                coord_thr=self.config.atomicenvironment.coordination_threshold + 1,
+            )
+        return self._com_fingerprint(positions, cell, pbc)
 
     def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False, full=False ) :
         """Add a new state in the `self.states` dictionnary."""
@@ -721,8 +797,10 @@ class BasinsGenericEvents() :
         for idx, state_data in self.states.items():
             if state_data.system is not None:
                 if state_data.system.pbc is None or np.all(state_data.system.pbc):
-                    box = np.diag(state_data.system.cell).tolist()
-                    existing_trees[idx] = cKDTree(state_data.system.positions, boxsize=box)
+                    box_arr = np.diag(state_data.system.cell).astype(np.float64)
+                    box = box_arr.tolist()
+                    wrapped = np.mod(state_data.system.positions, box_arr)
+                    existing_trees[idx] = cKDTree(wrapped, boxsize=box)
                 else:
                     existing_trees[idx] = None  # fallback to manual comparison
 
@@ -732,6 +810,8 @@ class BasinsGenericEvents() :
             for si, fp in self._state_fingerprints.items()
         ]
 
+        fp_tol = self._fingerprint_tolerance()
+
         for new_idx, system in new_systems.items():
             match = -1
             fp_new = new_fingerprints[new_idx]
@@ -740,7 +820,7 @@ class BasinsGenericEvents() :
             if existing_fp_items:
                 candidate_indices = []
                 for si, fp in existing_fp_items:
-                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= 0.5:
+                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= fp_tol:
                         candidate_indices.append(si)
             else:
                 candidate_indices = list(existing_trees.keys())
@@ -750,7 +830,8 @@ class BasinsGenericEvents() :
                     continue
                 tree = existing_trees[existing_idx]
                 if tree is not None:
-                    distances, _ = tree.query(system.positions, k=1)
+                    query_pos = np.mod(system.positions, np.diag(system.cell).astype(np.float64))
+                    distances, _ = tree.query(query_pos, k=1)
                     if np.max(distances) < 0.3:
                         match = existing_idx
                         break
@@ -769,7 +850,7 @@ class BasinsGenericEvents() :
                     if other_idx in new_systems:
                         fp_other = new_fingerprints[other_idx]
                         # Fingerprint pre-filter within batch
-                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > 0.5:
+                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > fp_tol:
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,

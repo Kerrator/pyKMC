@@ -195,6 +195,32 @@
   <details><summary>Description</summary>
   Number of threads used by parallel basin strategies. Has no effect when <code>strategy = serial</code>. The optimal value depends on the number of available MPI sessions (typically <code>np - 1</code>).
   </details>
+- **`fingerprint_coordination_thr`** : `int`, optional, default = `None`
+  <details><summary>Description</summary>
+  Coordination-based fingerprint for basin state deduplication. When set, atoms with fewer
+  neighbors (within the <code>rnei</code> cutoff from <code>[AtomicEnvironment]</code>) than this threshold are
+  identified as "atoms of interest" — typically atoms near defects or surfaces. Their sorted
+  coordination counts form a compact integer fingerprint vector used to quickly reject
+  non-equivalent states before the expensive cKDTree position comparison.
+
+  **When to use**: Recommended for surface or defect systems where most atoms are bulk-like
+  (high coordination) and only a small fraction are structurally distinct. For FCC metals,
+  a value of **10** works well (bulk atoms have 12 neighbors).
+
+  **How it works**:
+
+  1. Build cKDTree from wrapped positions
+  2. Count neighbors within `rnei` for each atom
+  3. Keep only atoms with count &lt; `fingerprint_coordination_thr`
+  4. Sort the counts → fingerprint vector
+  5. Two states with different fingerprint vectors are immediately rejected
+
+  If `None`, falls back to the legacy fingerprint (sorted distances from center of mass),
+  which works for any system but is less discriminating for surface/defect systems.
+
+  **Performance**: On a 383-atom Ni slab with 1 vacancy (wavefront w4, np=8), reduced dedup
+  time from 162.7s to 116.5s (28% faster).
+  </details>
 
 ---
 
