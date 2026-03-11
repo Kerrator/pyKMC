@@ -4,7 +4,7 @@ import numpy as np
 
 from pykmc import System
 from pykmc.kmc import KMC
-from pykmc.result import BasinOutput
+from pykmc.result import BasinOutput, Ok, ReconstructionOutput
 
 
 def _toy_system(offset: float) -> System:
@@ -48,3 +48,23 @@ def test_accept_capped_basin_exit_uses_selected_exit_state():
     assert np.allclose(kmc.system.positions, exit_system.positions)
     assert kmc.total_energy == -12.34
     kmc.manager.global_get_total_energy.assert_called_once()
+
+
+def test_apply_original_migration_event_restores_positions_and_total_energy():
+    kmc = KMC(config=Mock())
+    kmc.system = _toy_system(0.0)
+    reconstructed_system = _toy_system(3.0)
+
+    result_reconstruction = Ok(
+        ReconstructionOutput(
+            min1_positions=_toy_system(1.0).positions,
+            saddle_positions=_toy_system(2.0).positions,
+            min2_positions=reconstructed_system.positions,
+            min2_etot=-7.5,
+        )
+    )
+
+    kmc._apply_original_migration_event(result_reconstruction)
+
+    assert np.allclose(kmc.system.positions, reconstructed_system.positions)
+    assert kmc.total_energy == -7.5
