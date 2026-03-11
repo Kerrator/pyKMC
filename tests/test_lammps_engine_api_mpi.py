@@ -294,9 +294,9 @@ class TestLammpsApiMpiEngine :
             return  # Engine processes stop here
         # ------------ SESSION CODE (rank 0) ------------
         manager.initialize_sessions(config, system)
-        idx = 20*[0]
-        futures = manager.partn_refine(config, idx)
-        _ = [f.result() for f in futures]
+        idx = 0
+        future = manager.partn_refine(config, idx)
+        _ = future.result()
         manager.close_all()
 
 

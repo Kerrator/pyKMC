@@ -11,6 +11,16 @@ from pykmc.enginemanager.lmpi.pool import ManagerFactory
 logger = logging.getLogger("tests")
 
 
+def _basin_mock_config() -> Mock:
+    """Create a Mock config that routes to COM fingerprint (no atoms-of-interest)."""
+    config = Mock()
+    config.basin.fingerprint_coordination_thr = None
+    config.basin.fingerprint_tolerance = None
+    config.atomicenvironment.style = "cna"
+    config.atomicenvironment.coordination_threshold = None
+    return config
+
+
 def _toy_system(offset: float) -> System:
     return System(
         positions=np.array([[offset, 0.0, 0.0], [offset + 1.0, 0.0, 0.0]], dtype=float),
@@ -98,7 +108,7 @@ class TestFingerprint:
 class TestBasin :
 
     def test_initialize_resets_cached_state(self):
-        basin = BasinsGenericEvents(config=Mock(), reference_table=Mock(), known_environments=set(), manager=Mock())
+        basin = BasinsGenericEvents(config=_basin_mock_config(), reference_table=Mock(), known_environments=set(), manager=Mock())
         basin.states[99] = Mock()
         basin._state_fingerprints[99] = np.array([1.0])
         basin.absorbing_saddle_positions[99] = np.array([[0.0, 0.0, 0.0]])
@@ -112,7 +122,7 @@ class TestBasin :
         assert basin._was_capped is False
 
     def test_cap_remaining_states_materializes_frontier(self):
-        basin = BasinsGenericEvents(config=Mock(), reference_table=Mock(), known_environments=set(), manager=Mock())
+        basin = BasinsGenericEvents(config=_basin_mock_config(), reference_table=Mock(), known_environments=set(), manager=Mock())
         basin.connectivity_table = BasinStatesConnectivity()
         basin._add_state(state_index=0, system=_toy_system(0.0))
         basin.states_to_explore = [1, 2]
@@ -164,7 +174,7 @@ class TestBasin :
             )
         )
 
-        config = Mock()
+        config = _basin_mock_config()
         config.basin.strategy = "wavefront"
         config.basin.n_workers = 2
         config.basin.max_states = None
@@ -201,7 +211,7 @@ class TestBasin :
         manager.use_global = Mock()
         manager.basin_reconstruct = Mock(return_value=_FailedFuture(RuntimeError("remote boom")))
 
-        config = Mock()
+        config = _basin_mock_config()
         config.basin.strategy = "wavefront"
         config.basin.n_workers = 2
         config.basin.max_states = None
