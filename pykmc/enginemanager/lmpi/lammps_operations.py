@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
@@ -15,6 +16,8 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
+
+logger = logging.getLogger("log")
 
 
 def initialize_parameters(engine, boundary="p p p") :
@@ -161,7 +164,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
 
-    print('Central Atom', central_atom_idx)
+    logger.debug("[pARTn] Searching from central atom %d", central_atom_idx)
     #Check to see if system is in AV mode:
     if config.control.active_volume == True:
         atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, type)
@@ -688,7 +691,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                 
         attempt +=1
         artn.set("zseed", config.partn.zseed)
-        print("NEW ATTEMPT")
+        logger.debug("[pARTn] Retrying search with refreshed seed")
 
     else: #fail after max attemps
         if engine.rank == 0 : 
@@ -699,4 +702,3 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                 )
             )
         return None
-

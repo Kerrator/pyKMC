@@ -78,7 +78,7 @@ class ControlConfig(BaseModel):
 
     engine_use_rank_0: Optional[bool] = Field(
         default=False,
-        description="Deprecated : If use mpi rank 0 or not."
+        description="Deprecated and unsupported in ManagerFactory. Keep False."
     )
 
     verbosity: Optional[int] = Field(
@@ -507,7 +507,7 @@ class PSRConfig(BaseModel):
     )
 
 class ActiveVolume(BaseModel):
-    """ Active Volume Parameters"""
+    """Active Volume Parameters"""
 
     ract: float = Field(
         default=6.0,
@@ -576,6 +576,11 @@ class BasinConfig(BaseModel):
     n_workers: int = Field(
     default = 4,
     description="Number of threads for parallel basin phases"
+    )
+
+    max_states: Optional[int] = Field(
+        default=None,
+        description="Maximum transient states to explore. Remaining frontier becomes absorbing. None = unlimited.",
     )
 
 class DealloyingConfig(BaseModel):

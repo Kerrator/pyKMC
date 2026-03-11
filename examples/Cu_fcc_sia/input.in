@@ -5,7 +5,7 @@ engine = lammps
 verbosity = 1
 n_sessions = 7
 engine_use_rank_0 = False
-basin = False
+basin = True
 active_volume = False
 #reference_table = ./reference_table.pickle 
 #visited_environments = ./visited_environments.pickle
@@ -47,6 +47,8 @@ kmax_factor = 2.0
 
 [BASIN]
 energy_thr = 0.5
+strategy = wavefront
+n_workers = 4
 
 [ActiveVolume]
 ract = 20.0 

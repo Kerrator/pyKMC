@@ -256,41 +256,46 @@ class KMC:
                     self.system.update_positions(result_reconstruction.ok_value().min1_positions)
                     result_basin = basin.execute(self.system)
                     if result_basin.is_ok() : #Basin did no fail
+                        basin_output = result_basin.ok_value()
                     #move system to a state connected to the exit_state
-                        self.system.update_positions(result_basin.ok_value().initial_system_positions)
-                        self.neighbors_list = basin.states[result_basin.ok_value().from_state].neighbors_list
+                        self.system.update_positions(basin_output.initial_system_positions)
+                        self.neighbors_list = basin.states[basin_output.from_state].neighbors_list
                     #construct new active table with only event : new_actual_state - > exit_state
                         tmp_active_table = ActiveEventTable(self.config)
-                        tmp_event = EventRefinementOutput(central_atom_index=result_basin.ok_value().central_atom,
-                                                          saddle_positions=result_basin.ok_value().saddle_positions,
+                        tmp_event = EventRefinementOutput(central_atom_index=basin_output.central_atom,
+                                                          saddle_positions=basin_output.saddle_positions,
                                                           E_saddle=-1,
-                                                          min2_positions=result_basin.ok_value().final_positions,
-                                                          dE_forward=result_basin.ok_value().energy_barrier,
-                                                          num_reference_event=result_basin.ok_value().num_reference_event)
-                        neighbors = result_basin.ok_value().neighbors
+                                                          min2_positions=basin_output.final_positions,
+                                                          dE_forward=basin_output.energy_barrier,
+                                                          num_reference_event=basin_output.num_reference_event)
                         tmp_active_table.add_events(tmp_event)
-                    #reconstruct event
-                        self.manager.use_global()
-                        result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
-                        if result_basin_reconstruction.is_ok() :
-                            self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
-                            self.total_energy = result_basin_reconstruction.ok_value().min2_etot
-                            delta_t = result_basin.ok_value().t_exit
-                            ktot = result_basin.ok_value().k_tot
+                        if basin._was_capped:
+                            self.loggers.info("log", "\t :=> Basin max_states reached; accepting selected exit state directly.")
+                            self._accept_capped_basin_exit(basin, basin_output)
+                            delta_t = basin_output.t_exit
+                            ktot = basin_output.k_tot
                             idx_selected_event = 0
                             active_table.table = tmp_active_table.table
+                            self._log_basin_exit_selection(basin, basin_output.exit_state)
+                        else:
+                            # Reconstruct the selected exit event when the basin was fully explored.
+                            self.manager.use_global()
+                            result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
+                            if result_basin_reconstruction.is_ok() :
+                                self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
+                                self.total_energy = result_basin_reconstruction.ok_value().min2_etot
+                                delta_t = basin_output.t_exit
+                                ktot = basin_output.k_tot
+                                idx_selected_event = 0
+                                active_table.table = tmp_active_table.table
 
-                            #INFO
-                            idx_exit_event, basin_info = info_basin_events(self.system.types, self.reference_table, basin.connectivity_table, result_basin.ok_value().exit_state)
-                            basin_info = basin_info.output_msg()
-                            self.loggers.events_basin_info_line("events",idx_exit_event )
-                            self.loggers.info("events", basin_info)
+                                self._log_basin_exit_selection(basin, basin_output.exit_state)
 
+                            else :
+                               self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
+                               self.system.update_positions(basin.states[0].system.positions)
+                               self.system.update_positions(result_reconstruction.ok_value().min2_positions)
 
-                        else :
-                           self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
-                           self.system.update_positions(basin.states[0].system.positions)
-                           self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                     else :
                         self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
                         self.system.update_positions(result_reconstruction.ok_value().min2_positions)
@@ -641,6 +646,27 @@ class KMC:
         new_positions = active_table.table.loc[idx_selected_event].at["final_positions"]
         self.system.update_positions(new_positions)
 
+    def _accept_capped_basin_exit(self, basin: BasinsGenericEvents, basin_output) -> None:
+        exit_state = basin_output.exit_state
+        if exit_state not in basin.states or basin.states[exit_state].system is None:
+            raise RuntimeError(
+                f"Capped basin selected exit_state={exit_state}, but no materialized state is available."
+            )
+
+        exit_positions = basin.states[exit_state].system.positions.copy()
+        self.system.update_positions(exit_positions)
+        self.total_energy = self.manager.global_get_total_energy(positions=exit_positions.copy())
+
+    def _log_basin_exit_selection(self, basin: BasinsGenericEvents, exit_state: int) -> None:
+        idx_exit_event, basin_info = info_basin_events(
+            self.system.types,
+            self.reference_table,
+            basin.connectivity_table,
+            exit_state,
+        )
+        self.loggers.events_basin_info_line("events", idx_exit_event)
+        self.loggers.info("events", basin_info.output_msg())
+
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
         if self.config.control.restart_file is None: 
@@ -777,4 +803,3 @@ class KMC:
         self.loggers.info("log", ":=> End of simulation")
         self.manager.close_all()
         sys.exit()
-

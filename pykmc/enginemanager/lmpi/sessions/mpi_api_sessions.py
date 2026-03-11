@@ -1,3 +1,4 @@
+import logging
 from mpi4py import MPI 
 import numpy as np
 from ...messenger import MpiMessenger
@@ -6,6 +7,8 @@ from functools import wraps
 #TODO more general way to deal with operations 
 #TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
 #initiated in kmc, after the initialization of manager ...))
+
+logger = logging.getLogger("log")
 
 def session_locked(method):
     @wraps(method)
@@ -92,7 +95,7 @@ class MpiApiSession :
             If True, wait for the engine to send a status message (for normal sessions).
             If False, just send the close message (for global / long-running engines).
         """
-        print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
+        logger.debug("[Session %d] Closing engine at rank %d", self.session_id, self.engine_master_rank)
         self.send_message({"type": "close"}, expect_status=wait_status)
         self._is_alive = False
 

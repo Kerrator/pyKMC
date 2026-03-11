@@ -16,6 +16,7 @@ basin = True
 energy_thr = 0.1
 strategy = wavefront
 n_workers = 4
+max_states = 500
 ```
 
 ### Exploration Strategies
@@ -31,6 +32,8 @@ The BFS exploration loop can be parallelized using different strategies, configu
 | `wavefront` | Full wavefront BFS combining parallel reconstruction, batch dedup, and parallel exploration in each iteration |
 
 `n_workers` controls the number of threads used by parallel strategies (default: 4).
+`max_states` can be used as a safety cap for large basins. When the cap is reached, the remaining frontier states are reconstructed and converted to absorbing exits instead of continuing the BFS indefinitely. The capped basin is then treated as complete for exit selection: the selector chooses an exit rate/state from the capped connectivity graph, and KMC accepts that selected exit directly instead of falling back to the original event.
+For MPI-backed basin strategies, keep `[Control] engine_use_rank_0 = False`; rank-0 engine participation remains unsupported in the current manager implementation.
 
 ---
 
@@ -107,4 +110,3 @@ The following describes the serial BFS flow. Parallel strategies (`wavefront`, `
 
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
 If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
-

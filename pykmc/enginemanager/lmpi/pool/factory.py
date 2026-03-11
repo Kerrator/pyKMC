@@ -1,10 +1,13 @@
+import logging
+
 from mpi4py import MPI 
 from ...messenger import MpiMessenger, QueueMessenger
 from ...lmpi.pool import Manager
 from ...lmpi.sessions import MpiApiSession
 from ...lmpi.engines import MpiApiEngine
 import numpy as np
-import threading
+
+logger = logging.getLogger("log")
 
 class ManagerFactory:
     """
@@ -19,10 +22,13 @@ class ManagerFactory:
         self.use_rank_0 = use_rank_0
         self.has_global = has_global
 
-        if self.use_rank_0 : 
-            self.start_rank = 0
-        else : 
-            self.start_rank = 1
+        if self.use_rank_0:
+            raise ValueError(
+                "engine_use_rank_0=True is not supported by ManagerFactory. "
+                "Use engine_use_rank_0=False to avoid deadlocking rank 0 during MPI startup."
+            )
+
+        self.start_rank = 1
 
         if self.world_size < n_sessions + self.start_rank:
             raise ValueError("Not enough MPI ranks to allocate sessions")
@@ -78,17 +84,16 @@ class ManagerFactory:
                 global_engine_comm=global_comm,
                 global_engine_id=0
             )
-            engine.start()   # bloque ici
+            engine.start()
 
         
 
 
         # --- Session (On rank 0) ---
         if self.world_rank == 0:
-            print("rank0")
             for session_id, chunk in enumerate(self.chunks):
                 messenger = messengers[session_id]
-                print(f"[Factory] Creating session {session_id} for ranks: {chunk}")
+                logger.debug("[Factory] Creating session %d for ranks: %s", session_id, chunk)
                 session = MpiApiSession(
                     messenger=messenger,
                     engine_ranks=chunk,

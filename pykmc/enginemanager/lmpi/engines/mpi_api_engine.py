@@ -1,9 +1,12 @@
 from lammps import lammps
+import logging
 import threading 
 from mpi4py import MPI 
 import queue 
 from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reinitialize_system, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, basin_reconstruct, basin_explore
 from ...messenger import QueueMessenger, MpiMessenger
+
+logger = logging.getLogger("log")
 
 class MpiApiEngine() : 
     """ 
@@ -189,7 +192,7 @@ class MpiApiEngine() :
                     result = operation_handler(self,*args, **kwargs)
                 return result
             except Exception as e:
-                print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
+                logger.exception("[Engine Rank %d] Error in handler %s", self.rank, msg_type)
             finally : 
                 entry_engine_comm.barrier()
 
@@ -232,7 +235,7 @@ class MpiApiEngine() :
 
     def close(self) -> None:    
         """Close the LAMMPS engine."""
-        print(f"[Engine Rank {self.rank}] Closing LAMMPS engine.")
+        logger.debug("[Engine Rank %d] Closing LAMMPS engine", self.rank)
         if self.local_lmp is not None:
             self.local_lmp.close()
             self.local_lmp = None

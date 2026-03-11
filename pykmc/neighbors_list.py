@@ -42,13 +42,15 @@ class NeighborsList:
 
         if np.all(pbc):
             # Fully periodic: use boxsize (existing fast path)
-            tree = cKDTree(positions, boxsize=cell_diag.tolist())
-            for i in range(len(positions)):
-                neighbors = tree.query_ball_point(positions[i], self.rnei)
+            # Wrap positions into [0, box) — cKDTree requires non-negative coords
+            wrapped = np.mod(positions, cell_diag)
+            tree = cKDTree(wrapped, boxsize=cell_diag.tolist())
+            for i in range(len(wrapped)):
+                neighbors = tree.query_ball_point(wrapped[i], self.rnei)
                 neighbors.remove(i)  # don't have self as neighbor
                 self.neighbors_list["rnei"].append(neighbors)
                 if self.rcut is not None:
-                    neighbors = tree.query_ball_point(positions[i], self.rcut)
+                    neighbors = tree.query_ball_point(wrapped[i], self.rcut)
                     self.neighbors_list["rcut"].append(neighbors)
         else:
             # Mixed PBC: create ghost images in periodic directions
