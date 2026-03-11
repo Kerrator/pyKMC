@@ -30,7 +30,7 @@
   </details>
 - **`restart_file`** : `str`, optional
   <details><summary>Description</summary>
-  Path to a `.npz` restart file produced by a previous pyKMC run. When provided, KMC resumes from the stored step/time counters instead of starting from step 0, while recomputing the current energies from the supplied initial configuration and potential.
+  Path to a `.npz` restart file produced by a previous pyKMC run. When provided, KMC resumes from the stored step/time counters instead of starting from step 0, while recomputing the current energies from the supplied initial configuration and potential. `n_steps` remains the final target step number, so restarting from step 100 with `n_steps = 1000` continues at step 101 and stops at step 1000.
   </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>

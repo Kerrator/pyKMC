@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import pykmc.enginemanager.lmpi.pool.factory as factory_module
 from pykmc.enginemanager.lmpi.pool import Manager, ManagerFactory
+from pykmc.enginemanager.lmpi.sessions import MpiApiSession
 from pykmc import System, Config
 from mpi4py import MPI
 import pytest
@@ -12,6 +13,18 @@ def _skip_without_ranks(n_sessions: int, use_rank_0: bool) -> None:
     required_ranks = n_sessions if use_rank_0 else n_sessions + 1
     if MPI.COMM_WORLD.Get_size() < required_ranks:
         pytest.skip(f"requires mpirun with at least {required_ranks} ranks")
+
+
+class _FakeMessenger:
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.sent_messages = []
+
+    def send(self, msg, dest=None, tag=None):
+        self.sent_messages.append((msg, dest, tag))
+
+    def recv(self, source=None, tag=None):
+        return self._replies.pop(0)
 
 
 class TestManager: 
@@ -50,6 +63,39 @@ class TestManager:
         global_session.command.assert_called_once_with("units metal")
         for session in sessions:
             session.command.assert_not_called()
+
+    def test_session_returns_result_reply(self):
+        messenger = _FakeMessenger(
+            [
+                {"type": "status", "value": {"alive": True, "busy": False}},
+                {"type": "result", "value": {"ok": True, "payload": 3}},
+            ]
+        )
+        session = MpiApiSession(messenger=messenger, engine_ranks=[1], session_id=1)
+
+        result = session.basin_reconstruct(state_index=3)
+
+        assert result == {"ok": True, "payload": 3}
+        assert messenger.sent_messages[0][0]["type"] == "basin_reconstruct"
+
+    def test_session_raises_on_error_reply(self):
+        messenger = _FakeMessenger(
+            [
+                {"type": "status", "value": {"alive": True, "busy": False}},
+                {
+                    "type": "error",
+                    "value": {
+                        "operation": "basin_explore",
+                        "error_type": "RuntimeError",
+                        "message": "boom",
+                    },
+                },
+            ]
+        )
+        session = MpiApiSession(messenger=messenger, engine_ranks=[1], session_id=1)
+
+        with pytest.raises(RuntimeError, match="basin_explore.*boom"):
+            session.basin_explore(state_index=3)
 
     def test_initialize_manager(self)  : 
         _skip_without_ranks(n_sessions=2, use_rank_0=False)

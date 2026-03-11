@@ -8,7 +8,7 @@ from ..utils import geometry
 from ..rate_constant import compute_rate_Eyring
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok, BasinOutput
+from pykmc.result import Ok, Err, BasinOutput, ErrorInfo, ErrorType
 import logging
 import time
 
@@ -411,8 +411,6 @@ class BasinsGenericEvents() :
 
     def _result_from_mpi(self, mpi_result, from_state):
         """Convert MPI basin_reconstruct result dict to Ok(System) or Err(ErrorInfo)."""
-        from pykmc.result import Err, ErrorInfo, ErrorType
-
         if mpi_result is None or not mpi_result.get("ok"):
             error_type_str = mpi_result.get("error_type", "UNKNOWN") if mpi_result else "UNKNOWN"
             message = mpi_result.get("message", "Unknown error") if mpi_result else "No result from engine"
@@ -432,6 +430,14 @@ class BasinsGenericEvents() :
             index=np.arange(len(self.states[from_state].system.types)))
         return Ok(new_system)
 
+    def _transport_error(self, operation: str, exc: Exception):
+        return Err(
+            ErrorInfo(
+                type=ErrorType.MPI_REMOTE_ERROR,
+                message=f"{operation} failed: {exc}",
+            )
+        )
+
     def system_from_state(self, from_state, event_idx, central_atom, sym_idx):
         """Reconstruct a new state via MPI engine (PSR + minimize).
 
@@ -439,7 +445,10 @@ class BasinsGenericEvents() :
         """
         kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
         future = self.manager.basin_reconstruct(**kwargs)
-        mpi_result = future.result()
+        try:
+            mpi_result = future.result()
+        except Exception as exc:
+            return self._transport_error("basin_reconstruct", exc)
         return self._result_from_mpi(mpi_result, from_state)
 
     def _materialize_frontier_state(self, state_idx: int):
@@ -551,9 +560,18 @@ class BasinsGenericEvents() :
         return Ok(None)
 
 
+    def _fingerprint_tolerance(self) -> float:
+        """Return the max element-wise diff for fingerprint pre-filtering."""
+        if (self.config.basin is not None
+                and self.config.basin.fingerprint_tolerance is not None):
+            return self.config.basin.fingerprint_tolerance
+        # COM-distance tolerance (used by full COM and coordination-COM hybrid)
+        return 0.5
+
     def is_new_state(self, system) :
         #Loop over all other system in self.states to see if system is already known
         fp_new = self._compute_fingerprint(system.positions, system.cell, system.pbc)
+        fp_tol = self._fingerprint_tolerance()
 
         # Vectorized fingerprint rejection: compare against all states at once
         fp_items = [
@@ -565,7 +583,7 @@ class BasinsGenericEvents() :
             indices, fps = zip(*fp_items)
             fp_matrix = np.vstack(fps)  # (N_states, N_atoms)
             max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
-            candidates = [indices[i] for i in np.where(max_diffs <= 0.5)[0]]
+            candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
         else:
             candidates = list(self.states.keys())
 
@@ -618,13 +636,8 @@ class BasinsGenericEvents() :
             return False
 
     @staticmethod
-    def _compute_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
-        """Compute a cheap structural fingerprint for fast inequality rejection.
-
-        Returns sorted per-atom distances from center of mass. Rotationally and
-        permutationally invariant — ideal for quickly ruling out non-equivalent
-        structures before the expensive cKDTree comparison.
-        """
+    def _com_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
+        """Sorted per-atom distances from center of mass (legacy fallback)."""
         box = np.diag(cell).astype(np.float64)
         pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
         pos = np.array(positions, dtype=np.float64, copy=True)
@@ -637,6 +650,74 @@ class BasinsGenericEvents() :
             if pbc_array[dim] and box[dim] > 0:
                 diffs[:, dim] -= np.round(diffs[:, dim] / box[dim]) * box[dim]
         return np.sort(np.linalg.norm(diffs, axis=1))
+
+    @staticmethod
+    def _atoms_of_interest_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray,
+                                        rnei: float, coord_thr: int) -> np.ndarray:
+        """Atoms of interest fingerprint: sorted COM distances for undercoordinated atoms.
+
+        Identifies 'atoms of interest' — those with fewer than coord_thr neighbors
+        within rnei (near defects, surfaces, vacancies). Computes their sorted
+        distances from the system center of mass, producing a short, continuous-valued
+        fingerprint vector with high discriminating power.
+        """
+        pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
+        cell_diag = np.diag(cell).astype(np.float64)
+        pos = np.array(positions, dtype=np.float64, copy=True)
+
+        # Wrap positions for PBC
+        for dim in range(3):
+            if pbc_array[dim] and cell_diag[dim] > 0:
+                pos[:, dim] = np.mod(pos[:, dim], cell_diag[dim])
+
+        # Build tree and count neighbors
+        if np.all(pbc_array):
+            tree = cKDTree(pos, boxsize=cell_diag.tolist())
+        else:
+            tree = cKDTree(pos)
+
+        neighbor_lists = tree.query_ball_point(pos, rnei)
+        counts = np.array([len(n) - 1 for n in neighbor_lists], dtype=np.int32)
+
+        # Find interesting atom indices (undercoordinated)
+        interesting_mask = counts < coord_thr
+        if not np.any(interesting_mask):
+            return np.array([], dtype=np.float64)
+
+        # COM of full system, distances for interesting atoms only
+        com = pos.mean(axis=0)
+        diffs = pos[interesting_mask] - com
+        for dim in range(3):
+            if pbc_array[dim] and cell_diag[dim] > 0:
+                diffs[:, dim] -= np.round(diffs[:, dim] / cell_diag[dim]) * cell_diag[dim]
+
+        return np.sort(np.linalg.norm(diffs, axis=1))
+
+    def _compute_fingerprint(self, positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
+        """Compute a structural fingerprint for fast inequality rejection.
+
+        Dispatches to:
+        1. Atoms of interest fingerprint if fingerprint_coordination_thr is set (explicit override)
+        2. Atoms of interest fingerprint if AtomicEnvironment uses coordination style
+        3. Full COM-distance fingerprint otherwise
+        """
+        # Explicit override from [BASIN] config
+        if (self.config.basin is not None
+                and self.config.basin.fingerprint_coordination_thr is not None):
+            return self._atoms_of_interest_fingerprint(
+                positions, cell, pbc,
+                rnei=self.config.atomicenvironment.rnei,
+                coord_thr=self.config.basin.fingerprint_coordination_thr,
+            )
+        # Auto-detect from AtomicEnvironment style
+        if (self.config.atomicenvironment.style in ("coordination", "coordination/graph")
+                and self.config.atomicenvironment.coordination_threshold is not None):
+            return self._atoms_of_interest_fingerprint(
+                positions, cell, pbc,
+                rnei=self.config.atomicenvironment.rnei,
+                coord_thr=self.config.atomicenvironment.coordination_threshold + 1,
+            )
+        return self._com_fingerprint(positions, cell, pbc)
 
     def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False, full=False ) :
         """Add a new state in the `self.states` dictionnary."""
@@ -785,7 +866,14 @@ class BasinsGenericEvents() :
 
         reconstruction_error = None
         for state_idx, (from_state, future) in futures.items():
-            mpi_result = future.result()
+            try:
+                mpi_result = future.result()
+            except Exception as exc:
+                result = self._transport_error("basin_reconstruct", exc)
+                logger.warning("[Basin] Reconstruction transport failed for state %d: %s", state_idx, result.err_value())
+                if reconstruction_error is None:
+                    reconstruction_error = result
+                continue
             result = self._result_from_mpi(mpi_result, from_state)
             if result.is_ok():
                 reconstructed[state_idx] = result.ok_value()
@@ -851,7 +939,7 @@ class BasinsGenericEvents() :
         on rank 0 after all engines complete.
         """
         if not states_batch:
-            return
+            return Ok(None)
 
         gap = self._estimate_max_transitions_per_state()
         base = self._next_state_index
@@ -866,13 +954,17 @@ class BasinsGenericEvents() :
         # Collect results and merge connectivity rows
         max_new_index = base
         for state_idx, future in futures.items():
-            rows = future.result()
+            try:
+                rows = future.result()
+            except Exception as exc:
+                return self._transport_error("basin_explore", exc)
             if rows:
                 self.connectivity_table.add_connectivity_batch(rows)
                 max_conn = max(r["state_connexion"] for r in rows)
                 max_new_index = max(max_new_index, max_conn + 1)
 
         self._next_state_index = max_new_index
+        return Ok(None)
 
     def is_new_state_batch(self, new_systems):
         """Check multiple systems for duplicates at once.
@@ -914,6 +1006,8 @@ class BasinsGenericEvents() :
             for si, fp in self._state_fingerprints.items()
         ]
 
+        fp_tol = self._fingerprint_tolerance()
+
         for new_idx, system in new_systems.items():
             match = -1
             fp_new = new_fingerprints[new_idx]
@@ -922,7 +1016,7 @@ class BasinsGenericEvents() :
             if existing_fp_items:
                 candidate_indices = []
                 for si, fp in existing_fp_items:
-                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= 0.5:
+                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= fp_tol:
                         candidate_indices.append(si)
             else:
                 candidate_indices = list(existing_trees.keys())
@@ -952,7 +1046,7 @@ class BasinsGenericEvents() :
                     if other_idx in new_systems:
                         fp_other = new_fingerprints[other_idx]
                         # Fingerprint pre-filter within batch
-                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > 0.5:
+                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > fp_tol:
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,
@@ -1044,8 +1138,10 @@ class BasinsGenericEvents() :
                 # ── Phase C: Exploration via MPI engines ──
                 if new_transient:
                     t0 = time.perf_counter()
-                    self._explore_states_parallel(new_transient, n_workers=n_workers)
+                    result = self._explore_states_parallel(new_transient, n_workers=n_workers)
                     prof["explore"] += time.perf_counter() - t0
+                    if not result.is_ok():
+                        return result
 
                     # Mark explored
                     for state_idx in new_transient:

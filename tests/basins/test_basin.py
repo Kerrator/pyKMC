@@ -37,36 +37,62 @@ class _CompletedFuture:
         return self._value
 
 
+class _FailedFuture:
+    def __init__(self, exc):
+        self._exc = exc
+
+    def result(self):
+        raise self._exc
+
+
 class TestFingerprint:
 
-    def test_fingerprint_permutation_invariance(self):
-        """Fingerprint should be invariant to atom permutation."""
+    def test_com_fingerprint_permutation_invariance(self):
+        """COM fingerprint should be invariant to atom permutation."""
         positions = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
-        fp1 = BasinsGenericEvents._compute_fingerprint(positions, cell, pbc)
-        fp2 = BasinsGenericEvents._compute_fingerprint(positions[[2,0,3,1]], cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(positions, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(positions[[2,0,3,1]], cell, pbc)
         assert np.allclose(fp1, fp2)
 
-    def test_fingerprint_translation_invariance(self):
-        """Fingerprint should be invariant to uniform translation (no boundary crossing)."""
+    def test_com_fingerprint_translation_invariance(self):
+        """COM fingerprint should be invariant to uniform translation (no boundary crossing)."""
         positions = np.array([[1,1,1],[2,1,1],[1,2,1],[1,1,2]], dtype=float)
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
-        fp1 = BasinsGenericEvents._compute_fingerprint(positions, cell, pbc)
-        # Translate by 3.0 in each direction — no atoms cross boundary
-        fp2 = BasinsGenericEvents._compute_fingerprint(positions + [3.0, 3.0, 3.0], cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(positions, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(positions + [3.0, 3.0, 3.0], cell, pbc)
         assert np.allclose(fp1, fp2)
 
-    def test_fingerprint_different_structures(self):
-        """Different structures should produce different fingerprints."""
+    def test_com_fingerprint_different_structures(self):
+        """Different structures should produce different COM fingerprints."""
         cell = np.diag([10.0, 10.0, 10.0])
         pbc = np.array([True, True, True])
         pos1 = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
         pos2 = np.array([[0,0,0],[3,0,0],[0,3,0],[0,0,3]], dtype=float)
-        fp1 = BasinsGenericEvents._compute_fingerprint(pos1, cell, pbc)
-        fp2 = BasinsGenericEvents._compute_fingerprint(pos2, cell, pbc)
+        fp1 = BasinsGenericEvents._com_fingerprint(pos1, cell, pbc)
+        fp2 = BasinsGenericEvents._com_fingerprint(pos2, cell, pbc)
         assert not np.allclose(fp1, fp2, atol=0.3)
+
+    def test_atoms_of_interest_fingerprint_permutation_invariance(self):
+        """Atoms of interest fingerprint should be invariant to atom permutation."""
+        positions = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(positions, cell, pbc, rnei=1.5, coord_thr=10)
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(positions[[2,0,3,1]], cell, pbc, rnei=1.5, coord_thr=10)
+        assert np.allclose(fp1, fp2)
+
+    def test_atoms_of_interest_fingerprint_different_structures(self):
+        """Different structures should produce different atoms of interest fingerprints."""
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        pos1 = np.array([[0,0,0],[1,0,0],[0,1,0],[0,0,1]], dtype=float)
+        pos2 = np.array([[0,0,0],[3,0,0],[0,3,0],[0,0,3]], dtype=float)
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(pos1, cell, pbc, rnei=1.5, coord_thr=10)
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(pos2, cell, pbc, rnei=1.5, coord_thr=10)
+        assert not np.allclose(fp1, fp2)
 
 
 class TestBasin :
@@ -168,6 +194,59 @@ class TestBasin :
         assert result.err_value().message == "boom"
         manager.use_local.assert_called_once()
         manager.use_global.assert_called_once()
+
+    def test_parallel_reconstruction_transport_failures_are_returned(self):
+        manager = Mock()
+        manager.use_local = Mock()
+        manager.use_global = Mock()
+        manager.basin_reconstruct = Mock(return_value=_FailedFuture(RuntimeError("remote boom")))
+
+        config = Mock()
+        config.basin.strategy = "wavefront"
+        config.basin.n_workers = 2
+        config.basin.max_states = None
+
+        basin = BasinsGenericEvents(config=config, reference_table=Mock(), known_environments=set(), manager=manager)
+        basin.connectivity_table = BasinStatesConnectivity()
+        basin.connectivity_table.add_connectivity(
+            state=0,
+            state_connexion=1,
+            event_connexion=1,
+            central_atom=0,
+            sym=0,
+            transient=True,
+            dE_forward=0.1,
+            k_forward=1.0,
+            dE_backward=0.1,
+            k_backward=1.0,
+        )
+        basin._add_state(state_index=0, system=_toy_system(0.0))
+        basin.states_to_explore = [1]
+        basin.explored_states = []
+        basin._prepare_reconstruct_kwargs = Mock(return_value={})
+
+        result = basin.construct_connexion_table_parallel()
+
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.MPI_REMOTE_ERROR
+        assert "remote boom" in result.err_value().message
+        manager.use_local.assert_called_once()
+        manager.use_global.assert_called_once()
+
+    def test_parallel_exploration_transport_failures_are_returned(self):
+        manager = Mock()
+        manager.basin_explore = Mock(return_value=_FailedFuture(RuntimeError("explore boom")))
+
+        basin = BasinsGenericEvents(config=Mock(), reference_table=Mock(), known_environments=set(), manager=manager)
+        basin._next_state_index = 1
+        basin._estimate_max_transitions_per_state = Mock(return_value=4)
+        basin._prepare_explore_kwargs = Mock(return_value={})
+
+        result = basin._explore_states_parallel([0])
+
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.MPI_REMOTE_ERROR
+        assert "explore boom" in result.err_value().message
 
     def test_refine_absorbing_restores_global_mode_on_failure(self):
         manager = Mock()

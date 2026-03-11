@@ -330,8 +330,7 @@ initial_config = ./initial_config.xyz
 restart_file = ./restart_100.npz
 ```
 
-When `restart_file` is set, pyKMC resumes from the saved step/time counters instead of starting from step 0. The current structure and energies are still initialized from the input configuration and potential before the KMC loop continues.
-
+When `restart_file` is set, pyKMC resumes from the saved step/time counters instead of starting from step 0. The current structure and energies are still initialized from the input configuration and potential before the KMC loop continues. `n_steps` stays the final target step count, so a restart from step 100 with `n_steps = 1000` runs steps 101 through 1000, not 1100.
 
 
 

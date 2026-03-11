@@ -583,6 +583,22 @@ class BasinConfig(BaseModel):
         description="Maximum transient states to explore. Remaining frontier becomes absorbing. None = unlimited.",
     )
 
+    fingerprint_coordination_thr: Optional[int] = Field(
+    default = None,
+    description="Atoms of interest fingerprint for basin dedup. Atoms with fewer neighbors "
+    "(within rnei) than this threshold are 'atoms of interest'. Their sorted distances "
+    "from the system center of mass form a short, discriminating fingerprint vector. "
+    "Typical value: 9 for FCC surfaces. If None and AtomicEnvironment style is "
+    "'coordination' or 'coordination/graph', auto-derives as coordination_threshold + 1. "
+    "Otherwise falls back to full COM-distance fingerprint."
+    )
+
+    fingerprint_tolerance: Optional[float] = Field(
+    default = None,
+    description="Max element-wise difference for atoms of interest fingerprint pre-filtering. "
+    "If None, defaults to 0.5. Recommended: 1.0 for best balance of speed and correctness."
+    )
+
 class DealloyingConfig(BaseModel):
     """Dealloying event parameters.
 

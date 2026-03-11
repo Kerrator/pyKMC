@@ -115,6 +115,7 @@ class ErrorType(Enum):
     RECONSTRUCTION_INVALID_MIN1 = 41 
     RECONSTRUCTION_INVALID_MIN2 = 42
     BASIN_TEXIT_NOT_FOUND = 51
+    MPI_REMOTE_ERROR = 61
 
 
 # Dataclass to store operation outputs

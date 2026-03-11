@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 
 from pykmc import System
 from pykmc.kmc import KMC
@@ -68,3 +69,21 @@ def test_apply_original_migration_event_restores_positions_and_total_energy():
 
     assert np.allclose(kmc.system.positions, reconstructed_system.positions)
     assert kmc.total_energy == -7.5
+
+
+def test_restart_file_uses_total_target_steps(tmp_path):
+    restart_file = tmp_path / "restart_2.npz"
+    np.savez(restart_file, last_step=2, last_time=1.5)
+
+    config = Mock()
+    config.control.restart_file = str(restart_file)
+    config.control.n_steps = 5
+
+    kmc = KMC(config=config)
+    kmc.loggers = Mock()
+
+    last_step, last_time = kmc._load_run_counters()
+
+    assert last_step == 2
+    assert last_time == pytest.approx(1.5)
+    assert list(kmc._iter_kmc_steps(last_step)) == [3, 4, 5]

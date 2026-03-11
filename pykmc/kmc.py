@@ -116,28 +116,20 @@ class KMC:
         self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)
 
-        if self.config.control.restart_file is None: 
-        # Write initial step to file
+        if self.config.control.restart_file is None:
+            # Write initial step to file
             self._append_snapshot_to_trajectory()
-            last_step = 0 
-            total_time = 0.0
-
-        else : #read restart file
-            self.loggers.info("log", ":=> Reading restart file")
-            restart_info = np.load(self.config.control.restart_file) 
-            last_step = restart_info["last_step"]
-            total_time = restart_info["last_time"]
-            self.loggers.info("log", ":=> last step = {}, last_end_time = {}ps".format(last_step, total_time))
+        last_completed_step, total_time = self._load_run_counters()
 
         # LOOP KMC PARAMETERS
-        nkmc_steps = self.config.control.n_steps
-        last_step +=1 
         nsearch = self.config.eventsearch.nsearch
+        last_saved_step = last_completed_step
 
         
 
         # KMC LOOP
-        for step in range(last_step, nkmc_steps+last_step):
+        for step in self._iter_kmc_steps(last_completed_step):
+            last_saved_step = step
             start_real = time.time()
             start_cpu = time.process_time()
 
@@ -375,7 +367,7 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
-        self._save_restart_file(step, total_time)
+        self._save_restart_file(last_saved_step, total_time)
         self._close()
 
     def get_new_environments(self) -> list[str | bytes]:
@@ -786,6 +778,22 @@ class KMC:
             pbc=self.system.pbc,
         )
         write(self.config.control.trajectory_output, atoms, append=True)
+
+    def _load_run_counters(self) -> tuple[int, float]:
+        """Load restart counters, or return the fresh-run defaults."""
+        if self.config.control.restart_file is None:
+            return 0, 0.0
+
+        self.loggers.info("log", ":=> Reading restart file")
+        restart_info = np.load(self.config.control.restart_file)
+        last_step = int(restart_info["last_step"])
+        last_time = float(restart_info["last_time"])
+        self.loggers.info("log", ":=> last step = {}, last_end_time = {}ps".format(last_step, last_time))
+        return last_step, last_time
+
+    def _iter_kmc_steps(self, last_completed_step: int) -> range:
+        """Return the remaining step numbers up to the configured target."""
+        return range(last_completed_step + 1, self.config.control.n_steps + 1)
 
     def _save(self) -> None:
         """Save the reference event table and the list of visited environments."""
