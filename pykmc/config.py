@@ -281,7 +281,7 @@ class PartnConfig(BaseModel):
     )
 
     nevalf_max: int = Field(
-        default=9999, 
+        default=500, 
         description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
     )
 
