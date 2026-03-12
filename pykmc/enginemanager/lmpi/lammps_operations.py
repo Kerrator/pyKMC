@@ -2,7 +2,7 @@ import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes 
-import pypARTn
+import pypARTn2 as pypARTn
 import os
 from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
 
@@ -17,11 +17,11 @@ from ...result import  (
 )
 
 
-def initialize_parameters(engine) : 
+def initialize_parameters(engine, boundary="p p p") :
     engine.command("units metal")
     engine.command("atom_style atomic")
     engine.command("dimension 3")
-    engine.command("boundary p p p")
+    engine.command(f"boundary {boundary}")
     engine.command("atom_modify map array") #! necessary for scatter atoms
     engine.command("atom_modify sort 0 0.0") #! necessary for partn
 
@@ -67,6 +67,21 @@ def initialize_potential(engine, config) :
     engine.command("pair_style {}".format(pair_style))
     engine.command("pair_coeff {}".format(pair_coeff))
 
+
+def reinitialize_system(engine, config, system):
+    """Clear and reinitialize LAMMPS with a new system.
+
+    Used after atom removal to rebuild LAMMPS state with updated atom count.
+    """
+    from ...config import pbc_to_lammps_boundary
+    if config.lammps.boundary is not None:
+        boundary = config.lammps.boundary
+    else:
+        boundary = pbc_to_lammps_boundary(system.pbc) if system.pbc is not None else "p p p"
+    engine.lmp.command("clear")
+    initialize_parameters(engine, boundary=boundary)
+    initialize_system(engine, system)
+    initialize_potential(engine, config)
 
 def minimize(engine, config, positions=None) :
     if positions is not None :
@@ -272,6 +287,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                             saddle_positions=saddlepositions,
                             min2_positions=min2positions,
                             move_atom_index=index_move,
+                            types=type,
                         )
                     )
                 else:
@@ -284,6 +300,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                             saddle_positions=saddlepositions,
                             min2_positions=min1positions,
                             move_atom_index=index_move,
+                            types=type,
                         )
                     )
             else:
@@ -376,7 +393,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
     #When using a different seed it solves the problem
 
-    max_attempts = config.partn.r_max_attempts
+    max_attemps = config.partn.r_max_attempts
     attempt = 0
 
     while attempt < max_attempts :
@@ -425,6 +442,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                 
         attempt +=1
         artn.set("zseed", config.partn.zseed)
+        print("NEW ATTEMPT")
 
     else: #fail after max attemps
         if engine.rank == 0 : 
