@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
@@ -15,6 +16,8 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
+
+logger = logging.getLogger("log")
 
 
 def initialize_parameters(engine, boundary="p p p") :
@@ -161,7 +164,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
 
-    print('Central Atom', central_atom_idx)
+    logger.debug("[pARTn] Searching from central atom %d", central_atom_idx)
     #Check to see if system is in AV mode:
     if config.control.active_volume == True:
         atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, type)
@@ -318,6 +321,252 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                 )
             )
 
+def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
+                      ref_initial_positions, ref_saddle_positions, ref_final_positions,
+                      ref_initial_types, sym_matrices, sym_perms, central_atom, sym_idx,
+                      neighbor_indices, matching_score_thr, kmax_factor,
+                      atom_coloring_mode):
+    """Perform full basin reconstruction on engine ranks: PSR + 2x minimize.
+
+    Rank 0 does PSR (IRA point set registration) and position manipulation.
+    All ranks participate in LAMMPS minimization.
+
+    Returns
+    -------
+    dict or None
+        On rank 0: {"ok": True, "min2_positions": ndarray, "min2_etot": float}
+        or {"ok": False, "error_type": str, "message": str}.
+        None on non-root ranks.
+    """
+    import ira_mod
+    import ase.geometry
+    from ...utils.geometry import transform_positions, push_towards, compute_delr
+
+    proceed = None  # control signal broadcast to all ranks
+
+    if engine.rank == 0:
+        # --- PSR phase (rank 0 only) ---
+        coords1 = np.array(from_positions[neighbor_indices], copy=True)
+
+        if atom_coloring_mode == "full":
+            typ1 = list(np.array(from_types)[neighbor_indices])
+            typ2 = list(ref_initial_types) if ref_initial_types is not None else typ1
+        else:
+            typ1 = ['X'] * len(coords1)
+            typ2 = typ1
+
+        # Unwrap coords near cell boundaries
+        pbc_arr = pbc if pbc is not None else np.array([True, True, True])
+        cell_lengths = [cell[d][d] for d in range(3)]
+        central_pos = from_positions[central_atom]
+        for i in range(len(coords1)):
+            for dim in range(3):
+                if pbc_arr[dim]:
+                    diff = coords1[i][dim] - central_pos[dim]
+                    if abs(diff) > cell_lengths[dim] / 2:
+                        coords1[i][dim] += np.sign(-diff) * cell_lengths[dim]
+
+        coords2 = np.array(ref_initial_positions)
+        nat1 = len(coords1)
+        nat2 = len(coords2)
+
+        ira = ira_mod.IRA()
+        try:
+            rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
+        except Exception:
+            proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
+                       "message": "IRA did not find a match"}
+
+        if proceed is None and dh > matching_score_thr:
+            proceed = {"ok": False,
+                       "error_type": "PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD",
+                       "message": f"PSR matching score {dh} above threshold {matching_score_thr}"}
+
+        if proceed is None:
+            # Apply symmetry + PSR transforms
+            supposed_initial = np.array(ref_initial_positions, copy=True)
+            supposed_final = np.array(ref_final_positions, copy=True)
+            saddle = np.array(ref_saddle_positions, copy=True)
+
+            if sym_idx != 0:
+                sym_matrix = sym_matrices[sym_idx]
+                sym_perm = sym_perms[sym_idx]
+                supposed_initial = transform_positions(supposed_initial, sym_matrix, 0, sym_perm)
+                saddle = transform_positions(saddle, sym_matrix, 0, sym_perm)
+                supposed_final = transform_positions(supposed_final, sym_matrix, 0, sym_perm)
+
+            supposed_initial = transform_positions(supposed_initial, rmat, tr, perm)
+            saddle = transform_positions(saddle, rmat, tr, perm)
+            supposed_final = transform_positions(supposed_final, rmat, tr, perm)
+
+            # Build new system positions with saddle applied
+            new_positions = np.array(from_positions, copy=True)
+            new_positions[neighbor_indices] = saddle
+
+            # Push toward min1
+            saddle_toward_min1 = push_towards(
+                new_positions[neighbor_indices], supposed_initial, fraction=0.15, cell=cell, pbc=pbc)
+            tmp_positions = np.array(new_positions, copy=True)
+            tmp_positions[neighbor_indices] = saddle_toward_min1
+            proceed = {"step": "min1", "positions": tmp_positions,
+                       "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                       "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+
+    # Broadcast control signal to all ranks
+    proceed = engine.engine_comm.bcast(proceed, root=0)
+
+    if proceed is None or (isinstance(proceed, dict) and proceed.get("ok") is False):
+        if engine.rank == 0:
+            return proceed
+        return None
+
+    # --- Minimize toward min1 (all ranks) ---
+    set_positions(engine=engine, positions=proceed["positions"])
+    minimize(engine, config)
+    min1_pos = get_positions(engine)
+
+    # Validate min1 on rank 0
+    proceed2 = None
+    if engine.rank == 0:
+        import ase.geometry
+        from ...utils.geometry import push_towards, compute_delr
+
+        supposed_initial = proceed["supposed_initial"]
+        supposed_final = proceed["supposed_final"]
+        saddle_positions = proceed["saddle_positions"]
+        nbr_indices = proceed["neighbor_indices"]
+
+        t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
+        delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
+        if delr1 > matching_score_thr:
+            proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
+                        "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
+        else:
+            # Push toward min2
+            saddle_toward_min2 = push_towards(
+                saddle_positions[nbr_indices], supposed_final, fraction=0.15, cell=cell, pbc=pbc)
+            tmp_positions2 = np.array(saddle_positions, copy=True)
+            tmp_positions2[nbr_indices] = saddle_toward_min2
+            proceed2 = {"step": "min2", "positions": tmp_positions2,
+                        "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+
+    proceed2 = engine.engine_comm.bcast(proceed2, root=0)
+
+    if proceed2 is None or (isinstance(proceed2, dict) and proceed2.get("ok") is False):
+        if engine.rank == 0:
+            return proceed2
+        return None
+
+    # --- Minimize toward min2 (all ranks) ---
+    set_positions(engine=engine, positions=proceed2["positions"])
+    minimize(engine, config)
+    min2_pos = get_positions(engine)
+    min2_etot = get_total_energy(engine)
+
+    if engine.rank == 0:
+        import ase.geometry
+        from ...utils.geometry import compute_delr
+
+        supposed_final = proceed2["supposed_final"]
+        nbr_indices = proceed2["neighbor_indices"]
+
+        t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
+        delr2 = compute_delr(supposed_final, t2[nbr_indices], cell, pbc=pbc)
+        if delr2 > matching_score_thr:
+            return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
+                    "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
+
+        return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
+
+
+def basin_explore(engine, config_dict, reference_table_data, state_positions, state_types,
+                  state_cell, state_pbc, state_index, start_index):
+    """Perform basin exploration on engine rank 0. Other ranks idle.
+
+    Parameters
+    ----------
+    config_dict : dict
+        Subset of config fields needed for exploration.
+    reference_table_data : bytes
+        Pickled ReferenceEventTable.table DataFrame.
+    state_positions, state_types, state_cell, state_pbc : array-like
+        State data to reconstruct System + NeighborsList + AtomicEnvironment.
+    state_index : int
+        Index of the state being explored.
+    start_index : int
+        Starting index for new state connections.
+
+    Returns
+    -------
+    list[dict] or None
+        Connectivity rows on rank 0, None on other ranks.
+    """
+    if engine.rank == 0:
+        import pickle
+        from ...system import System
+        from ...neighbors_list import NeighborsList
+        from ...atomic_environment import AtomicEnvironment
+        from ...basins.exploration import BasinGenericEventExplorer
+        from ...basins.connectivity import BasinStatesConnectivity
+
+        # Reconstruct the reference table DataFrame
+        ref_table_df = pickle.loads(reference_table_data)
+
+        # Proxy for ReferenceEventTable (only needs .table and .has_id_subset_table)
+        class _RefTableProxy:
+            def __init__(self, table_df):
+                self.table = table_df
+            def has_id_subset_table(self, ids):
+                mask = self.table["event_id"].isin(ids)
+                return self.table[mask]
+
+        ref_table = _RefTableProxy(ref_table_df)
+
+        # Reconstruct state
+        system = System(positions=np.array(state_positions), types=list(state_types),
+                        cell=np.array(state_cell), pbc=state_pbc,
+                        index=np.arange(len(state_types)))
+        neighbors_list = NeighborsList(system, config_dict["rnei"], config_dict["rcut"])
+        types_for_env = system.types if config_dict["atom_coloring_mode"] == "full" else None
+        environment = AtomicEnvironment(
+            config_dict["ae_style"],
+            neighbors_list.neighbors_list['rnei'],
+            neighbors_list.neighbors_list['rcut'],
+            config_dict["neighbors_add"],
+            types=types_for_env,
+            coordination_threshold=config_dict.get("coordination_threshold"))
+
+        # Proxy for StateData
+        class _StateProxy:
+            def __init__(self, sys, env, nl):
+                self.system = sys
+                self.environment = env
+                self.neighbors_list = nl
+            def ensure_full_state(self, config):
+                pass
+
+        state = _StateProxy(system, environment, neighbors_list)
+
+        # Proxy for Config (explorer only needs config.basin.energy_thr)
+        class _ConfigProxy:
+            def __init__(self, energy_thr):
+                self.basin = type('obj', (object,), {'energy_thr': energy_thr})()
+
+        config_proxy = _ConfigProxy(config_dict["energy_thr"])
+
+        explorer = BasinGenericEventExplorer(config=config_proxy, reference_table=ref_table)
+        explorer.explore(state=state, state_index=state_index, start_index=start_index)
+
+        # Return connectivity rows as list of dicts
+        if explorer.connectivity_table._rows:
+            return explorer.connectivity_table._rows
+        if explorer.connectivity_table._df is not None and not explorer.connectivity_table._df.empty:
+            return explorer.connectivity_table._df.to_dict("records")
+        return []
+
+    return None
+
+
 def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
@@ -442,7 +691,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                 
         attempt +=1
         artn.set("zseed", config.partn.zseed)
-        print("NEW ATTEMPT")
+        logger.debug("[pARTn] Retrying search with refreshed seed")
 
     else: #fail after max attemps
         if engine.rank == 0 : 
@@ -453,4 +702,3 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                 )
             )
         return None
-

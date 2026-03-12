@@ -1,51 +1,70 @@
+from __future__ import annotations
+
 import pandas as pd
 
 #TODO: See if separated StatesConnectivity and BasinsStateConnectivity is really usefull.
 #TODO: See if self.gaph is needed, if only used for analysis we can remove it.
 
 
-class StatesConnectivity() : 
+class StatesConnectivity() :
     """
-    Store connectivity DateFrame describing transitions between visited system states.
+    Store connectivity DataFrame describing transitions between visited system states.
 
-    This class stores a pandas DataFrame that records transitions discovered
-    during basin exploration. 
-    Each row represents a directed transition from a `state` to a `state_connexion`,
-    associated with a given generic event, symmetry, and transition rates.
-
-    The class provides utilities to:
-    - Append new transitions
-    - Retrieve transitions leading to a given state
-    - Convert data to tuple format
-    - Reorder state indices (e.g., to keep transient states first)
-    - Save, merge, and clear the table
+    Rows are accumulated in a lightweight ``list[dict]`` buffer and materialised
+    into a :class:`pandas.DataFrame` lazily on first read.  This avoids the
+    O(N^2) cost of repeated ``pd.concat`` calls during basin exploration.
 
     Attributes
     ----------
     df : pd.DataFrame
-        Internal table containing transition information with columns:
+        Internal table (built on demand) containing transition information with columns:
         ['state', 'state_connexion', 'event_connexion', 'central_atom', 'sym',
          'transient', 'dE_forward', 'k_forward', 'dE_backward', 'k_backward'].
     graph : optional
         Placeholder for future graph-based operations (e.g., visualization, path finding).
     """
 
-    def __init__(self) -> None : 
-        self.df = pd.DataFrame(columns=['state', 
-                                        'state_connexion', 
-                                        'event_connexion',
-                                        'central_atom', 
-                                        'sym',
-                                        'transient',
-                                        'dE_forward', 
-                                        'k_forward',
-                                        'dE_backward', 
-                                        'k_backward']) 
+    _COLUMNS = ['state', 'state_connexion', 'event_connexion', 'central_atom',
+                'sym', 'transient', 'dE_forward', 'k_forward', 'dE_backward',
+                'k_backward']
+
+    def __init__(self) -> None :
+        self._rows: list[dict] = []
+        self._df: pd.DataFrame | None = None
         self.graph = None # Placeholder for later if needed to generate a connectivity graph from the dataframe, for path finding and vizualization
 
-    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE_forward, k_forward, dE_backward, k_backward ) -> None : 
+    # ── df property (lazy materialisation) ──────────────────────────
+
+    @property
+    def df(self) -> pd.DataFrame:
+        """Return the connectivity DataFrame, building it from the row buffer if needed."""
+        if self._rows:
+            self._ensure_df_canonical()
+        if self._df is None:
+            self._df = pd.DataFrame(columns=self._COLUMNS)
+        return self._df
+
+    @df.setter
+    def df(self, value: pd.DataFrame) -> None:
+        """Allow direct assignment for backward compatibility."""
+        self._df = value
+        self._rows = []
+
+    def _ensure_df_canonical(self) -> None:
+        """Force materialisation so that in-place mutations operate on the DataFrame."""
+        if self._rows:
+            new_df = pd.DataFrame(self._rows, columns=self._COLUMNS)
+            if self._df is not None and not self._df.empty:
+                self._df = pd.concat([self._df, new_df], ignore_index=True)
+            else:
+                self._df = new_df
+            self._rows = []
+
+    # ── Row insertion ───────────────────────────────────────────────
+
+    def add_connectivity(self, state, state_connexion, event_connexion, central_atom, sym, transient, dE_forward, k_forward, dE_backward, k_backward ) -> None :
         """
-        Add a new connectivity entry to the internal DataFrame.
+        Add a new connectivity entry to the row buffer.
 
         Parameters
         ----------
@@ -70,23 +89,24 @@ class StatesConnectivity() :
         k_backward : float
             Backward transition rate.
         """
-        new_row = pd.DataFrame([{'state': state, 
-                                 'state_connexion': state_connexion, 
-                                 'event_connexion': event_connexion, 
-                                 'central_atom': central_atom, 
-                                 'sym': sym, 
-                                 'transient': transient, 
-                                 'dE_forward': dE_forward,
-                                 'k_forward': k_forward, 
-                                 'dE_backward': dE_backward,
-                                 'k_backward': k_backward}])
-        if self.df.empty : 
-            self.df = new_row
-        else :
-            self.df = pd.concat([self.df, new_row], ignore_index=True)
+        self._rows.append({'state': state,
+                           'state_connexion': state_connexion,
+                           'event_connexion': event_connexion,
+                           'central_atom': central_atom,
+                           'sym': sym,
+                           'transient': transient,
+                           'dE_forward': dE_forward,
+                           'k_forward': k_forward,
+                           'dE_backward': dE_backward,
+                           'k_backward': k_backward})
 
+    def add_connectivity_batch(self, rows: list[dict]) -> None:
+        """Append many connectivity rows at once (avoids per-row overhead)."""
+        self._rows.extend(rows)
 
-    def get_transition_to_state(self, target_state:int, as_tuples: bool = True, return_all:bool = False) -> tuple|list[tuple]|pd.DataFrame: 
+    # ── Query helpers ───────────────────────────────────────────────
+
+    def get_transition_to_state(self, target_state:int, as_tuples: bool = True, return_all:bool = False) -> tuple|list[tuple]|pd.DataFrame:
         """Return the transition(s) leading to the specified target state.
 
         This method filters the internal connectivity dataframe to find all transitions
@@ -98,8 +118,8 @@ class StatesConnectivity() :
         target_state : int
             Identifier of the target state.
         as_tuples : bool, optional (default=True)
-            If True, return the transitions as a list of tuples 
-            (state, event_connexion, central_atom, sym). 
+            If True, return the transitions as a list of tuples
+            (state, event_connexion, central_atom, sym).
             If False, return a sub pandas DataFrame of the connectivity DataFrame
         return_all : bool, optional (default=False)
             If True, return all possible transitions to `target_state`.
@@ -109,7 +129,7 @@ class StatesConnectivity() :
         -------
         tuple or list[tuple] or pd.DataFrame
             - If `as_tuples` is True:
-                - If `return_all` is False: returns a list containing a single tuple 
+                - If `return_all` is False: returns a list containing a single tuple
                   (state, event_connexion, central_atom, sym) corresponding to the
                   transition from the smallest state.
                 - If `return_all` is True: returns a list of tuples for all matching transitions.
@@ -117,18 +137,18 @@ class StatesConnectivity() :
                 - Returns a pandas DataFrame containing the matching row(s).
         """
 
-        #Find sub dataframe with state_connexion == target_state 
+        #Find sub dataframe with state_connexion == target_state
         sub_df = self.df[self.df['state_connexion'] == target_state]
-        
+
         if not return_all:
             #Return the first transition with lower from state
             min_state = sub_df['state'].min()
-            sub_df = sub_df[sub_df['state'] == min_state].iloc[[0]]  # only first row 
+            sub_df = sub_df[sub_df['state'] == min_state].iloc[[0]]  # only first row
             return self.to_tuples(sub_df)[0] if as_tuples else sub_df
-        else : 
+        else :
             return self.to_tuples(sub_df) if as_tuples else sub_df
 
-    def get_table(self) -> pd.DataFrame: 
+    def get_table(self) -> pd.DataFrame:
         """
         Return the full connectivity table.
 
@@ -136,8 +156,8 @@ class StatesConnectivity() :
         -------
         pd.DataFrame
         """
-        return self.df 
-    
+        return self.df
+
 
     def to_tuples(self, df:pd.DataFrame) -> list[tuple]:
         """Convert a DataFrame to a list of tuples.
@@ -153,8 +173,8 @@ class StatesConnectivity() :
             Each tuple contains (state, event_connexion, central_atom, sym).
         """
         return list(df[['state', 'event_connexion', 'central_atom', 'sym', 'transient']].itertuples(index=False, name=None))
-    
-    def reorder_states_index(self) -> dict[int, int]: 
+
+    def reorder_states_index(self) -> dict[int, int]:
         """
         Reassign state indices so that transient states come first and numbering is compact and continuous.
 
@@ -164,7 +184,7 @@ class StatesConnectivity() :
             Mapping from old state index to new state index.
         """
 
-        #All states : 
+        #All states :
         unique_states = sorted(set(self.df["state"]) | set(self.df["state_connexion"]))
 
         #find transient states (all states in the state row)
@@ -173,19 +193,19 @@ class StatesConnectivity() :
         #find absorbing states (all other)
         current_absorbing_states = list(set(unique_states).difference(current_transient_states))
 
-        #Create mapping 
+        #Create mapping
         mapping = {}
-        new_idx = 0 
+        new_idx = 0
 
-        for idx in current_transient_states : 
+        for idx in current_transient_states :
             mapping[idx] = new_idx
-            new_idx += 1 
-        
-        for idx in current_absorbing_states : 
-            mapping[idx] = new_idx 
             new_idx += 1
 
-        #Apply mapping 
+        for idx in current_absorbing_states :
+            mapping[idx] = new_idx
+            new_idx += 1
+
+        #Apply mapping
         self.df['state'] = self.df['state'].map(mapping)
         self.df['state_connexion'] = self.df['state_connexion'].map(mapping)
 
@@ -202,29 +222,21 @@ class StatesConnectivity() :
         """
         self.df.to_pickle(outfile)
 
-    def clear(self) : 
-        """Reset the connectivity table to an empty DataFrame."""
-        self.df = pd.DataFrame(columns=['state', 
-                                        'state_connexion', 
-                                        'event_connexion',
-                                        'central_atom', 
-                                        'sym',
-                                        'transient', 
-                                        'dE_forward', 
-                                        'k_forward', 
-                                        'dE_backward',
-                                        'k_backward'])
-        
+    def clear(self) :
+        """Reset the connectivity table to an empty state."""
+        self._rows = []
+        self._df = None
 
-class BasinStatesConnectivity(StatesConnectivity)  : 
+
+class BasinStatesConnectivity(StatesConnectivity)  :
     """Connectivity table with basin exploration specific operations"""
-    
-    def change_state_index(self, current_index:int, new_index:int) : 
+
+    def change_state_index(self, current_index:int, new_index:int) :
         """Update all occurrences of a state index in the connectivity DataFrame.
 
-        This method is used during basin exploration when a state that needs to be 
-        explored is found to be identical to a previously explored state. All rows 
-        in the connectivity DataFrame where `state` or `state_connexion` equals `current_index` are updated 
+        This method is used during basin exploration when a state that needs to be
+        explored is found to be identical to a previously explored state. All rows
+        in the connectivity DataFrame where `state` or `state_connexion` equals `current_index` are updated
         to `new_index`.
 
         Parameters
@@ -237,40 +249,63 @@ class BasinStatesConnectivity(StatesConnectivity)  :
         self.df.loc[self.df['state'] == current_index, 'state'] = new_index
         self.df.loc[self.df['state_connexion'] == current_index, 'state_connexion'] = new_index
 
+    def bulk_change_state_index(self, mapping: dict) :
+        """Apply multiple state index remappings at once.
+
+        Parameters
+        ----------
+        mapping : dict[int, int]
+            Mapping from current_index -> new_index for all indices to remap.
+        """
+        if not mapping:
+            return
+        self.df['state'] = self.df['state'].replace(mapping)
+        self.df['state_connexion'] = self.df['state_connexion'].replace(mapping)
+
     def change_state_to_absorbing(self, state_connexion) :
         """
         Mark a state as absorbing in the connectivity table.
 
         Sets the `transient` flag to `False` for all transitions whose
-        destination (`state_connexion`) equals the given index. 
+        destination (`state_connexion`) equals the given index.
         This is mainly used when a state has unknown local atomic environments and should not be explored further.
 
         Parameters
         ----------
         state_connexion : int
             Index of the state to mark as absorbing.
-        """ 
+        """
         self.df.loc[self.df['state_connexion']== state_connexion, 'transient'] = False
 
-    def merge(self, states_connectivity: "StatesConnectivity") : 
-        """Merge another StatesConnectivity's DataFrame into this connectivity table.
+    def merge(self, states_connectivity: "StatesConnectivity") :
+        """Merge another StatesConnectivity's data into this connectivity table.
 
-        This method appends the DataFrame from `states_connectivity` to the internal
-        connectivity table (`self.df`) of the current object. It is typically used
-        during basin exploration when a new state has been explored.
+        This method appends the data from `states_connectivity` to the internal
+        connectivity table of the current object. Uses the row buffer for O(1)
+        merge when possible.
 
         Parameters
         ----------
         states_connectivity : StatesConnectivity
-            Another StatesConnectivity instance whose connectivity DataFrame (`df`)
-            will be appended to this object's DataFrame.
+            Another StatesConnectivity instance whose connectivity data
+            will be appended to this object.
 
         Notes
         -----
         - The index of the resulting DataFrame is reset.
         - This operation does not remove duplicates; ensure uniqueness if required.
         """
-        if self.df.empty: 
-            self.df = states_connectivity.df.copy()
-        else : 
-            self.df = pd.concat([self.df, states_connectivity.df], ignore_index=True)
+        # Absorb the other table's buffered rows directly (avoid materializing)
+        if states_connectivity._rows:
+            self._rows.extend(states_connectivity._rows)
+        # Also absorb any already-materialized DataFrame rows
+        if states_connectivity._df is not None and not states_connectivity._df.empty:
+            self._rows.extend(states_connectivity._df.to_dict("records"))
+
+    def merge_batch(self, tables: list[StatesConnectivity]) -> None:
+        """Merge multiple connectivity tables at once (single materialisation)."""
+        for t in tables:
+            if t._rows:
+                self._rows.extend(t._rows)
+            if t._df is not None and not t._df.empty:
+                self._rows.extend(t._df.to_dict("records"))

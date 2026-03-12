@@ -1,9 +1,12 @@
 from lammps import lammps
+import logging
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reinitialize_system, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reinitialize_system, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, basin_reconstruct, basin_explore
 from ...messenger import QueueMessenger, MpiMessenger
+
+logger = logging.getLogger("log")
 
 class MpiApiEngine() : 
     """ 
@@ -55,8 +58,20 @@ class MpiApiEngine() :
             "set_positions": set_positions, 
             "partn_search": partn_search, 
             "partn_refine" : partn_refine, 
-            "minimize_with_results" : minimize_with_results, 
-            "get_potential_energy" : get_potential_energy
+            "minimize_with_results" : minimize_with_results,
+            "get_potential_energy" : get_potential_energy,
+            "basin_reconstruct" : basin_reconstruct,
+            "basin_explore" : basin_explore
+        }
+        self._reply_operations = {
+            "get_total_energy",
+            "get_positions",
+            "minimize_with_results",
+            "get_potential_energy",
+            "partn_search",
+            "partn_refine",
+            "basin_reconstruct",
+            "basin_explore",
         }
 
 
@@ -123,7 +138,7 @@ class MpiApiEngine() :
                 continue
             
 
-            result = self._handle_message(msg)
+            result, error_payload = self._handle_message(msg)
 
             if entry_global_mode and self.global_rank == 0:
                 self._send_status(self.global_messenger)
@@ -134,13 +149,13 @@ class MpiApiEngine() :
             if not self._is_alive:
                 break
 
-            if result is not None:
+            if msg.get("type") in self._reply_operations:
                 if entry_global_mode:
-                    if self.global_rank == 0 :
-                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                    if self.global_rank == 0:
+                        self._send_reply(self.global_messenger, result, error_payload)
                 else:
-                    if self.local_rank == 0 :
-                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                    if self.local_rank == 0:
+                        self._send_reply(self.local_messenger, result, error_payload)
 
     def _send_status(self, messenger) :
         """Send the status of the engine to the session."""
@@ -153,43 +168,49 @@ class MpiApiEngine() :
         }
         messenger.send(status_msg, dest=0, tag=0)
 
+    def _send_reply(self, messenger, result, error_payload) -> None:
+        """Send either a successful result or an explicit error reply."""
+        if error_payload is None:
+            messenger.send({"type": "result", "value": result}, dest=0, tag=1)
+            return
+        messenger.send({"type": "error", "value": error_payload}, dest=0, tag=1)
 
-    def _handle_message(self, msg: dict) -> None:
+    def _handle_message(self, msg: dict):
         """Handle incoming messages from the session."""
 
         msg_type = msg.get("type")
-
         operation_handler = self._operations_map.get(msg_type)
-        if operation_handler is None:
-            raise ValueError(f"Unknown message type: {msg_type}")
+        value = msg.get("value", None)
+        entry_engine_comm = self.engine_comm
+        entry_engine_comm.barrier()
+        try:
+            if operation_handler is None:
+                raise ValueError(f"Unknown message type: {msg_type}")
 
-        else : 
-            #Call method of function (and so check if self needs to be provided or not)
-            value = msg.get("value", None)
-            entry_engine_comm = self.engine_comm    # needed for when msg is use_global
+            if value is None:
+                args = ()
+                kwargs = {}
+            elif isinstance(value, dict):
+                args = ()
+                kwargs = value
+            else:
+                args = (value,)
+                kwargs = {}
+
+            if hasattr(operation_handler, "__self__") and operation_handler.__self__ is self:
+                result = operation_handler(*args, **kwargs)
+            else:
+                result = operation_handler(self, *args, **kwargs)
+            return result, None
+        except Exception as exc:
+            logger.exception("[Engine Rank %d] Error in handler %s", self.rank, msg_type)
+            return None, {
+                "operation": msg_type,
+                "error_type": type(exc).__name__,
+                "message": str(exc) or repr(exc),
+            }
+        finally:
             entry_engine_comm.barrier()
-            try :
-                if value is None : 
-                    args = () 
-                    kwargs = {}
-                elif isinstance(value, dict) : 
-                    args = ()
-                    kwargs = value
-                else : 
-                    args = (value,)
-                    kwargs = {}
-
-                if hasattr(operation_handler, "__self__") and operation_handler.__self__ is self:
-                    #it s a method
-                    result = operation_handler(*args, **kwargs)
-                else:
-                    #it s an external method that takes engine as a parameter
-                    result = operation_handler(self,*args, **kwargs)
-                return result
-            except Exception as e:
-                print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
-            finally : 
-                entry_engine_comm.barrier()
 
 
 
@@ -230,7 +251,7 @@ class MpiApiEngine() :
 
     def close(self) -> None:    
         """Close the LAMMPS engine."""
-        print(f"[Engine Rank {self.rank}] Closing LAMMPS engine.")
+        logger.debug("[Engine Rank %d] Closing LAMMPS engine", self.rank)
         if self.local_lmp is not None:
             self.local_lmp.close()
             self.local_lmp = None

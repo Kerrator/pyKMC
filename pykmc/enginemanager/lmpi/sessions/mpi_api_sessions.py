@@ -1,3 +1,4 @@
+import logging
 from mpi4py import MPI 
 import numpy as np
 from ...messenger import MpiMessenger
@@ -6,6 +7,8 @@ from functools import wraps
 #TODO more general way to deal with operations 
 #TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
 #initiated in kmc, after the initialization of manager ...))
+
+logger = logging.getLogger("log")
 
 def session_locked(method):
     @wraps(method)
@@ -59,6 +62,23 @@ class MpiApiSession :
         else:
             raise RuntimeError(f"Unexpected message type received: {msg}, expected 'status' but got '{msg.get('type')}'")
 
+    def _receive_result_or_error(self):
+        """Receive a tag-1 reply, raising on explicit remote failures."""
+        msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+        msg_type = msg.get("type")
+        if msg_type == "result":
+            return msg.get("value")
+        if msg_type == "error":
+            value = msg.get("value", {})
+            operation = value.get("operation", "unknown operation")
+            error_type = value.get("error_type", "RuntimeError")
+            message = value.get("message", "Unknown remote error")
+            raise RuntimeError(
+                f"Remote {operation} failed on engine rank {self.engine_master_rank} "
+                f"({error_type}): {message}"
+            )
+        raise RuntimeError(f"Unexpected message type: {msg}")
+
     #@session_locked
     def command(self, cmd: str) -> None:
         """
@@ -92,7 +112,7 @@ class MpiApiSession :
             If True, wait for the engine to send a status message (for normal sessions).
             If False, just send the close message (for global / long-running engines).
         """
-        print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
+        logger.debug("[Session %d] Closing engine at rank %d", self.session_id, self.engine_master_rank)
         self.send_message({"type": "close"}, expect_status=wait_status)
         self._is_alive = False
 
@@ -147,32 +167,12 @@ class MpiApiSession :
         self.send_message({"type": "minimize", "value" : {"config": config, "positions": positions}})
 
     #@session_locked
-    def get_total_energy(self) -> float :
-        """ 
-        """
-        self._is_busy = True  # Mark the session as busy
-        #print(f"[Session] Get total energy")
-        try : 
-            self.send_message({"type": "get_total_energy"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result":
-                return msg["value"]  
-            else:
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally:
-            self._is_busy = False
-    
-    #@session_locked
     def get_positions(self) -> np.ndarray[float] :
         self._is_busy = True
         #print(f"[Session] Get Positions")
         try : 
             self.send_message({"type": "get_positions"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally : 
             self._is_busy = False
 
@@ -193,11 +193,7 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
         try : 
             self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally : 
             self._is_busy = False
 
@@ -207,11 +203,7 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}]  get potential energy")
         try :
             self.send_message({"type": "get_total_energy", "value": {"positions": positions}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" :
-                return msg["value"]
-            else :
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally :
             self._is_busy = False
 
@@ -221,11 +213,7 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}]  get potential energy")
         try : 
             self.send_message({"type": "get_potential_energy"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally : 
             self._is_busy = False
 
@@ -235,24 +223,34 @@ class MpiApiSession :
         #print(f"[Session] Launching pARTn search")
         try : 
             self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell": cell, "type": type}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally : 
             self._is_busy = False
 
     #@session_locked
     def partn_refine(self, config, central_atom_idx, positions = None, cell=None, type=None, saddle_idx=None, saddle_positions=None) :
-        self._is_busy = True 
+        self._is_busy = True
         #print(f"[Session] Launching pARTn search")
-        try : 
+        try :
             self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+            return self._receive_result_or_error()
+        finally :
+            self._is_busy = False
+
+    def basin_reconstruct(self, **kwargs):
+        """Send basin reconstruction task to engine and return result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_reconstruct", "value": kwargs})
+            return self._receive_result_or_error()
+        finally:
+            self._is_busy = False
+
+    def basin_explore(self, **kwargs):
+        """Send basin exploration task to engine and return result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_explore", "value": kwargs})
+            return self._receive_result_or_error()
+        finally:
             self._is_busy = False

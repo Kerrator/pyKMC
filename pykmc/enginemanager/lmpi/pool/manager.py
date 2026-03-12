@@ -1,9 +1,13 @@
 """Class for managing a pool of LAMMPS instances."""
-from ..sessions import MpiApiSession
-from dataclasses import dataclass
 from concurrent.futures import Future
+from dataclasses import dataclass
+import logging
 import queue
 import threading
+
+from ..sessions import MpiApiSession
+
+logger = logging.getLogger("log")
 
 #TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
 #initiated in kmc, after the initialization of manager ...))
@@ -41,7 +45,10 @@ class Manager:
         """
         Send the same command to all sessions and wait for all to finish.
         """
-        #print("[PoolManager] Broadcasting command:", cmd)
+        if self.using_global and self.global_session is not None:
+            self.global_session.command(cmd)
+            return
+
         for session in self.sessions:
             session.command(cmd)
 
@@ -54,16 +61,14 @@ class Manager:
             boundary = config.lammps.boundary
         else:
             boundary = pbc_to_lammps_boundary(system.pbc) if system.pbc is not None else "p p p"
-        print("[Manager] use local")
         self.use_local()
-        print("[Manager] Initializing all Lammps engines")
+        logger.debug("[Manager] Initializing local LAMMPS sessions")
         for session in self.sessions :
             session.initialize_parameters(boundary=boundary)
             session.initialize_system(system)
             session.initialize_potential(config)
-        print("[Manager] use global")
         self.use_global()
-        print("[Manager] Initializing global Lammps engines")
+        logger.debug("[Manager] Initializing global LAMMPS session")
         if self.global_session is not None :
             self.global_initialize_parameters(boundary=boundary)
             self.global_initialize_system(system)
@@ -190,6 +195,14 @@ class Manager:
             futures.append(f) 
         return futures
 
+    def basin_reconstruct(self, **kwargs) -> Future:
+        future = self.submit_job("basin_reconstruct", kwargs)
+        return future
+
+    def basin_explore(self, **kwargs) -> Future:
+        future = self.submit_job("basin_explore", kwargs)
+        return future
+
     def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None) -> list[Future] :
         future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
         return future
@@ -198,9 +211,13 @@ class Manager:
         """
         Close all sessions and their underlying engines.
         """
-        #print("[PoolManager] Closing all sessions.")
-        if self.global_session is not None :
-            self.global_session.close(wait_status=False)
+        if self.using_global:
+            if self.global_session is not None:
+                # A single global close is enough here because the close message is
+                # broadcast over the global communicator and shuts down every worker.
+                self.global_session.close(wait_status=True)
+            return
+
         for session in self.sessions:
             session.close(wait_status=True)
 
@@ -219,6 +236,3 @@ class Manager:
             return global_method
 
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-
-

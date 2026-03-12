@@ -8,6 +8,13 @@ expected_results = {
     "system_single_type_fcc_vacancy" : {"different": 2, "noncrystal" : 12}
 }
 
+expected_graph_results = {
+    "system_single_type_fcc_vacancy": {
+        "different": 7,
+        "counts": [169, 24, 24, 12, 12, 8, 6],
+    }
+}
+
 class TestAtomicEnvironment : 
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
@@ -31,10 +38,10 @@ class TestAtomicEnvironment :
 
         hash_count = Counter(ae.atomic_environment_list)
 
-        expected = expected_results[system_name]
+        expected = expected_graph_results[system_name]
 
         assert len(hash_count) == expected['different']
-        assert expected['noncrystal'] in hash_count.values()
+        assert sorted(hash_count.values(), reverse=True) == expected["counts"]
 
 
     @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])

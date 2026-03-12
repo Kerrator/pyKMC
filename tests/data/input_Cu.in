@@ -44,3 +44,6 @@ kmax_factor = 2.0
 
 [BASIN]
 energy_thr = 0.5
+strategy = wavefront
+n_workers = 4
+max_states = 16

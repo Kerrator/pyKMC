@@ -1,8 +1,11 @@
+import logging
 import numpy as np
-from .exit_time_solver import BisectionSolver
+from .exit_time_solver import BisectionSolver, QSDSolver
 from .connectivity import StatesConnectivity
 from .utils import solve_master_equation
 from pykmc.result import Result, Ok, ErrorInfo, BasinSelectorOutput, BasinExitTimeSolverOutput
+
+logger = logging.getLogger("log")
 
 #TODO : Use a Abstract Selector (if implement a new one, eg MRT) 
 #TODO : For the moment spectral decomposition=True is hardcoded, and it is assumed that we use BisectionSolver, need to modify if use different (and use builder)
@@ -31,10 +34,12 @@ class FPTASelector():
     [2] doi.org/10.1063/5.0015039
     """
 
-    def __init__(self) -> None : 
+    def __init__(self) -> None :
 
-        self.M_abs = None #Absorbing Markov chain generator matrix 
+        self.M_abs = None #Absorbing Markov chain generator matrix
         self.M_abs_reduced = None #Reduced absorbing markoc chain generator matrix
+        self._use_qsd: bool = False
+        self._qsd: np.ndarray | None = None
         
     def select_from_connectivity(self, connectivity_table: StatesConnectivity) -> Result[BasinSelectorOutput, ErrorInfo] : 
         """
@@ -137,9 +142,12 @@ class FPTASelector():
         for i in range(n_transient_states) : 
             self.M_abs_reduced[-1, i] = self.M_abs[n_transient_states:,i].sum()
 
-    def get_exit_time(self) -> Result[BasinExitTimeSolverOutput, ErrorInfo]: 
+    def get_exit_time(self) -> Result[BasinExitTimeSolverOutput, ErrorInfo]:
         """
-        Use Solver to find the exit time form the reduced matrix.
+        Use Solver to find the exit time from the reduced matrix.
+
+        Detects stiff matrices (transient rates >> absorbing rates) and
+        dispatches to QSDSolver in that case. Otherwise uses BisectionSolver.
 
         Returns
         -------
@@ -148,27 +156,41 @@ class FPTASelector():
             - Err(ErrorInfo) if solver failed.
         """
 
-        #Initialize 
+        #Initialize
         p0 = np.zeros(len(self.M_abs_reduced))
         p0[0] = 1 #we are always in state 0 when entering the basin
 
         # Pick random number between [0,1) representing the probability of being in an absorbing states after time t
         r1 = np.random.random()
 
-        #Use solver : 
-        exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
-        result = exit_time_solver.solve()
+        # Detect stiffness: ratio of max transient rate to max absorbing rate
+        n = len(self.M_abs_reduced) - 1  # number of transient states
+        max_transient_rate = np.max(np.diag(self.M_abs_reduced)[:n])
+        max_absorbing_rate = np.max(np.abs(self.M_abs_reduced[-1, :n]))
+        stiffness = max_transient_rate / max_absorbing_rate if max_absorbing_rate > 0 else np.inf
 
-        return result
+        if stiffness > 1e6:
+            logger.info("[FPTA] Stiff matrix detected (stiffness=%.2e), using QSD solver", stiffness)
+            exit_time_solver = QSDSolver(self.M_abs_reduced, p0, r1)
+            result = exit_time_solver.solve()
+            if result.is_ok():
+                self._use_qsd = True
+                self._qsd = exit_time_solver.qsd
+            return result
+        else:
+            self._use_qsd = False
+            self._qsd = None
+            exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
+            return exit_time_solver.solve()
 
-    def select_absorbing_state(self, t_exit: float) -> int: 
+    def select_absorbing_state(self, t_exit: float) -> int:
         """
         Find which absorbing state is reached at the given exit time.
 
         Parameters
         ----------
         t_exit : float
-            Exit time. 
+            Exit time.
 
         Returns
         -------
@@ -177,24 +199,41 @@ class FPTASelector():
             numbering of the full matrix M_abs).
         """
 
-        #Compute full probability vector 
-            #initial vector
-        p0 = np.zeros(len(self.M_abs))
-        p0[0] = 1 #always at state 0 when entering the basin 
+        n_transient = len(self.M_abs_reduced) - 1
 
-        #compute P = ext(-Mt)p0
-        p = solve_master_equation(self.M_abs, t_exit, p0) 
+        if self._use_qsd and self._qsd is not None:
+            # QSD path: exit state probabilities from quasi-stationary distribution
+            # p_j ∝ sum_i pi_qs[i] * |M_abs[j, i]| for each absorbing state j
+            n_absorbing = len(self.M_abs) - n_transient
+            p_absorbing = np.zeros(n_absorbing)
+            for j_idx in range(n_absorbing):
+                j = n_transient + j_idx
+                p_absorbing[j_idx] = np.sum(self._qsd * np.abs(self.M_abs[j, :n_transient]))
+        else:
+            # Standard path: compute full probability vector
+            p0 = np.zeros(len(self.M_abs))
+            p0[0] = 1  #always at state 0 when entering the basin
 
-        #Select only absorbing state
-        p_absorbing = p[len(self.M_abs_reduced)-1:]
-        #asjust so sum gives 1 
-        p_absorbing = p_absorbing/np.sum(p_absorbing)
+            p = solve_master_equation(self.M_abs, t_exit, p0)
 
-        #choose exit state 
+            #Select only absorbing states
+            p_absorbing = p[n_transient:]
+
+        #adjust so sum gives 1
+        p_absorbing = np.real(p_absorbing)
+        p_absorbing = np.maximum(p_absorbing, 0)  # clamp negatives from numerics
+        total = np.sum(p_absorbing)
+        if total > 0:
+            p_absorbing = p_absorbing / total
+        else:
+            # Uniform fallback (should not happen)
+            p_absorbing = np.ones(len(p_absorbing)) / len(p_absorbing)
+
+        #choose exit state
         p_absorbing_cumul = np.cumsum(p_absorbing)
         r2 = np.random.random()
         state_exit = np.searchsorted(p_absorbing_cumul, r2)
 
-        return state_exit+len(self.M_abs_reduced) -1 
+        return state_exit + n_transient
     
 

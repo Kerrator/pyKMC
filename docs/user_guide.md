@@ -299,9 +299,9 @@ To speed up event searches and the refinement part of the KMC loop, it is possib
 Each instance runs independently on a separate set of cores.
 
 The number of instances is defined by the n_sessions parameter in the [Control] section of the input file.
-The main KMC loop always runs on the main rank (rank 0), but you can choose whether the LAMMPS instances should use all other ranks only, or include rank 0 as well.
-This behavior is controlled by the engine_use_rank_0 parameter in the [Control] section.
-Note that enabling the use of rank 0 may slightly slow down the simulation, since that instance communicates via threads rather than MPI messages.
+The main KMC loop always runs on the main rank (rank 0), and the supported MPI manager setup uses the remaining ranks for LAMMPS worker sessions.
+This is controlled by the engine_use_rank_0 parameter in the [Control] section, which should stay set to `False`.
+`engine_use_rank_0 = True` is kept only for compatibility and is currently rejected during manager startup instead of attempting a potentially deadlocking rank-0 engine launch.
 
 For example, if you have 8 cores available and want to run 4 LAMMPS instances, each on different ranks than the master one, your input file should contain the following parameters:
 
@@ -320,8 +320,17 @@ mpirun -n 8 python -m pykmc -in <your_input_file>
 The available cores will be automatically split according to your configuration.
 In this example, the LAMMPS instances will run on ranks 1–2, 3–4, 5–6, and 7, while the main KMC loop runs on rank 0.
 
+## Restarting a simulation
 
+pyKMC writes restart checkpoints as `restart_<step>.npz` files. To resume from one of these checkpoints, set `restart_file` in the `[Control]` section:
 
+```INI
+[Control]
+initial_config = ./initial_config.xyz
+restart_file = ./restart_100.npz
+```
+
+When `restart_file` is set, pyKMC resumes from the saved step/time counters instead of starting from step 0. The current structure and energies are still initialized from the input configuration and potential before the KMC loop continues. `n_steps` stays the final target step count, so a restart from step 100 with `n_steps = 1000` runs steps 101 through 1000, not 1100.
 
 
 

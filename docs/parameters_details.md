@@ -28,6 +28,10 @@
   <details><summary>Description</summary>
   Path to a list of visited environment generated from a previous simulation.
   </details>
+- **`restart_file`** : `str`, optional
+  <details><summary>Description</summary>
+  Path to a `.npz` restart file produced by a previous pyKMC run. When provided, KMC resumes from the stored step/time counters instead of starting from step 0, while recomputing the current energies from the supplied initial configuration and potential. `n_steps` remains the final target step number, so restarting from step 100 with `n_steps = 1000` continues at step 101 and stops at step 1000.
+  </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.
@@ -45,9 +49,9 @@
   <details><summary>Description</summary>
   Number of Sessions
   </details>
-- **`engine_use_rank_0`** : `bool`, default = `True`
+- **`engine_use_rank_0`** : `bool`, default = `False`
   <details><summary>Description</summary>
-  If use mpi rank 0 or not.
+  Deprecated and unsupported in the current MPI manager implementation. Keep this set to `False`; setting it to `True` raises immediately instead of attempting a rank-0 engine startup.
   </details>
 - **`verbosity`** : `int`, default = `1`
   <details><summary>Description</summary>
@@ -66,7 +70,7 @@
   Atomic environments parameters.
 </details>
 
-- **`style`** : `Literal['cna', 'graph', 'cna/graph']`, mandatory
+- **`style`** : `Literal['cna', 'graph', 'cna/graph', 'coordination', 'coordination/graph']`, mandatory
   <details><summary>Description</summary>
   Method used to characterize and assign an ID to an atom's local atomic environment
   </details>
@@ -81,6 +85,14 @@
 - **`neighbors_add`** : `int`, default = `0`
   <details><summary>Description</summary>
   When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.
+  </details>
+- **`coordination_threshold`** : `int`, optional
+  <details><summary>Description</summary>
+  When `style` is `coordination` or `coordination/graph`, atoms with fewer neighbors than this value are labeled `noncrystal`; atoms with this many or more neighbors are labeled `crystal`.
+  </details>
+- **`atom_coloring_mode`** : `Literal['grey', 'full']`, default = `'grey'`
+  <details><summary>Description</summary>
+  Controls whether species information is included in environment matching. `grey` ignores atom types, while `full` keeps element-resolved coloring during graph hashing, PSR matching, and symmetry handling.
   </details>
 
 ---
@@ -165,6 +177,39 @@
 - **`T`** : `float`, default = `300`
   <details><summary>Description</summary>
   Temperature (in Kelvin) used for computing rate constants.
+  </details>
+
+---
+
+## `Basin` Section (conditional)
+
+<details><summary>Section Overview</summary>
+  Basin exploration parameters. Required when <code>control.basin = True</code>.
+</details>
+
+- **`energy_thr`** : `float`, default = `0.0`
+  <details><summary>Description</summary>
+  Energy threshold (in eV) for basin membership. During a KMC step, if the selected event has both forward and backward barriers below this value, basin exploration is triggered. All transitions with barriers below this threshold are considered intra-basin (transient); transitions with at least one barrier above it lead to absorbing (exit) states.
+  </details>
+- **`strategy`** : `str`, default = `'serial'`
+  <details><summary>Description</summary>
+  BFS parallelization strategy for basin exploration. Available strategies:
+
+  - `serial`: Sequential BFS, one state at a time
+  - `parallel_explore`: Parallel exploration of newly discovered transient states
+  - `batch_dedup`: Batched cKDTree deduplication across multiple candidates
+  - `parallel_reconstruct`: Parallel reconstruction distributing LAMMPS minimizations across all MPI sessions
+  - `wavefront`: Full wavefront BFS combining parallel reconstruction, batch dedup, and parallel exploration
+
+  For large systems (>500 atoms), `wavefront` or `parallel_reconstruct` with `n_workers >= 4` is recommended.
+  </details>
+- **`n_workers`** : `int`, default = `4`
+  <details><summary>Description</summary>
+  Number of threads used by parallel basin strategies. Has no effect when <code>strategy = serial</code>. The optimal value depends on the number of available MPI sessions (typically <code>np - 1</code>).
+  </details>
+- **`max_states`** : `int`, optional
+  <details><summary>Description</summary>
+  Hard cap on the number of transient states explored during basin construction. When reached, the remaining frontier states are materialized and converted to absorbing exits so the basin can terminate cleanly instead of expanding indefinitely. The resulting capped basin is still used for exit selection: KMC accepts the selected exit state/rate directly rather than discarding the basin result and reverting to the originally selected event.
   </details>
 
 ---

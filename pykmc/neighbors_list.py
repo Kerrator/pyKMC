@@ -35,20 +35,27 @@ class NeighborsList:
         self._build_neighbors_list()
 
     def _build_neighbors_list(self) -> None:
-        """Build and populates the `neighbors_list`."""
+        """Build and populate the neighbor lists.
+
+        Contract:
+        - `rnei` excludes the central atom.
+        - `rcut` includes the central atom exactly once.
+        """
         positions = self.system.positions
         cell_diag = np.array([self.system.cell[0][0], self.system.cell[1][1], self.system.cell[2][2]])
         pbc = self.system.pbc if self.system.pbc is not None else np.array([True, True, True])
 
         if np.all(pbc):
             # Fully periodic: use boxsize (existing fast path)
-            tree = cKDTree(positions, boxsize=cell_diag.tolist())
-            for i in range(len(positions)):
-                neighbors = tree.query_ball_point(positions[i], self.rnei)
+            # Wrap positions into [0, box) — cKDTree requires non-negative coords
+            wrapped = np.mod(positions, cell_diag)
+            tree = cKDTree(wrapped, boxsize=cell_diag.tolist())
+            for i in range(len(wrapped)):
+                neighbors = tree.query_ball_point(wrapped[i], self.rnei)
                 neighbors.remove(i)  # don't have self as neighbor
                 self.neighbors_list["rnei"].append(neighbors)
                 if self.rcut is not None:
-                    neighbors = tree.query_ball_point(positions[i], self.rcut)
+                    neighbors = tree.query_ball_point(wrapped[i], self.rcut)
                     self.neighbors_list["rcut"].append(neighbors)
         else:
             # Mixed PBC: create ghost images in periodic directions
@@ -72,7 +79,7 @@ class NeighborsList:
                 self.neighbors_list["rnei"].append(mapped)
                 if self.rcut is not None:
                     raw = tree.query_ball_point(positions[i], self.rcut)
-                    mapped = sorted(set(index_map[j] for j in raw) - {i})
+                    mapped = sorted(set(index_map[j] for j in raw))
                     self.neighbors_list["rcut"].append(mapped)
 
     def get_neighbors(self, cutoff_type: float, idx: int) -> list[int]:

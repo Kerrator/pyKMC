@@ -10,11 +10,12 @@ import ase.geometry
 #TODO: Use it in KMC
 #TODO: Clean reconstruct/split the method
 
-class Reconstruction: 
+class Reconstruction:
 
-    def __init__(self, config: Config, manager: Manager) -> None : 
+    def __init__(self, config: Config, manager: Manager, use_session_pool: bool = False) -> None :
         self.config = config
         self.manager = manager #Manager objet that can perform minimization and return minimized positions
+        self.use_session_pool = use_session_pool
 
     def reconstruct(self, supposed_min1_positions, supposed_min2_positions, saddle_positions, cell, delr_thr, neighbors = None, fraction = 0.15, pbc=True) :
         """From a saddle point, try to reconstruct the event to see if it matches the 
@@ -58,9 +59,11 @@ class Reconstruction:
         #Move toward min1 positions
         saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=0.15, cell = cell, pbc=pbc)
         tmp_positions[neighbors] = saddle_toward_min1_pos
-        #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
-#        min1_pos, _ = future.result()
+        if self.use_session_pool:
+            future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
+            min1_pos, _ = future.result()
+        else:
+            min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
 
         #compaire min1_pos with system current positions
         t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = cell, pbc = pbc)
@@ -77,9 +80,11 @@ class Reconstruction:
             #positions towards min2 :
             saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=0.15, cell = cell, pbc=pbc)
             tmp_positions[neighbors] = saddle_toward_min2_pos
-            #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-            min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
-#            min2_pos, _ = future.result()
+            if self.use_session_pool:
+                future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
+                min2_pos, min2_etot = future.result()
+            else:
+                min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions)
 
             #Compare min2pos with expected final_positions
             t2 = ase.geometry.wrap_positions(positions = min2_pos, cell = cell, pbc = pbc)
