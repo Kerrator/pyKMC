@@ -607,8 +607,12 @@ class KMC:
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
-
-
+        # Guard against neighbor count mismatch between refinement time and now
+        if saddle_positions.shape[0] != len(neighbors):
+            return Err(ErrorInfo(
+                type=ErrorType.RECONSTRUCTION_FAILED,
+                message=f"neighbor count mismatch: saddle has {saddle_positions.shape[0]} atoms but current neighbors has {len(neighbors)}",
+            ))
 
         #Move the system to the saddle point
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)

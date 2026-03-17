@@ -58,6 +58,12 @@ class BasinsGenericEvents() :
         self.explored_states = None #List of state that we already explored
         self.states: dict[int, StateData] = {}  #Dictionnary of StateDate
         self._state_fingerprints: dict[int, np.ndarray] = {}  # Fast dedup rejection cache
+        # Fingerprint pre-filter stats
+        self._fp_total_comparisons = 0   # Total state-vs-state comparisons attempted
+        self._fp_rejected = 0            # Rejected by fingerprint (skipped cKDTree)
+        self._fp_passed_to_ckdtree = 0   # Passed fingerprint, sent to cKDTree
+        self._fp_ckdtree_confirmed = 0   # cKDTree confirmed as duplicate
+        self._fp_ckdtree_rejected = 0    # cKDTree said not duplicate (false positive from fp)
         self.known_environments = known_environments
         self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
         self._next_state_index = 1  # Monotonic counter for state indices (0 is the initial state)
@@ -166,6 +172,12 @@ class BasinsGenericEvents() :
         self._state_fingerprints = {}
         self.absorbing_saddle_positions = {}
         self._next_state_index = 1  # State 0 is already assigned
+        # Reset fingerprint stats
+        self._fp_total_comparisons = 0
+        self._fp_rejected = 0
+        self._fp_passed_to_ckdtree = 0
+        self._fp_ckdtree_confirmed = 0
+        self._fp_ckdtree_rejected = 0
         self._was_capped = False
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
@@ -206,6 +218,19 @@ class BasinsGenericEvents() :
             pct = 100.0 * t / elapsed if elapsed > 0 else 0
             logger.info("[Basin] PROFILING:   %-15s %8.2fs  %5.1f%%", phase, t, pct)
 
+        # Fingerprint pre-filter effectiveness
+        if self._fp_total_comparisons > 0:
+            reject_pct = 100.0 * self._fp_rejected / self._fp_total_comparisons if self._fp_total_comparisons > 0 else 0
+            logger.info(
+                "[Basin] FINGERPRINT STATS: total_comparisons=%d | fp_rejected=%d | combined_reject=%.1f%% | passed_to_ckdtree=%d | ckdtree_confirmed=%d | ckdtree_false_positive=%d",
+                self._fp_total_comparisons,
+                self._fp_rejected,
+                reject_pct,
+                self._fp_passed_to_ckdtree,
+                self._fp_ckdtree_confirmed,
+                self._fp_ckdtree_rejected,
+            )
+
         self._write_timing_checkpoint(prof, elapsed, n_transient, n_absorbing_final, n_duplicates, n_processed)
         return Ok(None)
 
@@ -234,8 +259,8 @@ class BasinsGenericEvents() :
             #Loop over state to explore
             while len(self.states_to_explore) != 0 :
                 # Check max_states cap
-                if max_states is not None and n_explored >= max_states:
-                    logger.warning("[Basin] max_states=%d reached. Capping.", max_states)
+                if max_states is not None and len(self.states) >= max_states:
+                    logger.warning("[Basin] max_states=%d reached (%d total states). Capping.", max_states, len(self.states))
                     result = self._cap_remaining_as_absorbing()
                     if not result.is_ok():
                         return result
@@ -255,7 +280,14 @@ class BasinsGenericEvents() :
                     result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
                     prof["reconstruct"] += time.perf_counter() - t0
                     if not result.is_ok() :
-                        return result
+                        logger.warning("[Basin] Reconstruction failed for state %d: %s", to_explore, result.err_value())
+                        self.connectivity_table.drop_state(to_explore)
+                        if to_explore in self.states_to_explore:
+                            self.states_to_explore.remove(to_explore)
+                        if to_explore not in self.explored_states:
+                            self.explored_states.append(to_explore)
+                        self.states[from_state].release_heavy_objects()
+                        continue
                     new_system = result.ok_value()
 
                         #Check if it is a new_system or already in states
@@ -427,7 +459,9 @@ class BasinsGenericEvents() :
             types=self.states[from_state].system.types,
             cell=cell,
             pbc=pbc,
-            index=np.arange(len(self.states[from_state].system.types)))
+            index=np.arange(len(self.states[from_state].system.types)),
+            energy=mpi_result.get("min2_etot"),
+            peratom_energy=mpi_result.get("min2_peratom_energy"))
         return Ok(new_system)
 
     def _transport_error(self, operation: str, exc: Exception):
@@ -473,17 +507,18 @@ class BasinsGenericEvents() :
 
     def refine_absorbing(self, system) :
         """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
-        #compute the energy of the state 
+        #compute the energy of the state
         #for all row in connectivity table where we need to refine
         futures_context = {} #idx → { "min": f_min, "saddle": f_sad }
-        for idx, row in self.connectivity_table.df.iterrows() : 
+        psr_failed_rows = []  # rows where PSR failed — will be dropped
+        for idx, row in self.connectivity_table.df.iterrows() :
             if row["transient"]  == False : #need to refine
                 #tmp_system = copy.deepcopy(self.states[row["state"]].system)
                 tmp_system = System(positions=self.states[row["state"]].system.positions.copy(), types=self.states[row["state"]].system.types, cell=self.states[row["state"]].system.cell, pbc=self.states[row["state"]].system.pbc, index=np.arange(len(self.states[row["state"]].system.types)))
-                #get tmp_system energy 
+                #get tmp_system energy
                 future1 = self.manager.get_total_energy(positions=tmp_system.positions.copy()) #Send copy not reference
-                #move to generic saddle positions 
-                ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == row["event_connexion"]] 
+                #move to generic saddle positions
+                ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == row["event_connexion"]]
                 if ref_event.empty:
                     raise ValueError(f"idx_ref={row['event_connexion']} not found in reference table")
                 ref_event = ref_event.iloc[0].copy()
@@ -492,18 +527,25 @@ class BasinsGenericEvents() :
                 #Apply PSR between event initial position and environment positions of the central_atoms
 
 
-                #ENSURE "STATE" FULL 
+                #ENSURE "STATE" FULL
                 self.states[row["state"]].ensure_full_state(self.config)
 
                 result = PointSetRegistration(self.config, tmp_system, ref_event , self.states[row["state"]].neighbors_list, row["central_atom"]).match()
                 if not result.is_ok(): #PSR Err
-                    return result
-                    # Check if PointSetRegistration match is valid 
+                    logger.warning("[Basin] PSR failed during absorbing refinement for row %d (state %d→%d): %s",
+                                   idx, row["state"], row["state_connexion"], result.err_value())
+                    psr_failed_rows.append(idx)
+                    self.states[row["state"]].release_heavy_objects()
+                    continue
+                # Check if PointSetRegistration match is valid
                 result = check_match(result, self.config.psr.matching_score_thr)
-                if not result.is_ok() : #PSR matching score not valid : 
-                    return result
-                else : 
-                    psr_output = result.ok_value() #get psr results
+                if not result.is_ok() : #PSR matching score not valid :
+                    logger.warning("[Basin] PSR match score too low during absorbing refinement for row %d (state %d→%d): %s",
+                                   idx, row["state"], row["state_connexion"], result.err_value())
+                    psr_failed_rows.append(idx)
+                    self.states[row["state"]].release_heavy_objects()
+                    continue
+                psr_output = result.ok_value() #get psr results
 
                 # Apply symmetry matrix if sym != 0
                 if row["sym"] != 0 :
@@ -526,22 +568,25 @@ class BasinsGenericEvents() :
                     tmp_system.update_positions(saddle_positions, atom_idx = neighbors)
                     #refine
                     future2 = self.manager.partn_refine(self.config, row["central_atom"], tmp_system.positions.copy()) #send copy not reference !
-                
-                #save future in context : 
+
+                #save future in context :
                 futures_context[idx] = {
             "min": future1,
-            "saddle": future2, 
+            "saddle": future2,
             "neighbors": neighbors}
-                
-                #RELEASE MEMORY : 
+
+                #RELEASE MEMORY :
                 self.states[row["state"]].release_heavy_objects()
 
         #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
+        failed_rows = list(psr_failed_rows)
         for idx, ctx in futures_context.items():
             E_min    = ctx["min"].result()
             result_sad = ctx["saddle"].result()
-            if not result_sad.is_ok() : 
-                return result_sad
+            if not result_sad.is_ok() :
+                logger.warning("[Basin] pARTn refinement failed for row %d: %s", idx, result_sad.err_value())
+                failed_rows.append(idx)
+                continue
             E_sad = result_sad.ok_value().E_saddle
             if self.config.control.active_volume==True:
                 dE = E_sad
@@ -549,7 +594,7 @@ class BasinsGenericEvents() :
                 dE = E_sad - E_min
             k = compute_rate_Eyring(dE, self.config)
 
-            #also save saddle positions refined 
+            #also save saddle positions refined
             idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
             central_atom = self.connectivity_table.df.loc[idx].at["central_atom"]
             #self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
@@ -557,6 +602,13 @@ class BasinsGenericEvents() :
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
             self.connectivity_table.df.loc[idx, "k_forward"] = k
+
+        # Drop rows that failed refinement (PSR or pARTn)
+        if failed_rows:
+            n_total_absorbing = len(psr_failed_rows) + len(futures_context)
+            logger.warning("[Basin] Dropping %d/%d absorbing rows due to refinement failures",
+                           len(failed_rows), n_total_absorbing)
+            self.connectivity_table.df = self.connectivity_table.df.drop(index=failed_rows).reset_index(drop=True)
         return Ok(None)
 
 
@@ -565,8 +617,8 @@ class BasinsGenericEvents() :
         if (self.config.basin is not None
                 and self.config.basin.fingerprint_tolerance is not None):
             return self.config.basin.fingerprint_tolerance
-        # COM-distance tolerance (used by full COM and coordination-COM hybrid)
-        return 0.5
+        # Default tolerance: 1.0 for atoms-of-interest fingerprint (optimal from sweep profiling)
+        return 1.0
 
     def is_new_state(self, system) :
         #Loop over all other system in self.states to see if system is already known
@@ -579,21 +631,34 @@ class BasinsGenericEvents() :
             for si, fp in self._state_fingerprints.items()
             if len(fp) == len(fp_new)
         ]
+        # Also track states rejected by length mismatch
+        length_mismatched = [
+            si for si, fp in self._state_fingerprints.items()
+            if len(fp) != len(fp_new)
+        ]
+        n_existing = len(fp_items) + len(length_mismatched) if self._state_fingerprints else len(self.states)
+        self._fp_total_comparisons += n_existing
+
         if fp_items:
             indices, fps = zip(*fp_items)
             fp_matrix = np.vstack(fps)  # (N_states, N_atoms)
             max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
             candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
+            self._fp_rejected += len(fp_items) - len(candidates) + len(length_mismatched)
         else:
             candidates = list(self.states.keys())
 
+        self._fp_passed_to_ckdtree += len(candidates)
         for state_index in candidates:
             state_data = self.states[state_index]
             if state_data.system is None:
                 continue
             are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell, pbc=system.pbc)
             if are_equivalent :
+                self._fp_ckdtree_confirmed += 1
                 return state_index
+            else:
+                self._fp_ckdtree_rejected += 1
         return -1
 
 
@@ -697,25 +762,22 @@ class BasinsGenericEvents() :
         """Compute a structural fingerprint for fast inequality rejection.
 
         Dispatches to:
-        1. Atoms of interest fingerprint if fingerprint_coordination_thr is set (explicit override)
-        2. Atoms of interest fingerprint if AtomicEnvironment uses coordination style
-        3. Full COM-distance fingerprint otherwise
+        1. Atoms of interest fingerprint if fingerprint_coordination_thr is set
+           or AtomicEnvironment uses coordination style
+        2. Full COM-distance fingerprint otherwise
         """
-        # Explicit override from [BASIN] config
-        if (self.config.basin is not None
-                and self.config.basin.fingerprint_coordination_thr is not None):
+        coord_thr = None
+        if self.config.basin is not None and self.config.basin.fingerprint_coordination_thr is not None:
+            coord_thr = self.config.basin.fingerprint_coordination_thr
+        elif (self.config.atomicenvironment.style in ("coordination", "coordination/graph")
+              and self.config.atomicenvironment.coordination_threshold is not None):
+            coord_thr = self.config.atomicenvironment.coordination_threshold + 1
+
+        if coord_thr is not None:
             return self._atoms_of_interest_fingerprint(
                 positions, cell, pbc,
                 rnei=self.config.atomicenvironment.rnei,
-                coord_thr=self.config.basin.fingerprint_coordination_thr,
-            )
-        # Auto-detect from AtomicEnvironment style
-        if (self.config.atomicenvironment.style in ("coordination", "coordination/graph")
-                and self.config.atomicenvironment.coordination_threshold is not None):
-            return self._atoms_of_interest_fingerprint(
-                positions, cell, pbc,
-                rnei=self.config.atomicenvironment.rnei,
-                coord_thr=self.config.atomicenvironment.coordination_threshold + 1,
+                coord_thr=coord_thr,
             )
         return self._com_fingerprint(positions, cell, pbc)
 
@@ -737,7 +799,7 @@ class BasinsGenericEvents() :
         self.states[state_index]= new_state
         if system is not None:
             self._state_fingerprints[state_index] = self._compute_fingerprint(
-                system.positions, system.cell, system.pbc
+                system.positions, system.cell, system.pbc,
             )
 
     def _write_timing_checkpoint(self, prof, elapsed, n_transient, n_absorbing, n_duplicates, n_processed):
@@ -764,6 +826,30 @@ class BasinsGenericEvents() :
                 f.write(f"prof_{phase} = {t:.3f}\n")
                 f.write(f"pct_{phase} = {pct:.1f}\n")
         logger.info("[Basin] Timing checkpoint written to %s", ckpt_path)
+
+        # Dump all basin state positions for offline fingerprint benchmarking
+        state_positions = {}
+        state_energies = {}
+        state_peratom_energies = {}
+        for idx, sd in self.states.items():
+            if sd.system is not None:
+                state_positions[idx] = sd.system.positions.copy()
+                state_energies[idx] = getattr(sd.system, "energy", None)
+                if sd.system.peratom_energy is not None:
+                    state_peratom_energies[idx] = sd.system.peratom_energy.copy()
+        if state_positions:
+            cell = next(iter(self.states.values())).system.cell.copy()
+            pbc = next(iter(self.states.values())).system.pbc
+            save_data = {
+                "cell": cell,
+                "pbc": np.array(pbc),
+                "state_indices": np.array(list(state_positions.keys())),
+            }
+            save_data.update({f"pos_{idx}": pos for idx, pos in state_positions.items()})
+            if state_peratom_energies:
+                save_data.update({f"pe_{idx}": pe for idx, pe in state_peratom_energies.items()})
+            np.savez_compressed("basin_states.npz", **save_data)
+            logger.info("[Basin] Dumped %d state positions to basin_states.npz", len(state_positions))
 
         # Also write as level_complete format for compare_scaling.py compatibility
         level_path = "basin_connectivity_0_L0_level_complete.txt"
@@ -865,6 +951,7 @@ class BasinsGenericEvents() :
             futures[state_idx] = (from_state, self.manager.basin_reconstruct(**kwargs))
 
         reconstruction_error = None
+        failed_states = []
         for state_idx, (from_state, future) in futures.items():
             try:
                 mpi_result = future.result()
@@ -873,6 +960,7 @@ class BasinsGenericEvents() :
                 logger.warning("[Basin] Reconstruction transport failed for state %d: %s", state_idx, result.err_value())
                 if reconstruction_error is None:
                     reconstruction_error = result
+                failed_states.append(state_idx)
                 continue
             result = self._result_from_mpi(mpi_result, from_state)
             if result.is_ok():
@@ -882,9 +970,14 @@ class BasinsGenericEvents() :
             logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
             if reconstruction_error is None:
                 reconstruction_error = result
+            failed_states.append(state_idx)
 
-        if reconstruction_error is not None:
+        # Only fail if ALL states in the batch failed (no progress possible)
+        if not reconstructed and reconstruction_error is not None:
             return reconstruction_error
+        if failed_states:
+            logger.warning("[Basin] %d/%d reconstructions failed, continuing with %d successful",
+                           len(failed_states), len(to_reconstruct), len(reconstructed))
         return Ok((reconstructed, transition_info, len(to_reconstruct)))
 
     def _register_wavefront_states(self, to_reconstruct, reconstructed, transition_info, prof):
@@ -901,6 +994,16 @@ class BasinsGenericEvents() :
         n_duplicates = 0
         n_absorbing = 0
         for state_idx in to_reconstruct:
+            # Skip states that failed reconstruction — remove connectivity rows
+            # referencing them so they don't appear in the table at all
+            if state_idx not in reconstructed:
+                self.connectivity_table.drop_state(state_idx)
+                if state_idx in self.states_to_explore:
+                    self.states_to_explore.remove(state_idx)
+                if state_idx not in self.explored_states:
+                    self.explored_states.append(state_idx)
+                continue
+
             existing = dedup_results.get(state_idx, -1)
             if existing != -1:
                 self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing)
@@ -986,10 +1089,10 @@ class BasinsGenericEvents() :
         # Pre-compute fingerprints for new systems
         new_fingerprints = {}
         for idx, system in new_systems.items():
-            new_fingerprints[idx] = self._compute_fingerprint(system.positions, system.cell, system.pbc)
+            new_fingerprints[idx] = self._compute_fingerprint(
+                system.positions, system.cell, system.pbc)
 
-        # Build fingerprint-filtered cKDTree only for candidate existing states
-        # (pre-filter: only build trees for states whose fingerprint is close)
+        # Build cKDTree for each existing state
         existing_trees = {}
         for idx, state_data in self.states.items():
             if state_data.system is not None:
@@ -1000,7 +1103,6 @@ class BasinsGenericEvents() :
                 else:
                     existing_trees[idx] = None  # fallback to manual comparison
 
-        # Pre-compute fingerprint candidate sets for each new system vs existing states
         existing_fp_items = [
             (si, fp)
             for si, fp in self._state_fingerprints.items()
@@ -1013,14 +1115,20 @@ class BasinsGenericEvents() :
             fp_new = new_fingerprints[new_idx]
 
             # Fingerprint pre-filter against existing states
+            n_existing = len(existing_fp_items) if existing_fp_items else len(existing_trees)
+            self._fp_total_comparisons += n_existing
             if existing_fp_items:
                 candidate_indices = []
                 for si, fp in existing_fp_items:
-                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= fp_tol:
-                        candidate_indices.append(si)
+                    if len(fp) == len(fp_new):
+                        diff = np.max(np.abs(fp - fp_new))
+                        if diff <= fp_tol:
+                            candidate_indices.append(si)
+                self._fp_rejected += (n_existing - len(candidate_indices))
             else:
                 candidate_indices = list(existing_trees.keys())
 
+            self._fp_passed_to_ckdtree += len(candidate_indices)
             for existing_idx in candidate_indices:
                 if existing_idx not in existing_trees:
                     continue
@@ -1029,14 +1137,20 @@ class BasinsGenericEvents() :
                     wrapped_query = self._wrap_positions(system.positions, system.cell)
                     distances, _ = tree.query(wrapped_query, k=1)
                     if np.max(distances) < 0.3:
+                        self._fp_ckdtree_confirmed += 1
                         match = existing_idx
                         break
+                    else:
+                        self._fp_ckdtree_rejected += 1
                 else:
                     state_data = self.states[existing_idx]
                     if self.are_structures_equivalent(system.positions, state_data.system.positions,
                                                       cell=system.cell, pbc=system.pbc):
+                        self._fp_ckdtree_confirmed += 1
                         match = existing_idx
                         break
+                    else:
+                        self._fp_ckdtree_rejected += 1
 
             # Cross-check within this batch (two new states may be duplicates of each other)
             if match == -1:
@@ -1045,8 +1159,10 @@ class BasinsGenericEvents() :
                         continue  # this one is already a duplicate itself
                     if other_idx in new_systems:
                         fp_other = new_fingerprints[other_idx]
-                        # Fingerprint pre-filter within batch
-                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > fp_tol:
+                        if len(fp_other) != len(fp_new):
+                            continue
+                        diff = np.max(np.abs(fp_other - fp_new))
+                        if diff > fp_tol:
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,
@@ -1089,8 +1205,8 @@ class BasinsGenericEvents() :
         try:
             while len(self.states_to_explore) != 0:
                 # Check max_states cap
-                if max_states is not None and n_explored >= max_states:
-                    logger.warning("[Basin] max_states=%d reached. Capping.", max_states)
+                if max_states is not None and len(self.states) >= max_states:
+                    logger.warning("[Basin] max_states=%d reached (%d total states). Capping.", max_states, len(self.states))
                     result = self._cap_remaining_as_absorbing()
                     if not result.is_ok():
                         return result

@@ -580,7 +580,7 @@ class BasinConfig(BaseModel):
 
     max_states: Optional[int] = Field(
         default=None,
-        description="Maximum transient states to explore. Remaining frontier becomes absorbing. None = unlimited.",
+        description="Maximum total states (transient + absorbing) in a basin. Remaining frontier becomes absorbing. None = unlimited.",
     )
 
     fingerprint_coordination_thr: Optional[int] = Field(
@@ -596,7 +596,9 @@ class BasinConfig(BaseModel):
     fingerprint_tolerance: Optional[float] = Field(
     default = None,
     description="Max element-wise difference for atoms of interest fingerprint pre-filtering. "
-    "If None, defaults to 0.5. Recommended: 1.0 for best balance of speed and correctness."
+    "If None, defaults to 1.0. Optimal value from sweep profiling on Ni(100) FCC: "
+    "thr=9 with tol=1.0 gives fastest correct basin. Values below 0.5 risk false "
+    "positive rejections (over-dedup). Values above 1.5 still correct but slower."
     )
 
 class DealloyingConfig(BaseModel):

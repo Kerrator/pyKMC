@@ -32,6 +32,11 @@ class System:
         Flags for periodic boundary conditions (x, y, z). Defaults to None.
     index : np.ndarray of int, shape (N,), optional
         Original indices of the atoms. Defaults to None.
+    energy : float, optional
+        Total potential energy of the system after minimization. Defaults to None.
+    peratom_energy : np.ndarray of float, shape (N,), optional
+        Per-atom potential energies after minimization. Used by energy-weighted
+        fingerprinting for basin deduplication. Defaults to None.
 
     """
 
@@ -42,12 +47,16 @@ class System:
         cell: np.ndarray | None = None,
         pbc: np.ndarray | None = None,
         index: np.ndarray | None = None,
+        energy: float | None = None,
+        peratom_energy: np.ndarray | None = None,
     ) -> None:
         self.types = types
         self.positions = positions
         self.cell = cell
         self.pbc = pbc
         self.index = index
+        self.energy = energy
+        self.peratom_energy = peratom_energy
 
     @classmethod
     def create_from_file(cls, file_path: str) -> System:

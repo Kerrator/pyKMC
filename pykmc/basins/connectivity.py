@@ -262,6 +262,21 @@ class BasinStatesConnectivity(StatesConnectivity)  :
         self.df['state'] = self.df['state'].replace(mapping)
         self.df['state_connexion'] = self.df['state_connexion'].replace(mapping)
 
+    def drop_state(self, state_idx: int) -> None:
+        """Remove all connectivity rows that reference a state index.
+
+        Drops rows where the state appears as either source (``state``) or
+        destination (``state_connexion``).  Used when a state fails
+        reconstruction and must be removed from the basin entirely.
+
+        Parameters
+        ----------
+        state_idx : int
+            Index of the state to remove.
+        """
+        mask = (self.df["state"] == state_idx) | (self.df["state_connexion"] == state_idx)
+        self.df = self.df[~mask].reset_index(drop=True)
+
     def change_state_to_absorbing(self, state_connexion) :
         """
         Mark a state as absorbing in the connectivity table.

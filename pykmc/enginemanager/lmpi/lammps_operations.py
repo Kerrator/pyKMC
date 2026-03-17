@@ -119,22 +119,38 @@ def get_positions(engine) :
         result = np.reshape(result, (-1, 3))
         return result
     
-def set_positions(engine, positions) : 
+def get_peratom_energy(engine):
+    """Extract per-atom potential energy from current LAMMPS state.
+
+    Must be called after a minimize or run 0 so that energies are current.
+    Returns an (N,) float64 array on rank 0, None on other ranks.
+    """
+    engine.command("compute _pe_atom all pe/atom")
+    engine.command("run 0")
+    natoms = engine.lmp.get_natoms()
+    pe_ptr = engine.lmp.extract_compute("_pe_atom", 1, 1)
+    pe_array = np.ctypeslib.as_array(pe_ptr, shape=(natoms,)).copy()
+    engine.command("uncompute _pe_atom")
+    if engine.rank == 0:
+        return pe_array
+    return None
+
+def set_positions(engine, positions) :
     positions = positions.flatten().astype(np.float64)
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
 def minimize_with_results(engine, config, positions=None) :
-    """ 
+    """
     Minimize and return the minimized positions and the total energy.
     """
-    if positions is not None : 
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
-    minimize(engine, config) 
+    minimize(engine, config)
     new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
         return new_positions, total_energy
     
 def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) : 
@@ -462,6 +478,7 @@ def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
     minimize(engine, config)
     min2_pos = get_positions(engine)
     min2_etot = get_total_energy(engine)
+    min2_pe = get_peratom_energy(engine)
 
     if engine.rank == 0:
         import ase.geometry
@@ -476,7 +493,8 @@ def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
             return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
                     "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
 
-        return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
+        return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot,
+                "min2_peratom_energy": min2_pe}
 
 
 def basin_explore(engine, config_dict, reference_table_data, state_positions, state_types,

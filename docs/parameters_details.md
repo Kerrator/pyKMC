@@ -211,6 +211,30 @@
   <details><summary>Description</summary>
   Hard cap on the number of transient states explored during basin construction. When reached, the remaining frontier states are materialized and converted to absorbing exits so the basin can terminate cleanly instead of expanding indefinitely. The resulting capped basin is still used for exit selection: KMC accepts the selected exit state/rate directly rather than discarding the basin result and reverting to the originally selected event.
   </details>
+- **`fingerprint_coordination_thr`** : `int`, optional
+  <details><summary>Description</summary>
+  Atoms-of-interest fingerprint for fast dedup pre-filtering. Atoms with fewer neighbors (within <code>rnei</code>) than this threshold are considered "atoms of interest" (near defects, surfaces, vacancies). Their sorted distances from the system center of mass form a short fingerprint vector used to quickly reject non-matching state pairs before the expensive cKDTree position comparison.
+
+  If <code>None</code> and AtomicEnvironment style is <code>coordination</code> or <code>coordination/graph</code>, the threshold is auto-derived as <code>coordination_threshold + 1</code>. Otherwise falls back to the full COM-distance fingerprint (all N_atoms).
+
+  Recommended values by crystal structure:
+  - FCC (Ni, Cu, Al): 9–10 (bulk coordination = 12)
+  - BCC (Fe, W): 7 (bulk coordination = 8)
+  - HCP (Mg, Ti): 9–10 (bulk coordination = 12)
+
+  The threshold should be 2–3 below the bulk coordination number. From sweep profiling on Ni(100) FCC (383 atoms, 1 vacancy), <code>thr=9</code> gives the best combination of speed and correctness.
+  </details>
+- **`fingerprint_tolerance`** : `float`, optional
+  <details><summary>Description</summary>
+  Max element-wise difference for fingerprint pre-filtering. Two states whose fingerprint vectors differ by more than this tolerance in any element are immediately rejected as non-duplicates (skipping the cKDTree check).
+
+  If <code>None</code>, defaults to 1.0. From sweep profiling on Ni(100) FCC:
+  - <code>tol=1.0</code> with <code>thr=9</code>: optimal (fastest correct basin, dedup 77.7s)
+  - <code>tol=1.5</code>: still correct but slightly slower (dedup 83.0s)
+  - <code>tol=0.5</code> with <code>thr=11</code>: produces incorrect basin (860 states vs 832) due to over-rejection
+
+  Values below 0.5 risk false rejections (declaring true duplicates as distinct). The fingerprint is a pre-filter only — all candidates passing the tolerance check are still verified by full cKDTree position comparison.
+  </details>
 
 ---
 
