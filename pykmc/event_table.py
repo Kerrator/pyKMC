@@ -397,28 +397,34 @@ class ReferenceEventTable:
         min1system = System()
         min1system.positions = min1_positions
         min1system.cell = cell
+        min1system.types = types
         min1neighbors_list = NeighborsList(
             min1system,
             self.config.atomicenvironment.rnei,
             self.config.atomicenvironment.rcut,
+            graph_cutoff=self.config.atomicenvironment.graph_cutoff,
         )
 
         saddlesystem = System()
         saddlesystem.positions = saddle_positions
         saddlesystem.cell = cell
+        saddlesystem.types = types
         saddleneighbors_list = NeighborsList(
             saddlesystem,
             self.config.atomicenvironment.rnei,
             self.config.atomicenvironment.rcut,
+            graph_cutoff=self.config.atomicenvironment.graph_cutoff,
         )
 
         min2system = System()
         min2system.positions = min2_positions
         min2system.cell = cell
+        min2system.types = types
         min2neighbors_list = NeighborsList(
             min2system,
             self.config.atomicenvironment.rnei,
             self.config.atomicenvironment.rcut,
+            graph_cutoff=self.config.atomicenvironment.graph_cutoff,
         )
 
         # Compute all needed topology ID :

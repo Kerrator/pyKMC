@@ -103,6 +103,7 @@ class KMC:
                 self.system,
                 self.config.atomicenvironment.rnei,
                 self.config.atomicenvironment.rcut,
+                graph_cutoff=self.config.atomicenvironment.graph_cutoff,
             )
         self.atomic_environment = AtomicEnvironment(
                 self.config.atomicenvironment.style,
@@ -347,6 +348,7 @@ class KMC:
                 self.system,
                 self.config.atomicenvironment.rnei,
                 self.config.atomicenvironment.rcut,
+                graph_cutoff=self.config.atomicenvironment.graph_cutoff,
             )
             self.atomic_environment = AtomicEnvironment(
                 self.config.atomicenvironment.style,

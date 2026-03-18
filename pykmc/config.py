@@ -139,6 +139,50 @@ class AtomicEnvironmentConfig(BaseModel):
         "'full': element types used in graph hashing, PSR matching, and symmetry detection.",
     )
 
+    graph_cutoff: Optional[dict[str, float]] = Field(
+        default=None,
+        description="Per-element-pair first-neighbor cutoffs (Angstrom) for graph construction. "
+        "Format in INI: 'Ni-Ni:3.0, Ni-Fe:2.7, Fe-Fe:2.8'. "
+        "Keys are normalized to sorted element order. "
+        "Pairs not listed fall back to rnei. Requires atom_coloring_mode = 'full'.",
+    )
+
+    @field_validator("graph_cutoff", mode="before")
+    @classmethod
+    def parse_graph_cutoff(cls, v: Any) -> dict[str, float] | None:
+        """Parse INI string 'Ni-Ni:3.0, Ni-Fe:2.7' into a normalized dict."""
+        if v is None or (isinstance(v, str) and v.strip().lower() == "none"):
+            return None
+        if isinstance(v, dict):
+            return {
+                "-".join(sorted(k.split("-"))): float(val)
+                for k, val in v.items()
+            }
+        if isinstance(v, str):
+            result: dict[str, float] = {}
+            for pair_spec in v.split(","):
+                pair_spec = pair_spec.strip()
+                if not pair_spec:
+                    continue
+                if ":" not in pair_spec:
+                    raise ValueError(
+                        f"Invalid graph_cutoff entry: '{pair_spec}'. "
+                        "Expected 'El1-El2:value'."
+                    )
+                key, val = pair_spec.split(":", 1)
+                elements = key.strip().split("-")
+                if len(elements) != 2:
+                    raise ValueError(
+                        f"Invalid element pair: '{key.strip()}'. "
+                        "Expected 'El1-El2'."
+                    )
+                normalized_key = "-".join(
+                    sorted(e.strip() for e in elements)
+                )
+                result[normalized_key] = float(val.strip())
+            return result if result else None
+        return v
+
     @model_validator(mode="after")
     def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":
         """Ensure coordination_threshold is set when style requires it."""
@@ -148,6 +192,11 @@ class AtomicEnvironmentConfig(BaseModel):
                     "coordination_threshold is required when style is '{}'. "
                     "Set it in the [AtomicEnvironment] section of your INI file.".format(self.style)
                 )
+        if self.graph_cutoff is not None and self.atom_coloring_mode != "full":
+            raise ValueError(
+                "graph_cutoff requires atom_coloring_mode = 'full' since element "
+                "types are needed to determine pair-specific cutoffs."
+            )
         return self
 
 
@@ -586,8 +635,10 @@ class BasinConfig(BaseModel):
     fingerprint_coordination_thr: Optional[int] = Field(
     default = None,
     description="Atoms of interest fingerprint for basin dedup. Atoms with fewer neighbors "
-    "(within rnei) than this threshold are 'atoms of interest'. Their sorted distances "
-    "from the system center of mass form a short, discriminating fingerprint vector. "
+    "(within rnei) than this threshold are 'atoms of interest'. The fingerprint has two "
+    "components: (1) sorted distances from a periodic-aware (circular mean) defect COM "
+    "to each undercoordinated atom, and (2) the distance from defect COM to bulk COM. "
+    "The circular mean ensures invariance under any periodic representation. "
     "Typical value: 9 for FCC surfaces. If None and AtomicEnvironment style is "
     "'coordination' or 'coordination/graph', auto-derives as coordination_threshold + 1. "
     "Otherwise falls back to full COM-distance fingerprint."

@@ -37,7 +37,7 @@ class StateData:
     def ensure_full_state(self, config: Config) -> None : 
         if self.system is not None : 
             if self.neighbors_list is None : 
-                self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)  
+                self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut, graph_cutoff=config.atomicenvironment.graph_cutoff)
             if self.environment is None :
                 types = self.system.types if config.atomicenvironment.atom_coloring_mode == "full" else None
                 self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list["rnei"], self.neighbors_list.neighbors_list["rcut"], config.atomicenvironment.neighbors_add, types=types, coordination_threshold=config.atomicenvironment.coordination_threshold)
@@ -636,6 +636,55 @@ class BasinsGenericEvents() :
             return False
 
     @staticmethod
+    def _circular_mean_position(
+        positions: np.ndarray, box: np.ndarray, pbc: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Periodic-aware center of mass via circular mean.
+
+        Maps each coordinate to an angle on a circle, computes the circular
+        mean via atan2(mean(sin), mean(cos)), and maps back to Cartesian.
+
+        Returns
+        -------
+        com : ndarray, shape (3,)
+            Center of mass in [0, L) for periodic dimensions.
+        resultant : ndarray, shape (3,)
+            Resultant length per dimension (1.0 = perfectly conditioned,
+            0.0 = uniform/ill-defined). Non-periodic dimensions get 1.0.
+        """
+        com = np.empty(3, dtype=np.float64)
+        resultant = np.ones(3, dtype=np.float64)
+        for dim in range(3):
+            if pbc[dim] and box[dim] > 0:
+                theta = 2.0 * np.pi * positions[:, dim] / box[dim]
+                mean_sin = np.mean(np.sin(theta))
+                mean_cos = np.mean(np.cos(theta))
+                resultant[dim] = np.sqrt(mean_sin**2 + mean_cos**2)
+                angle = np.arctan2(mean_sin, mean_cos)
+                com[dim] = angle * box[dim] / (2.0 * np.pi) % box[dim]
+            else:
+                com[dim] = np.mean(positions[:, dim])
+        return com, resultant
+
+    @staticmethod
+    def _reference_atom_com(
+        positions: np.ndarray, box: np.ndarray, pbc: np.ndarray,
+        ref_idx: int = 0,
+    ) -> np.ndarray:
+        """Center of mass by unwrapping all atoms relative to a reference atom.
+
+        Uses minimum-image convention to unwrap positions relative to
+        positions[ref_idx], then computes the arithmetic mean. Well-defined
+        when the point cloud fits within half the box in each dimension.
+        """
+        ref = positions[ref_idx]
+        diffs = positions - ref
+        for dim in range(3):
+            if pbc[dim] and box[dim] > 0:
+                diffs[:, dim] -= np.round(diffs[:, dim] / box[dim]) * box[dim]
+        return ref + diffs.mean(axis=0)
+
+    @staticmethod
     def _com_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
         """Sorted per-atom distances from center of mass (legacy fallback)."""
         box = np.diag(cell).astype(np.float64)
@@ -644,7 +693,7 @@ class BasinsGenericEvents() :
         for dim in range(3):
             if pbc_array[dim] and box[dim] > 0:
                 pos[:, dim] = np.mod(pos[:, dim], box[dim])
-        com = pos.mean(axis=0)
+        com = BasinsGenericEvents._reference_atom_com(pos, box, pbc_array, ref_idx=0)
         diffs = pos - com
         for dim in range(3):
             if pbc_array[dim] and box[dim] > 0:
@@ -654,12 +703,19 @@ class BasinsGenericEvents() :
     @staticmethod
     def _atoms_of_interest_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray,
                                         rnei: float, coord_thr: int) -> np.ndarray:
-        """Atoms of interest fingerprint: sorted COM distances for undercoordinated atoms.
+        """Two-component fingerprint for undercoordinated atoms.
 
-        Identifies 'atoms of interest' — those with fewer than coord_thr neighbors
-        within rnei (near defects, surfaces, vacancies). Computes their sorted
-        distances from the system center of mass, producing a short, continuous-valued
-        fingerprint vector with high discriminating power.
+        Component 1 (defect-internal): sorted distances from the circular-mean
+        COM of undercoordinated atoms to each undercoordinated atom. Captures
+        the internal geometry of the defect cluster.
+
+        Component 2 (defect-position): minimum-image distance from defect COM
+        to bulk COM (reference-atom-unwrapped). Disambiguates states with
+        identical defect geometry but different defect positions.
+
+        The circular mean makes component 1 invariant under any periodic
+        representation of the same physical state. Falls back to reference-atom
+        unwrapping if the circular mean is ill-conditioned (resultant < 0.1).
         """
         pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
         cell_diag = np.diag(cell).astype(np.float64)
@@ -684,14 +740,35 @@ class BasinsGenericEvents() :
         if not np.any(interesting_mask):
             return np.array([], dtype=np.float64)
 
-        # COM of full system, distances for interesting atoms only
-        com = pos.mean(axis=0)
-        diffs = pos[interesting_mask] - com
+        defect_pos = pos[interesting_mask]
+
+        # Component 1: defect-internal distances via circular-mean defect COM
+        defect_com, resultant = BasinsGenericEvents._circular_mean_position(
+            defect_pos, cell_diag, pbc_array,
+        )
+        if np.any(resultant[pbc_array] < 0.1):
+            # Fallback: reference-atom unwrapping for ill-conditioned circular mean
+            defect_com = BasinsGenericEvents._reference_atom_com(
+                defect_pos, cell_diag, pbc_array, ref_idx=0,
+            )
+
+        diffs = defect_pos - defect_com
         for dim in range(3):
             if pbc_array[dim] and cell_diag[dim] > 0:
                 diffs[:, dim] -= np.round(diffs[:, dim] / cell_diag[dim]) * cell_diag[dim]
+        sorted_defect_dists = np.sort(np.linalg.norm(diffs, axis=1))
 
-        return np.sort(np.linalg.norm(diffs, axis=1))
+        # Component 2: defect position relative to bulk
+        bulk_com = BasinsGenericEvents._reference_atom_com(
+            pos, cell_diag, pbc_array, ref_idx=0,
+        )
+        bulk_defect_diff = defect_com - bulk_com
+        for dim in range(3):
+            if pbc_array[dim] and cell_diag[dim] > 0:
+                bulk_defect_diff[dim] -= np.round(bulk_defect_diff[dim] / cell_diag[dim]) * cell_diag[dim]
+        bulk_defect_dist = np.linalg.norm(bulk_defect_diff)
+
+        return np.append(sorted_defect_dists, bulk_defect_dist)
 
     def _compute_fingerprint(self, positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
         """Compute a structural fingerprint for fast inequality rejection.
@@ -726,7 +803,7 @@ class BasinsGenericEvents() :
         atomic_environment = []
 
         if full == True :
-            neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)
+            neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut, graph_cutoff=self.config.atomicenvironment.graph_cutoff)
             types = system.types if self.config.atomicenvironment.atom_coloring_mode == "full" else None
             atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list["rnei"], neighbors_list.neighbors_list["rcut"], self.config.atomicenvironment.neighbors_add, types=types, coordination_threshold=self.config.atomicenvironment.coordination_threshold)
         else :
@@ -822,6 +899,7 @@ class BasinsGenericEvents() :
             "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
             "coordination_threshold": self.config.atomicenvironment.coordination_threshold,
             "energy_thr": self.config.basin.energy_thr,
+            "graph_cutoff": self.config.atomicenvironment.graph_cutoff,
         }
 
         return {

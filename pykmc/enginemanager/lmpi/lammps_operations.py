@@ -526,7 +526,7 @@ def basin_explore(engine, config_dict, reference_table_data, state_positions, st
         system = System(positions=np.array(state_positions), types=list(state_types),
                         cell=np.array(state_cell), pbc=state_pbc,
                         index=np.arange(len(state_types)))
-        neighbors_list = NeighborsList(system, config_dict["rnei"], config_dict["rcut"])
+        neighbors_list = NeighborsList(system, config_dict["rnei"], config_dict["rcut"], graph_cutoff=config_dict.get("graph_cutoff"))
         types_for_env = system.types if config_dict["atom_coloring_mode"] == "full" else None
         environment = AtomicEnvironment(
             config_dict["ae_style"],

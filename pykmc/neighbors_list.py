@@ -2,7 +2,6 @@
 
 from scipy.spatial import cKDTree
 from .system import System
-from .config import Config
 import numpy as np
 
 
@@ -24,15 +23,29 @@ class NeighborsList:
 
     """
 
-    def __init__(self, system: System, rnei: float, rcut: float = None) -> None:
+    def __init__(
+        self,
+        system: System,
+        rnei: float,
+        rcut: float = None,
+        graph_cutoff: dict[str, float] | None = None,
+    ) -> None:
         self.system = system
         self.rnei = rnei
         self.rcut = rcut
-        if rcut is not None : 
+        self._graph_cutoff = graph_cutoff
+        if rcut is not None :
             self.neighbors_list = {"rnei": [], "rcut": []}
-        else : 
+        else :
             self.neighbors_list = {"rnei" : []}
         self._build_neighbors_list()
+
+    def _get_pair_cutoff(self, type_i: str, type_j: str) -> float:
+        """Look up pair-specific cutoff, falling back to rnei."""
+        if self._graph_cutoff is None:
+            return self.rnei
+        key = "-".join(sorted([type_i, type_j]))
+        return self._graph_cutoff.get(key, self.rnei)
 
     def _build_neighbors_list(self) -> None:
         """Build and populate the neighbor lists.
@@ -45,15 +58,36 @@ class NeighborsList:
         cell_diag = np.array([self.system.cell[0][0], self.system.cell[1][1], self.system.cell[2][2]])
         pbc = self.system.pbc if self.system.pbc is not None else np.array([True, True, True])
 
+        # Determine query radius for rnei — use max of all cutoffs when pair-specific
+        if self._graph_cutoff is not None:
+            query_rnei = max(self.rnei, max(self._graph_cutoff.values()))
+        else:
+            query_rnei = self.rnei
+        needs_filtering = self._graph_cutoff is not None and self.system.types is not None
+        types = self.system.types
+
         if np.all(pbc):
             # Fully periodic: use boxsize (existing fast path)
             # Wrap positions into [0, box) — cKDTree requires non-negative coords
             wrapped = np.mod(positions, cell_diag)
             tree = cKDTree(wrapped, boxsize=cell_diag.tolist())
             for i in range(len(wrapped)):
-                neighbors = tree.query_ball_point(wrapped[i], self.rnei)
-                neighbors.remove(i)  # don't have self as neighbor
-                self.neighbors_list["rnei"].append(neighbors)
+                candidates = tree.query_ball_point(wrapped[i], query_rnei)
+                if i in candidates:
+                    candidates.remove(i)  # don't have self as neighbor
+                if needs_filtering:
+                    neighbors = []
+                    for j in candidates:
+                        pair_cutoff = self._get_pair_cutoff(types[i], types[j])
+                        # Minimum image distance for PBC
+                        delta = wrapped[i] - wrapped[j]
+                        delta -= cell_diag * np.round(delta / cell_diag)
+                        dist = np.linalg.norm(delta)
+                        if dist <= pair_cutoff:
+                            neighbors.append(j)
+                    self.neighbors_list["rnei"].append(neighbors)
+                else:
+                    self.neighbors_list["rnei"].append(candidates)
                 if self.rcut is not None:
                     neighbors = tree.query_ball_point(wrapped[i], self.rcut)
                     self.neighbors_list["rcut"].append(neighbors)
@@ -74,9 +108,24 @@ class NeighborsList:
 
             n_real = len(positions)
             for i in range(n_real):
-                raw = tree.query_ball_point(positions[i], self.rnei)
-                mapped = sorted(set(index_map[j] for j in raw) - {i})
-                self.neighbors_list["rnei"].append(mapped)
+                raw = tree.query_ball_point(positions[i], query_rnei)
+                if needs_filtering:
+                    # Filter by pair-specific cutoff using ghost distances
+                    neighbors = []
+                    seen = set()
+                    for j in raw:
+                        real_j = index_map[j]
+                        if real_j == i or real_j in seen:
+                            continue
+                        pair_cutoff = self._get_pair_cutoff(types[i], types[real_j])
+                        dist = np.linalg.norm(positions[i] - all_positions[j])
+                        if dist <= pair_cutoff:
+                            seen.add(real_j)
+                            neighbors.append(real_j)
+                    self.neighbors_list["rnei"].append(sorted(neighbors))
+                else:
+                    mapped = sorted(set(index_map[j] for j in raw) - {i})
+                    self.neighbors_list["rnei"].append(mapped)
                 if self.rcut is not None:
                     raw = tree.query_ball_point(positions[i], self.rcut)
                     mapped = sorted(set(index_map[j] for j in raw))

@@ -79,6 +79,7 @@ class Initializer:
             self.kmc.system,
             self.kmc.config.atomicenvironment.rnei,
             self.kmc.config.atomicenvironment.rcut,
+            graph_cutoff=self.kmc.config.atomicenvironment.graph_cutoff,
         )
 
     def initialize_atomic_environments(self) -> None:
