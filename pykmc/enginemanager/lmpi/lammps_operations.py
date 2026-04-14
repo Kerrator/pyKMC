@@ -221,7 +221,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     artn.set("push_over", config.partn.push_over)
 
     # RUN
-    engine.command("minimize 1e-6 1e-8 10000 10000")
+    engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.evalf_max}")
     engine.command("unfix 10")
     
     # Restore original stdout (fd 1)
@@ -385,7 +385,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
         engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
         engine.command("min_style fire")
                 # RUN
-        engine.command("minimize 1e-6 1e-8 10000 10000")
+        engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_evalf_max}")
         engine.command("unfix 10")
 
         # EXTRACT DATA

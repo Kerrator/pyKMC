@@ -177,6 +177,11 @@ class PartnConfig(BaseModel):
         description="Threshold at which an atom is considered to have moved. This threshold affects the npart parameter in the artn.out output."
     )
 
+    evalf_max: int = Field(
+        default = 9999, 
+        description="to stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max."
+    )
+
     #Exploration
     zseed: int = Field(
         default=0, 
@@ -309,6 +314,11 @@ class PartnConfig(BaseModel):
 #################
 #Refinement part#
 #################
+
+    r_evalf_max: int = Field(
+        default = 300, 
+        description="to stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
+    )
 
     #Max single refinement attempt
     r_max_attempts: int = Field(
