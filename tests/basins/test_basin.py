@@ -104,6 +104,104 @@ class TestFingerprint:
         fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(pos2, cell, pbc, rnei=1.5, coord_thr=10)
         assert not np.allclose(fp1, fp2)
 
+    def test_com_fingerprint_boundary_crossing_invariance(self):
+        """COM fingerprint must be invariant when translation causes atoms to wrap."""
+        positions = np.array([[0.5, 0.5, 0.5], [1.5, 0.5, 0.5],
+                              [0.5, 1.5, 0.5], [0.5, 0.5, 1.5]], dtype=float)
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        fp1 = BasinsGenericEvents._com_fingerprint(positions, cell, pbc)
+        # Shift so atoms wrap: 0.5 + 9.7 = 10.2 → wraps to 0.2
+        shifted = positions + np.array([9.7, 9.7, 9.7])
+        fp2 = BasinsGenericEvents._com_fingerprint(shifted, cell, pbc)
+        assert np.allclose(fp1, fp2, atol=1e-10)
+
+    def test_aoi_fingerprint_boundary_crossing_invariance(self):
+        """Atoms-of-interest fingerprint must be invariant when shift causes wrapping."""
+        # Small cluster of 4 atoms (all undercoordinated with coord_thr=10)
+        positions = np.array([[0.5, 0.5, 0.5], [1.5, 0.5, 0.5],
+                              [0.5, 1.5, 0.5], [0.5, 0.5, 1.5]], dtype=float)
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(
+            positions, cell, pbc, rnei=1.5, coord_thr=10,
+        )
+        # Shift so atoms straddle the x=0/x=L boundary
+        shifted = positions + np.array([9.7, 0.0, 0.0])
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(
+            shifted, cell, pbc, rnei=1.5, coord_thr=10,
+        )
+        assert np.allclose(fp1, fp2, atol=1e-10)
+
+    def test_circular_mean_localized_cluster(self):
+        """Circular mean preserves COM-to-atom distances across boundary wrapping."""
+        box = np.array([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        # Cluster centered near (1, 1, 1)
+        cluster = np.array([[0.5, 0.8, 1.0], [1.5, 1.2, 0.9],
+                            [1.0, 0.5, 1.1], [1.0, 1.5, 1.0]], dtype=float)
+        com1, r1 = BasinsGenericEvents._circular_mean_position(cluster, box, pbc)
+        assert np.all(r1 > 0.9), "Localized cluster should have high resultant"
+
+        # Shift to straddle boundary: add (9.5, 0, 0) → wraps around x
+        shifted = (cluster + np.array([9.5, 0.0, 0.0])) % box
+        com2, r2 = BasinsGenericEvents._circular_mean_position(shifted, box, pbc)
+
+        # COM-to-atom minimum-image distances must be identical
+        def _mic_dists(positions, com):
+            diffs = positions - com
+            for dim in range(3):
+                diffs[:, dim] -= np.round(diffs[:, dim] / box[dim]) * box[dim]
+            return np.sort(np.linalg.norm(diffs, axis=1))
+
+        dists1 = _mic_dists(cluster, com1)
+        dists2 = _mic_dists(shifted, com2)
+        assert np.allclose(dists1, dists2, atol=1e-10)
+
+    def test_circular_mean_fallback_triggers(self):
+        """Uniform atom distribution should produce low resultant (ill-conditioned)."""
+        box = np.array([10.0, 10.0, 10.0])
+        pbc = np.array([True, True, True])
+        # Uniformly distributed atoms across the cell
+        rng = np.random.default_rng(42)
+        uniform_pos = rng.uniform(0, 10, size=(200, 3))
+        _, resultant = BasinsGenericEvents._circular_mean_position(uniform_pos, box, pbc)
+        # At least one dimension should have low resultant for 200 uniform points
+        assert np.any(resultant < 0.2), f"Expected low resultant for uniform dist, got {resultant}"
+
+    def test_two_component_discriminates_position(self):
+        """Fingerprint has K+1 elements: K sorted defect distances + 1 bulk-relative scalar.
+
+        Creates a system with a dense bulk cluster (many neighbors, fully
+        coordinated above coord_thr) plus a sparse defect cluster
+        (undercoordinated). Verifies the fingerprint encodes position info
+        via the last element.
+        """
+        cell = np.diag([30.0, 30.0, 30.0])
+        pbc = np.array([True, True, True])
+        # Dense bulk: 10 atoms packed within a 0.4 Ang sphere at (15, 15, 15)
+        # Each has 9 neighbors within rnei=1.5 → above coord_thr=4
+        rng = np.random.default_rng(123)
+        bulk = rng.uniform(-0.2, 0.2, size=(10, 3)) + np.array([15.0, 15.0, 15.0])
+        # Sparse defect: 3 atoms with spacing ~3 Ang, far from bulk
+        # Each has 0 neighbors within rnei=1.5 → below coord_thr=4
+        defect = np.array([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 3.0, 0.0]], dtype=float)
+        pos1 = np.vstack([bulk, defect + np.array([3.0, 3.0, 3.0])])
+        pos2 = np.vstack([bulk, defect + np.array([25.0, 25.0, 25.0])])
+        fp1 = BasinsGenericEvents._atoms_of_interest_fingerprint(
+            pos1, cell, pbc, rnei=1.5, coord_thr=4,
+        )
+        fp2 = BasinsGenericEvents._atoms_of_interest_fingerprint(
+            pos2, cell, pbc, rnei=1.5, coord_thr=4,
+        )
+        # Should have 3 defect atoms + 1 scalar = 4 elements
+        assert len(fp1) == 4
+        assert len(fp2) == 4
+        # Internal distances (first 3 elements) should match (same defect shape)
+        assert np.allclose(fp1[:3], fp2[:3], atol=1e-10)
+        # Bulk-relative scalar (last element) should differ (different position)
+        assert not np.isclose(fp1[-1], fp2[-1], atol=0.1)
+
 
 class TestBasin :
 
