@@ -86,6 +86,35 @@ def reinitialize_system(engine, config, system):
     initialize_system(engine, system)
     initialize_potential(engine, config)
 
+
+def _ensure_full_system(engine, config, positions, cell, types):
+    """Restore the full system after an active-volume operation changed atom count."""
+    from ...system import System
+
+    if positions is None or cell is None or types is None:
+        raise ValueError(
+            "Full-system positions, cell, and types are required to restore the LAMMPS engine."
+        )
+
+    expected_natoms = len(positions)
+    engine_natoms = int(engine.lmp.get_natoms())
+    if engine_natoms == expected_natoms:
+        return
+
+    logger.debug(
+        "[LAMMPS] Restoring full system after active-volume operation (%d -> %d atoms)",
+        engine_natoms,
+        expected_natoms,
+    )
+    system = System(
+        positions=np.array(positions, copy=True),
+        types=np.array(types, copy=True),
+        cell=np.array(cell, copy=True),
+        pbc=np.array([True, True, True], dtype=bool),
+        index=np.arange(expected_natoms),
+    )
+    reinitialize_system(engine, config, system)
+
 def minimize(engine, config, positions=None) :
     if positions is not None :
         set_positions(engine=engine, positions=positions)
@@ -249,6 +278,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
 
 
     # EXTRACT DATA
+    result = None
     if engine.rank == 0 :
 
         err = artn.get_error()
@@ -281,7 +311,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                     )
                     index_move = np.argmax(dist)
                 if delr1 < delr2:  # necessary for no reconstruction option
-                    return Ok(
+                    result = Ok(
                         EventSearchOutput(
                             central_atom_index=central_atom_idx,
                             dE_forward=dE_forward,
@@ -294,7 +324,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                         )
                     )
                 else:
-                    return Ok(
+                    result = Ok(
                         EventSearchOutput(
                             central_atom_index=central_atom_idx,
                             dE_forward=dE_backward,
@@ -307,7 +337,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                         )
                     )
             else:
-                return Err(
+                result = Err(
                     ErrorInfo(
                         type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
                         message="delr1 and delr2 > at {}".format(delr_threshold),
@@ -315,11 +345,16 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                     )
                 )
         else:
-            return Err(
+            result = Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_FOUND, message="No event found", details=err
                 )
             )
+
+    if config.control.active_volume == True:
+        _ensure_full_system(engine, config, positions, cell, type)
+
+    return result
 
 def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
                       ref_initial_positions, ref_saddle_positions, ref_final_positions,
@@ -644,10 +679,11 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     max_attempts = config.partn.r_max_attempts
     attempt = 0
+    exit_flag = False
+    result = None
 
     while attempt < max_attempts :
         exit_flag = False
-        result = None #for rank > 0
         engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
         engine.command("min_style fire")
                 # RUN
@@ -687,18 +723,21 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
         # Synchronize all ranks
         exit_flag = engine.local_engine_comm.bcast(exit_flag, root=0)
         if exit_flag : 
-            return result 
+            break
                 
         attempt +=1
         artn.set("zseed", config.partn.zseed)
         logger.debug("[pARTn] Retrying search with refreshed seed")
 
-    else: #fail after max attemps
-        if engine.rank == 0 : 
-            err = artn.get_error()
-            return Err(
-                ErrorInfo(
-                    type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
-                )
+    if not exit_flag and engine.rank == 0:
+        err = artn.get_error()
+        result = Err(
+            ErrorInfo(
+                type=ErrorType.EVENT_NOT_FOUND, message="no event found", details=err
             )
-        return None
+        )
+
+    if config.control.active_volume == True:
+        _ensure_full_system(engine, config, positions, cell, type)
+
+    return result
