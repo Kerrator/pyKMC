@@ -39,6 +39,7 @@ from .info_simulation import (
 from .eventsearch import EventSearch
 from .refinement import Refinement
 from .log import Colors
+from .otfml import OTFMLController
 import time
 from .utils import push_towards, compute_delr
 import copy
@@ -91,6 +92,7 @@ class KMC:
         self.visited_environments = None
         self.total_energy = None
         self.potential_energy = None
+        self.otfml = OTFMLController(self)
 
     def run(self) -> None:
         """Run the simulation."""
@@ -411,6 +413,7 @@ class KMC:
         """
         event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
         event_search.execute(central_atom_research_list)
+        self.otfml.retry_extrapolating_searches(event_search)
         return event_search
 
     def add_reference_events(
@@ -462,6 +465,7 @@ class KMC:
         )
         #refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(df_reference_events, self.total_energy)
+        self.otfml.retry_extrapolating_refinements(refinement)
         return refinement
 
     def add_active_events(
@@ -575,20 +579,29 @@ class KMC:
 
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
+        if self.otfml.is_enabled_for_phase("minimize"):
+            self.otfml.retry_extrapolating_minimization(
+                lambda: self._minimize_system_once(positions=positions)
+            )
+            return
+        self._minimize_system_once(positions=positions)
+
+    def _minimize_system_once(self, positions=None) -> None:
+        """Perform a single minimization without OTF retry handling."""
         if self.config.control.restart_file is None: 
             self.loggers.info("log", ":=> Minimizing the system")
         else : 
             self.loggers.info("log", ":=> Computing energies")
+        if self.otfml.is_enabled_for_phase("minimize"):
+            self.manager.global_reset_otf_flags()
         new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
-        #TEST
-        #future = self.manager.minimize_with_results(self.config, positions=positions)
-        #new_positions, total_energy = future.result()
-        #np.savetxt('before_min.dat', self.system.positions)
-        #np.savetxt('after_min.dat', new_positions)
         if self.config.control.restart_file is None : 
             self.system.update_positions(new_positions)
         self.total_energy = total_energy
         self.potential_energy = self.manager.global_get_potential_energy()
+        if self.otfml.is_enabled_for_phase("minimize"):
+            return self.manager.global_get_otf_flags()
+        return None
 
     def get_info_atomic_environments(
         self, new_environments: list[str | bytes]
@@ -709,4 +722,3 @@ class KMC:
         self.loggers.info("log", ":=> End of simulation")
         self.manager.close_all()
         sys.exit()
-

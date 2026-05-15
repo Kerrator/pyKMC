@@ -108,6 +108,8 @@ class ErrorType(Enum):
     EVENT_BACKWARD_ENERGY_LOWER_THAN_THRESHOLD = 13
     EVENT_ASYMMETRIC = 14
     EVENT_NOT_NEW = 15
+    EXTRAPOLATION = 16
+    EXTREME_EXTRAPOLATION = 17
     PSR_NO_MATCH_FOUND = 21
     PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
     REFINEMENT_INVALID_ENERGY_BARRIER = 31
@@ -174,6 +176,8 @@ class EventRefinementOutput:
         Refined forward energy barrier (if matched).
     num_reference_event : Optional[int]
         Index of the corresponding reference event (if matched).
+    symmetry_index : Optional[int]
+        Symmetry branch used to generate this refinement.
     refined: Optional[str] 
         If the event has been refined (T: True, F: False, B: In basin)
     """
@@ -184,7 +188,29 @@ class EventRefinementOutput:
     min2_positions: Optional[np.ndarray] = None
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
+    symmetry_index: Optional[int] = None
     refined: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SearchTask:
+    """Stable identity for one event-search launch."""
+
+    task_id: int
+    central_atom_index: int
+
+
+@dataclass(frozen=True)
+class RefinementTask:
+    """Stable identity and rerun context for one refinement launch."""
+
+    task_id: int
+    central_atom_index: int
+    num_reference_event: int
+    symmetry_index: int
+    dfevent: pd.Series = field(repr=False)
+    total_energy: float = field(repr=False)
+    e_thr: float = field(repr=False)
 
 
 @dataclass

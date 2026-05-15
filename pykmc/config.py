@@ -512,6 +512,14 @@ class LammpsConfig(BaseModel):
 
     pair_style: str = Field(default=..., description="Lammps pair_style command.")
     pair_coeff: str = Field(default=..., description="Lammps pair_coeff command.")
+    setup_commands: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of extra LAMMPS commands to run after loading the potential.",
+    )
+    reload_commands: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of LAMMPS commands to run before reloading an updated potential.",
+    )
     min_style: Optional[str] = Field(
         default="cg", description="Lammps min_style command."
     )
@@ -519,6 +527,33 @@ class LammpsConfig(BaseModel):
         default="1.0e-6 1.0e-8 1000 1000",
         description="Lammps minimize command",
     )
+
+    @field_validator("setup_commands", "reload_commands", mode="before")
+    @classmethod
+    def parse_command_list(cls, v):
+        return parse_list_of_str(v)
+
+
+class OTFMLConfig(BaseModel):
+    """On-the-fly machine learning potential parameters."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable on-the-fly ML potential retraining.",
+    )
+    retrain_command: Optional[str] = Field(
+        default=None,
+        description="Command executed when new extrapolation dumps are detected.",
+    )
+    enabled_phases: list[Literal["search", "refine", "minimize"]] = Field(
+        default_factory=lambda: ["search", "refine", "minimize"],
+        description="OTF phases enabled for retry handling.",
+    )
+
+    @field_validator("enabled_phases", mode="before")
+    @classmethod
+    def parse_enabled_phases(cls, v):
+        return parse_list_of_str(v)
 
 
 class IraConfig(BaseModel):
@@ -570,6 +605,10 @@ class Config(BaseModel):
     lammps: Optional[LammpsConfig] = Field(
         default=None,
         description="LAMMPS-specific parameters. Required if engine == lammps.",
+    )
+    otfml: Optional[OTFMLConfig] = Field(
+        default=None,
+        description="On-the-fly machine learning potential retraining parameters.",
     )
 
     partn: Optional[PartnConfig] = Field(
@@ -672,7 +711,8 @@ class Config(BaseModel):
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True) : ["basin"], 
-            ("control.active_volume", True) : ["activevolume"]
+            ("control.active_volume", True) : ["activevolume"],
+            ("otfml.enabled", True): ["otfml.retrain_command"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():
@@ -688,6 +728,8 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        if self.otfml and self.otfml.enabled and self.control.active_volume:
+            raise ValueError("OTFML does not support active_volume=True in v1.")
         return self
 
 
@@ -745,3 +787,21 @@ def format_pydantic_errors(e: ValidationError) -> str:
             # brut error
             messages.append(f"{location} : {msg}")
     return "\n".join(messages)
+
+
+def parse_list_of_str(v):
+    """Parse a string or list value into a list of strings."""
+    if v is None:
+        return None
+    if isinstance(v, list):
+        return [str(item).strip() for item in v if str(item).strip()]
+    if isinstance(v, str):
+        stripped = v.strip()
+        if stripped.lower() == "none" or stripped == "":
+            return None
+        if "\n" in stripped:
+            values = [line.strip() for line in stripped.splitlines() if line.strip()]
+            return values or None
+        stripped = stripped.strip("[]")
+        return [item.strip() for item in stripped.split(",") if item.strip()]
+    return v

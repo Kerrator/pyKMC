@@ -26,6 +26,7 @@ class Manager:
         self.global_session = global_session
         self.using_global = True
         self.job_queue: queue.Queue[Job] = queue.Queue()
+        self.otf_enabled = False
         #Thread that dispatch job to workers
         #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True)
         #self.dispatcher_thread.start()
@@ -49,6 +50,7 @@ class Manager:
         """ 
         Initialize engines with the same system and config
         """
+        self.otf_enabled = bool(config.otfml and config.otfml.enabled)
         print("[Manager] use local")
         self.use_local()
         print("[Manager] Initializing all Lammps engines")
@@ -91,6 +93,8 @@ class Manager:
 
             try:
                 method = getattr(session, job.operation_name)
+                if self.otf_enabled and job.operation_name in {"partn_search", "partn_refine"}:
+                    session.reset_otf_flags()
 
                 if job.params is None:
                     result = method()
@@ -143,6 +147,11 @@ class Manager:
         for session in self.sessions : 
             session.set_positions(positions=positions)
 
+    def reload_all_potentials(self, config) -> None:
+        """Reload the potential in all local sessions."""
+        for session in self.sessions:
+            session.reload_potential(config)
+
     def submit_job(self, method_name: str, params: dict = None) -> Future:
 
         future = Future()
@@ -171,13 +180,13 @@ class Manager:
 
     def partn_search(self, config, central_atom: list[int], positions=None, cell=None, type=None) -> list[Future] :
         futures = []
-        for atom in central_atom :
+        for atom in central_atom:
             f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "type":type})
             futures.append(f) 
         return futures
 
-    def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None) -> list[Future] :
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
+    def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None, num_reference_event: int | None = None, symmetry_index: int | None = None) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions, "num_reference_event": num_reference_event, "symmetry_index": symmetry_index})
         return future
 
     def close_all(self):
@@ -205,6 +214,3 @@ class Manager:
             return global_method
 
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-
-

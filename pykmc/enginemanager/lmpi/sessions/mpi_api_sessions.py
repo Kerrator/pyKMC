@@ -132,6 +132,26 @@ class MpiApiSession :
         """
         #print(f"[Session {self.session_id}] Initializing Lammps Potential")
         self.send_message({"type": "initialize_potential", "value": config})
+
+    def reload_potential(self, config) -> None:
+        """Reload an updated LAMMPS potential in-place."""
+        self.send_message({"type": "reload_potential", "value": config})
+
+    def reset_otf_flags(self) -> None:
+        """Reset latched OTF extrapolation flags on the engine."""
+        self.send_message({"type": "reset_otf_flags"})
+
+    def get_otf_flags(self):
+        """Return the current latched OTF extrapolation flags."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "get_otf_flags"})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result":
+                return msg["value"]
+            raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
+            self._is_busy = False
     
     #@session_locked
     def minimize(self, config, positions=None) -> None :
@@ -225,7 +245,14 @@ class MpiApiSession :
             self._is_busy = False
 
     #@session_locked
-    def partn_search(self, config, central_atom_idx, positions=None, cell=None, type=None) :
+    def partn_search(
+        self,
+        config,
+        central_atom_idx,
+        positions=None,
+        cell=None,
+        type=None,
+    ):
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
         try : 
@@ -239,11 +266,22 @@ class MpiApiSession :
             self._is_busy = False
 
     #@session_locked
-    def partn_refine(self, config, central_atom_idx, positions = None, cell=None, type=None, saddle_idx=None, saddle_positions=None) :
+    def partn_refine(
+        self,
+        config,
+        central_atom_idx,
+        positions = None,
+        cell=None,
+        type=None,
+        saddle_idx=None,
+        saddle_positions=None,
+        num_reference_event: int | None = None,
+        symmetry_index: int | None = None,
+    ):
         self._is_busy = True 
         #print(f"[Session] Launching pARTn search")
         try : 
-            self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions}})
+            self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions, "num_reference_event": num_reference_event, "symmetry_index": symmetry_index}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]
