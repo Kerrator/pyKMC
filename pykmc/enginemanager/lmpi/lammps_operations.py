@@ -1,10 +1,11 @@
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
-import ctypes 
+import ctypes
 import pypARTn
 import os
 from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
+from ...atom_selector import resolve_atom_selector
 
 from ...result import  (
     Result,
@@ -107,16 +108,20 @@ def set_positions(engine, positions) :
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
-def minimize_with_results(engine, config, positions=None) :
-    """ 
+def minimize_with_results(engine, config, positions=None, types=None) :
+    """
     Minimize and return the minimized positions and the total energy.
     """
-    if positions is not None : 
+    if positions is not None :
         set_positions(engine=engine, positions=positions)
-    minimize(engine, config) 
+    atoms_frozen = _make_frozen_group(engine, config, positions, types)
+    _apply_frozen_fix(engine, "f_frozen_min", atoms_frozen)
+    minimize(engine, config)
+    _remove_frozen_fix(engine, "f_frozen_min", atoms_frozen)
+    _delete_frozen_group(engine, atoms_frozen)
     new_positions = get_positions(engine)
     total_energy = get_total_energy(engine)
-    if engine.rank == 0 : 
+    if engine.rank == 0 :
         return new_positions, total_energy
     
 def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) : 
@@ -139,6 +144,38 @@ def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float
     engine.command("unfix freeze")
     engine.command("group frozen_group delete")
     engine.command("region sphere_region delete")
+
+def _make_frozen_group(engine, config, positions, types) -> bool:
+    """Resolve frozen atoms and create g_frozen group. Returns True if any atoms are frozen."""
+    if config.frozen_atoms is None:
+        return False
+    if positions is None or types is None:
+        return False
+    frozen_set = resolve_atom_selector(config.frozen_atoms, positions, types)
+    if not frozen_set:
+        return False
+    lammps_ids = " ".join(str(i + 1) for i in frozen_set)  # 1-based LAMMPS IDs
+    engine.command(f"group g_frozen id {lammps_ids}")
+    return True
+
+
+def _apply_frozen_fix(engine, fix_name: str, atoms_frozen: bool) -> None:
+    """Add a setforce 0 0 0 fix on g_frozen under the given name."""
+    if atoms_frozen:
+        engine.command(f"fix {fix_name} g_frozen setforce 0.0 0.0 0.0")
+
+
+def _remove_frozen_fix(engine, fix_name: str, atoms_frozen: bool) -> None:
+    """Remove a setforce fix previously added by _apply_frozen_fix."""
+    if atoms_frozen:
+        engine.command(f"unfix {fix_name}")
+
+
+def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
+    """Delete the g_frozen group after all fixes on it have been removed."""
+    if atoms_frozen:
+        engine.command("group g_frozen delete")
+
 
 def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
     original_stdout_fd = os.dup(1)
@@ -163,7 +200,10 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
 
     # LAMMPS COMMANDS
     engine.command("plugin load {}".format(config.partn.path_artnso))
+    atoms_frozen = _make_frozen_group(engine, config, positions, type)
+    _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
     engine.command("fix 10 all artn dmax {}".format(config.partn.dmax))
+    _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
     engine.command("min_style fire")
 
     # INITILIZE ARTN on all ranks
@@ -223,7 +263,10 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # RUN
     engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.evalf_max}")
     engine.command("unfix 10")
-    
+    _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
+    _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
+    _delete_frozen_group(engine, atoms_frozen)
+
     # Restore original stdout (fd 1)
     os.dup2(original_stdout_fd, 1)
     os.close(original_stdout_fd)
@@ -378,15 +421,19 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     max_attempts = config.partn.r_max_attempts
     attempt = 0
+    atoms_frozen = _make_frozen_group(engine, config, positions, type)
+    _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
 
     while attempt < max_attempts :
         exit_flag = False
         result = None #for rank > 0
         engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
+        _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
         engine.command("min_style fire")
                 # RUN
         engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_evalf_max}")
         engine.command("unfix 10")
+        _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
 
         # EXTRACT DATA
         if engine.rank == 0 : 
@@ -420,14 +467,18 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                     )
         # Synchronize all ranks
         exit_flag = engine.local_engine_comm.bcast(exit_flag, root=0)
-        if exit_flag : 
-            return result 
-                
+        if exit_flag :
+            _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
+            _delete_frozen_group(engine, atoms_frozen)
+            return result
+
         attempt +=1
         artn.set("zseed", config.partn.zseed)
 
     else: #fail after max attemps
-        if engine.rank == 0 : 
+        _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
+        _delete_frozen_group(engine, atoms_frozen)
+        if engine.rank == 0 :
             err = artn.get_error()
             return Err(
                 ErrorInfo(

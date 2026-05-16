@@ -541,6 +541,143 @@ class BasinConfig(BaseModel):
     description="Energy threshold"
     )
 
+class RegionSelector(BaseModel):
+    """Geometric region for atom selection.
+
+    ``side`` controls which atoms are selected:
+    - For ``sphere``, ``shell``, ``box``: ``"inside"`` (default) or ``"outside"``
+    - For ``plane``: ``"above"`` or ``"below"``
+    """
+
+    region_type: Literal["sphere", "shell", "box", "plane"] = Field(
+        ..., description="Shape of the region."
+    )
+    side: Literal["inside", "outside", "above", "below"] = Field(
+        default="inside",
+        description="Select atoms inside/outside (sphere/shell/box) or above/below (plane).",
+    )
+    # sphere / shell
+    center: Optional[tuple[float, float, float]] = Field(
+        default=None, description="Center (x, y, z) for sphere or shell regions."
+    )
+    radius: Optional[float] = Field(
+        default=None, description="Outer radius for sphere or shell regions."
+    )
+    inner_radius: Optional[float] = Field(
+        default=None, description="Inner (hollow) radius for shell regions."
+    )
+    # box
+    xlo: Optional[float] = Field(default=None)
+    xhi: Optional[float] = Field(default=None)
+    ylo: Optional[float] = Field(default=None)
+    yhi: Optional[float] = Field(default=None)
+    zlo: Optional[float] = Field(default=None)
+    zhi: Optional[float] = Field(default=None)
+    # plane
+    normal: Optional[Literal["x", "y", "z"]] = Field(
+        default=None, description="Axis normal to the cutting plane."
+    )
+    threshold: Optional[float] = Field(
+        default=None, description="Position along the normal axis defining the plane."
+    )
+
+    @field_validator("center", mode="before")
+    @classmethod
+    def parse_center(cls, v):
+        if isinstance(v, str):
+            parts = v.split()
+            if len(parts) != 3:
+                raise ValueError(f"region_center must have exactly 3 values, got: {v!r}")
+            return tuple(float(x) for x in parts)
+        return v
+
+    @model_validator(mode="after")
+    def check_region_fields(self) -> "RegionSelector":
+        t = self.region_type
+        if t in ("sphere", "shell"):
+            if self.center is None or self.radius is None:
+                raise ValueError(f"region_type='{t}' requires region_center and region_radius.")
+            if t == "shell" and self.inner_radius is None:
+                raise ValueError("region_type='shell' requires region_inner_radius.")
+            if self.side not in ("inside", "outside"):
+                raise ValueError(f"region_type='{t}' requires side 'inside' or 'outside'.")
+        elif t == "box":
+            for attr in ("xlo", "xhi", "ylo", "yhi", "zlo", "zhi"):
+                if getattr(self, attr) is None:
+                    raise ValueError(f"region_type='box' requires region_{attr}.")
+            if self.side not in ("inside", "outside"):
+                raise ValueError("region_type='box' requires side 'inside' or 'outside'.")
+        elif t == "plane":
+            if self.normal is None or self.threshold is None:
+                raise ValueError("region_type='plane' requires region_normal and region_threshold.")
+            if self.side not in ("above", "below"):
+                raise ValueError("region_type='plane' requires side 'above' or 'below'.")
+        return self
+
+
+# Required because from __future__ import annotations defers annotation resolution
+RegionSelector.model_rebuild()
+
+
+class AtomSelector(BaseModel):
+    """Selects atoms by type, index, or region (union semantics).
+
+    All matched atoms from all criteria are combined. Used for
+    ``inactive_atoms`` and ``frozen_atoms`` config sections.
+    """
+
+    types: list[str] = Field(
+        default_factory=list,
+        description="Chemical symbols of atom types to select (e.g. ['Fe', 'O']).",
+    )
+    indices: list[int] = Field(
+        default_factory=list,
+        description="0-based atom indices to select.",
+    )
+    region: Optional[RegionSelector] = Field(
+        default=None, description="Geometric region for atom selection."
+    )
+
+    @field_validator("types", mode="before")
+    @classmethod
+    def parse_types(cls, v):
+        if isinstance(v, str):
+            return [x.strip() for x in v.split() if x.strip()]
+        return v
+
+    @field_validator("indices", mode="before")
+    @classmethod
+    def parse_indices(cls, v):
+        if isinstance(v, str):
+            try:
+                return [int(x.strip()) for x in v.split() if x.strip()]
+            except ValueError:
+                raise ValueError(f"Invalid list of integers for indices: {v!r}")
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def collect_region_keys(cls, data: Any) -> Any:
+        """Collect flat region_* INI keys into a nested region dict."""
+        if not isinstance(data, dict):
+            return data
+        region_keys = {k: v for k, v in data.items() if k.startswith("region_")}
+        if not region_keys:
+            return data
+        data = {k: v for k, v in data.items() if not k.startswith("region_")}
+        region_dict: dict[str, Any] = {}
+        for k, v in region_keys.items():
+            # "region_type" maps to the "region_type" field; all others strip the prefix
+            field_name = k if k == "region_type" else k[len("region_"):]
+            region_dict[field_name] = v
+        data["region"] = region_dict
+        return data
+
+
+# Required because from __future__ import annotations defers annotation resolution
+AtomSelector.model_rebuild()
+
+
 class Config(BaseModel):
     """Config for the KMC simulations."""
 
@@ -581,6 +718,19 @@ class Config(BaseModel):
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
+
+    inactive_atoms: Optional[AtomSelector] = Field(
+        default=None,
+        description="Atoms on which no event search can be centered. "
+        "Applies both at search time (central atom selection) and at result time "
+        "(events where the most-displaced atom is inactive are discarded).",
+    )
+
+    frozen_atoms: Optional[AtomSelector] = Field(
+        default=None,
+        description="Atoms that cannot move during event search or refinement. "
+        "Implemented via 'fix setforce 0.0 0.0 0.0' in LAMMPS wrapping fix artn.",
+    )
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
