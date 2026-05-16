@@ -541,6 +541,42 @@ class BasinConfig(BaseModel):
     description="Energy threshold"
     )
 
+class BiasConfig(BaseModel):
+    """Event selection bias parameters."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable event selection bias."
+    )
+    type: Literal["direction", "point", "topo"] = Field(
+        default=...,
+        description="Bias type: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
+    )
+    direction: Optional[list[float]] = Field(
+        default=None,
+        description="Direction vector [x, y, z] for 'direction' bias."
+    )
+    target_point: Optional[list[float]] = Field(
+        default=None,
+        description="Target point [x, y, z] for 'point' bias."
+    )
+    atom_indices: Optional[list[int]] = Field(
+        default=None,
+        description="Global atom indices to bias. None means all atoms."
+    )
+    threshold: float = Field(
+        default=0.0,
+        description="Minimum projection onto the bias direction for acceptance."
+    )
+    topo_source: Optional[str] = Field(
+        default=None,
+        description="Source topology ID for 'topo' bias (e.g. vacancy)."
+    )
+    topo_target: Optional[str] = Field(
+        default=None,
+        description="Target topology ID for 'topo' bias (e.g. interstitial)."
+    )
+
 class Config(BaseModel):
     """Config for the KMC simulations."""
 
@@ -581,6 +617,8 @@ class Config(BaseModel):
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
+
+    bias: Optional[BiasConfig] = Field(default=None, description="Event selection bias parameters.")
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
