@@ -118,11 +118,17 @@ class TestDirectionBias:
         event = make_event(atom_index=0, final_positions=[[1.0, 0.0, 0.0]])
         assert bias.accept(event, system_origin, ref_table_atom0) is True
 
-    def test_atom_not_in_atom_set_always_accepted(self, system_origin, ref_table_atom0):
-        """Event from atom not in atom_indices is always accepted regardless of direction."""
-        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[99])
+    def test_atom_not_in_atom_set_pass_unlisted_true(self, system_origin, ref_table_atom0):
+        """With pass_unlisted=True, atoms not in atom_indices always pass."""
+        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[99], pass_unlisted=True)
         event = make_event(atom_index=0, final_positions=[[-5.0, 0.0, 0.0]])
         assert bias.accept(event, system_origin, ref_table_atom0) is True
+
+    def test_atom_not_in_atom_set_pass_unlisted_false(self, system_origin, ref_table_atom0):
+        """With pass_unlisted=False (default), atoms not in atom_indices return False."""
+        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[99])
+        event = make_event(atom_index=0, final_positions=[[-5.0, 0.0, 0.0]])
+        assert bias.accept(event, system_origin, ref_table_atom0) is False
 
     def test_atom_in_atom_set_is_filtered(self, system_origin, ref_table_atom0):
         """Event from atom in atom_indices is subject to the direction filter."""
@@ -212,12 +218,19 @@ class TestPointBias:
         event = make_event(atom_index=0, final_positions=[[6.0, 0.0, 0.0]])
         assert bias.accept(event, system, ref_table_atom0) is True
 
-    def test_atom_not_in_atom_set_always_accepted(self, ref_table_atom0):
-        """Event from atom not in atom_indices is always accepted."""
+    def test_atom_not_in_atom_set_pass_unlisted_true(self, ref_table_atom0):
+        """With pass_unlisted=True, atoms not in atom_indices always pass."""
+        system = make_system([[0.0, 0.0, 0.0]])
+        bias = PointBias(target_point=[5.0, 0.0, 0.0], atom_indices=[99], pass_unlisted=True)
+        event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
+        assert bias.accept(event, system, ref_table_atom0) is True
+
+    def test_atom_not_in_atom_set_pass_unlisted_false(self, ref_table_atom0):
+        """With pass_unlisted=False (default), atoms not in atom_indices return False."""
         system = make_system([[0.0, 0.0, 0.0]])
         bias = PointBias(target_point=[5.0, 0.0, 0.0], atom_indices=[99])
         event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
-        assert bias.accept(event, system, ref_table_atom0) is True
+        assert bias.accept(event, system, ref_table_atom0) is False
 
     def test_negative_threshold_accepts_away(self, ref_table_atom0):
         """Negative threshold: accept events that move away from the target."""
@@ -300,17 +313,25 @@ class TestTopoBias:
         event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
         assert not bias.accept(event, system, ref)
 
-    def test_accept_non_source_atom_always(self):
-        """Event from an atom that is not a source-topology atom is always accepted."""
-        # atom 0 is source, atom 2 is neither source nor target
+    def test_accept_non_source_atom_pass_unlisted_true(self):
+        """With pass_unlisted=True, non-source atoms always pass."""
+        system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
+        ae = make_atomic_environment({"vac": [0], "sia": [1]})
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        bias = TopoBias(topo_source="vac", topo_target="sia", pass_unlisted=True)
+        bias._prepare(system, ref, ae)
+        event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
+        assert bias.accept(event, system, ref) is True
+
+    def test_accept_non_source_atom_pass_unlisted_false(self):
+        """With pass_unlisted=False (default), non-source atoms return False."""
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
         bias = TopoBias(topo_source="vac", topo_target="sia")
         bias._prepare(system, ref, ae)
-        # atom 2 moves away from sia at [5,0,0] but is not a source atom
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
-        assert bias.accept(event, system, ref) is True
+        assert bias.accept(event, system, ref) is False
 
     def test_accept_when_source_topology_absent(self):
         """When no atom carries topo_source, all events are accepted (fallback)."""
@@ -390,3 +411,155 @@ class TestTopoBias:
         idx, _, _ = bias.select(rejection_free, l_k, active, system, ref,
                                  atomic_environment=ae)
         assert idx == 0
+
+
+# ---------------------------------------------------------------------------
+# Boost mode
+# ---------------------------------------------------------------------------
+
+def _two_event_setup():
+    """System with 2 events: idx=0 moves +x (desired), idx=1 moves -x (undesired)."""
+    system = make_system([[0.0, 0.0, 0.0]])
+    ref = MagicMock()
+    ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0]})
+    events = [
+        make_event(atom_index=0, final_positions=[[ 1.0, 0.0, 0.0]], k=1.0),
+        make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=9.0),
+    ]
+    active = make_active_table(events)
+    l_k = np.array([e["k"] for e in events])
+    return system, ref, active, l_k
+
+
+class TestBoostMode:
+
+    def test_selection_fraction_matches_bias_weight(self):
+        """With bias_weight=0.5, roughly 50% of selections should be the desired event."""
+        system, ref, active, l_k = _two_event_setup()
+        bias = DirectionBias(direction=[1, 0, 0], mode="boost", bias_weight=0.5)
+        n_desired = sum(
+            bias.select(rejection_free, l_k, active, system, ref)[0] == 0
+            for _ in range(2000)
+        )
+        assert abs(n_desired / 2000 - 0.5) < 0.05
+
+    def test_time_correction_gives_correct_mean(self):
+        """δt * k_total_true should be Exponential(1), mean ≈ 1."""
+        system, ref, active, l_k = _two_event_setup()
+        bias = DirectionBias(direction=[1, 0, 0], mode="boost", bias_weight=0.5)
+        k_total_true = float(l_k.sum())  # 10.0
+        products = [
+            bias.select(rejection_free, l_k, active, system, ref)[1] * k_total_true
+            for _ in range(1000)
+        ]
+        assert abs(np.mean(products) - 1.0) < 0.1
+
+    def test_fallback_no_desired_events(self):
+        """When k_boost=0 (no desired events), fall back to unbiased selection."""
+        system = make_system([[0.0, 0.0, 0.0]])
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        events = [make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=5.0)]
+        active = make_active_table(events)
+        l_k = np.array([e["k"] for e in events])
+        bias = DirectionBias(direction=[1, 0, 0], mode="boost", bias_weight=0.5)
+        idx, _, ktot = bias.select(rejection_free, l_k, active, system, ref)
+        assert idx == 0
+        assert np.isclose(ktot, 5.0)
+
+    def test_fallback_all_desired_events(self):
+        """When k_free=0 (all events desired), fall back to unbiased selection."""
+        system = make_system([[0.0, 0.0, 0.0]])
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        events = [make_event(atom_index=0, final_positions=[[1.0, 0.0, 0.0]], k=5.0)]
+        active = make_active_table(events)
+        l_k = np.array([e["k"] for e in events])
+        bias = DirectionBias(direction=[1, 0, 0], mode="boost", bias_weight=0.5)
+        idx, _, ktot = bias.select(rejection_free, l_k, active, system, ref)
+        assert idx == 0
+        assert np.isclose(ktot, 5.0)
+
+    def test_undesired_events_can_still_fire(self):
+        """In boost mode, undesired events (idx=1) are never blocked."""
+        system, ref, active, l_k = _two_event_setup()
+        # Very low bias_weight: desired event rarely selected, undesired must appear
+        bias = DirectionBias(direction=[1, 0, 0], mode="boost", bias_weight=0.01)
+        selections = [
+            bias.select(rejection_free, l_k, active, system, ref)[0]
+            for _ in range(200)
+        ]
+        assert 1 in selections
+
+    def test_pass_unlisted_true_with_atom_indices_raises_direction(self):
+        """DirectionBias: boost + pass_unlisted=True + atom_indices → ValueError."""
+        with pytest.raises(ValueError, match="pass_unlisted=True"):
+            DirectionBias(direction=[1, 0, 0], atom_indices=[0],
+                          mode="boost", pass_unlisted=True)
+
+    def test_pass_unlisted_true_with_atom_indices_raises_point(self):
+        """PointBias: boost + pass_unlisted=True + atom_indices → ValueError."""
+        with pytest.raises(ValueError, match="pass_unlisted=True"):
+            PointBias(target_point=[1, 0, 0], atom_indices=[0],
+                      mode="boost", pass_unlisted=True)
+
+    def test_pass_unlisted_true_raises_topo(self):
+        """TopoBias: boost + pass_unlisted=True → ValueError (always, no atom_indices check)."""
+        with pytest.raises(ValueError, match="pass_unlisted=True"):
+            TopoBias(topo_source="vac", topo_target="sia",
+                     mode="boost", pass_unlisted=True)
+
+    def test_pass_unlisted_false_with_atom_indices_is_valid(self):
+        """boost + pass_unlisted=False + atom_indices set is valid; non-listed atoms go to k_free."""
+        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[0],
+                             mode="boost", pass_unlisted=False)
+        assert bias.mode == "boost"
+        assert not bias.pass_unlisted
+
+
+# ---------------------------------------------------------------------------
+# pass_unlisted
+# ---------------------------------------------------------------------------
+
+class TestPassUnlisted:
+
+    def test_direction_pass_unlisted_false_non_listed(self, system_origin, ref_table_atom0):
+        """Default pass_unlisted=False: non-listed atoms return False from accept()."""
+        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[99])
+        event = make_event(atom_index=0, final_positions=[[-5.0, 0.0, 0.0]])
+        assert bias.accept(event, system_origin, ref_table_atom0) is False
+
+    def test_direction_pass_unlisted_true_non_listed(self, system_origin, ref_table_atom0):
+        """pass_unlisted=True: non-listed atoms return True from accept()."""
+        bias = DirectionBias(direction=[1, 0, 0], atom_indices=[99], pass_unlisted=True)
+        event = make_event(atom_index=0, final_positions=[[-5.0, 0.0, 0.0]])
+        assert bias.accept(event, system_origin, ref_table_atom0) is True
+
+    def test_point_pass_unlisted_false_non_listed(self, ref_table_atom0):
+        system = make_system([[0.0, 0.0, 0.0]])
+        bias = PointBias(target_point=[5, 0, 0], atom_indices=[99])
+        event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
+        assert bias.accept(event, system, ref_table_atom0) is False
+
+    def test_point_pass_unlisted_true_non_listed(self, ref_table_atom0):
+        system = make_system([[0.0, 0.0, 0.0]])
+        bias = PointBias(target_point=[5, 0, 0], atom_indices=[99], pass_unlisted=True)
+        event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
+        assert bias.accept(event, system, ref_table_atom0) is True
+
+    def test_topo_pass_unlisted_false_non_source(self):
+        system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
+        ae = make_atomic_environment({"vac": [0], "sia": [1]})
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias._prepare(system, ref, ae)
+        event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
+        assert bias.accept(event, system, ref) is False
+
+    def test_topo_pass_unlisted_true_non_source(self):
+        system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
+        ae = make_atomic_environment({"vac": [0], "sia": [1]})
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        bias = TopoBias(topo_source="vac", topo_target="sia",
+                        mode="filter", pass_unlisted=True)
+        bias._prepare(system, ref, ae)
+        event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
+        assert bias.accept(event, system, ref) is True

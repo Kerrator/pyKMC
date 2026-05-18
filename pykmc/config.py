@@ -552,6 +552,29 @@ class BiasConfig(BaseModel):
         default=...,
         description="Bias type: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
     )
+    mode: Literal["filter", "boost"] = Field(
+        default="filter",
+        description=(
+            "Selection mode. 'filter': rejection-loop removes non-accepted events. "
+            "'boost': multiplies desired event rates by a dynamic factor so they fire "
+            "with probability bias_weight, without blocking other events."
+        )
+    )
+    bias_weight: float = Field(
+        default=0.5,
+        description=(
+            "Target probability in (0, 1) that a desired event is selected at each step. "
+            "Only used in boost mode."
+        )
+    )
+    pass_unlisted: bool = Field(
+        default=False,
+        description=(
+            "Whether atoms not in atom_indices pass through the bias predicate unchanged. "
+            "False (default): non-listed atoms are rejected/undesired. "
+            "True: non-listed atoms always pass; only valid in filter mode."
+        )
+    )
     direction: Optional[list[float]] = Field(
         default=None,
         description="Direction vector [x, y, z] for 'direction' bias."

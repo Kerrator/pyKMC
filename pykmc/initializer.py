@@ -111,12 +111,22 @@ class Initializer:
         if bc is None or not bc.enabled:
             self.kmc.bias = None
             return
-        if bc.type == "direction":
-            self.kmc.bias = DirectionBias(bc.direction, bc.atom_indices, bc.threshold)
-        elif bc.type == "point":
-            self.kmc.bias = PointBias(bc.target_point, bc.atom_indices, bc.threshold)
-        elif bc.type == "topo":
-            self.kmc.bias = TopoBias(bc.topo_source, bc.topo_target)
+        match bc.type:
+            case "direction":
+                self.kmc.bias = DirectionBias(
+                    bc.direction, bc.atom_indices, bc.threshold,
+                    mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
+                )
+            case "point":
+                self.kmc.bias = PointBias(
+                    bc.target_point, bc.atom_indices, bc.threshold,
+                    mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
+                )
+            case "topo":
+                self.kmc.bias = TopoBias(
+                    bc.topo_source, bc.topo_target,
+                    mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
+                )
 
     def _initialize_visited_environments(self) -> None:
         """Initialize visited environment from file if specified, else initialize as {'crystal'}."""
