@@ -100,6 +100,11 @@ class ControlConfig(BaseModel):
         description="Incorporate AV's into simulations, recommended for large systems"
     )
 
+    bias: Optional[bool] = Field(
+        default=False,
+        description="Enable event selection bias. Requires a [Bias] section."
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
@@ -544,13 +549,9 @@ class BasinConfig(BaseModel):
 class BiasConfig(BaseModel):
     """Event selection bias parameters."""
 
-    enabled: bool = Field(
-        default=False,
-        description="Enable event selection bias."
-    )
-    type: Literal["direction", "point", "topo"] = Field(
+    style: Literal["direction", "point", "topo"] = Field(
         default=...,
-        description="Bias type: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
+        description="Bias style: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
     )
     mode: Literal["filter", "boost"] = Field(
         default="filter",
@@ -732,8 +733,9 @@ class Config(BaseModel):
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
-            ("control.basin", True) : ["basin"], 
-            ("control.active_volume", True) : ["activevolume"]
+            ("control.basin", True) : ["basin"],
+            ("control.active_volume", True) : ["activevolume"],
+            ("control.bias", True) : ["bias"]
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():

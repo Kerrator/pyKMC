@@ -108,10 +108,10 @@ class Initializer:
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""
         bc = self.kmc.config.bias
-        if bc is None or not bc.enabled:
+        if bc is None or not self.kmc.config.control.bias:
             self.kmc.bias = None
             return
-        match bc.type:
+        match bc.style:
             case "direction":
                 self.kmc.bias = DirectionBias(
                     bc.direction, bc.atom_indices, bc.threshold,
