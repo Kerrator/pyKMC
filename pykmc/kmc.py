@@ -24,7 +24,6 @@ import numpy as np
 from ase.io import write
 from ase import Atoms
 from .algorithms import rejection_free
-from .atom_selector import resolve_atom_selector
 import sys
 import pandas as pd
 import pickle
@@ -110,6 +109,22 @@ class KMC:
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
             )
+        self.inactive_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.inactive_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.inactive_atoms is not None else None
+        )
+        self.frozen_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.frozen_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.frozen_atoms is not None else None
+        )
         #Set new positions to all sessions/engine : 
         self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)
@@ -161,10 +176,8 @@ class KMC:
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
             search_results = event_search.get_successes_results()
-            if self.config.inactive_atoms is not None:
-                inactive_set = resolve_atom_selector(
-                    self.config.inactive_atoms, self.system.positions, self.system.types
-                )
+            if self.inactive_ae is not None:
+                inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
                 search_results = [r for r in search_results if r.move_atom_index not in inactive_set]
             results_is_valid_events = self.add_reference_events(search_results)
 
@@ -327,6 +340,22 @@ class KMC:
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
             )
+            self.inactive_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.inactive_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.inactive_atoms is not None else None
+            )
+            self.frozen_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.frozen_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.frozen_atoms is not None else None
+            )
 
             # == Save Reference Table and List visited environment :
             self._save()
@@ -385,11 +414,10 @@ class KMC:
 
         """
         central_atom_research_list = []
-        inactive_set: frozenset[int] = frozenset()
-        if self.config.inactive_atoms is not None:
-            inactive_set = resolve_atom_selector(
-                self.config.inactive_atoms, self.system.positions, self.system.types
-            )
+        inactive_set = (
+            set(self.inactive_ae.get_atoms_with_id("in"))
+            if self.inactive_ae is not None else set()
+        )
         # for each atomic environment hash in new_environment
         for env in new_environments:
             # find all index having that hash

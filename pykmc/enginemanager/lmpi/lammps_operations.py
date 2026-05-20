@@ -5,7 +5,7 @@ import ctypes
 import pypARTn
 import os
 from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
-from ...atom_selector import resolve_atom_selector
+from ...atomic_environment import AtomicEnvironment
 
 from ...result import  (
     Result,
@@ -151,10 +151,16 @@ def _make_frozen_group(engine, config, positions, types) -> bool:
         return False
     if positions is None or types is None:
         return False
-    frozen_set = resolve_atom_selector(config.frozen_atoms, positions, types)
-    if not frozen_set:
+    frozen_ae = AtomicEnvironment(
+        style="region",
+        region=config.frozen_atoms,
+        positions=positions,
+        atom_types=types,
+    )
+    frozen_indices = frozen_ae.get_atoms_with_id("in")
+    if not frozen_indices:
         return False
-    lammps_ids = " ".join(str(i + 1) for i in frozen_set)  # 1-based LAMMPS IDs
+    lammps_ids = " ".join(str(i + 1) for i in frozen_indices)  # 1-based LAMMPS IDs
     engine.command(f"group g_frozen id {lammps_ids}")
     return True
 
