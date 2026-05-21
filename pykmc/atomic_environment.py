@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from .environments import cna, graph, region
-from .config import Region
+from .config import RegionConfig
 
 
 class AtomicEnvironment:
@@ -37,7 +37,7 @@ class AtomicEnvironment:
         neighbors_list: list[list[int]] | None = None,
         environment_list: list[list[int]] | None = None,
         neighbors_add: int = 0,
-        region: Region | None = None,
+        region: RegionConfig | None = None,
         positions: np.ndarray | None = None,
         atom_types: list[str] | None = None,
     ) -> None:
@@ -90,7 +90,7 @@ class AtomicEnvironment:
 
     def compute_region(
         self,
-        r: Region | None,
+        r: RegionConfig | None,
         positions: np.ndarray | None,
         atom_types: list[str] | None,
     ) -> list[str]:

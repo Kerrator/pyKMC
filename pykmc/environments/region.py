@@ -1,4 +1,4 @@
-"""Region-based atomic environment classification."""
+"""RegionConfig-based atomic environment classification."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pykmc.config import Region
+    from pykmc.config import RegionConfig
 
 
-def region(r: "Region", positions: np.ndarray, atom_types: list[str]) -> list[str]:
+def region(r: "RegionConfig", positions: np.ndarray, atom_types: list[str]) -> list[str]:
     """Classify each atom as ``'in'`` or ``'out'``.
 
     Union semantics: an atom is ``'in'`` if it matches any of
@@ -17,7 +17,7 @@ def region(r: "Region", positions: np.ndarray, atom_types: list[str]) -> list[st
 
     Parameters
     ----------
-    r : Region
+    r : RegionConfig
         Selection criteria (geometry, types, indices).
     positions : np.ndarray, shape (N, 3)
         Current atom Cartesian positions.
@@ -45,7 +45,7 @@ def region(r: "Region", positions: np.ndarray, atom_types: list[str]) -> list[st
     return ["in" if i in selected else "out" for i in range(n)]
 
 
-def _resolve_geometric(r: "Region", positions: np.ndarray) -> set[int]:
+def _resolve_geometric(r: "RegionConfig", positions: np.ndarray) -> set[int]:
     """Return the set of atom indices that fall inside/outside the geometric region."""
     n = len(positions)
 

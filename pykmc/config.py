@@ -542,7 +542,7 @@ class BasinConfig(BaseModel):
     )
 
 
-class Region(BaseModel):
+class RegionConfig(BaseModel):
     """Selects atoms by type, index, or geometric region (union semantics).
 
     Used for ``inactive_atoms`` and ``frozen_atoms`` config sections.
@@ -633,7 +633,7 @@ class Region(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def check_fields(self) -> "Region":
+    def check_fields(self) -> "RegionConfig":
         """Validate required fields per region_type."""
         if self.region_type is None:
             return self
@@ -713,14 +713,14 @@ class Config(BaseModel):
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
-    inactive_atoms: Optional[Region] = Field(
+    inactive_atoms: Optional[RegionConfig] = Field(
         default=None,
         description="Atoms on which no event search can be centered. "
         "Applies both at search time (central atom selection) and at result time "
         "(events where the most-displaced atom is inactive are discarded).",
     )
 
-    frozen_atoms: Optional[Region] = Field(
+    frozen_atoms: Optional[RegionConfig] = Field(
         default=None,
         description="Atoms that cannot move during event search or refinement. "
         "Implemented via 'fix setforce 0.0 0.0 0.0' in LAMMPS wrapping fix artn.",
