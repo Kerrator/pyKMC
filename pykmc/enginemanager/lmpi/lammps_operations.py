@@ -94,13 +94,18 @@ def get_potential_energy(engine, positions = None) :
     engine.command("uncompute c1")
     return result
 
-def get_positions(engine) : 
+def get_positions(engine) :
     result = engine.lmp.gather_atoms("x", 1, 3)
     if engine.rank == 0:
         # convert ctype positions into a numpy array
         result = np.ctypeslib.as_array(result)
         result = np.reshape(result, (-1, 3))
         return result
+
+def get_types(engine) -> list[str]:
+    int_types = engine.lmp.gather_atoms("type", 0, 1)
+    labels = engine.lmp.get_category_keywords("typelabel")
+    return [labels[t - 1] for t in int_types]
     
 def set_positions(engine, positions) : 
     positions = positions.flatten().astype(np.float64)
@@ -149,8 +154,10 @@ def _make_frozen_group(engine, config, positions, types) -> bool:
     """Resolve frozen atoms and create g_frozen group. Returns True if any atoms are frozen."""
     if config.frozen_atoms is None:
         return False
-    if positions is None or types is None:
-        return False
+    if positions is None:
+        positions = get_positions(engine)
+    if types is None:
+        types = get_types(engine)
     frozen_ae = AtomicEnvironment(
         style="region",
         region=config.frozen_atoms,
@@ -183,7 +190,7 @@ def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
         engine.command("group g_frozen delete")
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, type=None) :
+def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, types=None) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
@@ -192,7 +199,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     print('Central Atom', central_atom_idx)
     #Check to see if system is in AV mode:
     if config.control.active_volume == True:
-        atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, type)
+        atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, types)
 
     else:
         #Set positions
@@ -206,7 +213,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
 
     # LAMMPS COMMANDS
     engine.command("plugin load {}".format(config.partn.path_artnso))
-    atoms_frozen = _make_frozen_group(engine, config, positions, type)
+    atoms_frozen = _make_frozen_group(engine, config, positions, types)
     _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
     engine.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
@@ -350,11 +357,11 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                 )
             )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, type=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
+def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, types=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
-        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, type, saddle_idx, saddle_positions)
+        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
     else:
         central_lammps_id=[central_atom_idx+1]
         E_init=0
@@ -427,7 +434,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     max_attempts = config.partn.r_max_attempts
     attempt = 0
-    atoms_frozen = _make_frozen_group(engine, config, positions, type)
+    atoms_frozen = _make_frozen_group(engine, config, positions, types)
     _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
 
     while attempt < max_attempts :
