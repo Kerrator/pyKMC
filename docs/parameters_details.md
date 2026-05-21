@@ -396,3 +396,24 @@
   </details>
 
 ---
+
+## `EventRecycling` Section (optional)
+
+<details><summary>Section Overview</summary>
+  Event recycling parameters. After the selected event is executed at a step, candidate events whose central atom (a) didn't move and (b) is far from the executed event are carried over to the next step instead of being re-searched. If <code>enabled = False</code> (default), behavior is identical to prior versions.
+</details>
+
+- **`enabled`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  If True, reuse non-perturbed events from the previous step instead of re-searching them.
+  </details>
+- **`movement_thr`** : `float`, default = `0.02`
+  <details><summary>Description</summary>
+  Angstroms. Central atoms whose displacement from pre- to post-execution of the selected event is below this are considered "unmoved".
+  </details>
+- **`distance_thr`** : `float`, default = `10.0`
+  <details><summary>Description</summary>
+  Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image distance) from the executed event's central atom pass the distance check.
+  </details>
+
+---

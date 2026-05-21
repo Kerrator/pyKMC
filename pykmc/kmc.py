@@ -44,6 +44,7 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
+from .event_recycling import select_recyclable_events
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -91,6 +92,8 @@ class KMC:
         self.visited_environments = None
         self.total_energy = None
         self.potential_energy = None
+        self.recycled_events: pd.DataFrame | None = None
+        self._pre_exec_positions: np.ndarray | None = None
 
     def run(self) -> None:
         """Run the simulation."""
@@ -148,10 +151,20 @@ class KMC:
             # == Find Current atomic environments that has not been visited ==
             new_environments = self.get_new_environments()
 
+            # == Event recycling: collect atom indices we can skip this step ==
+            if self.recycled_events is not None and len(self.recycled_events) > 0:
+                skip_atoms = set(int(a) for a in self.recycled_events["atom_index"].tolist())
+                self.loggers.info(
+                    "log",
+                    "\t :=> Recycling {} events from the previous step".format(len(skip_atoms)),
+                )
+            else:
+                skip_atoms = set()
+
             # == FIND NEW GENERIC EVENTS ==
             ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(
-                new_environments, nsearch
+                new_environments, nsearch, skip_atoms=skip_atoms
             )
 
             ##=>Perform event search on each atom in central_atom_research_list
@@ -183,10 +196,19 @@ class KMC:
                 self.atomic_environment.atomic_environment_list
             )
             ##=>Refines all event in subset
-            refinement = self.execute_refinements(subset_reference_event_table)
+            refinement = self.execute_refinements(subset_reference_event_table, skip_atoms=skip_atoms)
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             active_table = self.add_active_events(refinement.get_successes_results())
+
+            # == Merge recycled events from previous step (already refined, valid) ==
+            if self.recycled_events is not None and len(self.recycled_events) > 0:
+                active_table.table = pd.concat(
+                    [active_table.table, self.recycled_events],
+                    ignore_index=True,
+                )
+                self.recycled_events = None
+
             active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
             self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
 
@@ -212,6 +234,9 @@ class KMC:
 
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
+            # Pre-execution snapshot for event recycling (needed before update_positions below)
+            if self.config.eventrecycling.enabled:
+                self._pre_exec_positions = self.system.positions.copy()
                 #IF selected event shows we are in a basin
             if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
                 self.loggers.info("log","\t :=> System is in a Basin." )
@@ -262,9 +287,27 @@ class KMC:
                 if basin.connectivity_table is not None :
                     basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
                 #update delta_t, ktot (use basin infos)
+                # Basin super-event spans many atoms; recycling deferred (disabled on basin step).
+                self.recycled_events = None
             else :
                 self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                 self.total_energy = result_reconstruction.ok_value().min2_etot
+                # == Event recycling: capture non-perturbed events for the next step ==
+                if self.config.eventrecycling.enabled:
+                    self.recycled_events = select_recyclable_events(
+                        active_table,
+                        idx_selected_event,
+                        self.system,
+                        self._pre_exec_positions,
+                        self.config.eventrecycling.movement_thr,
+                        self.config.eventrecycling.distance_thr,
+                    )
+                    self.loggers.info(
+                        "log",
+                        "\t :=> {} events flagged for recycling".format(len(self.recycled_events)),
+                    )
+                else:
+                    self.recycled_events = None
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions 
@@ -355,7 +398,10 @@ class KMC:
         return new_environments
 
     def central_atoms_research(
-        self, new_environments: list[str | bytes], nsearch: int
+        self,
+        new_environments: list[str | bytes],
+        nsearch: int,
+        skip_atoms: set[int] | None = None,
     ) -> list[int]:
         """Generate list of central atoms on which we gonna perform generic event searches for the reference table.
 
@@ -367,6 +413,9 @@ class KMC:
             List of atomic environment ID.
         nsearch : int
             Number of searches per atomic environment.
+        skip_atoms : set[int] | None, optional
+            Atom indices to exclude from selection (e.g. atoms whose events are
+            being recycled from the previous step).
 
         Returns
         -------
@@ -379,6 +428,8 @@ class KMC:
             If no atoms are found for a given environment, random.choice will raise an IndexError.
 
         """
+        if skip_atoms is None:
+            skip_atoms = set()
         central_atom_research_list = []
         # for each atomic environment hash in new_environment
         for env in new_environments:
@@ -386,8 +437,10 @@ class KMC:
             tmp1 = [
                 i
                 for i, e in enumerate(self.atomic_environment.atomic_environment_list)
-                if e == env
+                if e == env and i not in skip_atoms
             ]
+            if not tmp1:
+                continue
             # Randomly choose nsearch atoms that have that environment
             tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
@@ -438,13 +491,20 @@ class KMC:
         )
         return results_is_valid_events
 
-    def execute_refinements(self, df_reference_events: pd.DataFrame) -> Refinement:
+    def execute_refinements(
+        self,
+        df_reference_events: pd.DataFrame,
+        skip_atoms: set[int] | None = None,
+    ) -> Refinement:
         """Refine all events in df_reference_events for all atoms on which they can be apply.
 
         Parameters
         ----------
         df_reference_events : pd.DataFrame
             Subset of the reference table with events that can be apply to the current system.
+        skip_atoms : set[int] | None, optional
+            Atom indices to skip refinement on (e.g. atoms whose events are
+            being recycled from the previous step).
 
         Returns
         -------
@@ -461,7 +521,7 @@ class KMC:
             self.manager,
         )
         #refinement.execute(df_reference_events, self.potential_energy)
-        refinement.execute(df_reference_events, self.total_energy)
+        refinement.execute(df_reference_events, self.total_energy, skip_atoms=skip_atoms)
         return refinement
 
     def add_active_events(

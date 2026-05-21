@@ -52,7 +52,12 @@ class Refinement:
         self.manager = manager
         self.results = None
 
-    def execute(self, df_reference_events: pd.DataFrame, total_energy) -> None:
+    def execute(
+        self,
+        df_reference_events: pd.DataFrame,
+        total_energy,
+        skip_atoms: set[int] | None = None,
+    ) -> None:
         """Execute event refinements for each reference event in the df_reference_events dataframe.
 
         It stores the results of the event refinements in self.results.
@@ -61,8 +66,13 @@ class Refinement:
         ----------
         df_reference_events : pd.DataFrame
             dataframe of reference events to refine.
+        skip_atoms : set[int] | None, optional
+            Atom indices to skip refinement on (e.g. atoms whose events are
+            being recycled from the previous step).
 
         """
+        if skip_atoms is None:
+            skip_atoms = set()
         self.results = []
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
@@ -72,12 +82,14 @@ class Refinement:
         all_futures = []
         future_context = {}  # mapping future -> contexte
 
-        #Launch all refine Jobs 
+        #Launch all refine Jobs
         for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
-            
+
             for at_idx in atoms_refine_idx:
+                if at_idx in skip_atoms:
+                    continue
                 ###=>refine single generic
                 futures = self.refine_single(at_idx, dfevent, total_energy, future_context, e_thr)
                 if isinstance(futures,list): #If symmetries

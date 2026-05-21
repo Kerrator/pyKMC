@@ -541,6 +541,31 @@ class BasinConfig(BaseModel):
     description="Energy threshold"
     )
 
+
+class EventRecyclingConfig(BaseModel):
+    """Event recycling parameters."""
+
+    enabled: bool = Field(
+        default=False,
+        description="If True, reuse non-perturbed events from the previous step instead of re-searching them.",
+    )
+    movement_thr: float = Field(
+        default=0.02,
+        description="Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.",
+    )
+    distance_thr: float = Field(
+        default=10.0,
+        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware) from the executed event's central atom pass the distance check.",
+    )
+
+    @field_validator("movement_thr", "distance_thr")
+    @classmethod
+    def _positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("threshold must be > 0")
+        return v
+
+
 class Config(BaseModel):
     """Config for the KMC simulations."""
 
@@ -581,6 +606,11 @@ class Config(BaseModel):
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
+
+    eventrecycling: EventRecyclingConfig = Field(
+        default_factory=EventRecyclingConfig,
+        description="Event recycling parameters.",
+    )
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
