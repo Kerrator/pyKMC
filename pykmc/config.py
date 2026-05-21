@@ -100,6 +100,11 @@ class ControlConfig(BaseModel):
         description="Incorporate AV's into simulations, recommended for large systems"
     )
 
+    bias: Optional[bool] = Field(
+        default=False,
+        description="Enable event selection bias. Requires a [Bias] section."
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
@@ -672,6 +677,62 @@ class RegionConfig(BaseModel):
         return self
 
 
+class BiasConfig(BaseModel):
+    """Event selection bias parameters."""
+
+    style: Literal["direction", "point", "topo"] = Field(
+        default=...,
+        description="Bias style: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
+    )
+    mode: Literal["filter", "boost"] = Field(
+        default="filter",
+        description=(
+            "Selection mode. 'filter': rejection-loop removes non-accepted events. "
+            "'boost': multiplies desired event rates by a dynamic factor so they fire "
+            "with probability bias_weight, without blocking other events."
+        )
+    )
+    bias_weight: float = Field(
+        default=0.5,
+        description=(
+            "Target probability in (0, 1) that a desired event is selected at each step. "
+            "Only used in boost mode."
+        )
+    )
+    pass_unlisted: bool = Field(
+        default=False,
+        description=(
+            "Whether atoms not in atom_indices pass through the bias predicate unchanged. "
+            "False (default): non-listed atoms are rejected/undesired. "
+            "True: non-listed atoms always pass; only valid in filter mode."
+        )
+    )
+    direction: Optional[list[float]] = Field(
+        default=None,
+        description="Direction vector [x, y, z] for 'direction' bias."
+    )
+    target_point: Optional[list[float]] = Field(
+        default=None,
+        description="Target point [x, y, z] for 'point' bias."
+    )
+    atom_indices: Optional[list[int]] = Field(
+        default=None,
+        description="Global atom indices to bias. None means all atoms."
+    )
+    threshold: float = Field(
+        default=0.0,
+        description="Minimum projection onto the bias direction for acceptance."
+    )
+    topo_source: Optional[str] = Field(
+        default=None,
+        description="Source topology ID for 'topo' bias (e.g. vacancy)."
+    )
+    topo_target: Optional[str] = Field(
+        default=None,
+        description="Target topology ID for 'topo' bias (e.g. interstitial)."
+    )
+
+
 class Config(BaseModel):
     """Config for the KMC simulations."""
 
@@ -725,6 +786,8 @@ class Config(BaseModel):
         description="Atoms that cannot move during event search or refinement. "
         "Implemented via 'fix setforce 0.0 0.0 0.0' in LAMMPS wrapping fix artn.",
     )
+
+    bias: Optional[BiasConfig] = Field(default=None, description="Event selection bias parameters.")
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
@@ -815,8 +878,9 @@ class Config(BaseModel):
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
-            ("control.basin", True) : ["basin"], 
-            ("control.active_volume", True) : ["activevolume"]
+            ("control.basin", True) : ["basin"],
+            ("control.active_volume", True) : ["activevolume"],
+            ("control.bias", True) : ["bias"]
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():
