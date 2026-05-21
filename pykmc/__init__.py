@@ -10,4 +10,5 @@ from .log import *
 from .config import *
 from .kmc import *
 from .initializer import *
+from .bias import Bias, DirectionBias, PointBias, TopoBias
 from .otfml import *

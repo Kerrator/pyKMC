@@ -45,6 +45,7 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
+from .bias import Bias
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -92,6 +93,7 @@ class KMC:
         self.visited_environments = None
         self.total_energy = None
         self.potential_energy = None
+        self.bias: Bias | None = None
         self.otfml = OTFMLController(self)
 
     def run(self) -> None:
@@ -111,29 +113,45 @@ class KMC:
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
             )
-        #Set new positions to all sessions/engine : 
+        self.inactive_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.inactive_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.inactive_atoms is not None else None
+        )
+        self.frozen_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.frozen_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.frozen_atoms is not None else None
+        )
+        #Set new positions to all sessions/engine :
         self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)
 
-        if self.config.control.restart_file is None: 
+        if self.config.control.restart_file is None:
         # Write initial step to file
             self._append_snapshot_to_trajectory()
-            last_step = 0 
+            last_step = 0
             total_time = 0.0
 
         else : #read restart file
             self.loggers.info("log", ":=> Reading restart file")
-            restart_info = np.load(self.config.control.restart_file) 
+            restart_info = np.load(self.config.control.restart_file)
             last_step = restart_info["last_step"]
             total_time = restart_info["last_time"]
             self.loggers.info("log", ":=> last step = {}, last_end_time = {}ps".format(last_step, total_time))
 
         # LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
-        last_step +=1 
+        last_step +=1
         nsearch = self.config.eventsearch.nsearch
 
-        
+
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps+last_step):
@@ -161,9 +179,11 @@ class KMC:
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
-            results_is_valid_events = self.add_reference_events(
-                event_search.get_successes_results()
-            )
+            search_results = event_search.get_successes_results()
+            if self.inactive_ae is not None:
+                inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
+                search_results = [r for r in search_results if r.move_atom_index not in inactive_set]
+            results_is_valid_events = self.add_reference_events(search_results)
 
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
@@ -269,7 +289,7 @@ class KMC:
                 self.total_energy = result_reconstruction.ok_value().min2_etot
             total_time += delta_t * 10**-12  # time is in seconds
 
-            ###=> Synchronise all lammps instances with new positions 
+            ###=> Synchronise all lammps instances with new positions
             self.manager.use_local()
             self.manager.set_all_positions(positions=self.system.positions)
             ##=>Minimize
@@ -297,7 +317,7 @@ class KMC:
 
             elapsed_real = time.time() - start_real
             elapsed_cpu = time.process_time() - start_cpu
-            
+
             self.loggers.table_line_info_kmc(
                 "output",
                 step,
@@ -308,7 +328,7 @@ class KMC:
                 active_table.table.loc[idx_selected_event].at["k"],
                 ktot,
                 self.total_energy,
-                elapsed_cpu, 
+                elapsed_cpu,
                 elapsed_real
             )
 
@@ -323,6 +343,22 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+            )
+            self.inactive_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.inactive_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.inactive_atoms is not None else None
+            )
+            self.frozen_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.frozen_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.frozen_atoms is not None else None
             )
 
             # == Save Reference Table and List visited environment :
@@ -382,6 +418,10 @@ class KMC:
 
         """
         central_atom_research_list = []
+        inactive_set = (
+            set(self.inactive_ae.get_atoms_with_id("in"))
+            if self.inactive_ae is not None else set()
+        )
         # for each atomic environment hash in new_environment
         for env in new_environments:
             # find all index having that hash
@@ -390,6 +430,10 @@ class KMC:
                 for i, e in enumerate(self.atomic_environment.atomic_environment_list)
                 if e == env
             ]
+            if inactive_set:
+                tmp1 = [i for i in tmp1 if i not in inactive_set]
+            if not tmp1:
+                continue  # no eligible atoms for this environment
             # Randomly choose nsearch atoms that have that environment
             tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
@@ -488,8 +532,15 @@ class KMC:
         active_table.add_events(events)
         return active_table
 
-    def _select_event(self, active_table: ActiveEventTable) -> tuple[int, float, float]:
+    def _select_event(
+        self,
+        active_table: ActiveEventTable,
+    ) -> tuple[int, float, float]:
         """Select an event in the active table based on the refection free algorithm.
+
+        Uses ``self.bias`` when set and enabled; otherwise performs a standard
+        unbiased rejection-free selection.  ``delta_t`` and ``ktot`` are always
+        derived from the rates of the pool at the moment of acceptance.
 
         Parameters
         ----------
@@ -505,28 +556,33 @@ class KMC:
             - float: total rate constant of the active events.
 
         """
-        # list of rate constant
         l_k = np.array(
             [active_table.table.loc[i].at["k"] for i in range(len(active_table.table))]
         )
-        idx_selected_event, delta_t, ktot = rejection_free(l_k)
+        if self.bias is None:
+            idx_selected_event, delta_t, ktot = rejection_free(l_k)
+        else:
+            idx_selected_event, delta_t, ktot = self.bias.select(
+                rejection_free, l_k, active_table,
+                self.system, self.reference_table, self.atomic_environment
+            )
         return idx_selected_event, delta_t, ktot
 
 
-    def reconstruction(self, active_table) : 
+    def reconstruction(self, active_table) :
             #TODO make a Result
 
             err_reference = []
             err_ae = []
-            while len(active_table.table) > 0 : 
+            while len(active_table.table) > 0 :
                 ##=>Select event
                 idx_selected_event, delta_t, ktot = self._select_event(active_table)
-                ##=>Reconstruct event 
+                ##=>Reconstruct event
                 self.loggers.info("log", "\t :=> Event Reconstruction")
                 result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
-                if result_reconstruction.is_ok() : 
-                    break 
-                else : 
+                if result_reconstruction.is_ok() :
+                    break
+                else :
                     num_ref_event = active_table.table.loc[idx_selected_event].at['num_reference_event']
                     self.loggers.info("log", "\t :=> Reconstruction fails (reference event {}) :  {}".format(num_ref_event, result_reconstruction.err_value().message))
                     ae_topo = self.reference_table.table[self.reference_table.table['idx_ref'] == num_ref_event]['event_id'].values[0]
@@ -535,7 +591,7 @@ class KMC:
 
                     self.loggers.info("log", "\t :=> Removing active event.")
                     active_table.remove(idx_selected_event)
-            else : 
+            else :
                 self.loggers.error("log", "All event reconstuctions failed.")
                 self._close()
             return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
@@ -554,7 +610,7 @@ class KMC:
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
 
         #try to reconstruct
-        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
+        result = Reconstruction(self.config, self.manager, types=self.system.types).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
         #result with min1, saddle, min2 pos
 
         #Back to original positions, in case reconstruction fails
@@ -588,14 +644,14 @@ class KMC:
 
     def _minimize_system_once(self, positions=None) -> None:
         """Perform a single minimization without OTF retry handling."""
-        if self.config.control.restart_file is None: 
+        if self.config.control.restart_file is None:
             self.loggers.info("log", ":=> Minimizing the system")
-        else : 
+        else :
             self.loggers.info("log", ":=> Computing energies")
         if self.otfml.is_enabled_for_phase("minimize"):
             self.manager.global_reset_otf_flags()
-        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
-        if self.config.control.restart_file is None : 
+        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions, types=self.system.types)
+        if self.config.control.restart_file is None :
             self.system.update_positions(new_positions)
         self.total_energy = total_energy
         self.potential_energy = self.manager.global_get_potential_energy()
@@ -708,12 +764,12 @@ class KMC:
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
 
-    def _save_restart_file(self, last_step, last_time) : 
-        """ 
+    def _save_restart_file(self, last_step, last_time) :
+        """
         Save end simulation informations
         """
-        np.savez("restart_"+str(last_step)+".npz", 
-                 last_step = last_step, 
+        np.savez("restart_"+str(last_step)+".npz",
+                 last_step = last_step,
                  last_time = last_time)
 
 
