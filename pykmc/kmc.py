@@ -111,6 +111,22 @@ class KMC:
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
             )
+        self.inactive_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.inactive_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.inactive_atoms is not None else None
+        )
+        self.frozen_ae = (
+            AtomicEnvironment(
+                style="region",
+                region=self.config.frozen_atoms,
+                positions=self.system.positions,
+                atom_types=self.system.types,
+            ) if self.config.frozen_atoms is not None else None
+        )
         #Set new positions to all sessions/engine :
         self.manager.use_local()
         self.manager.set_all_positions(self.system.positions)
@@ -161,9 +177,11 @@ class KMC:
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
-            results_is_valid_events = self.add_reference_events(
-                event_search.get_successes_results()
-            )
+            search_results = event_search.get_successes_results()
+            if self.inactive_ae is not None:
+                inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
+                search_results = [r for r in search_results if r.move_atom_index not in inactive_set]
+            results_is_valid_events = self.add_reference_events(search_results)
 
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
@@ -324,6 +342,22 @@ class KMC:
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
             )
+            self.inactive_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.inactive_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.inactive_atoms is not None else None
+            )
+            self.frozen_ae = (
+                AtomicEnvironment(
+                    style="region",
+                    region=self.config.frozen_atoms,
+                    positions=self.system.positions,
+                    atom_types=self.system.types,
+                ) if self.config.frozen_atoms is not None else None
+            )
 
             # == Save Reference Table and List visited environment :
             self._save()
@@ -382,6 +416,10 @@ class KMC:
 
         """
         central_atom_research_list = []
+        inactive_set = (
+            set(self.inactive_ae.get_atoms_with_id("in"))
+            if self.inactive_ae is not None else set()
+        )
         # for each atomic environment hash in new_environment
         for env in new_environments:
             # find all index having that hash
@@ -390,6 +428,10 @@ class KMC:
                 for i, e in enumerate(self.atomic_environment.atomic_environment_list)
                 if e == env
             ]
+            if inactive_set:
+                tmp1 = [i for i in tmp1 if i not in inactive_set]
+            if not tmp1:
+                continue  # no eligible atoms for this environment
             # Randomly choose nsearch atoms that have that environment
             tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
@@ -564,7 +606,7 @@ class KMC:
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
 
         #try to reconstruct
-        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
+        result = Reconstruction(self.config, self.manager, types=self.system.types).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
         #result with min1, saddle, min2 pos
 
         #Back to original positions, in case reconstruction fails
@@ -593,7 +635,7 @@ class KMC:
             self.loggers.info("log", ":=> Minimizing the system")
         else :
             self.loggers.info("log", ":=> Computing energies")
-        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
+        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions, types=self.system.types)
         #TEST
         #future = self.manager.minimize_with_results(self.config, positions=positions)
         #new_positions, total_energy = future.result()
