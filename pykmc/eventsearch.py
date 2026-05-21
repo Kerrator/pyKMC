@@ -53,7 +53,7 @@ class EventSearch:
             futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list, positions=self.system.positions.copy(), cell=self.system.cell.copy(), type=self.system.types.copy())
         else:
             futures = self.manager.partn_search(config=self.config, central_atom=central_atom_research_list,
-                                                positions=self.system.positions.copy())
+                                                positions=self.system.positions.copy(), type=self.system.types.copy())
         for f in futures :
             self.results.append(f.result())
 
