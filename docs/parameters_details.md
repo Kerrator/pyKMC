@@ -57,6 +57,10 @@
   <details><summary>Description</summary>
   Event constributing to this percent of ktot are refined.
   </details>
+- **`recycle`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an <code>[EventRecycling]</code> section.
+  </details>
 
 ---
 
@@ -397,15 +401,15 @@
 
 ---
 
-## `EventRecycling` Section (optional)
+## `EventRecycling` Section (required when `control.recycle = True`)
 
 <details><summary>Section Overview</summary>
-  Event recycling parameters. After the selected event is executed at a step, candidate events whose central atom (a) didn't move and (b) is far from the executed event are carried over to the next step instead of being re-searched. If <code>enabled = False</code> (default), behavior is identical to prior versions.
+  Event recycling parameters. After the selected event is executed at a step, candidate events whose central atom (a) didn't move and (b) is far from the executed event are carried over to the next step instead of being re-searched. Required when <code>control.recycle = True</code>; ignored otherwise.
 </details>
 
-- **`enabled`** : `bool`, default = `False`
+- **`style`** : `Literal['displacement']`, mandatory
   <details><summary>Description</summary>
-  If True, reuse non-perturbed events from the previous step instead of re-searching them.
+  Method used to decide which events can be recycled. Currently only <code>'displacement'</code> is implemented: an event is recycled iff its central atom moved less than <code>movement_thr</code> AND its central atom is farther than <code>distance_thr</code> from the executed event.
   </details>
 - **`movement_thr`** : `float`, default = `0.02`
   <details><summary>Description</summary>

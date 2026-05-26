@@ -77,23 +77,55 @@ def push_towards(current_positions, target_positions, fraction = 0.1, cell = Non
         new_positions = ase.geometry.wrap_positions(positions=new_positions, cell=cell, pbc=[True, True, True])
     return new_positions
 
-def compute_delr(positions_1, positions_2, cell=None) : 
+def compute_delr(positions_1, positions_2, cell=None) :
     displacements = positions_2 - positions_1
 
-    if cell is not None : 
-        cell_lengths = np.linalg.norm(cell, axis=1)  
+    if cell is not None :
+        cell_lengths = np.linalg.norm(cell, axis=1)
 
-        #apply pbc 
+        #apply pbc
 
-        for i in range(3) : 
+        for i in range(3) :
             displacements[:, i] -= cell_lengths[i] * np.round(displacements[:, i] / cell_lengths[i])
-    
+
     # Calcul des normes des déplacements
     distances = np.linalg.norm(displacements, axis=1)
-    
+
     # Retour du déplacement maximum
     delr = np.max(distances)
-    
+
     return delr
+
+
+def per_atom_displacement(
+    positions_pre: np.ndarray,
+    positions_post: np.ndarray,
+    cell: np.ndarray,
+) -> np.ndarray:
+    """Per-atom PBC-aware displacement magnitude (orthorhombic minimum-image).
+
+    Same minimum-image trick as `compute_delr`, but returns the full per-atom
+    array of Euclidean distances instead of just the maximum.
+
+    Parameters
+    ----------
+    positions_pre : np.ndarray
+        Shape (N, 3) positions before the displacement.
+    positions_post : np.ndarray
+        Shape (N, 3) positions after the displacement.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+
+    Returns
+    -------
+    np.ndarray
+        Shape (N,) of per-atom displacement magnitudes in Angstroms.
+
+    """
+    disp = positions_post - positions_pre
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    for i in range(3):
+        disp[:, i] -= cell_lengths[i] * np.round(disp[:, i] / cell_lengths[i])
+    return np.linalg.norm(disp, axis=1)
 
 

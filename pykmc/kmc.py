@@ -44,7 +44,7 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
-from .event_recycling import select_recyclable_events
+from .event_recycling import DistanceRecycling, Recycling
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -235,7 +235,7 @@ class KMC:
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
             # Pre-execution snapshot for event recycling (needed before update_positions below)
-            if self.config.eventrecycling.enabled:
+            if self.config.control.recycle:
                 self._pre_exec_positions = self.system.positions.copy()
                 #IF selected event shows we are in a basin
             if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
@@ -293,14 +293,18 @@ class KMC:
                 self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                 self.total_energy = result_reconstruction.ok_value().min2_etot
                 # == Event recycling: capture non-perturbed events for the next step ==
-                if self.config.eventrecycling.enabled:
-                    self.recycled_events = select_recyclable_events(
+                if self.config.control.recycle:
+                    recycler: Recycling
+                    if self.config.eventrecycling.style == "displacement":
+                        recycler = DistanceRecycling(
+                            movement_thr=self.config.eventrecycling.movement_thr,
+                            distance_thr=self.config.eventrecycling.distance_thr,
+                        )
+                    self.recycled_events = recycler.select_recyclable(
                         active_table,
                         idx_selected_event,
                         self.system,
                         self._pre_exec_positions,
-                        self.config.eventrecycling.movement_thr,
-                        self.config.eventrecycling.distance_thr,
                     )
                     self.loggers.info(
                         "log",

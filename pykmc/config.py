@@ -100,6 +100,11 @@ class ControlConfig(BaseModel):
         description="Incorporate AV's into simulations, recommended for large systems"
     )
 
+    recycle: Optional[bool] = Field(
+        default=False,
+        description="Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.",
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
@@ -543,27 +548,26 @@ class BasinConfig(BaseModel):
 
 
 class EventRecyclingConfig(BaseModel):
-    """Event recycling parameters."""
+    """Event recycling parameters. Required when control.recycle = True."""
 
-    enabled: bool = Field(
-        default=False,
-        description="If True, reuse non-perturbed events from the previous step instead of re-searching them.",
+    style: Literal["displacement"] = Field(
+        ...,
+        description=(
+            "Method used to decide which events can be recycled. "
+            "'displacement' = central atom moved less than movement_thr AND is "
+            "farther than distance_thr from the executed event."
+        ),
     )
     movement_thr: float = Field(
         default=0.02,
         description="Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.",
+        gt=0.0,
     )
     distance_thr: float = Field(
         default=10.0,
-        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware) from the executed event's central atom pass the distance check.",
+        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image) from the executed event's central atom pass the distance check.",
+        gt=0.0,
     )
-
-    @field_validator("movement_thr", "distance_thr")
-    @classmethod
-    def _positive(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("threshold must be > 0")
-        return v
 
 
 class Config(BaseModel):
@@ -607,9 +611,9 @@ class Config(BaseModel):
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
-    eventrecycling: EventRecyclingConfig = Field(
-        default_factory=EventRecyclingConfig,
-        description="Event recycling parameters.",
+    eventrecycling: Optional[EventRecyclingConfig] = Field(
+        default=None,
+        description="Event recycling parameters. Required when control.recycle = True.",
     )
 
     @classmethod
@@ -701,8 +705,9 @@ class Config(BaseModel):
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
-            ("control.basin", True) : ["basin"], 
-            ("control.active_volume", True) : ["activevolume"]
+            ("control.basin", True) : ["basin"],
+            ("control.active_volume", True) : ["activevolume"],
+            ("control.recycle", True) : ["eventrecycling"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():

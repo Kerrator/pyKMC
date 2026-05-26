@@ -1,99 +1,127 @@
 """Event recycling: carry events with unmoved, distant central atoms into the next KMC step.
 
-For each candidate event in step N's active table, recycle it into step N+1 iff both:
-  1. Its central atom's displacement from pre- to post-execution is below `movement_thr`.
-  2. Its central atom is farther than `distance_thr` from the executed event's central atom
-     (minimum-image PBC distance).
+The module exposes an abstract :class:`Recycling` interface and one concrete
+strategy, :class:`DistanceRecycling`. Future strategies should subclass
+:class:`Recycling` and implement :meth:`select_recyclable`.
 """
 
 from __future__ import annotations
+
+from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
 
 from .event_table import ActiveEventTable
 from .system import System
+from .utils.geometry import per_atom_displacement
 
 
-def _minimum_image(disp: np.ndarray, cell: np.ndarray) -> np.ndarray:
-    """Apply minimum-image PBC wrapping to a displacement array in-place style.
+class Recycling(ABC):
+    """Abstract interface for event recycling strategies.
 
-    Parameters
-    ----------
-    disp : np.ndarray
-        Shape (..., 3) raw displacement (pos_b - pos_a).
-    cell : np.ndarray
-        3x3 simulation cell (orthorhombic; row-wise vectors).
-
-    Returns
-    -------
-    np.ndarray
-        Wrapped displacement with each component in (-L_i/2, L_i/2].
-
+    A recycling strategy decides, given the active event table from step N
+    together with system position snapshots taken before and after the
+    executed event, which rows can be reused at step N+1 (i.e. carried
+    over without a fresh search + refinement).
     """
-    cell_lengths = np.linalg.norm(cell, axis=1)
-    wrapped = disp.copy()
-    for i in range(3):
-        wrapped[..., i] -= cell_lengths[i] * np.round(wrapped[..., i] / cell_lengths[i])
-    return wrapped
+
+    @abstractmethod
+    def select_recyclable(
+        self,
+        active_table: ActiveEventTable,
+        executed_idx: int,
+        system: System,
+        positions_pre: np.ndarray,
+    ) -> pd.DataFrame:
+        """Return the subset of `active_table.table` that can be reused next step.
+
+        Parameters
+        ----------
+        active_table : ActiveEventTable
+            The active event table built at step N (post-refinement).
+        executed_idx : int
+            Row index in `active_table.table` of the event that was executed.
+        system : System
+            The atomic system, positions already advanced to post-execution.
+        positions_pre : np.ndarray
+            Snapshot of `system.positions` taken just before the event was
+            applied (same atom ordering as `system.positions`).
+
+        Returns
+        -------
+        pd.DataFrame
+            Subset of `active_table.table` to carry into step N+1. Empty
+            DataFrame if nothing is recyclable.
+
+        """
 
 
-def select_recyclable_events(
-    active_table: ActiveEventTable,
-    executed_idx: int,
-    system: System,
-    positions_pre: np.ndarray,
-    movement_thr: float,
-    distance_thr: float,
-) -> pd.DataFrame:
-    """Return the rows of `active_table` that pass both the movement and distance checks.
+class DistanceRecycling(Recycling):
+    """Recycle events whose central atom (a) did not move and (b) is far from the executed event.
 
-    Parameters
-    ----------
-    active_table : ActiveEventTable
-        The active event table from the current step (post-refinement).
-    executed_idx : int
-        Row index in `active_table.table` of the event that was executed.
-    system : System
-        The atomic system with positions already updated to post-execution.
-    positions_pre : np.ndarray
-        Snapshot of `system.positions` taken before the event was applied.
-    movement_thr : float
-        Displacement threshold in Angstroms. Atoms moving less than this are "unmoved".
-    distance_thr : float
-        Distance threshold in Angstroms (PBC-aware) from the executed event's central atom.
+    A candidate event survives iff BOTH:
 
-    Returns
-    -------
-    pd.DataFrame
-        Subset of `active_table.table` containing the rows that can be recycled into the
-        next step. Empty DataFrame if nothing is recyclable.
+      1. its central atom's pre→post displacement (PBC minimum-image) is below
+         ``movement_thr``, AND
+      2. its central atom's distance to the executed event's central atom
+         (PBC-aware minimum-image) is above ``distance_thr``.
 
+    Otherwise the event is dropped and step N+1 will re-search / re-refine it.
+    Both thresholds are in Angstroms.
     """
-    table = active_table.table
-    if executed_idx not in table.index or len(table) <= 1:
-        return table.iloc[0:0].copy()
 
-    cell = np.asarray(system.cell)
-    disp_per_atom = np.linalg.norm(
-        _minimum_image(system.positions - positions_pre, cell), axis=1
-    )
+    def __init__(self, movement_thr: float, distance_thr: float) -> None:
+        self.movement_thr = movement_thr
+        self.distance_thr = distance_thr
 
-    executed_atom = int(table.loc[executed_idx, "atom_index"])
-    executed_pos = system.positions[executed_atom]
+    def select_recyclable(
+        self,
+        active_table: ActiveEventTable,
+        executed_idx: int,
+        system: System,
+        positions_pre: np.ndarray,
+    ) -> pd.DataFrame:
+        """Apply the two-fold check; see class docstring."""
+        table = active_table.table
 
-    keep_rows: list[int] = []
-    for i in table.index:
-        if i == executed_idx:
-            continue
-        atom_idx = int(table.loc[i, "atom_index"])
-        if disp_per_atom[atom_idx] >= movement_thr:
-            continue
-        dvec = _minimum_image(system.positions[atom_idx] - executed_pos, cell)
-        if np.linalg.norm(dvec) <= distance_thr:
-            continue
-        keep_rows.append(i)
+        # Trivial case: only the executed event in the table — nothing to recycle.
+        if executed_idx not in table.index or len(table) <= 1:
+            return table.iloc[0:0].copy()
 
-    if not keep_rows:
-        return table.iloc[0:0].copy()
-    return table.loc[keep_rows].reset_index(drop=True).copy()
+        # Per-atom displacement magnitudes pre → post (PBC minimum-image).
+        # Vectorized over the whole system; we'll index by atom_index below.
+        disp = per_atom_displacement(positions_pre, system.positions, system.cell)
+
+        # Reference point for the distance check: the just-executed event's
+        # central atom (post-execution position).
+        executed_atom = int(table.loc[executed_idx, "atom_index"])
+        executed_pos = system.positions[executed_atom]
+
+        # Per-axis box lengths used for minimum-image wrapping below.
+        cell_lengths = np.linalg.norm(system.cell, axis=1)
+
+        keep_rows = []
+        for i in table.index:
+            # Never recycle the just-executed event itself.
+            if i == executed_idx:
+                continue
+            atom_idx = int(table.loc[i, "atom_index"])
+
+            # (1) Movement check: this central atom must NOT have moved.
+            if disp[atom_idx] >= self.movement_thr:
+                continue
+
+            # (2) Distance check: this central atom must be FAR from the
+            # executed event. PBC minimum-image wrap per axis.
+            dvec = system.positions[atom_idx] - executed_pos
+            for axis in range(3):
+                dvec[axis] -= cell_lengths[axis] * np.round(dvec[axis] / cell_lengths[axis])
+            if np.linalg.norm(dvec) <= self.distance_thr:
+                continue
+
+            keep_rows.append(i)
+
+        if not keep_rows:
+            return table.iloc[0:0].copy()
+        return table.loc[keep_rows].reset_index(drop=True).copy()

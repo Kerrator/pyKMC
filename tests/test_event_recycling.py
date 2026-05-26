@@ -1,8 +1,10 @@
 """Tests for the v2 event-recycling feature (displacement + distance).
-Goal with this test is to have 3 vacancies with 2 close together with a 3rd far away, we should see
-that when event around vacancy A or B is excuted then the events around vacancy C will be recycled.
-a test should also have two close events be on other sides of PBC to check that this distance is PBC aware
 
+Goal: realistic Ni FCC box with 3 vacancies — two close together (A, B ~8 Å)
+and one far away (C ~20 Å). When the event around vacancy A is executed, the
+event around vacancy C should be recycled and the one around B should not.
+A separate test also exercises a 4th vacancy placed across the periodic wrap
+to verify PBC-aware minimum-image distance.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from pydantic import ValidationError
 
 from pykmc import Config, System
 from pykmc.config import EventRecyclingConfig
-from pykmc.event_recycling import select_recyclable_events
+from pykmc.event_recycling import DistanceRecycling, Recycling
 from pykmc.event_table import ActiveEventTable
 
 
@@ -96,7 +98,7 @@ def _make_ni_fcc_with_vacancies(
     L = repeats * a
 
     # Snap each target to the closest FCC site (PBC-aware).
-    removed_pre: list[int] = []
+    removed_pre = []
     for target in vacancy_targets:
         diff = positions - np.asarray(target)
         diff -= L * np.round(diff / L)
@@ -104,7 +106,7 @@ def _make_ni_fcc_with_vacancies(
         removed_pre.append(idx)
 
     # Pick one nearest neighbor per vacancy (must not itself be a vacancy or already chosen).
-    central_pre: list[int] = []
+    central_pre = []
     for vac_idx in removed_pre:
         diff = positions - positions[vac_idx]
         diff -= L * np.round(diff / L)
@@ -137,38 +139,60 @@ def _make_ni_fcc_with_vacancies(
 
 class TestEventRecyclingConfig:
     def test_defaults(self) -> None:
-        cfg = EventRecyclingConfig()
-        assert cfg.enabled is False
+        cfg = EventRecyclingConfig(style="displacement")
+        assert cfg.style == "displacement"
         assert cfg.movement_thr == 0.02
         assert cfg.distance_thr == 10.0
 
+    def test_style_required(self) -> None:
+        with pytest.raises(ValidationError):
+            EventRecyclingConfig()
+
+    def test_invalid_style(self) -> None:
+        with pytest.raises(ValidationError):
+            EventRecyclingConfig(style="garbage")
+
     def test_thresholds_must_be_positive(self) -> None:
         with pytest.raises(ValidationError):
-            EventRecyclingConfig(movement_thr=0.0)
+            EventRecyclingConfig(style="displacement", movement_thr=0.0)
         with pytest.raises(ValidationError):
-            EventRecyclingConfig(distance_thr=-1.0)
+            EventRecyclingConfig(style="displacement", distance_thr=-1.0)
 
     def test_ini_parsing(self, tmp_path) -> None:
         ini = tmp_path / "input.in"
         ini.write_text(
-            _BASE_INI
+            _BASE_INI.replace(
+                "engine_use_rank_0 = True\n",
+                "engine_use_rank_0 = True\nrecycle = True\n",
+            )
             + "[EventRecycling]\n"
-            + "enabled = True\n"
+            + "style = displacement\n"
             + "movement_thr = 0.05\n"
             + "distance_thr = 8.0\n"
         )
         config = Config.from_ini_file(str(ini))
-        assert config.eventrecycling.enabled is True
+        assert config.control.recycle is True
+        assert config.eventrecycling.style == "displacement"
         assert config.eventrecycling.movement_thr == 0.05
         assert config.eventrecycling.distance_thr == 8.0
 
-    def test_section_optional(self, tmp_path) -> None:
+    def test_section_optional_when_recycle_false(self, tmp_path) -> None:
         ini = tmp_path / "input.in"
         ini.write_text(_BASE_INI)
         config = Config.from_ini_file(str(ini))
-        assert config.eventrecycling.enabled is False
-        assert config.eventrecycling.movement_thr == 0.02
-        assert config.eventrecycling.distance_thr == 10.0
+        assert config.control.recycle is False
+        assert config.eventrecycling is None
+
+    def test_section_required_when_recycle_true(self, tmp_path) -> None:
+        ini = tmp_path / "input.in"
+        ini.write_text(
+            _BASE_INI.replace(
+                "engine_use_rank_0 = True\n",
+                "engine_use_rank_0 = True\nrecycle = True\n",
+            )
+        )
+        with pytest.raises((ValueError, ValidationError)):
+            Config.from_ini_file(str(ini))
 
 
 class TestRealisticVacancyScenario:
@@ -194,6 +218,10 @@ class TestRealisticVacancyScenario:
         )
 
     @staticmethod
+    def _recycler(movement_thr: float = 0.02, distance_thr: float = 10.0) -> DistanceRecycling:
+        return DistanceRecycling(movement_thr=movement_thr, distance_thr=distance_thr)
+
+    @staticmethod
     def _row(atom_index: int) -> dict:
         return {
             "atom_index": atom_index,
@@ -208,16 +236,14 @@ class TestRealisticVacancyScenario:
     def test_close_discarded_far_recycled(self) -> None:
         """8-Å vacancy must NOT be recycled; 20-Å vacancy MUST be recycled."""
         system, _vac, central = self._build()
-        # Sanity: we should have ~3997 atoms.
+        # Sanity: we should have 4000 - 3 atoms.
         assert len(system.positions) == 4000 - 3
         positions_pre = system.positions.copy()
         # Simulate execution at vacancy A: shift its central atom by 0.3 Å.
         system.positions[central[0]] = positions_pre[central[0]] + np.array([0.3, 0.0, 0.0])
         active = _make_active_table([self._row(c) for c in central])
-        recycled = select_recyclable_events(
-            active, executed_idx=0, system=system,
-            positions_pre=positions_pre,
-            movement_thr=0.02, distance_thr=10.0,
+        recycled = self._recycler().select_recyclable(
+            active, executed_idx=0, system=system, positions_pre=positions_pre,
         )
         assert len(recycled) == 1
         assert int(recycled.iloc[0]["atom_index"]) == central[2]
@@ -228,10 +254,8 @@ class TestRealisticVacancyScenario:
         positions_pre = system.positions.copy()
         system.positions[central[0]] = positions_pre[central[0]] + np.array([0.3, 0.0, 0.0])
         active = _make_active_table([self._row(c) for c in central])
-        recycled = select_recyclable_events(
-            active, executed_idx=0, system=system,
-            positions_pre=positions_pre,
-            movement_thr=0.02, distance_thr=25.0,
+        recycled = self._recycler(distance_thr=25.0).select_recyclable(
+            active, executed_idx=0, system=system, positions_pre=positions_pre,
         )
         assert len(recycled) == 0
 
@@ -242,10 +266,8 @@ class TestRealisticVacancyScenario:
         system.positions[central[0]] = positions_pre[central[0]] + np.array([0.3, 0.0, 0.0])
         system.positions[central[2]] = positions_pre[central[2]] + np.array([0.05, 0.0, 0.0])
         active = _make_active_table([self._row(c) for c in central])
-        recycled = select_recyclable_events(
-            active, executed_idx=0, system=system,
-            positions_pre=positions_pre,
-            movement_thr=0.02, distance_thr=10.0,
+        recycled = self._recycler().select_recyclable(
+            active, executed_idx=0, system=system, positions_pre=positions_pre,
         )
         assert len(recycled) == 0
 
@@ -255,10 +277,8 @@ class TestRealisticVacancyScenario:
         positions_pre = system.positions.copy()
         system.positions[central[0]] = positions_pre[central[0]] + np.array([0.3, 0.0, 0.0])
         active = _make_active_table([self._row(c) for c in central])
-        recycled = select_recyclable_events(
-            active, executed_idx=0, system=system,
-            positions_pre=positions_pre,
-            movement_thr=0.02, distance_thr=10.0,
+        recycled = self._recycler().select_recyclable(
+            active, executed_idx=0, system=system, positions_pre=positions_pre,
         )
         assert central[0] not in [int(a) for a in recycled["atom_index"].tolist()]
 
@@ -275,10 +295,16 @@ class TestRealisticVacancyScenario:
         positions_pre = system.positions.copy()
         system.positions[central[0]] = positions_pre[central[0]] + np.array([0.3, 0.0, 0.0])
         active = _make_active_table([self._row(c) for c in central])
-        recycled = select_recyclable_events(
-            active, executed_idx=0, system=system,
-            positions_pre=positions_pre,
-            movement_thr=0.02, distance_thr=10.0,
+        recycled = self._recycler().select_recyclable(
+            active, executed_idx=0, system=system, positions_pre=positions_pre,
         )
         recycled_idx = [int(a) for a in recycled["atom_index"].tolist()]
         assert recycled_idx == [central[2]]
+
+
+class TestRecyclingABC:
+    """The Recycling base class is abstract and cannot be instantiated."""
+
+    def test_cannot_instantiate_abstract_base(self) -> None:
+        with pytest.raises(TypeError):
+            Recycling()  # type: ignore[abstract]
