@@ -1,6 +1,14 @@
 """Module containing function to apply geometric transformations."""
 
-__all__ = ["transform_positions", "translate", "push_towards", "compute_delr"]
+__all__ = [
+    "transform_positions",
+    "translate",
+    "push_towards",
+    "compute_distances",
+    "count_moved_atoms",
+    "compute_delr_max",
+    "compute_delr_l2",
+]
 import ase.geometry
 import numpy as np
 
@@ -60,40 +68,54 @@ def translate(
     return positions
 
 
-def push_towards(current_positions, target_positions, fraction = 0.1, cell = None) : 
+def push_towards(current_positions, target_positions, fraction=0.1, cell=None):
     displacement = target_positions - current_positions
 
     if cell is not None:
         box = np.diag(cell)
         displacement -= np.round(displacement / box) * box
-        #unwrap target
+        # unwrap target
         target_positions_unwrapped = current_positions + displacement
     else:
         target_positions_unwrapped = target_positions
 
-    new_positions = current_positions + fraction * (target_positions_unwrapped - current_positions)
+    new_positions = current_positions + fraction * (
+        target_positions_unwrapped - current_positions
+    )
 
-    if cell is not None : 
-        new_positions = ase.geometry.wrap_positions(positions=new_positions, cell=cell, pbc=[True, True, True])
+    if cell is not None:
+        new_positions = ase.geometry.wrap_positions(
+            positions=new_positions, cell=cell, pbc=[True, True, True]
+        )
     return new_positions
 
-def compute_delr(positions_1, positions_2, cell=None) : 
+
+def compute_distances(positions_1, positions_2, cell=None) -> np.ndarray:
+    """Return per-atom distances between two configurations."""
     displacements = positions_2 - positions_1
 
-    if cell is not None : 
-        cell_lengths = np.linalg.norm(cell, axis=1)  
+    if cell is not None:
+        _wrapped_displacements, distances = ase.geometry.find_mic(
+            displacements, cell=cell, pbc=True
+        )
+        return np.asarray(distances)
 
-        #apply pbc 
-
-        for i in range(3) : 
-            displacements[:, i] -= cell_lengths[i] * np.round(displacements[:, i] / cell_lengths[i])
-    
-    # Calcul des normes des déplacements
-    distances = np.linalg.norm(displacements, axis=1)
-    
-    # Retour du déplacement maximum
-    delr = np.max(distances)
-    
-    return delr
+    return np.linalg.norm(displacements, axis=1)
 
 
+def count_moved_atoms(positions_1, positions_2, threshold, cell=None) -> int:
+    """Return the number of atoms displaced by more than ``threshold``."""
+    distances = compute_distances(positions_1, positions_2, cell=cell)
+    return int(np.count_nonzero(distances > threshold))
+
+
+def compute_delr_max(positions_1, positions_2, cell=None):
+    distances = compute_distances(positions_1, positions_2, cell=cell)
+    if distances.size == 0:
+        return 0.0
+    return float(np.max(distances))
+
+
+def compute_delr_l2(positions_1, positions_2, cell=None):
+    distances = compute_distances(positions_1, positions_2, cell=cell)
+    return float(np.linalg.norm(distances))
