@@ -32,3 +32,6 @@ __pycache__/
 *SOURCES.txt 
 *requires.txt
 *__pycache__
+
+# Local working notes (not part of project)
+WSL_INSTALL_HANDOFF.md
