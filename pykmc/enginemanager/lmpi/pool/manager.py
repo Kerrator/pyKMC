@@ -178,7 +178,7 @@ class Manager:
         future = self.submit_job("get_total_energy", {"positions": positions})
         return future
 
-    def partn_search(self, config, central_atom: list[int], positions=None, cell=None, type=None) -> list[Future] :
+    def partn_search(self, config, central_atom: list[int], positions=None, cell=None, types=None) -> list[Future] :
         futures = []
         for atom in central_atom:
             f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "types":types})

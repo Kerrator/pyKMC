@@ -265,8 +265,8 @@ class MpiApiSession :
     ):
         self._is_busy = True
         #print(f"[Session] Launching pARTn search")
-        try : 
-            self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell": cell, "type": type}})
+        try :
+            self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell": cell, "types": types}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result" : 
                 return msg["value"]

@@ -294,8 +294,10 @@ def _make_frozen_group(engine, config, positions, types) -> bool:
     """Resolve frozen atoms and create g_frozen group. Returns True if any atoms are frozen."""
     if config.frozen_atoms is None:
         return False
-    if positions is None or types is None:
-        return False
+    if positions is None:
+        positions = get_positions(engine)
+    if types is None:
+        types = get_types(engine)
     frozen_ae = AtomicEnvironment(
         style="region",
         region=config.frozen_atoms,
