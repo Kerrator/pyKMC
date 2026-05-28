@@ -266,6 +266,8 @@ class Refinement:
                 "config": self.config,
                 "central_atom": at_idx,
                 "positions": self.system.positions.copy(),
+                "cell": self.system.cell,
+                "types": self.system.types.copy(),
                 "num_reference_event": num_reference_event,
                 "symmetry_index": symmetry_index,
             }
