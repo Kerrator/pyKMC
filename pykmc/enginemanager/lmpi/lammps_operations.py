@@ -97,7 +97,11 @@ def initialize_potential(engine, config):
     engine.command("pair_coeff {}".format(pair_coeff))
     for cmd in config.lammps.setup_commands or []:
         engine.command(cmd)
-    if config.otfml and config.otfml.enabled:
+    if config.control.otfml:
+        if not pair_style.strip().startswith("mtp/extrapolation"):
+            raise RuntimeError(
+                "OTFML requires `pair_style mtp/extrapolation`."
+            )
         ensure_otfml_dirs()
         dump_path = session_dump_path(engine.engine_id).as_posix()
         engine.command(f"variable {OTFML_TOL_FLAG_INTERNAL} internal 0")
@@ -108,9 +112,20 @@ def initialize_potential(engine, config):
         engine.command(
             f"variable {OTFML_MAX_FLAG_VARIABLE} equal v_{OTFML_MAX_FLAG_INTERNAL}"
         )
-        engine.command(
-            f"fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1"
-        )
+        try:
+            engine.command(
+                "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1"
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "Please use the MLIP-3 style extrapolation for configuration mode MTPs" in msg:
+                raise RuntimeError(
+                    "The loaded MTP is in configuration mode. "
+                    "Current pyKMC OTFML expects neighborhood-mode `mtp/extrapolation` "
+                    "with per-atom `f_extrapolation_grade` support. "
+                    "Use a neighborhood-mode MTP or disable OTFML"
+                ) from exc
+            raise
         engine.command(f"compute max_grade all pair mtp/extrapolation")
         engine.command(f"variable max_grade equal c_max_grade[1]")
         engine.command(
@@ -122,7 +137,7 @@ def initialize_potential(engine, config):
         engine.command(f"dump_modify extrapolative_structures_dump append yes")
         engine.command(f"dump_modify extrapolative_structures_dump skip v_dump_skip")
         engine.command(
-            f"fix extreme_extrapolation all halt 3 v_max_grade > {OTFML_MAX_GAMMA:.4f} error continue"
+            f"fix extreme_extrapolation all halt 1 v_max_grade > {OTFML_MAX_GAMMA:.4f} error continue"
         )
         engine.command(f"thermo 1")
         engine.command(f"thermo_style custom step pe v_max_grade")
@@ -259,9 +274,9 @@ def minimize_with_results(engine, config, positions=None, types=None):
     _remove_frozen_fix(engine, "f_frozen_min", atoms_frozen)
     _delete_frozen_group(engine, atoms_frozen)
     new_positions = get_positions(engine)
-    total_energy = get_total_energy(engine)
+    potential_energy = get_potential_energy(engine)
     if engine.rank == 0:
-        return new_positions, total_energy
+        return new_positions, potential_energy
 
 
 def minimize_freeze_core(
@@ -456,7 +471,7 @@ def partn_search(
 
     # EXTRACT DATA
     if engine.rank == 0:
-        if config.otfml and config.otfml.enabled:
+        if config.control.otfml:
             extrapolation_error = _build_extrapolation_error(
                 get_otf_flags(engine),
                 phase="search",
@@ -690,7 +705,7 @@ def partn_refine(
 
             # EXTRACT DATA
             if engine.rank == 0:
-                if config.otfml and config.otfml.enabled:
+                if config.control.otfml:
                     extrapolation_error = _build_extrapolation_error(
                         get_otf_flags(engine),
                         phase="refine",

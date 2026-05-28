@@ -50,7 +50,7 @@ class Manager:
         """ 
         Initialize engines with the same system and config
         """
-        self.otf_enabled = bool(config.otfml and config.otfml.enabled)
+        self.otf_enabled = bool(config.control.otfml and config.otfml)
         print("[Manager] use local")
         self.use_local()
         print("[Manager] Initializing all Lammps engines")

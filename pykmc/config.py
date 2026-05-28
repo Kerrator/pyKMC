@@ -105,6 +105,11 @@ class ControlConfig(BaseModel):
         description="Enable event selection bias. Requires a [Bias] section."
     )
 
+    otfml: Optional[bool] = Field(
+        default=False,
+        description="Enable on-the-fly ML retraining. Requires an [OTFML] section with retrain_command.",
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
@@ -546,10 +551,6 @@ class LammpsConfig(BaseModel):
 class OTFMLConfig(BaseModel):
     """On-the-fly machine learning potential parameters."""
 
-    enabled: bool = Field(
-        default=False,
-        description="Enable on-the-fly ML potential retraining.",
-    )
     retrain_command: Optional[str] = Field(
         default=None,
         description="Command executed when new extrapolation dumps are detected.",
@@ -924,7 +925,7 @@ class Config(BaseModel):
             ("control.basin", True) : ["basin"],
             ("control.active_volume", True) : ["activevolume"],
             ("control.bias", True) : ["bias"],
-            ("otfml.enabled", True): ["otfml.retrain_command"],
+            ("control.otfml", True): ["otfml", "otfml.retrain_command"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():
@@ -940,8 +941,13 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
-        if self.otfml and self.otfml.enabled and self.control.active_volume:
+        if self.control.otfml and self.control.active_volume:
             raise ValueError("OTFML does not support active_volume=True in v1.")
+        if self.control.otfml and self.lammps is not None:
+            if not self.lammps.pair_style.strip().startswith("mtp/extrapolation"):
+                raise ValueError(
+                    "OTFML requires `pair_style mtp/extrapolation`."
+                )
         return self
 
 

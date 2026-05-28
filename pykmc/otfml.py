@@ -28,7 +28,7 @@ class OTFMLController:
     def __init__(self, kmc: KMC) -> None:
         self.kmc = kmc
         self.config = kmc.config.otfml
-        self.enabled = bool(self.config and self.config.enabled)
+        self.enabled = bool(kmc.config.control.otfml and self.config)
         if self.enabled:
             ensure_otfml_dirs()
 
