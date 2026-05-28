@@ -1,5 +1,9 @@
 """Module implementing Classes to manage reference events and active events."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
@@ -19,6 +23,9 @@ from .result import (
 )
 from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr
+
+if TYPE_CHECKING:
+    from .event_recycling import Recycling
 
 
 class ReferenceEventTable:
@@ -560,8 +567,17 @@ class ActiveEventTable:
 
     """
 
-    def __init__(self, config: Config, event_dataframe: pd.DataFrame = None):
+    def __init__(
+        self,
+        config: Config,
+        event_dataframe: pd.DataFrame = None,
+        recycler: "Recycling | None" = None,
+    ):
         self.config = config
+        # Optional recycling plugin. If attached, `prune_for_recycling` keeps
+        # the rows the recycler selects between KMC steps. If None, the table
+        # is cleared at the end of each step (matching prior behavior).
+        self.recycler = recycler
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -578,6 +594,39 @@ class ActiveEventTable:
                 "refined": pd.Series(dtype="str")
             }
             self.table = pd.DataFrame(columns)
+
+    def prune_for_recycling(
+        self,
+        executed_idx: int,
+        system: System,
+        positions_pre: np.ndarray,
+    ) -> None:
+        """Replace `self.table` with the rows that survive the recycler's filter.
+
+        If no recycler is attached, clear the table (matches the prior
+        end-of-step `del active_table` behavior).
+        """
+        if self.recycler is None:
+            self.table = self.table.iloc[0:0].reset_index(drop=True)
+        else:
+            self.table = self.recycler.select_recyclable(
+                self, executed_idx, system, positions_pre,
+            )
+
+    def existing_pairs(self) -> set[tuple[int, int]]:
+        """Return `(atom_index, num_reference_event)` tuples already in the table.
+
+        Used by `Refinement.execute` to skip pairs that survived the last step
+        and don't need to be refined again.
+        """
+        if len(self.table) == 0:
+            return set()
+        return set(
+            zip(
+                self.table["atom_index"].astype(int).tolist(),
+                self.table["num_reference_event"].astype(int).tolist(),
+            )
+        )
 
     def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
         """Add active events to the table.

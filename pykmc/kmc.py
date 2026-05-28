@@ -44,7 +44,7 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
-from .event_recycling import DistanceRecycling, Recycling
+from .event_recycling import DistanceRecycling
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -92,7 +92,7 @@ class KMC:
         self.visited_environments = None
         self.total_energy = None
         self.potential_energy = None
-        self.recycled_events: pd.DataFrame | None = None
+        self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
 
     def run(self) -> None:
@@ -131,10 +131,21 @@ class KMC:
 
         # LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
-        last_step +=1 
+        last_step +=1
         nsearch = self.config.eventsearch.nsearch
 
-        
+        # Build the persistent active event table once, optionally with a
+        # recycler plugin attached. The recycler decides what to carry over
+        # between KMC steps at end-of-step; with no recycler the table is
+        # cleared each step (same observable behavior as prior releases).
+        recycler = None
+        if self.config.control.recycle:
+            if self.config.eventrecycling.style == "displacement":
+                recycler = DistanceRecycling(
+                    movement_thr=self.config.eventrecycling.movement_thr,
+                    distance_thr=self.config.eventrecycling.distance_thr,
+                )
+        self.active_table = ActiveEventTable(self.config, recycler=recycler)
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps+last_step):
@@ -151,20 +162,18 @@ class KMC:
             # == Find Current atomic environments that has not been visited ==
             new_environments = self.get_new_environments()
 
-            # == Event recycling: collect atom indices we can skip this step ==
-            if self.recycled_events is not None and len(self.recycled_events) > 0:
-                skip_atoms = set(int(a) for a in self.recycled_events["atom_index"].tolist())
+            if self.config.control.recycle and len(self.active_table.table) > 0:
                 self.loggers.info(
                     "log",
-                    "\t :=> Recycling {} events from the previous step".format(len(skip_atoms)),
+                    "\t :=> Recycling {} events from the previous step".format(
+                        len(self.active_table.table)
+                    ),
                 )
-            else:
-                skip_atoms = set()
 
             # == FIND NEW GENERIC EVENTS ==
             ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(
-                new_environments, nsearch, skip_atoms=skip_atoms
+                new_environments, nsearch
             )
 
             ##=>Perform event search on each atom in central_atom_research_list
@@ -195,19 +204,17 @@ class KMC:
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
             )
-            ##=>Refines all event in subset
-            refinement = self.execute_refinements(subset_reference_event_table, skip_atoms=skip_atoms)
+            ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
+            refinement = self.execute_refinements(
+                subset_reference_event_table,
+                existing_pairs=self.active_table.existing_pairs(),
+            )
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
-            active_table = self.add_active_events(refinement.get_successes_results())
-
-            # == Merge recycled events from previous step (already refined, valid) ==
-            if self.recycled_events is not None and len(self.recycled_events) > 0:
-                active_table.table = pd.concat(
-                    [active_table.table, self.recycled_events],
-                    ignore_index=True,
-                )
-                self.recycled_events = None
+            # The persistent self.active_table is extended in place; recycled
+            # rows from the previous step are already present.
+            self.add_active_events(refinement.get_successes_results())
+            active_table = self.active_table
 
             active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
             self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
@@ -287,31 +294,28 @@ class KMC:
                 if basin.connectivity_table is not None :
                     basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
                 #update delta_t, ktot (use basin infos)
-                # Basin super-event spans many atoms; recycling deferred (disabled on basin step).
-                self.recycled_events = None
+                # Basin super-event spans many atoms; detach the recycler so
+                # prune_for_recycling clears the table (recycling deferred).
+                saved_recycler = self.active_table.recycler
+                self.active_table.recycler = None
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
+                self.active_table.recycler = saved_recycler
             else :
                 self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                 self.total_energy = result_reconstruction.ok_value().min2_etot
-                # == Event recycling: capture non-perturbed events for the next step ==
+                # == Event recycling: prune the active table for next step ==
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
                 if self.config.control.recycle:
-                    recycler: Recycling
-                    if self.config.eventrecycling.style == "displacement":
-                        recycler = DistanceRecycling(
-                            movement_thr=self.config.eventrecycling.movement_thr,
-                            distance_thr=self.config.eventrecycling.distance_thr,
-                        )
-                    self.recycled_events = recycler.select_recyclable(
-                        active_table,
-                        idx_selected_event,
-                        self.system,
-                        self._pre_exec_positions,
-                    )
                     self.loggers.info(
                         "log",
-                        "\t :=> {} events flagged for recycling".format(len(self.recycled_events)),
+                        "\t :=> {} events flagged for recycling".format(
+                            len(self.active_table.table)
+                        ),
                     )
-                else:
-                    self.recycled_events = None
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions 
@@ -402,10 +406,7 @@ class KMC:
         return new_environments
 
     def central_atoms_research(
-        self,
-        new_environments: list[str | bytes],
-        nsearch: int,
-        skip_atoms: set[int] | None = None,
+        self, new_environments: list[str | bytes], nsearch: int
     ) -> list[int]:
         """Generate list of central atoms on which we gonna perform generic event searches for the reference table.
 
@@ -417,9 +418,6 @@ class KMC:
             List of atomic environment ID.
         nsearch : int
             Number of searches per atomic environment.
-        skip_atoms : set[int] | None, optional
-            Atom indices to exclude from selection (e.g. atoms whose events are
-            being recycled from the previous step).
 
         Returns
         -------
@@ -432,8 +430,6 @@ class KMC:
             If no atoms are found for a given environment, random.choice will raise an IndexError.
 
         """
-        if skip_atoms is None:
-            skip_atoms = set()
         central_atom_research_list = []
         # for each atomic environment hash in new_environment
         for env in new_environments:
@@ -441,10 +437,8 @@ class KMC:
             tmp1 = [
                 i
                 for i, e in enumerate(self.atomic_environment.atomic_environment_list)
-                if e == env and i not in skip_atoms
+                if e == env
             ]
-            if not tmp1:
-                continue
             # Randomly choose nsearch atoms that have that environment
             tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
@@ -498,7 +492,7 @@ class KMC:
     def execute_refinements(
         self,
         df_reference_events: pd.DataFrame,
-        skip_atoms: set[int] | None = None,
+        existing_pairs: set[tuple[int, int]] | None = None,
     ) -> Refinement:
         """Refine all events in df_reference_events for all atoms on which they can be apply.
 
@@ -506,9 +500,10 @@ class KMC:
         ----------
         df_reference_events : pd.DataFrame
             Subset of the reference table with events that can be apply to the current system.
-        skip_atoms : set[int] | None, optional
-            Atom indices to skip refinement on (e.g. atoms whose events are
-            being recycled from the previous step).
+        existing_pairs : set[tuple[int, int]] | None, optional
+            `(atom_index, num_reference_event)` pairs already present in the
+            persistent active table (carried over from the previous step).
+            These are skipped during refinement.
 
         Returns
         -------
@@ -525,7 +520,7 @@ class KMC:
             self.manager,
         )
         #refinement.execute(df_reference_events, self.potential_energy)
-        refinement.execute(df_reference_events, self.total_energy, skip_atoms=skip_atoms)
+        refinement.execute(df_reference_events, self.total_energy, existing_pairs=existing_pairs)
         return refinement
 
     def add_active_events(
@@ -544,9 +539,11 @@ class KMC:
             The active event table object.
 
         """
-        active_table = ActiveEventTable(self.config)
-        active_table.add_events(events)
-        return active_table
+        # Extend the persistent active table (initialised once in `run()`).
+        # Any rows surviving from the previous step are already present and
+        # are not re-added because Refinement skipped them via existing_pairs.
+        self.active_table.add_events(events)
+        return self.active_table
 
     def _select_event(self, active_table: ActiveEventTable) -> tuple[int, float, float]:
         """Select an event in the active table based on the refection free algorithm.

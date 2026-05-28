@@ -56,7 +56,7 @@ class Refinement:
         self,
         df_reference_events: pd.DataFrame,
         total_energy,
-        skip_atoms: set[int] | None = None,
+        existing_pairs: set[tuple[int, int]] | None = None,
     ) -> None:
         """Execute event refinements for each reference event in the df_reference_events dataframe.
 
@@ -66,13 +66,13 @@ class Refinement:
         ----------
         df_reference_events : pd.DataFrame
             dataframe of reference events to refine.
-        skip_atoms : set[int] | None, optional
-            Atom indices to skip refinement on (e.g. atoms whose events are
-            being recycled from the previous step).
+        existing_pairs : set[tuple[int, int]] | None, optional
+            `(atom_index, num_reference_event)` pairs already present in the
+            active event table (carried over from the previous step). These
+            are skipped during refinement.
 
         """
-        if skip_atoms is None:
-            skip_atoms = set()
+        existing_pairs = existing_pairs or set()
         self.results = []
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
@@ -86,9 +86,10 @@ class Refinement:
         for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
+            ref_idx = int(dfevent["idx_ref"])
 
             for at_idx in atoms_refine_idx:
-                if at_idx in skip_atoms:
+                if (at_idx, ref_idx) in existing_pairs:
                     continue
                 ###=>refine single generic
                 futures = self.refine_single(at_idx, dfevent, total_energy, future_context, e_thr)
