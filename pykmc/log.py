@@ -118,6 +118,10 @@ class LogManager:
         """Similar to `debug()`, but for the CRITICAL level."""
         self._get_active_logger(logger_name).critical(msg, *args, **kwargs)
 
+    def is_enabled_for(self, logger_name: str, level: int) -> bool:
+        """Return whether the specified logger would emit records at ``level``."""
+        return self._get_active_logger(logger_name).isEnabledFor(level)
+
 
 class Colors(Enum):
     """An enumeration of ANSI escape codes for common text colors and styles.

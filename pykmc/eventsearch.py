@@ -1,7 +1,8 @@
 """Module implementing the EventSearch class that deals with the event search procedure."""
 
-import concurrent.futures
 
+import concurrent.futures
+import logging
 from .result import ErrorInfo, EventSearchOutput, Result, SearchTask
 from .system import System
 from .enginemanager.lmpi.pool import Manager
@@ -48,7 +49,7 @@ class EventSearch:
         tasks = self.build_tasks(central_atom_research_list)
         self.loggers.info(
             "log",
-            "\t :=> Searching {} reference events".format(len(tasks)),
+            f"\t :=> Searching {len(tasks)} reference events",
         )
         self.tasks = tasks
         self.results = [None] * len(tasks)
@@ -78,26 +79,70 @@ class EventSearch:
                 central_atom=[task.central_atom_index for task in tasks],
                 positions=self.system.positions.copy(),
                 cell=self.system.cell.copy(),
-                type=self.system.types.copy(),
+                types=self.system.types.copy(),
             )
         else:
             futures = self.manager.partn_search(
                 config=self.config,
                 central_atom=[task.central_atom_index for task in tasks],
                 positions=self.system.positions.copy(),
+                cell=self.system.cell.copy(),
+                types=self.system.types.copy(),
             )
 
-        future_to_task_id = {
-            future: task.task_id
-            for task, future in zip(tasks, futures, strict=False)
+        future_to_task = {
+            future: task for task, future in zip(tasks, futures, strict=False)
         }
+
         run_results = {}
-        for i, future in enumerate(
-            concurrent.futures.as_completed(future_to_task_id)
-        ):
-            run_results[future_to_task_id[future]] = future.result()
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_task)):
+            task = future_to_task[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                self.loggers.error(
+                    "log",
+                    f"\n\t task {task.task_id:5d} | atom {task.central_atom_index:6d} | {'RAISE':<5} type={type(exc).__name__}",
+                )
+                raise
+            run_results[task.task_id] = result
+            self._log_task_result(task, result)
             self.loggers.progress_bar("progress", i + 1, len(tasks))
         return run_results
+
+    def _log_task_result(
+        self, task: SearchTask, result: Result[EventSearchOutput, ErrorInfo]
+    ) -> None:
+        """Temporary debug logging for per-search outcomes."""
+        if not self.loggers.is_enabled_for("log", logging.DEBUG):
+            return
+
+        prefix = f"\n\t task {task.task_id:5d} | atom {task.central_atom_index:6d}"
+        if result.is_ok():
+            output = result.ok_value()
+            self.loggers.debug(
+                "log",
+                f"{prefix} | {'OK':<5} dE_fwd={output.dE_forward:.4f} eV  dE_bwd={output.dE_backward:.4f} eV  move_atom={output.move_atom_index:6d}",
+            )
+            return
+
+        error = result.err_value()
+        parts = [
+            f"type={error.type.name}",
+        ]
+        if error.details is not None:
+            parts.append(f"details={error.details}")
+        if error.variables:
+            vars_str = ", ".join(
+                f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                for k, v in error.variables.items()
+            )
+            parts.append(f"variables=({vars_str})")
+
+        self.loggers.debug(
+            "log",
+            f"{prefix} | {'FAIL':<5} {', '.join(parts)}",
+        )
 
     def retry(self, retry_task_ids: list[int]) -> None:
         """Rerun only the requested event-search tasks."""
