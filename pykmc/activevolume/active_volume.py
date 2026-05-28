@@ -229,7 +229,7 @@ def initialize_parameters(engine):
     engine.command("atom_modify sort 0 0.0")  # ! necessary for partn
 
 
-def initialize_system(engine, system):
+def initialize_system(engine, system, config=None):
     # system parameters
     natoms = len(system.types)
     cell = system.cell
@@ -240,10 +240,12 @@ def initialize_system(engine, system):
 
     ind = np.linspace(0, natoms - 1, natoms).astype(int)
     ind += 1  # Lammps id start at 1
-    # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
+    type_order = config.lammps.type_order if (config and config.lammps.type_order) else list(dict.fromkeys(types))
+    if set(type_order) != set(types):
+        raise ValueError(f"type_order {type_order} does not match the elements in the system {sorted(set(types))}")
     map_type = {
         atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(types)))
+        for i, atom_type in enumerate(type_order)
     }
     types = [map_type[element]["ref"] for element in types]  # map to integer
 

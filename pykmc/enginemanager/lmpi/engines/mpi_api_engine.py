@@ -2,6 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
+import traceback
 from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reload_potential, reset_otf_flags, get_otf_flags, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy
 from ...messenger import QueueMessenger, MpiMessenger
 
@@ -36,6 +37,7 @@ class MpiApiEngine() :
 
         self._is_alive = False 
         self._is_busy = False 
+        self._last_error = None
         self.message_reader_thread = None 
         self.message_queue = queue.Queue() #Queue to hold messages from the session 
 
@@ -124,7 +126,7 @@ class MpiApiEngine() :
             if msg is None:
                 continue
             
-
+            self._last_error = None
             result = self._handle_message(msg)
 
             if entry_global_mode and self.global_rank == 0:
@@ -151,6 +153,7 @@ class MpiApiEngine() :
         "value": {
             "alive": self._is_alive,
             "busy": self._is_busy,
+            "error": self._last_error,
             }
         }
         messenger.send(status_msg, dest=0, tag=0)
@@ -189,6 +192,12 @@ class MpiApiEngine() :
                     result = operation_handler(self,*args, **kwargs)
                 return result
             except Exception as e:
+                self._last_error = {
+                    "type": type(e).__name__,
+                    "message": str(e),
+                    "traceback": traceback.format_exc(),
+                    "operation": msg_type,
+                }
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
             finally : 
                 entry_engine_comm.barrier()

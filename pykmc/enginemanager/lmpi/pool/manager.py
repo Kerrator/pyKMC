@@ -55,15 +55,15 @@ class Manager:
         self.use_local()
         print("[Manager] Initializing all Lammps engines")
         for session in self.sessions : 
-            session.initialize_parameters() 
-            session.initialize_system(system)
+            session.initialize_parameters()
+            session.initialize_system(system, config)
             session.initialize_potential(config)
         print("[Manager] use global")
         self.use_global()
         print("[Manager] Initializing global Lammps engines")
         if self.global_session is not None :
             self.global_initialize_parameters()
-            self.global_initialize_system(system)
+            self.global_initialize_system(system, config)
             self.global_initialize_potential(config)
 
 
@@ -181,12 +181,12 @@ class Manager:
     def partn_search(self, config, central_atom: list[int], positions=None, cell=None, type=None) -> list[Future] :
         futures = []
         for atom in central_atom:
-            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "type":type})
-            futures.append(f) 
+            f = self.submit_job("partn_search", {"config": config, "central_atom_idx": atom, "positions": positions, "cell":cell, "types":types})
+            futures.append(f)
         return futures
 
-    def partn_refine(self, config, central_atom: int, positions=None, cell=None, type=None, saddle_idx=None, saddle_positions=None, num_reference_event: int | None = None, symmetry_index: int | None = None) -> list[Future] :
-        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "type":type, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions, "num_reference_event": num_reference_event, "symmetry_index": symmetry_index})
+    def partn_refine(self, config, central_atom: int, positions=None, cell=None, types=None, saddle_idx=None, saddle_positions=None, num_reference_event: int | None = None, symmetry_index: int | None = None) -> list[Future] :
+        future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "types":types, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions, "num_reference_event": num_reference_event, "symmetry_index": symmetry_index})
         return future
 
     def close_all(self):
