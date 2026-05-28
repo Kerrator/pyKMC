@@ -162,7 +162,7 @@ class KMC:
             results_is_valid_events = self.add_reference_events(
                 event_search.get_successes_results()
             )
-
+            self.reference_table.save("test.pickle")
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
                 self.loggers.error(
