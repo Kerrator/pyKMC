@@ -8,7 +8,7 @@ def graph(
     neighbors_list: list[list[int]],
     environment_list: list[list[int]],
     atom_idx: list[int] = None,
-) -> list[bytes]:
+) -> list[str]:
     """Compute atoms's graph ID.
 
     Parameters
@@ -22,7 +22,7 @@ def graph(
 
     Returns
     -------
-    list[bytes]
+    list[str]
         List of graph ID
 
     """
