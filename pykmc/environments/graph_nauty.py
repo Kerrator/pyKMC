@@ -48,7 +48,7 @@ def graph(
     list_hash = []
 
     for g in list_g:
-        list_hash.append(pynauty.certificate(g))
+        list_hash.append(pynauty.certificate(g).hex())
     #list_hash = comm.gather(list_hash, root=0)
     #if rank == 0:
 #    list_hash = [gcertificate for e in list_hash for gcertificate in e]
