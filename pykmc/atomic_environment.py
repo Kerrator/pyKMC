@@ -1,7 +1,10 @@
 """Defines the `AtomicEnvironment` class for characterizing and computing local atomic environments."""
 
+from __future__ import annotations
+
 import numpy as np
-from .environments import cna, graph
+from .environments import cna, graph, region
+from .config import RegionConfig
 
 
 class AtomicEnvironment:
@@ -15,7 +18,7 @@ class AtomicEnvironment:
        first neighbors lists
     environment_list : list[list[int]] or None
         Optional. lists of atoms in environments (used for 'graph' or 'cna/graph' styles).
-    neighbors_add : int or None 
+    neighbors_add : int or None
         Optional. When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.
     atomic_environment_list : list
         Computed atomic environment ID for each atom. **Populated during initialization**
@@ -31,11 +34,14 @@ class AtomicEnvironment:
     def __init__(
         self,
         style: str,
-        neighbors_list: list[list[int]],
+        neighbors_list: list[list[int]] | None = None,
         environment_list: list[list[int]] | None = None,
-        neighbors_add: int = 0
+        neighbors_add: int = 0,
+        region: RegionConfig | None = None,
+        positions: np.ndarray | None = None,
+        atom_types: list[str] | None = None,
     ) -> None:
-        self.style =  style
+        self.style = style
         self.neighbors_list = neighbors_list
         self.environment_list = environment_list
         self.neighbors_add = neighbors_add
@@ -51,6 +57,10 @@ class AtomicEnvironment:
             case "cna/graph":
                 self.atomic_environment_list = self.compute_cnagraph(
                     neighbors_list, environment_list
+                )
+            case "region":
+                self.atomic_environment_list = self.compute_region(
+                    region, positions, atom_types
                 )
             case _:
                 raise Exception("Atomic environment style unknown")
@@ -77,6 +87,15 @@ class AtomicEnvironment:
         """
         #return list([]) #Set if you want to only test refinements
         return list(set(self.atomic_environment_list).difference(visited_environments))
+
+    def compute_region(
+        self,
+        r: RegionConfig | None,
+        positions: np.ndarray | None,
+        atom_types: list[str] | None,
+    ) -> list[str]:
+        """See :py:func:`.environments.region` for details."""
+        return region(r, positions, atom_types)
 
     def compute_cna(self) -> list[str]:
         """See :py:func:`.environments.cna` for details on CNA computation."""
