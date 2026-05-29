@@ -132,7 +132,6 @@ class AtomicEnvironment:
     def compute_diamondgraph(self, neighbors_list, environment_list) : 
         #Compute identify diamant ID 
         list_hash = identify_diamond(neighbors_list)
-        print(list_hash)
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
         )
