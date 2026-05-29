@@ -83,7 +83,7 @@ class KMC:
         Store atomic environment of atoms in the system
     reference_table : ReferenceEventTable
         Store generic events that can be apply to the system.
-    visited_environment : set[str|bytes]
+    visited_environment : set[str]
         Track atomic environments already explored. Those for which event searches as been previously done.
     total_energy : float
         The total energy of the system.
@@ -460,12 +460,12 @@ class KMC:
         self._save_restart_file(step, total_time)
         self._close()
 
-    def get_new_environments(self) -> list[str | bytes]:
+    def get_new_environments(self) -> list[str]:
         """Get atomic environments of the current system that has not been already explored.
 
         Returns
         -------
-        list[str|bytes]
+        list[str]
             The atomic environments of the current system that are encounter for the first time.
 
         """
@@ -479,7 +479,7 @@ class KMC:
         return new_environments
 
     def central_atoms_research(
-        self, new_environments: list[str | bytes], nsearch: int
+        self, new_environments: list[str], nsearch: int
     ) -> list[int]:
         """Generate list of central atoms on which we gonna perform generic event searches for the reference table.
 
@@ -487,7 +487,7 @@ class KMC:
 
         Parameters
         ----------
-        new_environments : list[str|bytes]
+        new_environments : list[str]
             List of atomic environment ID.
         nsearch : int
             Number of searches per atomic environment.
@@ -784,7 +784,7 @@ class KMC:
         return None
 
     def get_info_atomic_environments(
-        self, new_environments: list[str | bytes]
+        self, new_environments: list[str]
     ) -> AtomicEnvironmentInfo:
         """Get atomic environments informations for outputs.
 
@@ -792,7 +792,7 @@ class KMC:
 
         Parameters
         ----------
-        new_environments : list[str | bytes]
+        new_environments : list[str]
             List of new environments detected.
 
         Returns

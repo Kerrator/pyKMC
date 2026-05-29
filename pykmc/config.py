@@ -113,7 +113,7 @@ class ControlConfig(BaseModel):
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
-    style: Literal["cna", "graph", "cna/graph"] = Field(
+    style: Literal["cna", "graph", "cna/graph", "diamond/graph"] = Field(
         ...,
         description="Method used to characterize and assign an ID to an atom's local atomic environment",
     )
