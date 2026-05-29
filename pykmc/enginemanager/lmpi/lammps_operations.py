@@ -161,13 +161,14 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
 
+    # INITILIZE ARTN on all ranks
+    artn = pypARTn.artn(engine="lmp")
+
     # LAMMPS COMMANDS
-    engine.command("plugin load {}".format(config.partn.path_artnso))
+    engine.command( f"plugin load {artn.lib._name}" )
     engine.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     engine.command("min_style fire")
 
-    # INITILIZE ARTN on all ranks
-    artn = pypARTn.artn(engine="lmp")
     # SETUP ARTN
     artn.reset_input()
     # Control 
@@ -319,7 +320,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
     # LAMMPS COMMANDS
-    engine.command("plugin load {}".format(config.partn.path_artnso))
+    engine.command( f"plugin load {artn.lib._name}" )
     
     # SETUP ARTN
     artn.reset_input()
