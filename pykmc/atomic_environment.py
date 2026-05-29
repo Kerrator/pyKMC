@@ -1,7 +1,7 @@
 """Defines the `AtomicEnvironment` class for characterizing and computing local atomic environments."""
 
 import numpy as np
-from .environments import cna, graph
+from .environments import cna, graph, identify_diamond
 
 
 class AtomicEnvironment:
@@ -52,6 +52,9 @@ class AtomicEnvironment:
                 self.atomic_environment_list = self.compute_cnagraph(
                     neighbors_list, environment_list
                 )
+            case "diamond/graph" : 
+                self.atomic_environment_list = self.compute_diamondgraph(neighbors_list, environment_list)
+            
             case _:
                 raise Exception("Atomic environment style unknown")
 
@@ -125,4 +128,26 @@ class AtomicEnvironment:
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 
+        return list_hash
+    
+    def compute_diamondgraph(self, neighbors_list, environment_list) : 
+        #Compute identify diamant ID 
+        list_hash = identify_diamond(neighbors_list)
+        non_crystal_idx = (
+            np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
+        )
+
+        # If radd_cna != None add neighbors of non crystal from cna
+        if self.neighbors_add > 0:
+            tmp = []
+            for _i in range(self.neighbors_add):  # Do it recursively
+                for idx in non_crystal_idx:
+                    tmp += neighbors_list[idx]
+            non_crystal_idx += tmp
+            non_crystal_idx = list(set(non_crystal_idx))
+        # Compute graph topo for all non cristalline atoms
+        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        for i, idx in enumerate(non_crystal_idx):
+            list_hash[idx] = list_graphs_hash[i]
+        
         return list_hash
