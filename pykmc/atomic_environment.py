@@ -1,7 +1,7 @@
 """Defines the `AtomicEnvironment` class for characterizing and computing local atomic environments."""
 
 import numpy as np
-from .environments import cna, graph, identify_diamant
+from .environments import cna, graph, identify_diamond
 
 
 class AtomicEnvironment:
@@ -52,8 +52,8 @@ class AtomicEnvironment:
                 self.atomic_environment_list = self.compute_cnagraph(
                     neighbors_list, environment_list
                 )
-            case "diamant/graph" : 
-                self.atomic_environment_list = self.compute_diamantgraph(neighbors_list, environment_list)
+            case "diamond/graph" : 
+                self.atomic_environment_list = self.compute_diamondgraph(neighbors_list, environment_list)
             case _:
                 raise Exception("Atomic environment style unknown")
 
@@ -129,9 +129,9 @@ class AtomicEnvironment:
 
         return list_hash
     
-    def compute_diamantgraph(self, neighbors_list, environment_list) : 
+    def compute_diamondgraph(self, neighbors_list, environment_list) : 
         #Compute identify diamant ID 
-        list_hash = identify_diamant(neighbors_list)
+        list_hash = identify_diamond(neighbors_list)
         print(list_hash)
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()

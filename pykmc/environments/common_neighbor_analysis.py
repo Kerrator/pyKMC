@@ -76,7 +76,7 @@ def is_crystal(signatures:dict) :
     
     return False
 
-def is_diamant(signature:dict) : 
+def is_diamond(signature:dict) : 
 
     if not signature : 
         return False 
@@ -84,7 +84,7 @@ def is_diamant(signature:dict) :
         return True 
     return False
 
-def identify_diamant(neighbors_list) : 
+def identify_diamond(neighbors_list) : 
     #Neet first to have list of second neighbors atoms : 
 
     second_neighbors_list = [] 
@@ -100,7 +100,7 @@ def identify_diamant(neighbors_list) :
     hash = []
     #check is fcc or bcc
     for signatures in all_signatures : 
-        if is_diamant(signatures) : 
+        if is_diamond(signatures) : 
             hash.append("crystal")
         else : 
             hash.append("noncrystal")
