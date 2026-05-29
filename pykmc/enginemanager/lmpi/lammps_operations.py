@@ -96,14 +96,7 @@ def initialize_potential(engine, config):
     for cmd in config.lammps.setup_commands or []:
         engine.command(cmd)
 
-    if config.control.otfml:
-        if not pair_style.strip().startswith("mtp/extrapolation"):
-            raise RuntimeError("OTFML requires `pair_style mtp/extrapolation`.")
-        gamma_tol = config.otfml.gamma_tolerance
-        gamma_max = config.otfml.gamma_max
-        dump_path = session_dump_path(engine.engine_id).as_posix()
-        engine.command(f"variable {OTFML_TOL_FLAG} internal 0")
-        engine.command(f"variable {OTFML_MAX_FLAG} internal 0")
+    if pair_style.strip().startswith("mtp/extrapolation"):
         try:
             engine.command(
                 "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1"
@@ -121,6 +114,15 @@ def initialize_potential(engine, config):
                     "Use a neighborhood-mode MTP or disable OTFML"
                 ) from exc
             raise
+
+    if config.control.otfml:
+        if not pair_style.strip().startswith("mtp/extrapolation"):
+            raise RuntimeError("OTFML requires `pair_style mtp/extrapolation`.")
+        gamma_tol = config.otfml.gamma_tolerance
+        gamma_max = config.otfml.gamma_max
+        dump_path = session_dump_path(engine.engine_id).as_posix()
+        engine.command(f"variable {OTFML_TOL_FLAG} internal 0")
+        engine.command(f"variable {OTFML_MAX_FLAG} internal 0")
         engine.command(f"compute max_grade all reduce max f_extrapolation_grade")
         engine.command(f"variable max_grade equal c_max_grade")
         engine.command(f'variable dump_skip equal "v_max_grade < {gamma_tol:.4f}"')
