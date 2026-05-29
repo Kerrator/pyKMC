@@ -551,9 +551,24 @@ class LammpsConfig(BaseModel):
 class OTFMLConfig(BaseModel):
     """On-the-fly machine learning potential parameters."""
 
-    retrain_command: Optional[str] = Field(
+    retrain_command: str = Field(
+        description="Base command for retraining (e.g. 'python -m mtp_otf'). Named arguments below are appended automatically.",
+    )
+    potential_file: str = Field(
+        description="Potential file path. Appended as --potential and copied to otfml_runtime/cycle{N}/ after each retrain.",
+    )
+    training_set_file: str = Field(
+        description="Training set file path. Appended as --training_set and copied to otfml_runtime/cycle{N}/ after each retrain.",
+    )
+    gamma_tolerance: float = Field(
+        description="Extrapolation tolerance used for dumping and flagging configurations.",
+    )
+    gamma_max: float = Field(
+        description="Maximum extrapolation grade; triggers halt and extreme-extrapolation flag.",
+    )
+    args: Optional[str] = Field(
         default=None,
-        description="Command executed when new extrapolation dumps are detected.",
+        description="Extra arguments appended verbatim to the retrain command before the dump glob.",
     )
     enabled_phases: list[Literal["search", "refine", "minimize"]] = Field(
         default_factory=lambda: ["search", "refine", "minimize"],
@@ -925,7 +940,7 @@ class Config(BaseModel):
             ("control.basin", True) : ["basin"],
             ("control.active_volume", True) : ["activevolume"],
             ("control.bias", True) : ["bias"],
-            ("control.otfml", True): ["otfml", "otfml.retrain_command"],
+            ("control.otfml", True): ["otfml"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():

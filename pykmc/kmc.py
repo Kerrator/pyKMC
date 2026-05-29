@@ -544,7 +544,7 @@ class KMC:
         """
         event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
         event_search.execute(central_atom_research_list)
-        self.otfml.retry_extrapolating_searches(event_search)
+        self.otfml.retry_extrapolating("search", event_search)
         return event_search
 
     def add_reference_events(
@@ -596,7 +596,7 @@ class KMC:
         )
         # refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(df_reference_events, self.total_energy)
-        self.otfml.retry_extrapolating_refinements(refinement)
+        self.otfml.retry_extrapolating("refine", refinement)
         return refinement
 
     def add_active_events(

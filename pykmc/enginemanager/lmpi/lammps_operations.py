@@ -3,7 +3,7 @@ from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes
 import pypARTn
-import os
+from pathlib import Path
 from types import SimpleNamespace
 from ...utils.io_utils import capture_output
 from ...utils.geometry import compute_delr_l2, count_moved_atoms
@@ -15,17 +15,15 @@ from ...activevolume.active_volume import (
     position_results_AV,
 )
 from ...atomic_environment import AtomicEnvironment
-from ...otfml_paths import (
-    OTFML_EXTRAPOLATION_TOLERANCE,
-    OTFML_MAX_GAMMA,
-    OTFML_MAX_FLAG_INTERNAL,
-    OTFML_MAX_FLAG_VARIABLE,
-    OTFML_TOL_FLAG_INTERNAL,
-    OTFML_TOL_FLAG_VARIABLE,
-    ensure_otfml_dirs,
+from ...otfml import (
+    OTFML_MAX_FLAG,
+    OTFML_TOL_FLAG,
+    OTFML_LATCH,
     session_dump_path,
+    read_otf_thermo,
+    otf_thermo_path,
+    OTFExtrapolationFlags,
 )
-from ...otfml import OTFExtrapolationFlags
 
 from ...result import (
     Result,
@@ -97,28 +95,25 @@ def initialize_potential(engine, config):
     engine.command("pair_coeff {}".format(pair_coeff))
     for cmd in config.lammps.setup_commands or []:
         engine.command(cmd)
+
     if config.control.otfml:
         if not pair_style.strip().startswith("mtp/extrapolation"):
-            raise RuntimeError(
-                "OTFML requires `pair_style mtp/extrapolation`."
-            )
-        ensure_otfml_dirs()
+            raise RuntimeError("OTFML requires `pair_style mtp/extrapolation`.")
+        gamma_tol = config.otfml.gamma_tolerance
+        gamma_max = config.otfml.gamma_max
         dump_path = session_dump_path(engine.engine_id).as_posix()
-        engine.command(f"variable {OTFML_TOL_FLAG_INTERNAL} internal 0")
-        engine.command(f"variable {OTFML_MAX_FLAG_INTERNAL} internal 0")
-        engine.command(
-            f"variable {OTFML_TOL_FLAG_VARIABLE} equal v_{OTFML_TOL_FLAG_INTERNAL}"
-        )
-        engine.command(
-            f"variable {OTFML_MAX_FLAG_VARIABLE} equal v_{OTFML_MAX_FLAG_INTERNAL}"
-        )
+        engine.command(f"variable {OTFML_TOL_FLAG} internal 0")
+        engine.command(f"variable {OTFML_MAX_FLAG} internal 0")
         try:
             engine.command(
                 "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1"
             )
         except RuntimeError as exc:
             msg = str(exc)
-            if "Please use the MLIP-3 style extrapolation for configuration mode MTPs" in msg:
+            if (
+                "Please use the MLIP-3 style extrapolation for configuration mode MTPs"
+                in msg
+            ):
                 raise RuntimeError(
                     "The loaded MTP is in configuration mode. "
                     "Current pyKMC OTFML expects neighborhood-mode `mtp/extrapolation` "
@@ -126,21 +121,49 @@ def initialize_potential(engine, config):
                     "Use a neighborhood-mode MTP or disable OTFML"
                 ) from exc
             raise
-        engine.command(f"compute max_grade all pair mtp/extrapolation")
-        engine.command(f"variable max_grade equal c_max_grade[1]")
-        engine.command(
-            f'variable dump_skip equal "v_max_grade < {OTFML_EXTRAPOLATION_TOLERANCE:.4f}"'
-        )
+        engine.command(f"compute max_grade all reduce max f_extrapolation_grade")
+        engine.command(f"variable max_grade equal c_max_grade")
+        engine.command(f'variable dump_skip equal "v_max_grade < {gamma_tol:.4f}"')
         engine.command(
             f"dump extrapolative_structures_dump all custom 1 {dump_path} id type x y z f_extrapolation_grade"
         )
         engine.command(f"dump_modify extrapolative_structures_dump append yes")
         engine.command(f"dump_modify extrapolative_structures_dump skip v_dump_skip")
         engine.command(
-            f"fix extreme_extrapolation all halt 1 v_max_grade > {OTFML_MAX_GAMMA:.4f} error continue"
+            f"fix extreme_extrapolation all halt 1 v_max_grade > {gamma_max:.4f} error continue"
         )
+        _setup_otf_latch(engine, gamma_tol, gamma_max)
+        engine.command(f"log {otf_thermo_path(engine).as_posix()}")
+        # engine.command("echo none")
         engine.command(f"thermo 1")
-        engine.command(f"thermo_style custom step pe v_max_grade")
+        engine.command(
+            f"thermo_style custom step pe v_max_grade v_{OTFML_LATCH} v_{OTFML_TOL_FLAG} v_{OTFML_MAX_FLAG}"
+        )
+        engine.command("thermo_modify line yaml flush no")
+
+
+def _setup_otf_latch(engine, gamma_tol: float, gamma_max: float) -> None:
+    """Register a python-style variable that latches the OTF flag internal variables.
+
+    Evaluated every minimization step via thermo_style, so flags are updated
+    the moment grade crosses either threshold — not just at the final step.
+    """
+    latch_code = (
+        f"def _latch_otf_flags(handle, max_grade):\n"
+        f"    from lammps import lammps\n"
+        f"    lmp = lammps(ptr=handle)\n"
+        f"    if max_grade >= {gamma_tol:.4f}: lmp.set_internal_variable('{OTFML_TOL_FLAG}', 1.0)\n"
+        f"    if max_grade >= {gamma_max:.4f}: lmp.set_internal_variable('{OTFML_MAX_FLAG}', 1.0)\n"
+        f"    return lmp.extract_variable('{OTFML_TOL_FLAG}')\n"
+    )
+    engine.command(
+        f"python _latch_otf_flags"
+        f" input 2 SELF v_max_grade"
+        f" return v_{OTFML_LATCH}"
+        f" format pff"
+        f' here """{latch_code}"""'
+    )
+    engine.command(f"variable {OTFML_LATCH} python _latch_otf_flags")
 
 
 def reload_potential(engine, config):
@@ -151,35 +174,57 @@ def reload_potential(engine, config):
 
 def reset_otf_flags(engine) -> None:
     """Reset the latched OTF extrapolation flags on the current engine."""
+    engine.command(f"log {otf_thermo_path(engine).as_posix()}")
     if not hasattr(engine.lmp, "set_internal_variable"):
         raise RuntimeError(
             "LAMMPS Python module does not expose set_internal_variable(), "
             "which is required for OTFML flag handling."
         )
-    if engine.lmp.set_internal_variable(OTFML_TOL_FLAG_INTERNAL, 0.0) != 0:
-        raise RuntimeError(
-            f"Failed to reset OTFML variable '{OTFML_TOL_FLAG_INTERNAL}'."
-        )
-    if engine.lmp.set_internal_variable(OTFML_MAX_FLAG_INTERNAL, 0.0) != 0:
-        raise RuntimeError(
-            f"Failed to reset OTFML variable '{OTFML_MAX_FLAG_INTERNAL}'."
-        )
+    if engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0) != 0:
+        raise RuntimeError(f"Failed to reset OTFML variable '{OTFML_TOL_FLAG}'.")
+    if engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0) != 0:
+        raise RuntimeError(f"Failed to reset OTFML variable '{OTFML_MAX_FLAG}'.")
+
+
+def get_thermo_otf_flags(engine) -> OTFExtrapolationFlags:
+    """Read OTF flags from the already-parsed engine.otf_thermo block."""
+    # Read last thermo YAML block for diagnostics only.
+    engine.command("log none")  # force flush
+    otf_thermo = read_otf_thermo(engine)
+
+    if otf_thermo is None:
+        raise RuntimeError("OTF thermo data not available on engine.")
+
+    tol_col = f"v_{OTFML_TOL_FLAG}"
+    max_col = f"v_{OTFML_MAX_FLAG}"
+
+    return OTFExtrapolationFlags(
+        extrapolated=bool(max(otf_thermo[tol_col]) > 0),
+        extreme_extrapolated=bool(max(otf_thermo[max_col]) > 0),
+    )
+
+
+def get_lammps_otf_flags(engine) -> OTFExtrapolationFlags:
+    """Read the current latched OTF extrapolation flags from the engine."""
+
+    def extract_scalar(name: str) -> float:
+        # try:
+        value = engine.lmp.extract_variable(name, None, 0)
+        # except TypeError:
+        #     value = engine.lmp.extract_variable(name)
+        return float(value)
+
+    return OTFExtrapolationFlags(
+        extrapolated=bool(extract_scalar(OTFML_TOL_FLAG)),
+        extreme_extrapolated=bool(extract_scalar(OTFML_MAX_FLAG)),
+    )
 
 
 def get_otf_flags(engine) -> OTFExtrapolationFlags:
     """Read the current latched OTF extrapolation flags from the engine."""
 
-    def extract_scalar(name: str) -> float:
-        try:
-            value = engine.lmp.extract_variable(name, None, 0)
-        except TypeError:
-            value = engine.lmp.extract_variable(name)
-        return float(value)
-
-    return OTFExtrapolationFlags(
-        extrapolated=bool(extract_scalar(OTFML_TOL_FLAG_VARIABLE)),
-        extreme_extrapolated=bool(extract_scalar(OTFML_MAX_FLAG_VARIABLE)),
-    )
+    return get_lammps_otf_flags(engine)
+    # return get_thermo_otf_flags(engine)
 
 
 def _build_extrapolation_error(
@@ -586,6 +631,7 @@ def partn_search(
                     details=err,
                 )
             )
+
 
 @capture_output()
 def partn_refine(
