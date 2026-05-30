@@ -311,11 +311,6 @@ class PartnConfig(BaseModel):
         description="dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
     )
 
-    path_artnso: str = Field(
-        default=...,
-        description="Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'",
-    )
-
 #################
 #Refinement part#
 #################
