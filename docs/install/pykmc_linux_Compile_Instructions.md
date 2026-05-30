@@ -178,14 +178,6 @@ make install-python
 cd ../..
 ```
 
-Create symlinks so pARTn can find CMake build outputs (pARTn's `configure` searches `lammps/src/` while CMake writes to `lammps/build/`):
-
-```bash
-mkdir -p lammps/src/styles
-ln -sf ../../build/styles/lmpinstalledpkgs.h lammps/src/styles/lmpinstalledpkgs.h
-ln -sf ../build/liblammps.so lammps/src/liblammps.so
-```
-
 Verify:
 
 ```bash
@@ -208,43 +200,22 @@ Verify:
 python -c "import ira_mod; print('IRA OK')"
 ```
 
-> **Note:** On Linux, `.so` is the native shared library format, so no symlink workaround is needed (unlike macOS, which builds `.dylib`).
-
 ---
 
 ## 6. Build pARTn plugin
 
+The following will directly install the `pypARTn` python module into the venv path. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
 ```bash
 cd artn-plugin
-
-./configure --with-lammps LAMMPS_PATH=$(pwd)/../lammps
-```
-
-Patch C++17 support (required by LAMMPS headers) using GNU `sed` (no `''` after `-i`, unlike macOS):
-
-```bash
-sed -i 's/^CXX=mpicxx$/CXX=mpicxx\nCXXFLAGS=-std=c++17/' make.inc
-sed -i 's/$(CXX) -g -fPIC -I/$(CXX) -g -fPIC ${CXXFLAGS} -I/g' ENGINES/LAMMPS/Makefile
-```
-
-Build the plugin:
-
-```bash
-make lmplib
-cd ..
-```
-
-Install the `pypARTn` Python interface into the venv:
-
-```bash
-cp artn-plugin/interface/pypARTn.py "$(python -c 'import site; print(site.getsitepackages()[0])')/"
+cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH=$(pwd)/../lammps/build -DARTN_INSTALL_PYTHON=ON
+cmake --build build
+cmake --install build
 ```
 
 Verify:
 
 ```bash
-ls artn-plugin/lib/libartn-lmp.so
-python -c "import pypARTn; print('pypARTn OK')"
+python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
 ```
 
 ---
@@ -270,8 +241,6 @@ print('All imports OK')
 ```bash
 source pykmc_env/bin/activate
 export LD_LIBRARY_PATH=$(pwd)/lammps/build:${LD_LIBRARY_PATH}
-export PYTHONPATH=$(pwd)/artn-plugin/interface:$PYTHONPATH
-export PYTHONPATH=$(pwd)/IterativeRotationsAssignments/interface:$PYTHONPATH
 
 mpirun -n 8 python -m pykmc -in input.in
 ```
@@ -294,21 +263,9 @@ source activate.sh
 module load StdEnv/2023 python/3.12.4 openmpi mpi4py
 source /home/$USER/pykmc/pykmc_env/bin/activate
 
-export PYTHONPATH=$HOME/pykmc/artn-plugin/interface:$PYTHONPATH
-export PYTHONPATH=$HOME/pykmc/IterativeRotationsAssignments/interface:$PYTHONPATH
-
 srun --ntasks=$SLURM_NTASKS --distribution=block:block \
      --cpu-bind=cores --mem-bind=local \
      python -m pykmc -in input.in
-```
-
-### pARTn library path
-
-In your `input.in`, set the pARTn library path (use the full absolute path):
-
-```ini
-[pARTn]
-path_artnso = /full/path/to/pykmc/artn-plugin/lib/libartn-lmp.so
 ```
 
 ---
@@ -321,6 +278,6 @@ path_artnso = /full/path/to/pykmc/artn-plugin/lib/libartn-lmp.so
 | 2 | Library path variable | `LD_LIBRARY_PATH` | `DYLD_LIBRARY_PATH` |
 | 3 | CPU count | `nproc` | `sysctl -n hw.ncpu` |
 | 4 | `sed` syntax | `sed -i '...'` | `sed -i '' '...'` |
-| 5 | IRA install | `pip install .` works directly | Pre-create `libira.so` symlink first |
-| 6 | LAMMPS symlinks | Required so pARTn finds CMake outputs under `lammps/src/` (one `.so` link) | Required both for `.dylib` → `.so` *and* to bridge CMake outputs to `lammps/src/` |
+| 5 | IRA install | `pip install .` works directly | Pre-create `libira.so` symlink first (should not be needed anymore, but not confirmed) |
+| 6 | LAMMPS symlinks | Required so pARTn finds CMake outputs under `lammps/src/` (one `.so` link) | Required both for `.dylib` → `.so` *and* to bridge CMake outputs to `lammps/src/` (by passing the lammps/build directory avoid the symlinks; the `.so` vs `.dylib` is probably resolved also, if not send a message to [pARTn](https://gitlab.com/mammasmias/artn-plugin/-/work_items)) |
 | 7 | Package manager | `apt` / `dnf` | `brew` |
