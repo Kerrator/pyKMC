@@ -211,7 +211,6 @@ The dictionnary is composed of pARTn parameters, parameters needed to compute th
 
 ```python
 search_params = {'nsearch' : 10,
-                 'path_artnso' : '/root/programs/artn-plugin/lib/libartn-lmp.so', 
                  'rcutenv' : 7.0, 
                  'emax_event' : 5.0, 
                  'emin_event' : 0.2,

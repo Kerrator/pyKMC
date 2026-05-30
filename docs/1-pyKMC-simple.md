@@ -105,7 +105,7 @@ radd_cna = 3.0
 
 ### `[EventSearch]`  
 
-To find transition paths and generate events, we use the **ARTn LAMMPS plugin**, pARTn (`style = pARTn`). This requires specifying the path to the ARTn library using the `path_artnso` key.  
+To find transition paths and generate events, we use the **ARTn LAMMPS plugin**, pARTn (`style = pARTn`).
 
 Next, we define the number of event searches performed for each atomic environment ID using the `nsearch` key.  
 
@@ -131,7 +131,6 @@ This gives us :
 style = pARTn 
 nsearch = 10 
 rcutenv = 7.0 
-path_artnso = /path/to/pARTn/lib/libartn-lmp.so
 k0 = 1.0e-12
 T = 300.0 
 ```  
@@ -157,8 +156,6 @@ cp ../Ni_fcc_2047at_monovacancy/initial_config.xyz ../Ni_fcc_2047at_monovacancy/
 
  
 Then, we need to put all together the parameters in the input file, you can create it by yourself or run :
-
-**Note** : Don't forget to modify the `path_artnso`key. 
 
 
 ```bash
@@ -190,7 +187,6 @@ radd_cna = 3.0
 style = pARTn 
 nsearch = 10 
 rcutenv = 7.0 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 k0 = 1.0e-12
 T = 300.0 
 
