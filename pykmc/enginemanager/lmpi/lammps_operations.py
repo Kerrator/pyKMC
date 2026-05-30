@@ -6,7 +6,7 @@ import pypARTn
 from pathlib import Path
 from types import SimpleNamespace
 from ...utils.io_utils import capture_output
-from ...utils.geometry import compute_delr_l2, count_moved_atoms
+from ...utils.geometry import compute_delr_max
 from ...activevolume.active_volume import (
     reset,
     redefine_atoms,
@@ -557,27 +557,21 @@ def partn_search(
                 index_move = np.argmax(dist)
 
             delr_threshold = config.eventsearch.delr_thr
-            delr1 = compute_delr_l2(positions, min1positions, cell=cell)
-            delr2 = compute_delr_l2(positions, min2positions, cell=cell)
-            npart1 = count_moved_atoms(
-                positions, min1positions, delr_threshold, cell=cell
-            )
-            npart2 = count_moved_atoms(
-                positions, min2positions, delr_threshold, cell=cell
-            )
-            npart12 = count_moved_atoms(
-                min1positions, min2positions, delr_threshold, cell=cell
-            )
+            delr1 = artn.extract("delr_min1")
+            delr2 = artn.extract("delr_min2")
+            delrmax1 = compute_delr_max(positions, min1positions, cell=cell)
+            delrmax2 = compute_delr_max(positions, min2positions, cell=cell)
+            delrmax12 = compute_delr_max(min1positions, min2positions, cell=cell)
 
             error_variables = {
                 "delr1": delr1,
                 "delr2": delr2,
-                "npart1": npart1,
-                "npart2": npart2,
-                "npart12": npart12,
+                "delrmax1": delrmax1,
+                "delrmax2": delrmax2,
+                "delrmax12": delrmax12,
             }
 
-            if npart12 == 0:
+            if delrmax12 < delr_threshold:
                 return Err(
                     ErrorInfo(
                         type=ErrorType.EVENT_MINIMA_NOT_DISTINCT,
@@ -588,12 +582,12 @@ def partn_search(
                     )
                 )
 
-            if npart1 != 0 and npart2 != 0:
+            if delrmax1 > delr_threshold and delrmax2 > delr_threshold:
                 return Err(
                     ErrorInfo(
                         type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
                         message=(
-                            f"Neither minimum matches the initial configuration within npart {min(npart1, npart2)}"
+                            f"Neither minimum matches the initial configuration within delrmax {min(delrmax1, delrmax2):.4f}"
                         ),
                         variables=error_variables,
                     )
