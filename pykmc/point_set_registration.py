@@ -92,48 +92,18 @@ class PointSetRegistration:
 
         #typ2 = typ1  # If they have same topology id should be always true ?
 
-        # unwrap if close to cell limits :
-        alat = self.system.cell[0][0]
+        # unwrap if close to cell limits (use per-axis cell lengths for non-cubic cells):
+        alat_x = self.system.cell[0][0]
+        alat_y = self.system.cell[1][1]
+        alat_z = self.system.cell[2][2]
+        center = self.system.positions[central_atom_index]
         for i in range(len(coords1)):
-            if (
-                np.linalg.norm(
-                    coords1[i][0] - self.system.positions[central_atom_index][0]
-                )
-                > alat / 2
-            ):
-                coords1[i][0] = (
-                    coords1[i][0]
-                    + np.sign(
-                        self.system.positions[central_atom_index][0] - coords1[i][0]
-                    )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][1] - self.system.positions[central_atom_index][1]
-                )
-                > alat / 2
-            ):
-                coords1[i][1] = (
-                    coords1[i][1]
-                    + np.sign(
-                        self.system.positions[central_atom_index][1] - coords1[i][1]
-                    )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][2] - self.system.positions[central_atom_index][2]
-                )
-                > alat / 2
-            ):
-                coords1[i][2] = (
-                    coords1[i][2]
-                    + np.sign(
-                        self.system.positions[central_atom_index][2] - coords1[i][2]
-                    )
-                    * alat
-                )
+            if abs(coords1[i][0] - center[0]) > alat_x / 2:
+                coords1[i][0] += np.sign(center[0] - coords1[i][0]) * alat_x
+            if abs(coords1[i][1] - center[1]) > alat_y / 2:
+                coords1[i][1] += np.sign(center[1] - coords1[i][1]) * alat_y
+            if abs(coords1[i][2] - center[2]) > alat_z / 2:
+                coords1[i][2] += np.sign(center[2] - coords1[i][2]) * alat_z
         nat1 = len(coords1)
         kmax_factor = self.config.ira.kmax_factor
 
