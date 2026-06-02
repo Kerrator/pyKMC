@@ -91,8 +91,8 @@ class BasinGenericEventExplorer(Explorer) :
             l_atoms = state.environment.get_atoms_with_id(df_event["id_initial"])
             #Find backward info
             backward_idx = self.reference_table.table.loc[idx].at["idx_backward"]
-            dE_backward = self.reference_table.table[self.reference_table.table['idx_ref'] == backward_idx]['energy_barrier'].values[0]
-#            dE_backward = self.reference_table.table.loc[backward_idx].at["energy_barrier"]
+            dE_backward = self.reference_table.table[self.reference_table.table['idx_ref'] == backward_idx]['dE_forward'].values[0]
+#            dE_backward = self.reference_table.table.loc[backward_idx].at["dE_forward"]
             k_backward = self.reference_table.table[self.reference_table.table['idx_ref'] == backward_idx]['k'].values[0]
             #k_backward = self.reference_table.table.loc[backward_idx].at["k"]
             ref_event = self.reference_table.table.loc[idx].at["idx_ref"]
@@ -102,7 +102,7 @@ class BasinGenericEventExplorer(Explorer) :
                 #Loop over symmetries : 
                 for i in range(len(df_event.at["sym_matrix"])) : 
                     #for each symmetries add connectivity in table 
-                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=ref_event, central_atom=at, sym=i, transient=is_transient, dE_forward=df_event["energy_barrier"], k_forward=df_event["k"], dE_backward=dE_backward, k_backward=k_backward )
+                    self.connectivity_table.add_connectivity(state=state_index, state_connexion=start_index+count, event_connexion=ref_event, central_atom=at, sym=i, transient=is_transient, dE_forward=df_event["dE_forward"], k_forward=df_event["k"], dE_backward=dE_backward, k_backward=k_backward )
 
                     #update count 
                     count +=1

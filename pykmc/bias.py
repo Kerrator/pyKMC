@@ -204,7 +204,7 @@ class Bias(ABC):
                     f" (atom={event.get('atom_index', '?')},"
                     f" ref={num_ref},"
                     f" event_id={event_id},"
-                    f" Ea={event.get('energy_barrier', float('nan')):.6f} eV,"
+                    f" Ea={event.get('dE_forward', float('nan')):.6f} eV,"
                     f" k={float(l_k[idx]):.6e})"
                 )
                 return idx, delta_t, ktot
@@ -213,7 +213,7 @@ class Bias(ABC):
                 f" (atom={event.get('atom_index', '?')},"
                 f" ref={num_ref},"
                 f" event_id={event_id},"
-                f" Ea={event.get('energy_barrier', float('nan')):.6f} eV)"
+                f" Ea={event.get('dE_forward', float('nan')):.6f} eV)"
             )
             candidate_events.remove(idx)
         _LOGGER.debug("\t :=> Filter: all candidates rejected, using unbiased selection")
@@ -267,7 +267,7 @@ class Bias(ABC):
         _LOGGER.debug(
             f"\t :=> Boost: selected event {idx},"
             f" event_id={event_id},"
-            f" Ea={selected_event.get('energy_barrier', float('nan')):.6f} eV,"
+            f" Ea={selected_event.get('dE_forward', float('nan')):.6f} eV,"
             f" corrected_delta_t={float(delta_t):.6e},"
             f" true_k_total={float(k_total_true):.6e}"
         )

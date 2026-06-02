@@ -198,8 +198,8 @@ class ReferenceEventTable:
                 ):  # same topo
                     if (
                         abs(
-                            dfevent_forward["energy_barrier"]
-                            - dfevent_backward["energy_barrier"]
+                            dfevent_forward["dE_forward"]
+                            - dfevent_backward["dE_forward"]
                         )
                         < 0.25
                     ):  # maybe same event so IRA check
@@ -285,8 +285,8 @@ class ReferenceEventTable:
 
         # if same  id, chekc if same dE
         tol = 0.25
-        dE = dfevent["energy_barrier"]
-        subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
+        dE = dfevent["dE_forward"]
+        subset = subset[(subset["dE_forward"] - dE).abs() <= tol]
         if len(subset) == 0:
             return True
 
@@ -487,7 +487,8 @@ class ReferenceEventTable:
                 "initial_positions": min1_positions[neighbor_list_forwward],
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
                 "final_positions": min2_positions[neighbor_list_forwward],
-                "energy_barrier": dE_forward,
+                "dE_forward": dE_forward,
+                "dE_backward": dE_backward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "event_id": combine_ids(id_min1, id_saddle, id_min2),
                 "id_initial": id_min1,
@@ -512,7 +513,8 @@ class ReferenceEventTable:
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
-                "energy_barrier": dE_backward,
+                "dE_forward": dE_backward,
+                "dE_backward": dE_forward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "event_id": combine_ids(id_min2, id_saddle, id_min1),
                 "id_initial": id_min2,
@@ -549,7 +551,8 @@ class ReferenceEventTable:
                     "initial_positions": pd.Series(dtype="object"),
                     "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
-                    "energy_barrier": pd.Series(dtype="float64"),
+                    "dE_forward": pd.Series(dtype="float64"),
+                    "dE_backward": pd.Series(dtype="float64"),
                     "k": pd.Series(dtype="float64"),
                     "event_id": pd.Series(dtype="str"),
                     "id_initial": pd.Series(dtype="str"),
@@ -597,6 +600,53 @@ class ReferenceEventTable:
         """
         self.table.to_pickle(outfile)
 
+    def save_txt(self, outfile: str = "reference_table.txt") -> None:
+        """Save a human-readable snapshot of the reference event table.
+
+        Parameters
+        ----------
+        outfile : str, optional
+            path to the output file, by default 'reference_table.txt'.
+
+        """
+        df = pd.DataFrame({
+            "idx_ref":       self.table["idx_ref"],
+            "dE_forward":    self.table["dE_forward"],
+            "dE_backward":   self.table["dE_backward"],
+            "k":             self.table["k"],
+            "event_id":      [fmt_hash(e) for e in self.table["event_id"]],
+            "id_initial":    [fmt_hash(e) for e in self.table["id_initial"]],
+            "id_saddle":     [fmt_hash(e) for e in self.table["id_saddle"]],
+            "id_final":      [fmt_hash(e) for e in self.table["id_final"]],
+            "move_atom_idx": self.table["move_atom_idx"],
+            "idx_backward":  self.table["idx_backward"],
+            "dra":           self.table["dra"],
+        }).reset_index(drop=True)
+        lines = [
+            "#Reference Event Table",
+            "\t #idx_ref      : Index of the reference event.",
+            "\t #dE_forward   : Forward energy barrier (eV).",
+            "\t #dE_backward  : Backward energy barrier (eV).",
+            "\t #k            : Rate constant of the forward reaction (ps-1).",
+            f"\t #event_id     : First {DISPLAYED_HASH_LENGTH} characters of the combined topology ID (ini+sad+fin).",
+            f"\t #id_initial   : First {DISPLAYED_HASH_LENGTH} characters of the initial topology ID.",
+            f"\t #id_saddle    : First {DISPLAYED_HASH_LENGTH} characters of the saddle topology ID.",
+            f"\t #id_final     : First {DISPLAYED_HASH_LENGTH} characters of the final topology ID.",
+            "\t #move_atom_idx: Index of the moving atom in the environment.",
+            "\t #idx_backward : Index of the corresponding backward event.",
+            "\t #dra          : Displacement between initial and saddle positions.",
+            "",
+            "========== Reference Events ({}) ==========".format(len(df)),
+        ]
+        with open(outfile, "w") as f:
+            f.write("\n".join(lines) + "\n")
+            f.write(df.to_string(index=True, formatters={
+                "dE_forward":  lambda x: f"{x:.6f}",
+                "dE_backward": lambda x: f"{x:.6f}",
+                "k":           lambda x: f"{x:.6e}",
+                "dra":         lambda x: f"{x:.6f}",
+            }) + "\n")
+
 
 class ActiveEventTable:
     """Store active events and manage them.
@@ -622,7 +672,7 @@ class ActiveEventTable:
                 "atom_index": pd.Series(dtype="int64"),
                 "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
-                "energy_barrier": pd.Series(dtype="float64"),
+                "dE_forward": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
@@ -706,7 +756,7 @@ class ActiveEventTable:
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
-                "energy_barrier": event_refinement_output.dE_forward,
+                "dE_forward": event_refinement_output.dE_forward,
                 "k": compute_rate_Eyring(
                     event_refinement_output.dE_forward, self.config
                 ),
@@ -740,11 +790,11 @@ class ActiveEventTable:
 
         for idx, row in self.table.iterrows():
             central_atom = row["atom_index"]
-            dE = row["energy_barrier"]
+            dE = row["dE_forward"]
 
             subset = self.table[
                 (self.table["atom_index"] == central_atom)
-                & (abs(self.table["energy_barrier"] - dE) < tol_energy)
+                & (abs(self.table["dE_forward"] - dE) < tol_energy)
             ]
             grouped.append((idx, subset))
 

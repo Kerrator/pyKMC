@@ -307,7 +307,7 @@ class KMC:
                         saddle_positions=result_basin.ok_value().saddle_positions,
                         E_saddle=-1,
                         min2_positions=result_basin.ok_value().final_positions,
-                        dE_forward=result_basin.ok_value().energy_barrier,
+                        dE_forward=result_basin.ok_value().dE_forward,
                         num_reference_event=result_basin.ok_value().num_reference_event,
                     )
                     neighbors = result_basin.ok_value().neighbors
@@ -411,7 +411,7 @@ class KMC:
                 "output",
                 step,
                 self.total_energy,
-                active_table.table.loc[idx_selected_event].at["energy_barrier"],
+                active_table.table.loc[idx_selected_event].at["dE_forward"],
                 delta_t * 10**-12,
                 active_table.table.loc[idx_selected_event].at["k"],
                 total_time,
@@ -685,7 +685,7 @@ class KMC:
                     f"atom_index={selected_event.at['atom_index']}, "
                     f"reference_event={selected_event.at['num_reference_event']}, "
                     f"k={selected_event.at['k']:.6e}, "
-                    f"Ea={selected_event.at['energy_barrier']:.6f} eV"
+                    f"Ea={selected_event.at['dE_forward']:.6f} eV"
                 ),
             )
             ##=>Reconstruct event
@@ -919,6 +919,7 @@ class KMC:
     def _save(self) -> None:
         """Save the reference event table and the list of visited environments."""
         self.reference_table.save("reference_table.pickle")
+        self.reference_table.save_txt("pykmc.reference_table")
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
 

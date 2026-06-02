@@ -24,7 +24,7 @@ def _apply_event_generic(self, idx_atom_apply_event, idx_event_table) :
                 Esad = self.engine.compute_potential_energy(self.system)
                 #check if energy barrier consistent : 
                 dE = Esad-Eini
-                if abs(dE-self.reference_table.table.loc[idx_event_table]['energy_barrier']) < 0.5 : 
+                if abs(dE-self.reference_table.table.loc[idx_event_table]['dE_forward']) < 0.5 : 
 
                     new_positions = np.zeros((len(self.reference_table.table.loc[idx_event_table].at['final_positions']), 3))
                     for i in range(len(new_positions)) : 

@@ -212,7 +212,7 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
     central_atom = active_table.table['atom_index'].to_numpy(dtype=int, copy=True)
     types = np.array(system_types)[central_atom] 
     reference_events = active_table.table['num_reference_event'].to_numpy(copy=True)
-    dE_forward = active_table.table['energy_barrier'].to_numpy(copy=True)
+    dE_forward = active_table.table['dE_forward'].to_numpy(copy=True)
     k = active_table.table["k"].to_numpy(copy=True)
     refined = active_table.table['refined'].to_numpy(copy=True)
     
@@ -224,7 +224,7 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
     mapping_id_final = dict(zip(idx_ref, reference_table.table['id_final'].values))
     mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
-    mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
+    mapping_energy = dict(zip(idx_ref, reference_table.table['dE_forward'].values))
 
     #get info applying mapping
     initial_topologies = np.array([mapping_id_initial[ref] for ref in reference_events])
@@ -278,7 +278,7 @@ def info_basin_events(system_types, reference_table, connectivity_table, exit_st
     mapping_id_final = dict(zip(idx_ref, reference_table.table['id_final'].values))
     mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
-    mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
+    mapping_energy = dict(zip(idx_ref, reference_table.table['dE_forward'].values))
 
     # Apply mapping
     initial_topologies = np.array([mapping_id_initial[ref] for ref in reference_events])

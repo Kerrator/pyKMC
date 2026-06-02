@@ -118,7 +118,7 @@ class ErrorType(Enum):
     PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD = 22
     REFINEMENT_INVALID_ENERGY_BARRIER = 31
     REFINEMENT_INVALID_MINIMA = 32
-    RECONSTRUCTION_INVALID_MIN1 = 41 
+    RECONSTRUCTION_INVALID_MIN1 = 41
     RECONSTRUCTION_INVALID_MIN2 = 42
     BASIN_TEXIT_NOT_FOUND = 51
 
@@ -174,7 +174,7 @@ class EventRefinementOutput:
         Refined saddle point atomic positions.
     min2_positions : np.ndarray
         Refined atomic positions of the final minimum (if matched)
-    E_saddle : float 
+    E_saddle : float
         Potential energy at the saddle point.
     dE_forward : Optional[float]
         Refined forward energy barrier (if matched).
@@ -182,7 +182,7 @@ class EventRefinementOutput:
         Index of the corresponding reference event (if matched).
     symmetry_index : Optional[int]
         Symmetry branch used to generate this refinement.
-    refined: Optional[str] 
+    refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
     """
 
@@ -239,39 +239,39 @@ class PSROutput:
     permutation_matrix: np.ndarray
     matching_score: float
 
-@dataclass 
-class ReconstructionOutput : 
+@dataclass
+class ReconstructionOutput :
     """Store the result of a reconstruction"""
-    min1_positions: np.ndarray 
-    saddle_positions: np.ndarray 
+    min1_positions: np.ndarray
+    saddle_positions: np.ndarray
     min2_positions: np.ndarray
     min2_etot: float
 
-@dataclass 
-class BasinSelectorOutput : 
+@dataclass
+class BasinSelectorOutput :
     """"Store the result of the selector"""
-    t_exit: float 
-    exit_state: int 
+    t_exit: float
+    exit_state: int
 
-@dataclass 
-class BasinExitTimeSolverOutput : 
+@dataclass
+class BasinExitTimeSolverOutput :
     """Sotre the results of exit time solver"""
     t_exit: float
 
 @dataclass
-class BasinOutput : 
+class BasinOutput :
     """Store the results of the basin."""
     initial_system_positions: np.ndarray
     central_atom: int
-    saddle_positions: np.ndarray 
-    final_positions: np.ndarray 
+    saddle_positions: np.ndarray
+    final_positions: np.ndarray
     neighbors: np.ndarray
-    energy_barrier: float
-    k_tot: float 
+    dE_forward: float
+    k_tot: float
     t_exit: float
     exit_state: int
     from_state: int
-    num_reference_event: int 
+    num_reference_event: int
 
 @dataclass
 class AtomicEnvironmentInfo:
@@ -353,7 +353,7 @@ class RefinementsInfo:
     n_fails: dict[str, int]
 
 @dataclass
-class EventsInfo: 
+class EventsInfo:
     """Active events informations."""
 
     types: list[str]

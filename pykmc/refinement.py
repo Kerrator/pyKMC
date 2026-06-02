@@ -176,7 +176,7 @@ class Refinement:
             return PreparedRefinementTask(
                 task=task,
                 min2_positions=None,
-                reference_energy_barrier=dfevent["energy_barrier"],
+                reference_energy_barrier=dfevent["dE_forward"],
                 neighbors=neighbors,
                 immediate_result=result_psr,
             )
@@ -227,14 +227,14 @@ class Refinement:
         self.system.update_positions(
             new_positions=new_positions_saddle, atom_idx=neighbors
         )
-        if dfevent.at["energy_barrier"] > task.e_thr:
+        if dfevent.at["dE_forward"] > task.e_thr:
             immediate_result = Ok(
                 EventRefinementOutput(
                     central_atom_index=at_idx,
                     saddle_positions=self.system.positions.copy(),
-                    E_saddle=dfevent["energy_barrier"]
+                    E_saddle=dfevent["dE_forward"]
                     if self.config.control.active_volume
-                    else task.total_energy + dfevent["energy_barrier"],
+                    else task.total_energy + dfevent["dE_forward"],
                     num_reference_event=num_reference_event,
                     symmetry_index=symmetry_index,
                     refined="F",
@@ -244,7 +244,7 @@ class Refinement:
             return PreparedRefinementTask(
                 task=task,
                 min2_positions=min2_positions,
-                reference_energy_barrier=dfevent["energy_barrier"],
+                reference_energy_barrier=dfevent["dE_forward"],
                 neighbors=neighbors,
                 immediate_result=immediate_result,
             )
@@ -275,7 +275,7 @@ class Refinement:
         return PreparedRefinementTask(
             task=task,
             min2_positions=min2_positions,
-            reference_energy_barrier=dfevent["energy_barrier"],
+            reference_energy_barrier=dfevent["dE_forward"],
             neighbors=neighbors,
             submit_kwargs=submit_kwargs,
         )
@@ -369,7 +369,7 @@ class Refinement:
             e_value = (
                 df_reference_events.loc[mask]
                 .sort_values("k")
-                .iloc[-1]["energy_barrier"]
+                .iloc[-1]["dE_forward"]
             )
         else:  # refine no event
             e_value = 0.0

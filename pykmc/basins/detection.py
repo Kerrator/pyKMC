@@ -32,7 +32,7 @@ class DetectorThreshold(Detector) :
             Index of the generic event in `df_reference_table` of the `pds_selected_active_event`.
         """
 
-        dE_forward = pds_selected_active_event["energy_barrier"]
+        dE_forward = pds_selected_active_event["dE_forward"]
 
         if dE_forward >= energy_threshold : 
             #not in a basin 
@@ -60,6 +60,6 @@ class DetectorThreshold(Detector) :
                 raise ValueError("Basin detection: No backward event for the selected active event.") 
 
             #Check if at least one backward event has a low energy barrier
-            dE_backward = df_backward_events["energy_barrier"].min() 
+            dE_backward = df_backward_events["dE_forward"].min() 
 
             return dE_backward < energy_threshold
