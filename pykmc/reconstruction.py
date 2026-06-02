@@ -118,9 +118,7 @@ class Reconstruction:
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
-                        message="did not retreive expected final minimum : delr2 = {}".format(
-                            delr2
-                        ),
+                        message=f"did not retreive expected final minimum : delr2 = {delr2}",
                         variables={"delr2": delr2},
                     )
                 )

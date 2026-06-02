@@ -1,5 +1,6 @@
 """Module implementing Classes to manage reference events and active events."""
 
+import logging
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
@@ -19,6 +20,9 @@ from .result import (
 )
 from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr_max
+
+
+_LOGGER = logging.getLogger("log")
 
 
 class ReferenceEventTable:
@@ -722,7 +726,9 @@ class ActiveEventTable:
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
 
-        duplicates = []
+        duplicates: list[int] = []
+        duplicates_central: list[int] = []
+        duplicates_symmetric: list[int] = []
         # 1. Check duplicates on central atoms : to be sure
         # Sub dataframes with events grouped by central_atom and dE
         tol_energy = 0.1  # eV
@@ -750,6 +756,7 @@ class ActiveEventTable:
                 if delr < self.config.psr.matching_score_thr:
                     # print('Removing event with delr',delr)
                     duplicates.append(jdx)
+                    duplicates_central.append(jdx)
 
         # 2. Check duplicates due to symmetric events applied on different central atoms.
         # Group by same generic event if generic event has symmetries meaning that the same generic event has been applied to same central atom
@@ -809,8 +816,23 @@ class ActiveEventTable:
                             delr = compute_delr_max(sad_pos1, sad_pos2, cell)
                             if delr < self.config.psr.matching_score_thr:
                                 duplicates.append(jdx)
+                                duplicates_symmetric.append(jdx)
 
-        self.remove(duplicates)
+        unique_duplicates = sorted(set(duplicates))
+        if unique_duplicates:
+            self.remove(unique_duplicates)
+            _LOGGER.info(
+                "\t :=> Removed %d duplicate active events (central=%d, symmetric=%d).",
+                len(unique_duplicates),
+                len(set(duplicates_central)),
+                len(set(duplicates_symmetric)),
+            )
+            _LOGGER.info(
+                "\t :=> Duplicate active event indices removed: %s",
+                unique_duplicates,
+            )
+        else:
+            _LOGGER.info("\t :=> No duplicate active events detected.")
 
     def save(self, outfile: str = "active_table.pickle") -> None:
         """Save the reference event table to a pickle file.
