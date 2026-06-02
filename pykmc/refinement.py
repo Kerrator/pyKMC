@@ -102,7 +102,7 @@ class Refinement:
         supposed_ktot = 0.0
         for _idx, dfevent in df_reference_events.iterrows():
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
-                dfevent["event_id"]
+                dfevent["id_initial"]
             )
             for at_idx in atoms_refine_idx:
                 for symmetry_index, _sym in enumerate(dfevent.at["sym_matrix"]):

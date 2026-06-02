@@ -52,7 +52,7 @@ def _select_event_generic(self) :
         l_env = list(set(self.atomic_environment.atomic_environment_list))
         if l_env == ['crystal'] : 
             self._close()
-        l_reference_table = [i for i in range(len(self.reference_table.table)) if self.reference_table.table.loc[i].at['event_id'] in l_env ]
+        l_reference_table = [i for i in range(len(self.reference_table.table)) if self.reference_table.table.loc[i].at['id_initial'] in l_env ]
     else  : # all events in reference events are possible 
         l_reference_table = [i for i in range(len(self.reference_table.table))]
     #Get constant rate of possible events
@@ -65,7 +65,7 @@ def _select_central_atom_idx(self, idx_event_table) :
     """ 
     """
     if self.config.control.reconstruction : 
-        id_hash = self.reference_table.table.loc[idx_event_table].at['event_id'] 
+        id_hash = self.reference_table.table.loc[idx_event_table].at['id_initial'] 
         possible = [i for i,e in enumerate(self.atomic_environment.atomic_environment_list) if e == id_hash]
         return random.choice(possible) 
     else : 

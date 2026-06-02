@@ -1,7 +1,21 @@
 """Tools to compute graphs and graph's ID using NAUTY."""
 
+import hashlib
+
 import pynauty
 import numpy as np
+
+
+def encode_cert(value: bytes | str) -> str:
+    """Return a stable string ID for a graph certificate or existing ID."""
+    if isinstance(value, bytes):
+        return hashlib.sha256(value).hexdigest()
+    return value
+
+
+def combine_ids(id1: str, id2: str, id3: str) -> str:
+    """Return a single ID derived from three graph IDs."""
+    return hashlib.sha256((id1 + id2 + id3).encode()).hexdigest()
 
 
 def graph(
@@ -37,7 +51,7 @@ def graph(
     if atom_idx is None:  # graph for all atoms in system
 
         local_index = np.arange(len(neighbors_list))
-    else : 
+    else :
         local_index = atom_idx
     #    split = np.array_split(range(len(neighbors_list)), nprocs)
     #else:
@@ -48,7 +62,7 @@ def graph(
     list_hash = []
 
     for g in list_g:
-        list_hash.append(pynauty.certificate(g).hex())
+        list_hash.append(encode_cert(pynauty.certificate(g)))
     #list_hash = comm.gather(list_hash, root=0)
     #if rank == 0:
 #    list_hash = [gcertificate for e in list_hash for gcertificate in e]

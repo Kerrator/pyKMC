@@ -709,7 +709,7 @@ class KMC:
                 )
                 ae_topo = self.reference_table.table[
                     self.reference_table.table["idx_ref"] == num_ref_event
-                ]["event_id"].values[0]
+                ]["id_initial"].values[0]
                 err_reference.append(num_ref_event)
                 err_ae.append(ae_topo)
 

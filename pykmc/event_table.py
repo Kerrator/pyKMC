@@ -5,7 +5,7 @@ import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
 import numpy as np
-from .environments.graph_nauty import graph
+from .environments.graph_nauty import graph, combine_ids
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
@@ -183,7 +183,7 @@ class ReferenceEventTable:
                 dfevent=dfevent_forward
             ):  # check if event not already in the catalog
                 if (
-                    dfevent_forward["event_id"] == dfevent_forward["id_final"]
+                    dfevent_forward["id_initial"] == dfevent_forward["id_final"]
                 ):  # We are sure that the backward reaction same as forward
                     # dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
@@ -193,7 +193,7 @@ class ReferenceEventTable:
                 # backward event could still be the same as the forward one :
 
                 elif (
-                    dfevent_forward["event_id"] == dfevent_backward["event_id"]
+                    dfevent_forward["id_initial"] == dfevent_backward["id_initial"]
                 ):  # same topo
                     if (
                         abs(
@@ -373,7 +373,7 @@ class ReferenceEventTable:
             Subset of the reference table dataframe with only event having IDs in ids.
 
         """
-        return self.table[self.table["event_id"].isin(ids)]
+        return self.table[self.table["id_initial"].isin(ids)]
 
     def _build_event_series(
         self,
@@ -483,12 +483,13 @@ class ReferenceEventTable:
         dfevent_forward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
-                "event_id": id_min1,
                 "initial_positions": min1_positions[neighbor_list_forwward],
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
                 "final_positions": min2_positions[neighbor_list_forwward],
                 "energy_barrier": dE_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
+                "event_id": combine_ids(id_min1, id_saddle, id_min2),
+                "id_initial": id_min1,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
@@ -507,12 +508,13 @@ class ReferenceEventTable:
         dfevent_backward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
-                "event_id": id_min2,
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
                 "energy_barrier": dE_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
+                "event_id": combine_ids(id_min2, id_saddle, id_min1),
+                "id_initial": id_min2,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -543,12 +545,13 @@ class ReferenceEventTable:
             self.table = pd.DataFrame(
                 {
                     "idx_ref": pd.Series(dtype="int64"),
-                    "event_id": pd.Series(dtype="str"),
                     "initial_positions": pd.Series(dtype="object"),
                     "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
                     "k": pd.Series(dtype="float64"),
+                    "event_id": pd.Series(dtype="str"),
+                    "id_initial": pd.Series(dtype="str"),
                     "id_saddle": pd.Series(dtype="str"),
                     "id_final": pd.Series(dtype="str"),
                     "move_atom_idx": pd.Series(dtype="int64"),

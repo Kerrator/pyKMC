@@ -53,7 +53,7 @@ class DetectorThreshold(Detector) :
                 pds_generic_event_forward = pds_selected_active_event
 
             #all possible generic backward events
-            df_backward_events = df_reference_table[df_reference_table["event_id"] == pds_generic_event_forward["id_final"]] 
+            df_backward_events = df_reference_table[df_reference_table["id_initial"] == pds_generic_event_forward["id_final"]]
 
             #Should always have one (reversibility) 
             if df_backward_events.empty : 

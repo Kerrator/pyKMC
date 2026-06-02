@@ -88,7 +88,7 @@ class BasinGenericEventExplorer(Explorer) :
             #check if df_event leads to transient state 
             is_transient = self.detector.detect(df_event, self.reference_table.table, self.config.basin.energy_thr)
             #All atoms on which we can apply the event : 
-            l_atoms = state.environment.get_atoms_with_id(df_event["event_id"])
+            l_atoms = state.environment.get_atoms_with_id(df_event["id_initial"])
             #Find backward info
             backward_idx = self.reference_table.table.loc[idx].at["idx_backward"]
             dE_backward = self.reference_table.table[self.reference_table.table['idx_ref'] == backward_idx]['energy_barrier'].values[0]

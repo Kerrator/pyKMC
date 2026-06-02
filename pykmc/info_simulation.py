@@ -218,7 +218,7 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
     
     # Needed mapping to access reference table info
     idx_ref = reference_table.table['idx_ref'].values
-    mapping_event_id = dict(zip(idx_ref, reference_table.table['event_id'].values))
+    mapping_event_id = dict(zip(idx_ref, reference_table.table['id_initial'].values))
     mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
     mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
