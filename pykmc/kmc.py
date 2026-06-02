@@ -28,6 +28,7 @@ from .result import (
     Err,
     Ok,
 )
+from .log import fmt_hash
 import numpy as np
 from ase.io import write
 from ase import Atoms
@@ -400,16 +401,23 @@ class KMC:
             elapsed_real = time.time() - start_real
             elapsed_cpu = time.process_time() - start_cpu
 
+            num_ref_selected = active_table.table.loc[idx_selected_event].at["num_reference_event"]
+            event_id_selected = fmt_hash(
+                self.reference_table.table[
+                    self.reference_table.table["idx_ref"] == num_ref_selected
+                ]["event_id"].values[0]
+            )
             self.loggers.table_line_info_kmc(
                 "output",
                 step,
-                delta_t * 10**-12,
-                total_time,
-                active_table.table.loc[idx_selected_event].at["num_reference_event"],
-                active_table.table.loc[idx_selected_event].at["energy_barrier"],
-                active_table.table.loc[idx_selected_event].at["k"],
-                ktot,
                 self.total_energy,
+                active_table.table.loc[idx_selected_event].at["energy_barrier"],
+                delta_t * 10**-12,
+                active_table.table.loc[idx_selected_event].at["k"],
+                total_time,
+                ktot,
+                num_ref_selected,
+                event_id_selected,
                 elapsed_cpu,
                 elapsed_real,
             )
@@ -689,9 +697,12 @@ class KMC:
                 num_ref_event = active_table.table.loc[idx_selected_event].at[
                     "num_reference_event"
                 ]
+                event_id = self.reference_table.table[
+                    self.reference_table.table["idx_ref"] == num_ref_event
+                ]["event_id"].values[0]
                 self.loggers.info(
                     "log",
-                    f"\t :=> Reconstruction succeeded (reference event {num_ref_event}).",
+                    f"\t :=> Reconstruction succeeded (reference event {num_ref_event}, event_id={fmt_hash(event_id)}, Ea={selected_event.at['dE_forward']:.6f} eV).",
                 )
                 break
             else:

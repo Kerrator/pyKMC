@@ -11,6 +11,15 @@ from enum import Enum
 import re
 from .config import Config
 
+DISPLAYED_HASH_LENGTH = 8
+
+
+def fmt_hash(value: str | None, length: int = DISPLAYED_HASH_LENGTH) -> str:
+    """Return the human-readable hash prefix used in log output."""
+    if value is None:
+        return "?"
+    return value[:length]
+
 
 class LogManager:
     """Manage the configuration and usage of multiple standard Python loggers.
@@ -317,13 +326,14 @@ class LogKMC(LogManager):
 
     OUTPUT_TABLE_COLUMNS: ClassVar[tuple[tuple[int, str, str], ...]] = (
         (10, "n", "Step"),
-        (14, ".6e", "dT(s)"),
-        (14, ".6e", "T(s)"),
-        (14, "d", "Ref event"),
-        (14, ".6f", "Ea(eV)"),
-        (14, ".6e", "k_evt(ps-1)"),
-        (14, ".6e", "k_tot(ps-1)"),
         (14, ".6e", "E(eV)"),
+        (14, ".6f", "Ea(eV)"),
+        (14, ".6e", "dT(s)"),
+        (14, ".6e", "k_evt(ps-1)"),
+        (14, ".6e", "T(s)"),
+        (14, ".6e", "k_tot(ps-1)"),
+        (14, "d", "Ref event"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "event_id"),
         (14, ".6e", "Cpu time(s)"),
         (14, ".6e", "Wall time(s)"),
     )
@@ -441,25 +451,19 @@ class LogKMC(LogManager):
         self.new_line(logger_name)
         self.info(logger_name, "# Column Details:")
         self.info(logger_name, "\t# Step          : Simulation step number.")
-        self.info(
-            logger_name, "\t# dT(s)         : Time elapsed for this specific step."
-        )
-        self.info(logger_name, "\t# T(s)          : Total time since simulation start.")
-        self.info(
-            logger_name,
-            "\t# Ref event     : Index in the reference talbe of the selected event.",
-        )
-        self.info(logger_name, "\t# Ea(eV)        : Event activation energy barrier.")
-        self.info(
-            logger_name, "\t# k_evt(ps-1)   : Rate constant of the selected event."
-        )
-        self.info(
-            logger_name,
-            "\t# k_tot(ps-1)   : Total rate constant of all possible events at this step",
-        )
         self.info(logger_name, "\t# E(eV)         : Energy of the system.")
-        self.info(logger_name, "\t# Cpu time(s) : Cpu time in seconds. ")
-        self.info(logger_name, "\t# Wall time(s) : Wall time in seconds. ")
+        self.info(logger_name, "\t# Ea(eV)        : Event activation energy barrier.")
+        self.info(logger_name, "\t# dT(s)         : Time elapsed for this specific step.")
+        self.info(logger_name, "\t# k_evt(ps-1)   : Rate constant of the selected event.")
+        self.info(logger_name, "\t# T(s)          : Total time since simulation start.")
+        self.info(logger_name, "\t# k_tot(ps-1)   : Total rate constant of all possible events at this step.")
+        self.info(logger_name, "\t# Ref event     : Index in the reference table of the selected event.")
+        self.info(
+            logger_name,
+            f"\t# event_id      : First {DISPLAYED_HASH_LENGTH} characters of the selected event's combined topology ID.",
+        )
+        self.info(logger_name, "\t# Cpu time(s)   : Cpu time in seconds.")
+        self.info(logger_name, "\t# Wall time(s)  : Wall time in seconds.")
         self.new_line(logger_name)
         # First line of the table
         self.info(logger_name, self._format_output_table_header())
@@ -476,13 +480,16 @@ class LogKMC(LogManager):
             Values representing the columns of the simulation output progress table.
             These should correspond to:
                 - Step Number
-                - Time elapsed for this step (dT in s)
-                - Total cumulative time (T in s)
-                - Index in the reference table of the selected event.
+                - Total energy (E in eV)
                 - Event energy barrier (Ea in eV)
+                - Time elapsed for this step (dT in s)
                 - Rate constant of current event (k_evt in ps-1)
+                - Total cumulative time (T in s)
                 - Total rate constant of all events (k_tot in ps-1)
-                - Total energy (E in eV).
+                - Index in the reference table of the selected event
+                - Truncated display form of the event's combined topology ID (event_id)
+                - Cpu time (s)
+                - Wall time (s)
 
         """
         self.info(logger_name, self._format_output_table_row(*args))

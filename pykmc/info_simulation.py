@@ -218,31 +218,41 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
     
     # Needed mapping to access reference table info
     idx_ref = reference_table.table['idx_ref'].values
-    mapping_event_id = dict(zip(idx_ref, reference_table.table['id_initial'].values))
+    mapping_id_initial = dict(zip(idx_ref, reference_table.table['id_initial'].values))
+    mapping_event_id = dict(zip(idx_ref, reference_table.table['event_id'].values))
+    mapping_id_saddle = dict(zip(idx_ref, reference_table.table['id_saddle'].values))
+    mapping_id_final = dict(zip(idx_ref, reference_table.table['id_final'].values))
     mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
     mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
-    
-    #get info applying mapping 
-    initial_topologies = np.array([mapping_event_id[ref] for ref in reference_events])
+
+    #get info applying mapping
+    initial_topologies = np.array([mapping_id_initial[ref] for ref in reference_events])
+    event_ids = np.array([mapping_event_id[ref] for ref in reference_events])
+    id_saddles = np.array([mapping_id_saddle[ref] for ref in reference_events])
+    id_finals = np.array([mapping_id_final[ref] for ref in reference_events])
     dra_i = np.array([mapping_dra[ref] for ref in reference_events])
     backward_events = np.array([mapping_backward[ref] for ref in reference_events])
     dE_backward = np.array([mapping_energy[ref] for ref in backward_events])
     dra_f = np.array([mapping_dra[ref] for ref in backward_events])
-    
+
     dE_asym = np.abs(dE_forward - dE_backward)
 
-    return EventsInfo(types=types, 
-                      central_atom=central_atom, 
-                      initial_topologies=initial_topologies, 
+    return EventsInfo(types=types,
+                      central_atom=central_atom,
+                      initial_topologies=initial_topologies,
                       reference_events=reference_events,
-                      dE_forward=dE_forward, 
-                      dE_backward=dE_backward, 
-                      dE_asym=dE_asym, 
-                      k=k, 
-                      dra_i=dra_i, 
-                      dra_f=dra_f, 
-                      refined=refined)
+                      dE_forward=dE_forward,
+                      dE_backward=dE_backward,
+                      dE_asym=dE_asym,
+                      k=k,
+                      dra_i=dra_i,
+                      dra_f=dra_f,
+                      refined=refined,
+                      event_id=event_ids,
+                      id_initial=initial_topologies,
+                      id_saddle=id_saddles,
+                      id_final=id_finals)
 
 def info_basin_events(system_types, reference_table, connectivity_table, exit_state) -> EventsInfo: 
     """Construct dataclass with exit basin events"""
@@ -262,27 +272,38 @@ def info_basin_events(system_types, reference_table, connectivity_table, exit_st
     
     #Needed mapping to extract reference table info
     idx_ref = reference_table.table['idx_ref'].values
+    mapping_id_initial = dict(zip(idx_ref, reference_table.table['id_initial'].values))
+    mapping_event_id = dict(zip(idx_ref, reference_table.table['event_id'].values))
+    mapping_id_saddle = dict(zip(idx_ref, reference_table.table['id_saddle'].values))
+    mapping_id_final = dict(zip(idx_ref, reference_table.table['id_final'].values))
     mapping_dra = dict(zip(idx_ref, reference_table.table['dra'].values))
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
     mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
-    
+
     # Apply mapping
+    initial_topologies = np.array([mapping_id_initial[ref] for ref in reference_events])
+    event_ids = np.array([mapping_event_id[ref] for ref in reference_events])
+    id_saddles = np.array([mapping_id_saddle[ref] for ref in reference_events])
+    id_finals = np.array([mapping_id_final[ref] for ref in reference_events])
     dra_i = np.array([mapping_dra[ref] for ref in reference_events])
     backward_events = np.array([mapping_backward[ref] for ref in reference_events])
     dE_backward = np.array([mapping_energy[ref] for ref in backward_events])
     dra_f = np.array([mapping_dra[ref] for ref in backward_events])
-    
+
     dE_asym = np.abs(dE_forward - dE_backward)
 
-
-    return idx_selected_event, EventsInfo(types=types, 
-                      central_atom=central_atom, 
-                      initial_topologies=None, 
-                      reference_events=reference_events, 
-                      dE_forward=dE_forward, 
-                      dE_backward=dE_backward, 
-                      dE_asym=dE_asym, 
-                      k=k, 
-                      dra_i = dra_i, 
-                      dra_f = dra_f, 
-                      refined=refined)    
+    return idx_selected_event, EventsInfo(types=types,
+                      central_atom=central_atom,
+                      initial_topologies=initial_topologies,
+                      reference_events=reference_events,
+                      dE_forward=dE_forward,
+                      dE_backward=dE_backward,
+                      dE_asym=dE_asym,
+                      k=k,
+                      dra_i=dra_i,
+                      dra_f=dra_f,
+                      refined=refined,
+                      event_id=event_ids,
+                      id_initial=initial_topologies,
+                      id_saddle=id_saddles,
+                      id_final=id_finals)

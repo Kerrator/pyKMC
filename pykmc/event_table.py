@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
+from .log import DISPLAYED_HASH_LENGTH, fmt_hash
 import numpy as np
 from .environments.graph_nauty import graph, combine_ids
 from .system import System

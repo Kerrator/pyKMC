@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 import logging
 import numpy as np
 import pandas as pd
+from .log import fmt_hash
 
 if TYPE_CHECKING:
     from .event_table import ActiveEventTable, ReferenceEventTable
@@ -190,11 +191,19 @@ class Bias(ABC):
             idx_in_candidates, delta_t, ktot = selection_algorithm(l_k[candidate_events])
             idx = candidate_events[idx_in_candidates]
             event = active_table.table.loc[idx]
+            num_ref = event.get('num_reference_event', None)
+            ref_rows = reference_table.table[reference_table.table["idx_ref"] == num_ref]
+            event_id = (
+                fmt_hash(ref_rows["event_id"].values[0])
+                if len(ref_rows) > 0
+                else "?"
+            )
             if self.accept(event, system, reference_table, neighbors_list):
                 _LOGGER.debug(
                     f"\t\t :=> Filter: accepted event {idx}"
                     f" (atom={event.get('atom_index', '?')},"
-                    f" ref={event.get('num_reference_event', '?')},"
+                    f" ref={num_ref},"
+                    f" event_id={event_id},"
                     f" Ea={event.get('energy_barrier', float('nan')):.6f} eV,"
                     f" k={float(l_k[idx]):.6e})"
                 )
@@ -202,7 +211,8 @@ class Bias(ABC):
             _LOGGER.debug(
                 f"\t\t :=> Filter: rejected event {idx}"
                 f" (atom={event.get('atom_index', '?')},"
-                f" ref={event.get('num_reference_event', '?')},"
+                f" ref={num_ref},"
+                f" event_id={event_id},"
                 f" Ea={event.get('energy_barrier', float('nan')):.6f} eV)"
             )
             candidate_events.remove(idx)
@@ -247,8 +257,16 @@ class Bias(ABC):
         k_total_true = k_boost + k_free
         delta_t = delta_t_boosted * ktot_boosted / k_total_true
         selected_event = active_table.table.loc[idx]
+        num_ref = selected_event.get('num_reference_event', None)
+        ref_rows = reference_table.table[reference_table.table["idx_ref"] == num_ref]
+        event_id = (
+            fmt_hash(ref_rows["event_id"].values[0])
+            if len(ref_rows) > 0
+            else "?"
+        )
         _LOGGER.debug(
             f"\t :=> Boost: selected event {idx},"
+            f" event_id={event_id},"
             f" Ea={selected_event.get('energy_barrier', float('nan')):.6f} eV,"
             f" corrected_delta_t={float(delta_t):.6e},"
             f" true_k_total={float(k_total_true):.6e}"

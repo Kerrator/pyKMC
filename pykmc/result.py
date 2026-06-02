@@ -16,6 +16,7 @@ from enum import Enum
 import numpy as np
 import yaml
 import pandas as pd
+from .log import fmt_hash
 
 # Construction of the Result Type :
 
@@ -355,7 +356,7 @@ class RefinementsInfo:
 class EventsInfo: 
     """Active events informations."""
 
-    types: list[str] 
+    types: list[str]
     central_atom: list[int]
     initial_topologies: list[str]
     reference_events: list[int]
@@ -366,21 +367,29 @@ class EventsInfo:
     dra_i: list[float]
     dra_f: list[float]
     refined: list[str]
+    event_id: list[str]
+    id_initial: list[str]
+    id_saddle: list[str]
+    id_final: list[str]
 
-    def output_msg(self) -> str: 
-
+    def output_msg(self) -> str:
         df = pd.DataFrame({
-                'Types': self.types,
-                'Central Atom': self.central_atom,
-                'Ref Event': self.reference_events,
-                'dE forward': self.dE_forward,
-                'dE backward': self.dE_backward,
-                'dE asym': self.dE_asym,
-                'k': self.k,
-                'dra_i': self.dra_i,
-                'dra_f': self.dra_f,
-                'Refined': self.refined,}).reset_index(drop=True)
-        return df.to_string(index=True)        
+            'Types': self.types,
+            'Central Atom': self.central_atom,
+            'Ref Event': self.reference_events,
+            'dE forward': self.dE_forward,
+            'dE backward': self.dE_backward,
+            'dE asym': self.dE_asym,
+            'k': self.k,
+            'dra_i': self.dra_i,
+            'dra_f': self.dra_f,
+            'Refined': self.refined,
+            'event_id': [fmt_hash(e) for e in self.event_id],
+            'id_initial': [fmt_hash(e) for e in self.id_initial],
+            'id_saddle': [fmt_hash(e) for e in self.id_saddle],
+            'id_final': [fmt_hash(e) for e in self.id_final],
+        }).reset_index(drop=True)
+        return df.to_string(index=True)
 
 @dataclass
 class KMCLoopInfo:
