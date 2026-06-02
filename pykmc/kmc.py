@@ -263,12 +263,10 @@ class KMC:
                 self.visited_environments = self.visited_environments.difference(
                     set(err_ae)
                 )
-            events_info = events_info.output_msg()
-
             # INFO :
             self.loggers.events_file_step_first_line("events", step)
             self.loggers.events_applicable_info_line("events", idx_selected_event)
-            self.loggers.info("events", events_info)
+            self.loggers.events_write("events", events_info)
 
             # TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
@@ -336,9 +334,8 @@ class KMC:
                             basin.connectivity_table,
                             result_basin.ok_value().exit_state,
                         )
-                        basin_info = basin_info.output_msg()
                         self.loggers.events_basin_info_line("events", idx_exit_event)
-                        self.loggers.info("events", basin_info)
+                        self.loggers.events_write("events", basin_info)
 
                     else:
                         self.loggers.info(

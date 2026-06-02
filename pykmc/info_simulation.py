@@ -193,7 +193,7 @@ def info_refinements(
                 case ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER:
                     n_fails["invalid_dE"]['n'] +=1 
                 case ErrorType.REFINEMENT_INVALID_MINIMA:
-                    n_fails["invalid_min"]["n"] +=1
+                    n_fails["invalid_minima"]["n"] +=1
                 case ErrorType.EVENT_NOT_FOUND:
                     n_fails["event_not_found"]["n"] +=1
                 case ErrorType.EVENT_REFINEMENT_RUNTIME_ERROR:

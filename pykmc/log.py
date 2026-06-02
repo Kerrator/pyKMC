@@ -346,6 +346,38 @@ class LogKMC(LogManager):
         (14, ".6e", "Wall time(s)"),
     )
 
+    EVENTS_TABLE_COLUMNS: ClassVar[tuple[tuple[int, str, str], ...]] = (
+        (5,  "d",   "#"),
+        (7,  "s",   "Types"),
+        (13, "d",   "CentralAtom"),
+        (10, "d",   "RefEvent"),
+        (14, ".6f", "dE_forward"),
+        (14, ".6f", "dE_backward"),
+        (14, ".6f", "dE_asym"),
+        (14, ".6e", "k"),
+        (14, ".6f", "dra_i"),
+        (14, ".6f", "dra_f"),
+        (9,  "s",   "Refined"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "event_id"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_initial"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_saddle"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_final"),
+    )
+
+    REFERENCE_TABLE_COLUMNS: ClassVar[tuple[tuple[int, str, str], ...]] = (
+        (10, "d",   "idx_ref"),
+        (14, ".6f", "dE_forward"),
+        (14, ".6f", "dE_backward"),
+        (14, ".6e", "k"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "event_id"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_initial"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_saddle"),
+        (DISPLAYED_HASH_LENGTH + 4, "s", "id_final"),
+        (14, "d",   "move_atom_idx"),
+        (14, "d",   "idx_backward"),
+        (14, ".6f", "dra"),
+    )
+
     def __init__(self, config_dict: dict[str, Any], verbosity: int = 1) -> None:
         super().__init__(config_dict)
         self._verbosity = verbosity
@@ -401,7 +433,7 @@ class LogKMC(LogManager):
         """
         self.info(logger_name, "          |              ")
         self.info(logger_name, ",---.,   .|__/ ,-.-.,---.")
-        self.info(logger_name, "|   ||   ||  \ | | ||    ")
+        self.info(logger_name, "|   ||   ||  \\ | | ||    ")
         self.info(logger_name, "|---'`---|`   `` ' '`---'")
         self.info(logger_name, "|    `---              ")
         self.info(logger_name, "\n")
@@ -519,6 +551,40 @@ class LogKMC(LogManager):
             cells.append(f"{value:<{width}{value_fmt}}")
         return " ".join(cells)
 
+    @classmethod
+    def _format_events_table_header(cls) -> str:
+        return " ".join(
+            f"{name:<{width}s}" for width, _, name in cls.EVENTS_TABLE_COLUMNS
+        )
+
+    @classmethod
+    def _format_events_table_row(cls, *values) -> str:
+        cells: list[str] = []
+        for idx, (width, value_fmt, _) in enumerate(cls.EVENTS_TABLE_COLUMNS):
+            value = values[idx] if idx < len(values) else None
+            if value is None:
+                cells.append(" " * width)
+                continue
+            cells.append(f"{value:<{width}{value_fmt}}")
+        return " ".join(cells)
+
+    @classmethod
+    def _format_reference_table_header(cls) -> str:
+        return " ".join(
+            f"{name:<{width}s}" for width, _, name in cls.REFERENCE_TABLE_COLUMNS
+        )
+
+    @classmethod
+    def _format_reference_table_row(cls, *values) -> str:
+        cells: list[str] = []
+        for idx, (width, value_fmt, _) in enumerate(cls.REFERENCE_TABLE_COLUMNS):
+            value = values[idx] if idx < len(values) else None
+            if value is None:
+                cells.append(" " * width)
+                continue
+            cells.append(f"{value:<{width}{value_fmt}}")
+        return " ".join(cells)
+
     def events_file_header(self, logger_name: str) -> None:
         """Write header of the events file
 
@@ -551,11 +617,13 @@ class LogKMC(LogManager):
         )
         self.info(
             logger_name,
-            "\t #dra_i: displacement between the final positions and the saddle positions.",
+            "\t #dra_f: displacement between the final positions and the saddle positions.",
         )
         self.info(logger_name, "\t #Refined: - T : The event has been refined.")
         self.info(logger_name, "\t #         - F : The event has not been refined.")
         self.new_line(logger_name)
+        self.info(logger_name, self._format_events_table_header())
+        self.info(logger_name, "-" * len(self._format_events_table_header()))
 
     def reference_table_file_header(self, logger_name: str) -> None:
         """Write the header of the reference table file."""
@@ -572,30 +640,56 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t #idx_backward : Index of the corresponding backward event.")
         self.info(logger_name, "\t #dra          : Displacement between initial and saddle positions.")
         self.new_line(logger_name)
+        self.info(logger_name, self._format_reference_table_header())
+        self.info(logger_name, "-" * len(self._format_reference_table_header()))
 
     def reference_table_write(self, logger_name: str, reference_table) -> None:
-        """Write a snapshot of the reference event table."""
-        import pandas as pd
-        df = pd.DataFrame({
-            "idx_ref":       reference_table.table["idx_ref"],
-            "dE_forward":    reference_table.table["dE_forward"],
-            "dE_backward":   reference_table.table["dE_backward"],
-            "k":             reference_table.table["k"],
-            "event_id":      [fmt_hash(e) for e in reference_table.table["event_id"]],
-            "id_initial":    [fmt_hash(e) for e in reference_table.table["id_initial"]],
-            "id_saddle":     [fmt_hash(e) for e in reference_table.table["id_saddle"]],
-            "id_final":      [fmt_hash(e) for e in reference_table.table["id_final"]],
-            "move_atom_idx": reference_table.table["move_atom_idx"],
-            "idx_backward":  reference_table.table["idx_backward"],
-            "dra":           reference_table.table["dra"],
-        }).reset_index(drop=True)
-        self.info(logger_name, "========== Reference Events ({}) ==========".format(len(df)))
-        self.info(logger_name, df.to_string(index=True, formatters={
-            "dE_forward":  lambda x: f"{x:.6f}",
-            "dE_backward": lambda x: f"{x:.6f}",
-            "k":           lambda x: f"{x:.6e}",
-            "dra":         lambda x: f"{x:.6f}",
-        }))
+        """Write a snapshot of the reference event table, overwriting on each call."""
+        logger = self._get_active_logger(logger_name)
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler) and handler.stream:
+                handler.stream.seek(0)
+                handler.stream.truncate()
+                break
+        tbl = reference_table.table
+        self.reference_table_file_header(logger_name)
+        self.info(logger_name, "========== Reference Events ({}) ==========".format(len(tbl)))
+        for i in range(len(tbl)):
+            row = tbl.iloc[i]
+            self.info(logger_name, self._format_reference_table_row(
+                int(row["idx_ref"]),
+                float(row["dE_forward"]),
+                float(row["dE_backward"]),
+                float(row["k"]),
+                fmt_hash(row["event_id"]),
+                fmt_hash(row["id_initial"]),
+                fmt_hash(row["id_saddle"]),
+                fmt_hash(row["id_final"]),
+                int(row["move_atom_idx"]),
+                int(row["idx_backward"]),
+                float(row["dra"]),
+            ))
+
+    def events_write(self, logger_name: str, events_info) -> None:
+        """Write formatted event rows to the events file."""
+        for i in range(len(events_info.types)):
+            self.info(logger_name, self._format_events_table_row(
+                i,
+                str(events_info.types[i]),
+                int(events_info.central_atom[i]),
+                int(events_info.reference_events[i]),
+                float(events_info.dE_forward[i]),
+                float(events_info.dE_backward[i]),
+                float(events_info.dE_asym[i]),
+                float(events_info.k[i]),
+                float(events_info.dra_i[i]),
+                float(events_info.dra_f[i]),
+                str(events_info.refined[i]),
+                fmt_hash(events_info.event_id[i]),
+                fmt_hash(events_info.id_initial[i]),
+                fmt_hash(events_info.id_saddle[i]),
+                fmt_hash(events_info.id_final[i]),
+            ))
 
     def events_file_step_first_line(self, logger_name: str, step: int) -> None:
         """Write the first line with step informations

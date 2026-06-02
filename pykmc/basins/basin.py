@@ -99,7 +99,7 @@ class BasinsGenericEvents() :
                               saddle_positions=self.absorbing_saddle_positions[exit_state], 
                               final_positions=self.states[exit_state].system.positions[neighbors], 
                               neighbors=neighbors,
-                              energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"], 
+                              dE_forward= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"], 
                               k_tot = self.connectivity_table.df.loc[self.connectivity_table.df["transient"] == False, "k_forward"].sum(),
                               t_exit = t_exit,
                               exit_state = exit_state, 
