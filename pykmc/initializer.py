@@ -116,15 +116,20 @@ class Initializer:
                 self.kmc.bias = DirectionBias(
                     bc.direction, bc.atom_indices, bc.threshold,
                     mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
+                    require_central=bc.require_central,
                 )
             case "point":
                 self.kmc.bias = PointBias(
                     bc.target_point, bc.atom_indices, bc.threshold,
                     mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
+                    require_central=bc.require_central,
                 )
             case "topo":
                 self.kmc.bias = TopoBias(
-                    bc.topo_source, bc.topo_target,
+                    bc.atom_source_idx, self.kmc.atomic_environment,
+                    atom_target_idx=bc.atom_target_idx,
+                    direction=bc.direction,
+                    threshold=bc.threshold,
                     mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
                 )
 

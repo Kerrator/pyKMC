@@ -3,6 +3,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal
+import logging
 import numpy as np
 import pandas as pd
 
@@ -10,36 +11,10 @@ if TYPE_CHECKING:
     from .event_table import ActiveEventTable, ReferenceEventTable
     from .system import System
     from .atomic_environment import AtomicEnvironment
+    from .neighbors_list import NeighborsList
 
 
-def _moving_atom_displacement(
-    event: pd.Series,
-    system: System,
-    reference_table: ReferenceEventTable,
-) -> np.ndarray:
-    """Return the displacement of the moving atom for a candidate event.
-
-    Parameters
-    ----------
-    event : pd.Series
-        One row of the active event table.
-    system : System
-        Current atomic configuration.
-    reference_table : ReferenceEventTable
-        Reference table used to look up ``move_atom_idx``.
-
-    Returns
-    -------
-    np.ndarray, shape (3,)
-        Displacement vector (final − initial) of the moving atom.
-    """
-    atom_idx = int(event["atom_index"])
-    num_ref = int(event["num_reference_event"])
-    ref_row = reference_table.table[reference_table.table["idx_ref"] == num_ref].iloc[0]
-    move_atom_idx = int(ref_row["move_atom_idx"])
-    final_pos = event["final_positions"][move_atom_idx]
-    current_pos = system.positions[atom_idx]
-    return final_pos - current_pos
+_LOGGER = logging.getLogger("log")
 
 
 class Bias(ABC):
@@ -79,6 +54,7 @@ class Bias(ABC):
         mode: Literal["filter", "boost"] = "filter",
         bias_weight: float = 0.5,
         pass_unlisted: bool = False,
+        require_central: bool = False,
     ) -> None:
         if mode == "boost" and pass_unlisted:
             raise ValueError(
@@ -90,6 +66,7 @@ class Bias(ABC):
         self.mode = mode
         self.bias_weight = bias_weight
         self.pass_unlisted = pass_unlisted
+        self.require_central = require_central
 
     @abstractmethod
     def accept(
@@ -97,6 +74,7 @@ class Bias(ABC):
         event: pd.Series,
         system: System,
         reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList | None = None,
     ) -> bool:
         """Return True if the event is accepted (filter) or desired (boost).
 
@@ -109,6 +87,10 @@ class Bias(ABC):
         reference_table : ReferenceEventTable
             Reference event table used to retrieve the moving-atom index
             within the event's local neighbourhood array.
+        neighbors_list : NeighborsList or None, optional
+            Neighbour list of the current system.  Required when
+            ``atom_indices`` is set so that the bias can locate a specific
+            atom within ``event["final_positions"]``.
 
         Returns
         -------
@@ -122,6 +104,7 @@ class Bias(ABC):
         system: System,
         reference_table: ReferenceEventTable,
         atomic_environment: AtomicEnvironment,
+        neighbors_list: NeighborsList | None = None,
     ) -> None:
         """Pre-loop hook called once per :meth:`select` invocation.
 
@@ -148,6 +131,7 @@ class Bias(ABC):
         system: System,
         reference_table: ReferenceEventTable,
         atomic_environment: AtomicEnvironment | None = None,
+        neighbors_list: NeighborsList | None = None,
     ) -> tuple[int, float, float]:
         """Select an event using the configured bias mode.
 
@@ -174,16 +158,21 @@ class Bias(ABC):
             - float: total rate constant.
         """
         if not self.enabled:
+            _LOGGER.debug("\t :=> Bias disabled, using unbiased selection")
             return selection_algorithm(l_k)
-        self._prepare(system, reference_table, atomic_environment)
+        _LOGGER.debug(
+            f"\n\t :=> Bias select: mode={self.mode},"
+            f" events={len(l_k)}, k_total={float(np.sum(l_k)):.6e}"
+        )
+        self._prepare(system, reference_table, atomic_environment, neighbors_list)
         match self.mode:
             case "filter":
                 return self._select_filter(
-                    selection_algorithm, l_k, active_table, system, reference_table
+                    selection_algorithm, l_k, active_table, system, reference_table, neighbors_list
                 )
             case "boost":
                 return self._select_boost(
-                    selection_algorithm, l_k, active_table, system, reference_table
+                    selection_algorithm, l_k, active_table, system, reference_table, neighbors_list
                 )
 
     def _select_filter(
@@ -193,17 +182,31 @@ class Bias(ABC):
         active_table: ActiveEventTable,
         system: System,
         reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList | None = None,
     ) -> tuple[int, float, float]:
         """Rejection-loop selection: remove failing events one by one."""
         candidate_events = list(range(len(l_k)))
         while candidate_events:
-            idx_in_candidates, delta_t, ktot = selection_algorithm(
-                l_k[candidate_events]
-            )
+            idx_in_candidates, delta_t, ktot = selection_algorithm(l_k[candidate_events])
             idx = candidate_events[idx_in_candidates]
-            if self.accept(active_table.table.loc[idx], system, reference_table):
+            event = active_table.table.loc[idx]
+            if self.accept(event, system, reference_table, neighbors_list):
+                _LOGGER.debug(
+                    f"\t\t :=> Filter: accepted event {idx}"
+                    f" (atom={event.get('atom_index', '?')},"
+                    f" ref={event.get('num_reference_event', '?')},"
+                    f" Ea={event.get('energy_barrier', float('nan')):.6f} eV,"
+                    f" k={float(l_k[idx]):.6e})"
+                )
                 return idx, delta_t, ktot
+            _LOGGER.debug(
+                f"\t\t :=> Filter: rejected event {idx}"
+                f" (atom={event.get('atom_index', '?')},"
+                f" ref={event.get('num_reference_event', '?')},"
+                f" Ea={event.get('energy_barrier', float('nan')):.6f} eV)"
+            )
             candidate_events.remove(idx)
+        _LOGGER.debug("\t :=> Filter: all candidates rejected, using unbiased selection")
         return selection_algorithm(l_k)
 
     def _select_boost(
@@ -213,34 +216,75 @@ class Bias(ABC):
         active_table: ActiveEventTable,
         system: System,
         reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList | None = None,
     ) -> tuple[int, float, float]:
         """Rate-boost selection: multiply desired event rates by dynamic α."""
         desired_mask = np.array(
             [
-                self.accept(row, system, reference_table)
+                self.accept(row, system, reference_table, neighbors_list)
                 for _, row in active_table.table.iterrows()
             ]
         )
         k_boost = l_k[desired_mask].sum()
         k_free = l_k[~desired_mask].sum()
         if k_boost == 0 or k_free == 0:
+            _LOGGER.debug(
+                f"\t :=> Boost: degenerate split"
+                f" (k_boost={float(k_boost):.6e}, k_free={float(k_free):.6e}),"
+                f" using unbiased selection"
+            )
             return selection_algorithm(l_k)
         alpha = self.bias_weight * k_free / ((1 - self.bias_weight) * k_boost)
+        _LOGGER.debug(
+            f"\t :=> Boost: desired={int(np.count_nonzero(desired_mask))},"
+            f" undesired={int(np.count_nonzero(~desired_mask))},"
+            f" k_boost={float(k_boost):.6e}, k_free={float(k_free):.6e},"
+            f" bias_weight={float(self.bias_weight):.3f}, alpha={float(alpha):.6e}"
+        )
         l_k_boosted = l_k.copy()
         l_k_boosted[desired_mask] *= alpha
         idx, delta_t_boosted, ktot_boosted = selection_algorithm(l_k_boosted)
         k_total_true = k_boost + k_free
         delta_t = delta_t_boosted * ktot_boosted / k_total_true
+        selected_event = active_table.table.loc[idx]
+        _LOGGER.debug(
+            f"\t :=> Boost: selected event {idx},"
+            f" Ea={selected_event.get('energy_barrier', float('nan')):.6f} eV,"
+            f" corrected_delta_t={float(delta_t):.6e},"
+            f" true_k_total={float(k_total_true):.6e}"
+        )
         return idx, delta_t, k_total_true
 
-    def _moving_atom_displacement(
+    def _get_displacement(
         self,
         event: pd.Series,
         system: System,
-        reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList,
+        atom_idx: int,
     ) -> np.ndarray:
-        """Return the displacement of the moving atom for a candidate event."""
-        return _moving_atom_displacement(event, system, reference_table)
+        """Return displacement of atom_idx in this event via neighbourhood lookup."""
+        neighborhood = np.asarray(
+            neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
+        )
+        k = int(np.where(neighborhood == atom_idx)[0][0])
+        return event["final_positions"][k] - system.positions[atom_idx]
+
+    def _biased_atom_displacements(
+        self,
+        event: pd.Series,
+        system: System,
+        neighbors_list: NeighborsList,
+    ):
+        """Yield (atom_idx, displacement) for each biased atom in the neighbourhood."""
+        neighborhood = np.asarray(
+            neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
+        )
+        for atom_idx in self._atom_set:
+            where = np.where(neighborhood == atom_idx)[0]
+            if len(where) == 0:
+                continue
+            k = int(where[0])
+            yield atom_idx, event["final_positions"][k] - system.positions[atom_idx]
 
 
 class DirectionBias(Bias):
@@ -265,6 +309,12 @@ class DirectionBias(Bias):
     pass_unlisted : bool
         Return value of :meth:`accept` for non-listed atoms.  Default is
         ``False``.  Setting ``True`` is only valid in ``"filter"`` mode.
+    require_central : bool
+        When True and ``atom_indices`` is set, only the most-moving atom
+        (``event["atom_index"]``) is checked.  If it is not in
+        ``atom_indices``, ``pass_unlisted`` is returned.  When False
+        (default), the condition is satisfied by any atom in ``atom_indices``
+        found in the event neighbourhood.
     """
 
     def __init__(
@@ -275,9 +325,11 @@ class DirectionBias(Bias):
         mode: Literal["filter", "boost"] = "filter",
         bias_weight: float = 0.5,
         pass_unlisted: bool = False,
+        require_central: bool = False,
     ) -> None:
         super().__init__(
-            mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted
+            mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted,
+            require_central=require_central,
         )
         d = np.asarray(direction, dtype=float)
         self._direction = d / np.linalg.norm(d)
@@ -289,14 +341,30 @@ class DirectionBias(Bias):
         event: pd.Series,
         system: System,
         reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList | None = None,
     ) -> bool:
-        if (
-            self._atom_set is not None
-            and int(event["atom_index"]) not in self._atom_set
-        ):
-            return self.pass_unlisted
-        displacement = self._moving_atom_displacement(event, system, reference_table)
-        return float(np.dot(displacement, self._direction)) >= self._threshold
+        atom_idx = int(event["atom_index"])
+        if self._atom_set is None or self.require_central:
+            if self._atom_set is not None and atom_idx not in self._atom_set:
+                return self.pass_unlisted
+            displacement = self._get_displacement(event, system, neighbors_list, atom_idx)
+            projection = float(np.dot(displacement, self._direction))
+            accepted = projection >= self._threshold
+            _LOGGER.debug(
+                f"\t\t :=> Direction bias: atom {atom_idx},"
+                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" accepted={accepted}"
+            )
+            return accepted
+        for atom_idx, displacement in self._biased_atom_displacements(event, system, neighbors_list):
+            projection = float(np.dot(displacement, self._direction))
+            _LOGGER.debug(
+                f"\t\t :=> Direction bias: atom {atom_idx},"
+                f" projection={projection:.6e}, threshold={float(self._threshold):.6e}"
+            )
+            if projection >= self._threshold:
+                return True
+        return self.pass_unlisted
 
 
 class PointBias(Bias):
@@ -324,6 +392,12 @@ class PointBias(Bias):
     pass_unlisted : bool
         Return value of :meth:`accept` for non-listed atoms.  Default is
         ``False``.  Setting ``True`` is only valid in ``"filter"`` mode.
+    require_central : bool
+        When True and ``atom_indices`` is set, only the most-moving atom
+        (``event["atom_index"]``) is checked.  If it is not in
+        ``atom_indices``, ``pass_unlisted`` is returned.  When False
+        (default), the condition is satisfied by any atom in ``atom_indices``
+        found in the event neighbourhood.
     """
 
     def __init__(
@@ -334,9 +408,11 @@ class PointBias(Bias):
         mode: Literal["filter", "boost"] = "filter",
         bias_weight: float = 0.5,
         pass_unlisted: bool = False,
+        require_central: bool = False,
     ) -> None:
         super().__init__(
-            mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted
+            mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted,
+            require_central=require_central,
         )
         self._target = np.asarray(target_point, dtype=float)
         self._atom_set = set(atom_indices) if atom_indices is not None else None
@@ -347,36 +423,68 @@ class PointBias(Bias):
         event: pd.Series,
         system: System,
         reference_table: ReferenceEventTable,
+        neighbors_list: NeighborsList | None = None,
     ) -> bool:
-        atom_idx = int(event["atom_index"])
-        if self._atom_set is not None and atom_idx not in self._atom_set:
-            return self.pass_unlisted
-        current_pos = system.positions[atom_idx]
-        to_target = self._target - current_pos
-        dist = np.linalg.norm(to_target)
-        if dist < 1e-10:
-            return True
-        local_direction = to_target / dist
-        displacement = self._moving_atom_displacement(event, system, reference_table)
-        return float(np.dot(displacement, local_direction)) >= self._threshold
+        if self._atom_set is None or self.require_central:
+            atom_idx = int(event["atom_index"])
+            if self._atom_set is not None and atom_idx not in self._atom_set:
+                return self.pass_unlisted
+            current_pos = system.positions[atom_idx]
+            to_target = self._target - current_pos
+            dist = np.linalg.norm(to_target)
+            if dist < 1e-10:
+                return True
+            displacement = self._get_displacement(event, system, neighbors_list, atom_idx)
+            projection = float(np.dot(displacement, to_target / dist))
+            _LOGGER.debug(
+                f"\t\t :=> Point bias: atom {atom_idx},"
+                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" accepted={projection >= self._threshold}"
+            )
+            return projection >= self._threshold
+        for atom_idx, displacement in self._biased_atom_displacements(event, system, neighbors_list):
+            current_pos = system.positions[atom_idx]
+            to_target = self._target - current_pos
+            dist = np.linalg.norm(to_target)
+            if dist < 1e-10:
+                return True
+            projection = float(np.dot(displacement, to_target / dist))
+            _LOGGER.debug(
+                f"\t\t :=> Point bias: atom {atom_idx},"
+                f" projection={projection:.6e}, threshold={float(self._threshold):.6e}"
+            )
+            if projection >= self._threshold:
+                return True
+        return self.pass_unlisted
 
 
 class TopoBias(Bias):
     """Bias events that reduce the distance between two topology defects.
 
-    On each KMC step :meth:`_prepare` locates all atoms carrying
-    ``topo_source`` and ``topo_target`` in the current atomic environment.
-    :meth:`accept` then accepts a candidate event only if the moving atom
-    belongs to the source topology and its displacement brings it closer to the
-    nearest target-topology atom.  If either topology is absent the bias is
-    inactive for that step.
+    The topology IDs of the source and (optional) target atoms are resolved
+    once at construction from ``atom_source_idx`` / ``atom_target_idx``.
+    On each KMC step :meth:`_prepare` locates all atoms that currently carry
+    those fixed topology IDs.  :meth:`accept` then accepts a candidate event
+    only if the most-moving atom belongs to the source topology and either:
+
+    - moves toward the nearest target-topology atom (two-index mode), or
+    - its displacement projects onto *direction* above *threshold* (one-index mode).
 
     Parameters
     ----------
-    topo_source : str | bytes
-        Topology ID of the defect to move (e.g. vacancy graph ID).
-    topo_target : str | bytes
-        Topology ID of the defect to approach (e.g. interstitial graph ID).
+    atom_source_idx : int
+        Index of the atom whose topology ID at construction time is used as
+        the source topology.
+    atomic_environment : AtomicEnvironment
+        Atomic environment at construction time, used for the one-time
+        topology-ID lookup.
+    atom_target_idx : int or None, optional
+        Index of the atom whose topology ID is used as the target.  When
+        *None* (default), one-index (direction) mode is active.
+    direction : array-like, shape (3,) or None, optional
+        Required in one-index mode.  Desired displacement direction.
+    threshold : float, optional
+        Minimum projection onto *direction* in one-index mode.  Default is 0.
     mode : {"filter", "boost"}
         Selection mode.  Default is ``"filter"``.
     bias_weight : float
@@ -388,42 +496,75 @@ class TopoBias(Bias):
 
     def __init__(
         self,
-        topo_source: str | bytes,
-        topo_target: str | bytes,
+        atom_source_idx: int,
+        atomic_environment,
+        atom_target_idx: int | None = None,
+        direction: np.ndarray | None = None,
+        threshold: float = 0.0,
         mode: Literal["filter", "boost"] = "filter",
         bias_weight: float = 0.5,
         pass_unlisted: bool = False,
     ) -> None:
-        super().__init__(
-            mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted
+        super().__init__(mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted)
+        self._topo_source = atomic_environment.atomic_environment_list[atom_source_idx]
+        self._topo_target = (
+            atomic_environment.atomic_environment_list[atom_target_idx]
+            if atom_target_idx is not None else None
         )
-        self._topo_source = topo_source
-        self._topo_target = topo_target
-        self._source_positions = None
+        if self._topo_target is None:
+            if direction is None:
+                raise ValueError("direction is required when atom_target_idx is not given")
+            d = np.asarray(direction, dtype=float)
+            self._direction = d / np.linalg.norm(d)
+        else:
+            self._direction = None
+        self._threshold = threshold
+        self._source_atoms: set[int] = set()
         self._target_positions = None
 
-    def _prepare(self, system, reference_table, atomic_environment) -> None:
+    def _prepare(self, system, reference_table, atomic_environment, neighbors_list=None) -> None:
         source_atoms = atomic_environment.get_atoms_with_id(self._topo_source)
-        target_atoms = atomic_environment.get_atoms_with_id(self._topo_target)
-        self._source_positions = (
-            system.positions[source_atoms] if source_atoms else None
+        self._source_atoms = set(source_atoms)
+        if self._topo_target is not None:
+            target_atoms = atomic_environment.get_atoms_with_id(self._topo_target)
+            self._target_positions = system.positions[target_atoms] if target_atoms else None
+        n_target = (
+            len(atomic_environment.get_atoms_with_id(self._topo_target))
+            if self._topo_target else 0
         )
-        self._target_positions = (
-            system.positions[target_atoms] if target_atoms else None
+        _LOGGER.debug(
+            f"\t :=> Topo bias prepare: source_atoms={len(source_atoms)}, target_atoms={n_target}"
         )
 
-    def accept(self, event, system, reference_table) -> bool:
-        if self._source_positions is None or self._target_positions is None:
-            return True
-        current_pos = system.positions[int(event["atom_index"])]
-        if not any(np.allclose(current_pos, s) for s in self._source_positions):
+    def accept(self, event, system, reference_table, neighbors_list=None) -> bool:
+        atom_idx = int(event["atom_index"])
+        if atom_idx not in self._source_atoms:
+            _LOGGER.debug(
+                f"\t\t :=> Topo bias: atom {atom_idx} not in source topology,"
+                f" pass_unlisted={self.pass_unlisted}"
+            )
             return self.pass_unlisted
-        displacement = self._moving_atom_displacement(event, system, reference_table)
+        displacement = self._get_displacement(event, system, neighbors_list, atom_idx)
+        if self._direction is not None:
+            projection = float(np.dot(displacement, self._direction))
+            accepted = projection >= self._threshold
+            _LOGGER.debug(
+                f"\t\t :=> Topo bias: atom {atom_idx},"
+                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" accepted={accepted}"
+            )
+            return accepted
+        if self._target_positions is None:
+            _LOGGER.debug("\t :=> Topo bias: no target-topology atoms this step, inactive (accepted=True)")
+            return True
+        current_pos = system.positions[atom_idx]
         final_pos = current_pos + displacement
-        current_min_dist = np.min(
-            np.linalg.norm(self._target_positions - current_pos, axis=1)
+        current_min_dist = float(np.min(np.linalg.norm(self._target_positions - current_pos, axis=1)))
+        final_min_dist = float(np.min(np.linalg.norm(self._target_positions - final_pos, axis=1)))
+        accepted = final_min_dist < current_min_dist
+        _LOGGER.debug(
+            f"\t\t :=> Topo bias: atom {atom_idx},"
+            f" current_min_dist={current_min_dist:.6e}, final_min_dist={final_min_dist:.6e},"
+            f" accepted={accepted}"
         )
-        final_min_dist = np.min(
-            np.linalg.norm(self._target_positions - final_pos, axis=1)
-        )
-        return final_min_dist < current_min_dist
+        return accepted

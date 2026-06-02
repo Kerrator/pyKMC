@@ -542,6 +542,11 @@ class LammpsConfig(BaseModel):
     def parse_command_list(cls, v):
         return parse_list_of_str(v)
 
+    @field_validator("type_order", mode="before")
+    @classmethod
+    def parse_type_order(cls, v):
+        return parse_list_of_str(v)
+
 
 class OTFMLConfig(BaseModel):
     """On-the-fly machine learning potential parameters."""
@@ -757,6 +762,16 @@ class BiasConfig(BaseModel):
             "True: non-listed atoms always pass; only valid in filter mode."
         )
     )
+    require_central: bool = Field(
+        default=False,
+        description=(
+            "When True and atom_indices is set, the bias condition is only checked on the "
+            "most-moving atom (event atom_index). The event is accepted only if that atom "
+            "is in atom_indices and satisfies the condition; otherwise pass_unlisted is returned. "
+            "When False (default), the condition is satisfied if any atom in atom_indices "
+            "that appears in the event neighbourhood satisfies it."
+        )
+    )
     direction: Optional[list[float]] = Field(
         default=None,
         description="Direction vector [x, y, z] for 'direction' bias."
@@ -773,13 +788,20 @@ class BiasConfig(BaseModel):
         default=0.0,
         description="Minimum projection onto the bias direction for acceptance."
     )
-    topo_source: Optional[str] = Field(
+    atom_source_idx: Optional[int] = Field(
         default=None,
-        description="Source topology ID for 'topo' bias (e.g. vacancy)."
+        description=(
+            "Atom index for 'topo' bias. The topology ID of this atom at initialisation "
+            "is used as the source topology for the remainder of the simulation."
+        )
     )
-    topo_target: Optional[str] = Field(
+    atom_target_idx: Optional[int] = Field(
         default=None,
-        description="Target topology ID for 'topo' bias (e.g. interstitial)."
+        description=(
+            "Atom index for 'topo' bias (two-index mode). The topology ID of this atom "
+            "at initialisation is used as the target topology. When absent, direction mode "
+            "is active and a direction vector must be provided."
+        )
     )
 
     @field_validator("direction", "target_point", mode="before")
