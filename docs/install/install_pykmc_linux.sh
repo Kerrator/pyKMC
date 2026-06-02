@@ -47,14 +47,14 @@ if command -v apt >/dev/null 2>&1; then
         sudo apt update
         sudo apt install -y $PKGS
     fi
-elif command -v dnf >/dev/null 2>&1; then
+elif command -v dnf > /dev/null 2>&1; then
     PKGS=""
-    rpm -q gcc-c++     >/dev/null 2>&1 || PKGS="$PKGS gcc-c++"
-    rpm -q gcc-gfortran >/dev/null 2>&1 || PKGS="$PKGS gcc-gfortran"
-    rpm -q cmake       >/dev/null 2>&1 || PKGS="$PKGS cmake"
+    rpm -q gcc-c++       >/dev/null 2>&1 || PKGS="$PKGS gcc-c++"
+    rpm -q gcc-gfortran  >/dev/null 2>&1 || PKGS="$PKGS gcc-gfortran"
+    rpm -q cmake         >/dev/null 2>&1 || PKGS="$PKGS cmake"
     rpm -q openmpi-devel >/dev/null 2>&1 || PKGS="$PKGS openmpi-devel"
-    rpm -q fftw-devel  >/dev/null 2>&1 || PKGS="$PKGS fftw-devel"
-    rpm -q lapack-devel >/dev/null 2>&1 || PKGS="$PKGS lapack-devel"
+    rpm -q fftw-devel    >/dev/null 2>&1 || PKGS="$PKGS fftw-devel"
+    rpm -q lapack-devel  >/dev/null 2>&1 || PKGS="$PKGS lapack-devel"
     rpm -q python3-devel >/dev/null 2>&1 || PKGS="$PKGS python3-devel"
     if [ -n "$PKGS" ]; then
         echo "Installing missing packages:$PKGS"
@@ -187,11 +187,9 @@ cmake ../cmake \
   -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_C_COMPILER=mpicc \
   -DCMAKE_Fortran_COMPILER=mpif90 \
-  -DPython_EXECUTABLE="$(which python)"  \
-  > /dev/null 2>&1
-
-make -j"$(nproc)" > /dev/null 2>&1
-make install-python > /dev/null 2>&1
+  -DPython_EXECUTABLE="$(which python)" > /dev/null 2>&1
+make -j"$(nproc)"                       > /dev/null 2>&1
+make install-python                     > /dev/null 2>&1
 
 cd "$INSTALL_DIR"
 
@@ -222,9 +220,9 @@ cmake -B build \
       -DWITH_LAMMPS=ON \
       -DLAMMPS_PATH="$INSTALL_DIR/lammps/build" \
       -DARTN_INSTALL_PYTHON=ON \
-      > /dev/null 2>&1
+      -DCMAKE_CXX_FLAGS_INIT="-std=c++17" > /dev/null 2>&1
 cmake --build build --parallel "$(nproc)" > /dev/null 2>&1
-cmake --install build > /dev/null 2>&1
+cmake --install build                     > /dev/null 2>&1
 
 cd "$INSTALL_DIR"
 
@@ -241,8 +239,15 @@ ok "pARTn built and installed"
 step "Verifying installation"
 
 python -c "
-from lammps import lammps
-import ase, pykmc, ira_mod, pypARTn
+import ase, pykmc, ira_mod
+import lammps
+lmp=lammps.lammps()
+import pypARTn
+artn=pypARTn.artn( engine='lmp' )
+lmp.command( f'plugin load {artn.lib._name}' )
+print( 'Loaded libraries:' )
+print( ' * liblammps   ::', lmp.lib._name )
+print( ' * libartn-lmp ::', artn.lib._name )
 print('All imports OK')
 " || fail "Import verification failed"
 
@@ -258,7 +263,6 @@ cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 
 PYKMC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PYKMC_DIR/pykmc_env/bin/activate"
-export LD_LIBRARY_PATH="$PYKMC_DIR/lammps/build:${LD_LIBRARY_PATH:-}"
 echo "pyKMC environment activated. Run with:"
 echo "  mpirun -n 8 python -m pykmc -in input.in"
 ACTIVATE

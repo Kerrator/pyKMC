@@ -122,7 +122,7 @@ fi
 # ------------------------------------------
 step "Creating virtual environment and installing pyKMC"
 
-python3.13 -m venv ./pykmc_env
+"$PYTHON_BIN" -m venv ./pykmc_env
 source pykmc_env/bin/activate
 
 python -m pip install --upgrade pip --quiet
@@ -158,11 +158,9 @@ cmake ../cmake \
   -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_C_COMPILER=mpicc \
   -DCMAKE_Fortran_COMPILER=mpif90 \
-  -DPython_EXECUTABLE="$(which python)" \
-  > /dev/null 2>&1
-
-make -j"$(sysctl -n hw.ncpu)" > /dev/null 2>&1
-make install-python > /dev/null 2>&1
+  -DPython_EXECUTABLE="$(which python)" > /dev/null 2>&1
+make -j"$(sysctl -n hw.ncpu)"           > /dev/null 2>&1
+make install-python                     > /dev/null 2>&1
 
 cd "$INSTALL_DIR"
 
@@ -176,12 +174,7 @@ step "Building IRA"
 
 cd "$INSTALL_DIR/IterativeRotationsAssignments"
 
-#### --- these are probably not needed, but i dont have access to a mac to try.
-mkdir -p lib
-ln -sf libira.dylib lib/libira.so
-#### ---
-
-python -m pip install . --quiet
+python -m pip install . #--quiet
 
 cd "$INSTALL_DIR"
 
@@ -199,9 +192,9 @@ cmake -B build \
       -DWITH_LAMMPS=ON \
       -DLAMMPS_PATH="$INSTALL_DIR/lammps/build" \
       -DARTN_INSTALL_PYTHON=ON \
-      > /dev/null 2>&1
-cmake --build build --parallel "$(nproc)" > /dev/null 2>&1
-cmake --install build > /dev/null 2>&1
+      -DCMAKE_CXX_FLAGS_INIT="-std=c++17"             > /dev/null 2>&1
+cmake --build build --parallel "$(sysctl -n hw.ncpu)" > /dev/null 2>&1
+cmake --install build                                 > /dev/null 2>&1
 
 cd "$INSTALL_DIR"
 
@@ -217,8 +210,15 @@ ok "pARTn built and installed"
 step "Verifying installation"
 
 python -c "
-from lammps import lammps
-import ase, pykmc, ira_mod, pypARTn
+import ase, pykmc, ira_mod
+import lammps
+lmp=lammps.lammps()
+import pypARTn
+artn=pypARTn.artn( engine='lmp' )
+lmp.command( f'plugin load {artn.lib._name}' )
+print( 'Loaded libraries:' )
+print( ' * liblammps   ::', lmp.lib._name )
+print( ' * libartn-lmp ::', artn.lib._name )
 print('All imports OK')
 " || fail "Import verification failed"
 
@@ -234,7 +234,6 @@ cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 
 PYKMC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PYKMC_DIR/pykmc_env/bin/activate"
-export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}"
 echo "pyKMC environment activated. Run with:"
 echo "  mpirun -n 8 python -m pykmc -in input.in"
 ACTIVATE
