@@ -283,6 +283,13 @@ LOGGING_CONFIG = {
             "filename": "pykmc.events",
             "mode": "a",
         },
+        "reference_table_output": {
+            "class": "logging.FileHandler",
+            "formatter": "file_formatter",
+            "level": "DEBUG",
+            "filename": "pykmc.reference_table",
+            "mode": "w",
+        },
         "progress_bar_handler": {
             "class": "pykmc.log.ProgressHandler",
             "formatter": "default_formatter",
@@ -300,6 +307,7 @@ LOGGING_CONFIG = {
         },
         "info": {"handlers": ["step_informations"]},
         "events": {"handlers": ["events_output"]},
+        "reference_table": {"handlers": ["reference_table_output"]},
         "progress": {
             # "handlers": ["log_file", "progress_bar_handler"],
             "handlers": ["progress_bar_handler"],
@@ -548,6 +556,46 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t #Refined: - T : The event has been refined.")
         self.info(logger_name, "\t #         - F : The event has not been refined.")
         self.new_line(logger_name)
+
+    def reference_table_file_header(self, logger_name: str) -> None:
+        """Write the header of the reference table file."""
+        self.info(logger_name, "#Reference Event Table")
+        self.info(logger_name, "\t #idx_ref      : Index of the reference event.")
+        self.info(logger_name, "\t #dE_forward   : Forward energy barrier (eV).")
+        self.info(logger_name, "\t #dE_backward  : Backward energy barrier (eV).")
+        self.info(logger_name, "\t #k            : Rate constant of the forward reaction (ps-1).")
+        self.info(logger_name, f"\t #event_id     : First {DISPLAYED_HASH_LENGTH} characters of the combined topology ID (ini+sad+fin).")
+        self.info(logger_name, f"\t #id_initial   : First {DISPLAYED_HASH_LENGTH} characters of the initial topology ID.")
+        self.info(logger_name, f"\t #id_saddle    : First {DISPLAYED_HASH_LENGTH} characters of the saddle topology ID.")
+        self.info(logger_name, f"\t #id_final     : First {DISPLAYED_HASH_LENGTH} characters of the final topology ID.")
+        self.info(logger_name, "\t #move_atom_idx: Index of the moving atom in the environment.")
+        self.info(logger_name, "\t #idx_backward : Index of the corresponding backward event.")
+        self.info(logger_name, "\t #dra          : Displacement between initial and saddle positions.")
+        self.new_line(logger_name)
+
+    def reference_table_write(self, logger_name: str, reference_table) -> None:
+        """Write a snapshot of the reference event table."""
+        import pandas as pd
+        df = pd.DataFrame({
+            "idx_ref":       reference_table.table["idx_ref"],
+            "dE_forward":    reference_table.table["dE_forward"],
+            "dE_backward":   reference_table.table["dE_backward"],
+            "k":             reference_table.table["k"],
+            "event_id":      [fmt_hash(e) for e in reference_table.table["event_id"]],
+            "id_initial":    [fmt_hash(e) for e in reference_table.table["id_initial"]],
+            "id_saddle":     [fmt_hash(e) for e in reference_table.table["id_saddle"]],
+            "id_final":      [fmt_hash(e) for e in reference_table.table["id_final"]],
+            "move_atom_idx": reference_table.table["move_atom_idx"],
+            "idx_backward":  reference_table.table["idx_backward"],
+            "dra":           reference_table.table["dra"],
+        }).reset_index(drop=True)
+        self.info(logger_name, "========== Reference Events ({}) ==========".format(len(df)))
+        self.info(logger_name, df.to_string(index=True, formatters={
+            "dE_forward":  lambda x: f"{x:.6f}",
+            "dE_backward": lambda x: f"{x:.6f}",
+            "k":           lambda x: f"{x:.6e}",
+            "dra":         lambda x: f"{x:.6f}",
+        }))
 
     def events_file_step_first_line(self, logger_name: str, step: int) -> None:
         """Write the first line with step informations

@@ -4,7 +4,6 @@ import logging
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
-from .log import DISPLAYED_HASH_LENGTH, fmt_hash
 import numpy as np
 from .environments.graph_nauty import graph, combine_ids
 from .system import System
@@ -599,53 +598,6 @@ class ReferenceEventTable:
 
         """
         self.table.to_pickle(outfile)
-
-    def save_txt(self, outfile: str = "reference_table.txt") -> None:
-        """Save a human-readable snapshot of the reference event table.
-
-        Parameters
-        ----------
-        outfile : str, optional
-            path to the output file, by default 'reference_table.txt'.
-
-        """
-        df = pd.DataFrame({
-            "idx_ref":       self.table["idx_ref"],
-            "dE_forward":    self.table["dE_forward"],
-            "dE_backward":   self.table["dE_backward"],
-            "k":             self.table["k"],
-            "event_id":      [fmt_hash(e) for e in self.table["event_id"]],
-            "id_initial":    [fmt_hash(e) for e in self.table["id_initial"]],
-            "id_saddle":     [fmt_hash(e) for e in self.table["id_saddle"]],
-            "id_final":      [fmt_hash(e) for e in self.table["id_final"]],
-            "move_atom_idx": self.table["move_atom_idx"],
-            "idx_backward":  self.table["idx_backward"],
-            "dra":           self.table["dra"],
-        }).reset_index(drop=True)
-        lines = [
-            "#Reference Event Table",
-            "\t #idx_ref      : Index of the reference event.",
-            "\t #dE_forward   : Forward energy barrier (eV).",
-            "\t #dE_backward  : Backward energy barrier (eV).",
-            "\t #k            : Rate constant of the forward reaction (ps-1).",
-            f"\t #event_id     : First {DISPLAYED_HASH_LENGTH} characters of the combined topology ID (ini+sad+fin).",
-            f"\t #id_initial   : First {DISPLAYED_HASH_LENGTH} characters of the initial topology ID.",
-            f"\t #id_saddle    : First {DISPLAYED_HASH_LENGTH} characters of the saddle topology ID.",
-            f"\t #id_final     : First {DISPLAYED_HASH_LENGTH} characters of the final topology ID.",
-            "\t #move_atom_idx: Index of the moving atom in the environment.",
-            "\t #idx_backward : Index of the corresponding backward event.",
-            "\t #dra          : Displacement between initial and saddle positions.",
-            "",
-            "========== Reference Events ({}) ==========".format(len(df)),
-        ]
-        with open(outfile, "w") as f:
-            f.write("\n".join(lines) + "\n")
-            f.write(df.to_string(index=True, formatters={
-                "dE_forward":  lambda x: f"{x:.6f}",
-                "dE_backward": lambda x: f"{x:.6f}",
-                "k":           lambda x: f"{x:.6e}",
-                "dra":         lambda x: f"{x:.6f}",
-            }) + "\n")
 
 
 class ActiveEventTable:

@@ -60,6 +60,7 @@ class Initializer:
         if self.kmc.config.control.restart_file is None : 
             self.kmc.loggers.output_file_header("output")
             self.kmc.loggers.events_file_header("events")
+            self.kmc.loggers.reference_table_file_header("reference_table")
 
     def initialize_system(self) -> None:
         """Read and initialize the system from the intial configuration file."""
