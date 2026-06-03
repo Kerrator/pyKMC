@@ -93,6 +93,15 @@ class MpiApiSession :
         self.send_message({"type": "use_global"})
 
     #@session_locked
+    def sleep(self) -> None:
+        """Send the engine into its low-CPU sleep loop."""
+        self.messenger.send({"type": "sleep"}, dest=self.engine_master_rank, tag=2)
+
+    def wake(self) -> None:
+        """Wake the engine and receive the delayed sleep status."""
+        self.messenger.send({"type": "wake"}, dest=self.engine_master_rank, tag=2)
+        self.receive_status()
+
     def close(self, wait_status: bool = False) -> None:
         """
         Instruct the engine to shut down.

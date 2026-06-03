@@ -2,6 +2,7 @@
 from ..sessions import MpiApiSession
 from dataclasses import dataclass
 from concurrent.futures import Future
+from contextlib import contextmanager
 import queue
 import threading
 
@@ -141,6 +142,25 @@ class Manager:
     #        job.future.set_result(result)
     #    except Exception as e :
     #        job.future.set_exception(e)
+
+    def _active_sessions(self) -> list[MpiApiSession]:
+        if self.using_global:
+            return [self.global_session] if self.global_session is not None else []
+        return list(self.sessions)
+
+    @contextmanager
+    def sleeping_workers(self):
+        """Put the active workers in their sleep loop for the duration of the scope."""
+        sessions = self._active_sessions()
+        slept_sessions = []
+        try:
+            for session in sessions:
+                session.sleep()
+                slept_sessions.append(session)
+            yield
+        finally:
+            for session in reversed(slept_sessions):
+                session.wake()
 
     def set_all_positions(self, positions) : 
         #print("[Manager] Setting positions to all sessions.")

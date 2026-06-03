@@ -6,6 +6,7 @@ import traceback
 from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reload_potential, reset_otf_flags, get_otf_flags, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy
 from ...messenger import QueueMessenger, MpiMessenger
 
+
 class MpiApiEngine() : 
     """ 
     """
@@ -45,6 +46,8 @@ class MpiApiEngine() :
         self._operations_map = {
             "use_global": self.use_global,
             "use_local": self.use_local,
+            "sleep": self.sleep,
+            "wake": self.wake,
             "close" : self.close,
             "command": self.command,
             "initialize_parameters": initialize_parameters,
@@ -107,6 +110,14 @@ class MpiApiEngine() :
 
         return msg
 
+
+    def _read_sleep_message(self):
+        """Wait for a control message while the engine is sleeping."""
+        if isinstance(self.messenger, MpiMessenger):
+            return self.messenger.recv(source=MPI.ANY_SOURCE, tag=2)
+        if isinstance(self.messenger, QueueMessenger):
+            return self.messenger.recv(tag=2)
+        raise RuntimeError("Unsupported messenger type")
 
     #RUN ON ALL RANKS
     def run_engine_loop(self):
@@ -220,6 +231,28 @@ class MpiApiEngine() :
             raise RuntimeError(f"Error executing command '{cmd}': {e}")
         finally:
             self._is_busy = False
+
+    def sleep(self) -> None:
+        """Block the worker until a wake or close control message arrives."""
+        while self._is_alive:
+            if self.rank == 0:
+                msg = self._read_sleep_message()
+            else:
+                msg = None
+
+            msg = self.engine_comm.bcast(msg, root=0)
+            msg_type = msg.get("type")
+
+            if msg_type == "wake":
+                return
+            if msg_type == "close":
+                self.close()
+                return
+            raise ValueError(f"Unknown sleep control message: {msg_type}")
+
+    def wake(self) -> None:
+        """Wake is consumed by the sleep loop."""
+        return None
 
     def use_global(self) -> None:
         """Switch to global LAMMPS"""

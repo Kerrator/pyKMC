@@ -167,12 +167,15 @@ class OTFMLController:
         dumps_glob = str(OTFML_DUMP_DIR / "extrapolating_dump.*.lammps")
         full_command = self._build_retrain_command(dumps_glob)
         self._log("log", "\t :=> OTFML retraining command: {}".format(full_command))
+
         clean_env = {
             k: v
             for k, v in os.environ.items()
             if not any(k.startswith(p) for p in self._MPI_PREFIXES)
-        }
-        subprocess.run(full_command, shell=True, check=True, env=clean_env)
+        } # does nothing for now
+        
+        with self.kmc.manager.sleeping_workers():
+            subprocess.run(full_command, shell=True, check=True, env=clean_env)
 
         self._retrain_cycle += 1
         self._redirect_dumps_to_new_cycle()
@@ -253,9 +256,7 @@ class OTFMLController:
     def _redirect_session_dump(self, session) -> None:
         new_path = session_dump_path(session.session_id).as_posix()
         session.command("undump extrapolative_structures_dump")
-        session.command(
-            f"dump extrapolative_structures_dump all custom 1 {new_path} id type x y z f_extrapolation_grade"
-        )
+        session.command(f"dump extrapolative_structures_dump all custom 1 {new_path} id type x y z f_extrapolation_grade")
         session.command("dump_modify extrapolative_structures_dump append yes")
         session.command("dump_modify extrapolative_structures_dump skip v_dump_skip")
 
