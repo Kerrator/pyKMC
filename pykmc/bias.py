@@ -370,7 +370,7 @@ class DirectionBias(Bias):
             accepted = projection >= self._threshold
             _LOGGER.debug(
                 f"\t\t :=> Direction bias: atom {atom_idx},"
-                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" projection={projection:+.6e}, threshold={float(self._threshold):.6e},"
                 f" accepted={accepted}"
             )
             return accepted
@@ -378,7 +378,7 @@ class DirectionBias(Bias):
             projection = float(np.dot(displacement, self._direction))
             _LOGGER.debug(
                 f"\t\t :=> Direction bias: atom {atom_idx},"
-                f" projection={projection:.6e}, threshold={float(self._threshold):.6e}"
+                f" projection={projection:+.6e}, threshold={float(self._threshold):.6e}"
             )
             if projection >= self._threshold:
                 return True
@@ -456,7 +456,7 @@ class PointBias(Bias):
             projection = float(np.dot(displacement, to_target / dist))
             _LOGGER.debug(
                 f"\t\t :=> Point bias: atom {atom_idx},"
-                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" projection={projection:+.6e}, threshold={float(self._threshold):.6e},"
                 f" accepted={projection >= self._threshold}"
             )
             return projection >= self._threshold
@@ -469,7 +469,7 @@ class PointBias(Bias):
             projection = float(np.dot(displacement, to_target / dist))
             _LOGGER.debug(
                 f"\t\t :=> Point bias: atom {atom_idx},"
-                f" projection={projection:.6e}, threshold={float(self._threshold):.6e}"
+                f" projection={projection:+.6e}, threshold={float(self._threshold):.6e}"
             )
             if projection >= self._threshold:
                 return True
@@ -568,7 +568,7 @@ class TopoBias(Bias):
             accepted = projection >= self._threshold
             _LOGGER.debug(
                 f"\t\t :=> Topo bias: atom {atom_idx},"
-                f" projection={projection:.6e}, threshold={float(self._threshold):.6e},"
+                f" projection={projection:+.6e}, threshold={float(self._threshold):.6e},"
                 f" accepted={accepted}"
             )
             return accepted
