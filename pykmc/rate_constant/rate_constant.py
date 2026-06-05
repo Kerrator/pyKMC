@@ -1,7 +1,12 @@
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 from pykmc.config import PhysicalConstants
-from .backends import PrefactorBackend
+
+if TYPE_CHECKING:
+    from .backends.base import PrefactorBackend
+
 
 @dataclass(frozen=True)
 class RateComponents:
@@ -49,11 +54,11 @@ class RateConstant:
         Backend used to compute the prefactor.
     """
 
-    def __init__(self, T: float, prefactor_backend: PrefactorBackend) -> None:
+    def __init__(self, T: float, prefactor_backend: "PrefactorBackend") -> None:
         self.T = T
         self._prefactor_backend = prefactor_backend
 
-    def compute_prefactor(self, **kwargs) -> float:
+    def compute_prefactor(self, **kwargs: object) -> float:
         """Compute the rate prefactor.
 
         Returns
@@ -63,7 +68,7 @@ class RateConstant:
         """
         return self._prefactor_backend.compute(**kwargs)
 
-    def compute_rate(self, dE: float, **kwargs) -> RateComponents:
+    def compute_rate(self, dE: float, **kwargs: object) -> RateComponents:
         """Compute the rate for a given energy barrier.
 
         Parameters

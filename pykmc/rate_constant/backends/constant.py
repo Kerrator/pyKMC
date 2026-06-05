@@ -27,7 +27,7 @@ class ConstantBackend(PrefactorBackend):
     def __init__(self, config: ConstantBackendConfig) -> None:
         self.config = config
 
-    def compute(self, **kwargs) -> float:
+    def compute(self, **kwargs: object) -> float:
         """Return the constant prefactor.
 
         Returns
