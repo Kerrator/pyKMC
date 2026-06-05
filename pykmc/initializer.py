@@ -118,6 +118,7 @@ class Initializer:
                     bc.direction, bc.atom_indices, bc.threshold,
                     mode=bc.mode, bias_weight=bc.bias_weight, pass_unlisted=bc.pass_unlisted,
                     require_central=bc.require_central,
+                    step_interval=bc.step_interval,
                 )
             case "point":
                 self.kmc.bias = PointBias(

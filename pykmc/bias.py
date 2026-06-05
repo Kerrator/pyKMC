@@ -68,6 +68,8 @@ class Bias(ABC):
         self.bias_weight = bias_weight
         self.pass_unlisted = pass_unlisted
         self.require_central = require_central
+        self.current_step = 0
+        self._step_is_active = True
 
     @abstractmethod
     def accept(
@@ -161,11 +163,15 @@ class Bias(ABC):
         if not self.enabled:
             _LOGGER.debug("\t :=> Bias disabled, using unbiased selection")
             return selection_algorithm(l_k)
+        self.current_step += 1
         _LOGGER.debug(
             f"\n\t :=> Bias select: mode={self.mode},"
             f" events={len(l_k)}, k_total={float(np.sum(l_k)):.6e}"
         )
         self._prepare(system, reference_table, atomic_environment, neighbors_list)
+        if not self._step_is_active:
+            _LOGGER.debug("\t :=> Bias inactive on this step, using unbiased selection")
+            return selection_algorithm(l_k)
         match self.mode:
             case "filter":
                 return self._select_filter(
@@ -333,6 +339,9 @@ class DirectionBias(Bias):
         ``atom_indices``, ``pass_unlisted`` is returned.  When False
         (default), the condition is satisfied by any atom in ``atom_indices``
         found in the event neighbourhood.
+    step_interval : int or None, optional
+        Apply the bias only every ``step_interval`` KMC steps. ``None`` or ``1``
+        means the bias is active at every step.
     """
 
     def __init__(
@@ -344,6 +353,7 @@ class DirectionBias(Bias):
         bias_weight: float = 0.5,
         pass_unlisted: bool = False,
         require_central: bool = False,
+        step_interval: int | None = None,
     ) -> None:
         super().__init__(
             mode=mode, bias_weight=bias_weight, pass_unlisted=pass_unlisted,
@@ -353,6 +363,23 @@ class DirectionBias(Bias):
         self._direction = d / np.linalg.norm(d)
         self._atom_set = set(atom_indices) if atom_indices is not None else None
         self._threshold = threshold
+        if step_interval is not None and step_interval < 1:
+            raise ValueError("step_interval must be >= 1")
+        self._step_interval = step_interval
+
+    def _prepare(
+        self,
+        system: System,
+        reference_table: ReferenceEventTable,
+        atomic_environment: AtomicEnvironment,
+        neighbors_list: NeighborsList | None = None,
+    ) -> None:
+        self._step_is_active = (
+            self._step_interval is None
+            or self._step_interval == 1
+            or self.current_step is None
+            or self.current_step % self._step_interval == 0
+        )
 
     def accept(
         self,
@@ -540,7 +567,13 @@ class TopoBias(Bias):
         self._source_atoms: set[int] = set()
         self._target_positions = None
 
-    def _prepare(self, system, reference_table, atomic_environment, neighbors_list=None) -> None:
+    def _prepare(
+        self,
+        system,
+        reference_table,
+        atomic_environment,
+        neighbors_list=None,
+    ) -> None:
         source_atoms = atomic_environment.get_atoms_with_id(self._topo_source)
         self._source_atoms = set(source_atoms)
         if self._topo_target is not None:

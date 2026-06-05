@@ -788,6 +788,14 @@ class BiasConfig(BaseModel):
         default=0.0,
         description="Minimum projection onto the bias direction for acceptance."
     )
+    step_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Apply the bias only every Nth KMC step. None or 1 means the bias is "
+            "active at every step."
+        )
+    )
     atom_source_idx: Optional[int] = Field(
         default=None,
         description=(

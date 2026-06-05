@@ -141,6 +141,36 @@ class TestDirectionBias:
         bias = DirectionBias(direction=[2, 0, 0])
         assert np.allclose(np.linalg.norm(bias._direction), 1.0)
 
+    def test_step_interval_applies_bias_only_on_matching_steps(self, ref_table_atom0):
+        """step_interval=2 leaves odd steps unbiased and applies the filter on even steps."""
+        system = make_system([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        ref = make_reference_table(move_atom_idx=0, idx_ref=0)
+        ref.table = pd.DataFrame({
+            "idx_ref": [0, 0],
+            "move_atom_idx": [0, 0],
+        })
+        bias = DirectionBias(direction=[1, 0, 0], step_interval=2)
+        events = [
+            make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=10.0),
+            make_event(atom_index=1, final_positions=[[1.0, 0.0, 0.0]], k=1.0),
+        ]
+        active = make_active_table(events)
+        l_k = np.array([e["k"] for e in events])
+
+        def pick_first_event(rates):
+            return 0, 1.0, float(np.sum(rates))
+
+        idx_odd, _, _ = bias.select(pick_first_event, l_k, active, system, ref)
+        idx_even, _, _ = bias.select(pick_first_event, l_k, active, system, ref)
+
+        assert idx_odd == 0
+        assert idx_even == 1
+
+    def test_step_interval_must_be_positive(self, system_origin, ref_table_atom0):
+        """step_interval values below 1 are invalid."""
+        with pytest.raises(ValueError, match="step_interval must be >= 1"):
+            DirectionBias(direction=[1, 0, 0], step_interval=0)
+
     def test_enabled_false_bypasses_filter(self, system_origin, ref_table_atom0):
         """When enabled=False, select() returns unbiased result without calling accept."""
         bias = DirectionBias(direction=[1, 0, 0])
