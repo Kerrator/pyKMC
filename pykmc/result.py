@@ -184,6 +184,7 @@ class EventRefinementOutput:
     min2_positions: Optional[np.ndarray] = None
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
+    k_prefactor: Optional[float] = None
     refined: Optional[str] = None
 
 
