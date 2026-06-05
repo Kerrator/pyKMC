@@ -16,6 +16,8 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
+from pykmc.htst.prefactor import compute_event_prefactors as _compute_event_prefactors
+from pykmc.htst.constants import thz_to_hz, ESKM_DIV_EV_AMU_A2
 
 
 def initialize_parameters(engine) : 
@@ -101,6 +103,104 @@ def get_positions(engine) :
         result = np.ctypeslib.as_array(result)
         result = np.reshape(result, (-1, 3))
         return result
+
+def get_forces(engine, positions=None):
+    if positions is not None:
+        set_positions(engine=engine, positions=positions)
+    engine.command("run 0")
+    result = engine.lmp.gather_atoms("f", 1, 3)
+    if engine.rank == 0:
+        result = np.ctypeslib.as_array(result)
+        result = np.reshape(result, (-1, 3))
+        return result
+
+
+def compute_event_prefactors(
+    engine,
+    config,
+    central_atom_idx,
+    min1_positions,
+    saddle_positions,
+    min2_positions,
+    types,
+    cell,
+):
+    """Per-event Vineyard nu0 on one session: binds get_forces to the orchestrator.
+
+    Runs entirely on this engine; concurrency comes from one job per event
+    (see Manager.compute_event_prefactors). Never raises — returns an
+    EventPrefactors whose nu0_* are None on any failure.
+    """
+    rc = config.rateconstant
+
+    def hessian_fn(positions, free_indices):
+        # Use the configured finite-difference step so the dynamical_matrix
+        # Hessian matches the validated FD path; a too-small step shifts the soft
+        # saddle modes and inflates nu0 (see HTST cross-validation).
+        return dynamical_matrix_eskm(
+            engine, positions, free_indices=free_indices, dx=rc.fd_step
+        )
+
+    # pyKMC production systems are fully periodic; the free-region selector only
+    # needs box lengths from `cell`.
+    pbc = np.array([True, True, True])
+    return _compute_event_prefactors(
+        forces_fn=None,
+        hessian_fn=hessian_fn,
+        min1=min1_positions,
+        saddle=saddle_positions,
+        min2=min2_positions,
+        types=list(types),
+        central_index=int(central_atom_idx),
+        free_radius=rc.free_radius,
+        fd_step=rc.fd_step,
+        cell=cell,
+        pbc=pbc,
+        nu0_min_hz=thz_to_hz(rc.nu0_min_THz),
+        nu0_max_hz=thz_to_hz(rc.nu0_max_THz),
+        require_one_negative_mode=rc.require_one_negative_mode,
+    )
+
+
+def dynamical_matrix_eskm(engine, positions, free_indices=None, dx=1e-2):
+    """Mass-weighted Hessian at ``positions`` via LAMMPS ``dynamical_matrix eskm``.
+
+    Computes the Hessian in-LAMMPS (a C++ finite difference per DOF) instead of
+    the Python force loop. When ``free_indices`` is given, only those atoms
+    vibrate (a LAMMPS group); the rest stay fixed at ``positions`` as the frozen
+    boundary. Returns the Hessian in eV/(amu·Å²) on rank 0 (a drop-in for
+    ``mass_weighted_partial_hessian``); ``None`` on other ranks.
+
+    ``dx`` defaults to the FD step (0.01 Å) used by the validated FD path; a
+    much smaller step shifts the soft saddle modes and inflates nu0.
+    """
+    set_positions(engine, positions)
+    engine.command("run 0")  # rebuild neighbour lists after the scatter
+    if free_indices is not None:
+        free = np.asarray(free_indices, dtype=int)
+        ids = " ".join(str(i + 1) for i in free)  # 1-based LAMMPS ids
+        engine.command(f"group g_dyn id {ids}")
+        group, nat = "g_dyn", len(free)
+    else:
+        group, nat = "all", int(engine.lmp.get_natoms())
+    tmp = f"/tmp/pykmc_dynmat.{getattr(engine, 'engine_id', 0)}.dat"
+    engine.command(f"dynamical_matrix {group} eskm {dx} file {tmp}")
+    if free_indices is not None:
+        engine.command("group g_dyn delete")
+    if engine.rank != 0:
+        return None
+    data = np.loadtxt(tmp)
+    dim = 3 * nat
+    hessian = np.empty((dim, dim))
+    for i in range(dim):
+        hessian[i] = data[i * nat:(i + 1) * nat].reshape(-1)
+    hessian /= ESKM_DIV_EV_AMU_A2
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return 0.5 * (hessian + hessian.T)
+
 
 def get_types(engine) -> list[str]:
     int_types = engine.lmp.gather_atoms("type", 0, 1)
