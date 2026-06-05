@@ -1,0 +1,51 @@
+[Control]
+initial_config = ./Ni_Fe_FCC_10x10x10_Ni50_Fe50_minimized.xyz
+n_steps = 200
+engine = lammps
+verbosity = 2
+n_sessions = 7
+engine_use_rank_0 = False
+basin = False
+active_volume = False
+
+[Lammps]
+pair_style = eam/alloy
+pair_coeff = * * ./FeNiCr_EDDE_V2.eam Ni Fe
+min_style = cg
+minimize = 1e-10 1e-12 10000 10000
+
+[AtomicEnvironment]
+style = cna/graph
+rnei = 3
+rcut = 8
+atom_coloring_mode = full
+
+[EventSearch]
+style = partn
+nsearch = 30
+emax_event = 5.5
+emin_event = 0.0
+r_nnewchance = 3
+
+
+[pARTn]
+path_artnso = /Users/stephenkerr/kmc/artn-plugin/lib/libartn-lmp.so
+
+[RateConstant]
+style = constant
+k0 = 10.0
+T = 300.0
+
+[PSR]
+style = ira
+matching_score_thr = 0.4
+
+[IRA]
+kmax_factor = 2.0
+
+[Basin]
+energy_thr = 0.5
+
+[ActiveVolume]
+ract = 20.0
+rmov = 14.0

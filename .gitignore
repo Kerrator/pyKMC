@@ -2,6 +2,7 @@
 # Ignore everything in examples by default
 examples/**
 # Whitelist
+!examples/*/
 !examples/README.md
 !examples/**/input.in.template
 !examples/**/initial_config.xyz
@@ -12,6 +13,7 @@ examples/**
 !examples/**/input.in
 !examples/**/Ni_Fe_FCC_8x8x8_Ni95_Fe05_minimized.xyz
 !examples/NiFe_fcc_2047at_monovacancy/
+!examples/**/Si.sw
 
 
 # Utils : 

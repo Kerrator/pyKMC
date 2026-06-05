@@ -29,8 +29,7 @@ emin_event = 0.0
 atom_coloring_mode = full
 
 
-[pARTn] 
-path_artnso = /Users/stephenkerr/kmc/artn-plugin/lib/libartn-lmp.so
+[pARTn]
 
 [RateConstant] 
 style = constant
