@@ -142,6 +142,11 @@ class EventSearchOutput:
         Index of the atom that moved the most during the transition.
     cell : Optional[np.ndarray]
         Simulation cell, if applicable.
+    nu0_forward : Optional[float]
+        Forward Vineyard prefactor nu0 (Hz), stamped by KMC.attach_prefactors for
+        the 'htst'/'rpa' styles; None for 'constant' or on per-event fallback.
+    nu0_backward : Optional[float]
+        Backward Vineyard prefactor nu0 (Hz); see ``nu0_forward``.
 
     """
 
@@ -154,6 +159,8 @@ class EventSearchOutput:
     move_atom_index: int
     #map: np.ndarray
     cell: Optional[np.ndarray] = None
+    nu0_forward: Optional[float] = None
+    nu0_backward: Optional[float] = None
 
 
 @dataclass
@@ -174,8 +181,13 @@ class EventRefinementOutput:
         Refined forward energy barrier (if matched).
     num_reference_event : Optional[int]
         Index of the corresponding reference event (if matched).
-    refined: Optional[str] 
+    refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
+    k_prefactor : Optional[float]
+        Resolved pre-exponential factor (Hz) carried from the reference event,
+        used to rebuild the active rate without re-invoking the backend.
+    nu0 : Optional[float]
+        Raw Vineyard nu0 (Hz) diagnostic carried from the reference event.
     """
 
     central_atom_index: int
@@ -185,6 +197,7 @@ class EventRefinementOutput:
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
     k_prefactor: Optional[float] = None
+    nu0: Optional[float] = None
     refined: Optional[str] = None
 
 

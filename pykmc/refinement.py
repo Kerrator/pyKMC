@@ -100,6 +100,7 @@ class Refinement:
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
                 res.ok_value().k_prefactor = ctx["k_prefactor"]
+                res.ok_value().nu0 = ctx["nu0"]
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
                 #TODO partn should not return different things depending on AV or not. We get the total energy at the saddle point or dE, but not both.
@@ -228,6 +229,7 @@ class Refinement:
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "k_prefactor": dfevent["k_prefactor"],
+                    "nu0": dfevent["nu0"],
                     "neighbors": neighbors.copy()
                 }
 
