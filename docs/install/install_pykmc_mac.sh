@@ -111,7 +111,8 @@ ok "All repositories cloned"
 step "Fixing Python version constraint"
 
 if [ "$PYTHON_MINOR" -eq 13 ]; then
-    sed -i '' 's/requires-python = "<3.13,>=3.9"/requires-python = "<3.14,>=3.9"/' pyKMC/pyproject.toml
+    sed -i '' 's/<3.13,/<3.14,/' pyKMC/pyproject.toml
+    grep -q '<3.14,' pyKMC/pyproject.toml || fail "Failed to bump pyproject upper Python bound (sed pattern stale?)"
     ok "Updated pyproject.toml for Python 3.13"
 else
     ok "Python $PYTHON_VERSION is within range, no fix needed"
@@ -234,6 +235,9 @@ cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 
 PYKMC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PYKMC_DIR/pykmc_env/bin/activate"
+# Drop any inherited pyKMC PYTHONPATH so the venv's pypARTn / ira_mod are loaded
+# (not the previous install's interface modules, which can shadow site-packages)
+unset PYTHONPATH
 echo "pyKMC environment activated. Run with:"
 echo "  mpirun -n 8 python -m pykmc -in input.in"
 ACTIVATE

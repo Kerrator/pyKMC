@@ -278,6 +278,5 @@ srun --ntasks=$SLURM_NTASKS --distribution=block:block \
 | 2 | Library path variable | `LD_LIBRARY_PATH` | `DYLD_LIBRARY_PATH` |
 | 3 | CPU count | `nproc` | `sysctl -n hw.ncpu` |
 | 4 | `sed` syntax | `sed -i '...'` | `sed -i '' '...'` |
-| 5 | IRA install | `pip install .` works directly | Pre-create `libira.so` symlink first (not needed anymore) |
-| 6 | LAMMPS symlinks | Required so pARTn finds CMake outputs under `lammps/src/` (one `.so` link) | Required both for `.dylib` → `.so` *and* to bridge CMake outputs to `lammps/src/` (by passing the lammps/build directory avoid the symlinks; the `.so` vs `.dylib` is also resolved) |
-| 7 | Package manager | `apt` / `dnf` | `brew` |
+| 5 | IRA install | `pip install .` works directly | `pip install .` works directly |
+| 6 | Package manager | `apt` / `dnf` | `brew` |
