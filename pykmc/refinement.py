@@ -120,6 +120,7 @@ class Refinement:
             if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
+                res.ok_value().k_prefactor = ctx["k_prefactor"]
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[
                     ctx["neighbors"]
                 ]
@@ -300,6 +301,7 @@ class Refinement:
                     ),
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
+                    "k_prefactor": dfevent["k_prefactor"],
                     "neighbors": neighbors.copy(),
                 }
 

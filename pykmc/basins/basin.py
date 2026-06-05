@@ -16,7 +16,7 @@ from pykmc import (
 )
 from typing import Optional
 from ..utils import geometry
-from ..rate_constant import compute_rate_Eyring
+from ..rate_constant import create_rate_constant
 import pandas as pd
 import copy
 import numpy as np
@@ -69,6 +69,11 @@ class BasinsGenericEvents:
         self, config: Config, reference_table, known_environments, manager
     ) -> None:
         self.config = config  # Config object with basins parameters
+        self.rate_constant = create_rate_constant(
+            T=config.rateconstant.T,
+            prefactor_backend_name=config.rateconstant.style,
+            config=config.rateconstant,
+        )
         self.explorer = None  # object to explore a state in the basin
         self.reference_table = reference_table  # Object with reference generic events
         self.manager = manager  # object to do external task (minimize, refine)
@@ -530,7 +535,7 @@ class BasinsGenericEvents:
                 dE = E_sad
             else:
                 dE = E_sad - E_min
-            k = compute_rate_Eyring(dE, self.config)
+            k = self.rate_constant.compute_rate(dE)
 
             # also save saddle positions refined
             idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]

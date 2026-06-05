@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pandas as pd
-from .rate_constant import compute_rate_Eyring
+from .rate_constant import create_rate_constant
+from .rate_constant.rate_constant import rate_from_prefactor
 from .config import Config
 import numpy as np
 from .environments.graph_nauty import graph
@@ -40,6 +41,11 @@ class ReferenceEventTable:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self.rate_constant = create_rate_constant(
+            T=config.rateconstant.T,
+            prefactor_backend_name=config.rateconstant.style,
+            config=config.rateconstant,
+        )
         self._initialize_table()
 
     def add_events(
@@ -545,7 +551,8 @@ class ReferenceEventTable:
                 "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
-                "k": compute_rate_Eyring(dE_forward, self.config),
+                "k": (rc_forward := self.rate_constant.compute_rate(dE_forward)).rate,
+                "k_prefactor": rc_forward.prefactor,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -571,7 +578,8 @@ class ReferenceEventTable:
                 "final_positions": min1_positions[neighbor_list_backward],
                 "types": local_types_backward,
                 "energy_barrier": dE_backward,
-                "k": compute_rate_Eyring(dE_backward, self.config),
+                "k": (rc_backward := self.rate_constant.compute_rate(dE_backward)).rate,
+                "k_prefactor": rc_backward.prefactor,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -808,8 +816,10 @@ class ActiveEventTable:
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
                 "energy_barrier": event_refinement_output.dE_forward,
-                "k": compute_rate_Eyring(
-                    event_refinement_output.dE_forward, self.config
+                "k": rate_from_prefactor(
+                    event_refinement_output.k_prefactor,
+                    event_refinement_output.dE_forward,
+                    self.config.rateconstant.T,
                 ),
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined,
