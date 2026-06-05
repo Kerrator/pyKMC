@@ -299,10 +299,6 @@
   <details><summary>Description</summary>
   dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.
   </details>
-- **`path_artnso`** : `str`, mandatory
-  <details><summary>Description</summary>
-  Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'
-  </details>
 - **`r_push_mode`** : `Literal['list', 'rad']`, default = `'list'`
   <details><summary>Description</summary>
   Determines how the initial atomic displacement (push) is generated around the central atom of the currently explored environment:
