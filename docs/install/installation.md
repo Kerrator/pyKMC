@@ -30,6 +30,7 @@ A recent version of [LAMMPS](https://docs.lammps.org/Manual.html) is recommended
 make yes-basic 
 make yes-extra-compute  # Required for CNA computation  
 make yes-plugin         # Required for pARTn  
+make yes-phonon         # Required for HTST dynamical_matrix  
 make mode=shared mpi    # Required for pARTn (otherwise use `make mpi`)  
 make install-python     # Enables Python bindings  
 ```

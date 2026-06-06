@@ -182,6 +182,7 @@ cmake ../cmake \
   -DPKG_MOLECULE=on \
   -DPKG_EXTRA-COMPUTE=on \
   -DPKG_PLUGIN=on \
+  -DPKG_PHONON=on \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_C_COMPILER=mpicc \
