@@ -1,4 +1,4 @@
-"""ReferenceEventTable stores directional nu0 and routes k through compute_rate."""
+"""ReferenceEventTable stores directional nu0 and resolves k via the htst backend."""
 
 import math
 from typing import Any
@@ -7,13 +7,15 @@ import numpy as np
 from pytest import MonkeyPatch
 
 from pykmc.event_table import ReferenceEventTable
-from pykmc.rate_constant import compute_rate
 
 
-def test_reference_table_has_nu0_column(config_Ni_4000at_monovacancy_sia: Any) -> None:
-    """Fresh reference table carries the nu0 column."""
+def test_reference_table_has_nu0_and_k_prefactor_columns(
+    config_Ni_4000at_monovacancy_sia: Any,
+) -> None:
+    """Fresh reference table carries both the nu0 diagnostic and k_prefactor columns."""
     table = ReferenceEventTable(config_Ni_4000at_monovacancy_sia)
     assert "nu0" in table.table.columns
+    assert "k_prefactor" in table.table.columns
 
 
 def test_build_event_series_stores_directional_nu0(
@@ -74,5 +76,10 @@ def test_build_event_series_stores_directional_nu0(
     )
     assert fwd["nu0"] == 5.0e12
     assert bwd["nu0"] == 3.0e12
-    assert math.isclose(fwd["k"], compute_rate(0.5, config, nu0=5.0e12))
-    assert math.isclose(bwd["k"], compute_rate(0.7, config, nu0=3.0e12))
+    # Load-bearing wiring: the nu0 kwarg reaches the htst backend, so the resolved
+    # prefactor is nu0 (NOT the k0 fallback). This single assertion guards the
+    # whole per-event nu0 path (active events freeze this prefactor).
+    assert fwd["k_prefactor"] == 5.0e12
+    assert bwd["k_prefactor"] == 3.0e12
+    assert math.isclose(fwd["k"], table.rate_constant.compute_rate(0.5, nu0=5.0e12).rate)
+    assert math.isclose(bwd["k"], table.rate_constant.compute_rate(0.7, nu0=3.0e12).rate)

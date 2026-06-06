@@ -28,11 +28,8 @@ def _kmc(style: str) -> KMC:
     """Build a KMC instance without running __init__, with the bits attach_prefactors needs."""
     kmc = KMC.__new__(KMC)
     kmc.config = SimpleNamespace(rateconstant=SimpleNamespace(style=style))
-    # System is now owned by the State coordinator; KMC.system is a read-only
-    # property delegating to self.state.system.
-    kmc.state = SimpleNamespace(
-        system=SimpleNamespace(types=["Ni", "Ni"], cell=np.diag([10.0, 10.0, 10.0]))
-    )
+    # No State coordinator on this branch: KMC.system is a direct attribute.
+    kmc.system = SimpleNamespace(types=["Ni", "Ni"], cell=np.diag([10.0, 10.0, 10.0]))
     kmc.manager = Mock()
     kmc.loggers = Mock()
     return kmc
