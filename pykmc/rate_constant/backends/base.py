@@ -2,6 +2,15 @@ from abc import ABC, abstractmethod
 
 
 class PrefactorBackend(ABC):
+    """Abstract base class for prefactor backends.
+
+    Subclasses must define:
+
+    - a ``name`` class attribute (``str``) : unique key used by the factory registry.
+    - a ``compute(**kwargs) -> float`` method : returns the prefactor in ps^-1.
+
+    A ``TypeError`` is raised at class definition time if ``name`` is missing.
+    """
     name: str
 
     def __init_subclass__(cls, **kwargs):
