@@ -1,3 +1,12 @@
+"""Prefactor backend implementations for rate constant computation.
+
+Exposes [`PrefactorBackend`][pykmc.rate_constant.backends.PrefactorBackend],
+the abstract base class all backends must inherit from.
+
+All modules in this package are imported automatically at load time via
+``pkgutil``, so any backend defined in a new file here is discovered without
+modifying existing code.
+"""
 import importlib
 import pkgutil
 
