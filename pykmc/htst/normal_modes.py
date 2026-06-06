@@ -22,7 +22,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .constants import HBAR_OMEGA_EV, ZERO_MODE_TOL_EV2
+from pykmc.config import PhysicalConstants
+
+from .constants import ZERO_MODE_TOL_EV2
 
 
 def normal_modes_from_hessian(
@@ -108,7 +110,7 @@ def normal_modes_from_hessian(
             )
         neg_idx = int(neg_indices[0])
         omega0_natural = float(np.sqrt(-eigvals_kept[neg_idx]))
-        omega0_eV = HBAR_OMEGA_EV * omega0_natural
+        omega0_eV = PhysicalConstants.hbar_omega_eV * omega0_natural
 
         # Drop the negative mode for the positive-frequency list
         keep_pos = np.ones(len(eigvals_kept), dtype=bool)
@@ -131,7 +133,7 @@ def normal_modes_from_hessian(
         # After saddle removal, all should be positive. Anything still negative
         # is a soft mode that should have been projected; clamp to 0.
         positive_eigvals = np.maximum(positive_eigvals, 0.0)
-    omegas_eV = HBAR_OMEGA_EV * np.sqrt(positive_eigvals)
+    omegas_eV = PhysicalConstants.hbar_omega_eV * np.sqrt(positive_eigvals)
 
     # Reconstruct full eigenvector matrix in original sorted order
     # (with zero modes still included so neg_idx maps consistently)

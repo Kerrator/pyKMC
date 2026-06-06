@@ -10,8 +10,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from pykmc.config import PhysicalConstants
 from pykmc.htst.normal_modes import normal_modes_from_hessian
-from pykmc.htst.constants import HBAR_OMEGA_EV
+
+HBAR_OMEGA_EV = PhysicalConstants.hbar_omega_eV
 
 
 # ---------------------------------------------------------------------------

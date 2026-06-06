@@ -15,9 +15,9 @@ from typing import Callable, Optional
 import numpy as np
 from ase.data import atomic_masses, atomic_numbers
 
-from .free_region import select_free_indices
-from .hessian import mass_weighted_partial_hessian
-from .vineyard import vineyard_prefactor
+from pykmc.htst.free_region import select_free_indices
+from pykmc.htst.hessian import mass_weighted_partial_hessian
+from pykmc.htst.vineyard import vineyard_prefactor
 
 
 @dataclass

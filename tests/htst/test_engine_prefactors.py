@@ -19,7 +19,7 @@ pytest.importorskip("lammps")
 from lammps import lammps  # noqa: E402
 
 from pykmc.enginemanager.lmpi import lammps_operations as ops  # noqa: E402
-from pykmc.htst.prefactor import EventPrefactors  # noqa: E402
+from pykmc.rate_constant.prefactor import EventPrefactors  # noqa: E402
 from pykmc.htst.constants import hz_to_thz  # noqa: E402
 
 

@@ -34,6 +34,9 @@ class ReferenceEventTable:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        # nu0 is an HTST/RPA-only diagnostic column; a constant run's schema stays
+        # identical to the base. See gating below.
+        self._htst_active = config.rateconstant.style in ("htst", "rpa")
         self.rate_constant = create_rate_constant(
             T=config.rateconstant.T,
             prefactor_backend_name=config.rateconstant.style,
@@ -475,7 +478,6 @@ class ReferenceEventTable:
                 "energy_barrier": dE_forward,
                 "k": (rc_forward := self.rate_constant.compute_rate(dE_forward, nu0=nu0_forward)).rate,
                 "k_prefactor": rc_forward.prefactor,
-                "nu0": nu0_forward,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
@@ -501,7 +503,6 @@ class ReferenceEventTable:
                 "energy_barrier": dE_backward,
                 "k": (rc_backward := self.rate_constant.compute_rate(dE_backward, nu0=nu0_backward)).rate,
                 "k_prefactor": rc_backward.prefactor,
-                "nu0": nu0_backward,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -511,6 +512,10 @@ class ReferenceEventTable:
                 "dra": dra_backward,
             }
         )
+
+        if self._htst_active:
+            dfevent_forward["nu0"] = nu0_forward
+            dfevent_backward["nu0"] = nu0_backward
 
         return dfevent_forward, dfevent_backward
     
@@ -529,23 +534,25 @@ class ReferenceEventTable:
         if self.config.control.reference_table is not None:
             self.table = pd.read_pickle(self.config.control.reference_table)
         else:
-            self.table = pd.DataFrame({
+            columns = {
                     "idx_ref": pd.Series(dtype="int64"),
                     "event_id": pd.Series(dtype="str"),
                     "initial_positions": pd.Series(dtype="object"),
                      "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
-                    "k": pd.Series(dtype="float64"), 
+                    "k": pd.Series(dtype="float64"),
                     "k_prefactor": pd.Series(dtype="float64"),
-                    "nu0": pd.Series(dtype="float64"),
                     "id_saddle": pd.Series(dtype="str"),
                     "id_final": pd.Series(dtype="str"),
                     "move_atom_idx": pd.Series(dtype='int64'),
-                    "sym_matrix": pd.Series(dtype="object"), 
+                    "sym_matrix": pd.Series(dtype="object"),
                     "sym_perm": pd.Series(dtype="object"),
                     "idx_backward": pd.Series(dtype="int64"),
-                    "dra" : pd.Series(dtype="float64")})
+                    "dra" : pd.Series(dtype="float64")}
+            if self._htst_active:
+                columns["nu0"] = pd.Series(dtype="float64")
+            self.table = pd.DataFrame(columns)
 
     def remove(self, idx_refs: list[int]) -> None : 
         """Remove events with ind == idx_ref as well as its backward event
@@ -590,6 +597,7 @@ class ActiveEventTable:
 
     def __init__(self, config: Config, event_dataframe: pd.DataFrame = None):
         self.config = config
+        self._htst_active = config.rateconstant.style in ("htst", "rpa")
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -602,10 +610,11 @@ class ActiveEventTable:
                 "final_positions": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
-                "nu0": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str")
             }
+            if self._htst_active:
+                columns["nu0"] = pd.Series(dtype="float64")
             self.table = pd.DataFrame(columns)
 
     def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
@@ -685,11 +694,12 @@ class ActiveEventTable:
                 "final_positions": event_refinement_output.min2_positions,
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": rate_from_prefactor(event_refinement_output.k_prefactor, event_refinement_output.dE_forward, self.config.rateconstant.T),
-                "nu0": event_refinement_output.nu0,
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined
             }
         )
+        if self._htst_active:
+            dfactive["nu0"] = event_refinement_output.nu0
         return dfactive
     
     def remove(self, ind: int|list[int]) -> None :

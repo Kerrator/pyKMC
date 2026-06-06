@@ -18,6 +18,9 @@ class PhysicalConstants:
 
     kb = 8.6173303e-05  # eV.K^-1
     h = 4.135667e-3  # eV.ps
+    hbar_omega_eV = 0.06466  # eV / sqrt(eV/(amu·Å²)); ℏω from a mass-weighted eigenvalue
+    hbar_eV_s = 6.582119569e-16  # ℏ in eV·s
+    eskm_div_eV_amu_A2 = 9648.5  # LAMMPS dynamical_matrix eskm scaling -> eV/(amu·Å²)
 
 
 class ControlConfig(BaseModel):
@@ -538,7 +541,7 @@ class PSRConfig(BaseModel):
     )
 
 class ActiveVolume(BaseModel):
-    """ Active Volume Parameters"""
+    """Active Volume Parameters"""
 
     ract: float = Field(
         default=6.0,

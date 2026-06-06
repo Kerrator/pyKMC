@@ -1,7 +1,12 @@
 """Finite-difference mass-weighted partial Hessian from a forces callable.
 
 Engine-agnostic: the caller supplies ``forces_fn(positions) -> (N, 3)`` forces.
-The LAMMPS binding lives in lammps_operations.compute_event_prefactors.
+
+OFFLINE REFERENCE — not on the production HTST path. The live run supplies the
+Hessian via LAMMPS ``dynamical_matrix_eskm`` (passed as ``hessian_fn=`` to
+``compute_event_prefactors``). This finite-difference builder is retained for the
+offline ``htst.enrich`` enricher and as the FD cross-check that validated the
+engine Hessian (5.76 vs 5.75 THz).
 """
 
 from __future__ import annotations

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .constants import HBAR_EV_S
+from pykmc.config import PhysicalConstants
 from .normal_modes import normal_modes_from_hessian
 
 
@@ -80,5 +80,5 @@ def vineyard_prefactor(
     # Actually log(prod_init/prod_sad) gives ratio of ω products. The result
     # has units of ω (since #init = #sad + 1, one ω is left over). So nu0_eV
     # is an ℏω in eV, which we now convert to Hz.
-    nu0_Hz = nu0_eV / (2.0 * np.pi * HBAR_EV_S)
+    nu0_Hz = nu0_eV / (2.0 * np.pi * PhysicalConstants.hbar_eV_s)
     return float(nu0_Hz)

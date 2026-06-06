@@ -10,7 +10,6 @@ from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .enginemanager.lmpi.pool import Manager
 import ase.geometry
-import numpy as np
 import pandas as pd
 import concurrent.futures
 
@@ -145,8 +144,8 @@ class Refinement:
         -------
         list[Result[EventRefinementOutput, ErrorInfo]]
             list of Result of the refinements.
-        """
 
+        """
         ##=>PSR between generic event and at_idx environments
         result_psr = PointSetRegistration(
             self.config, self.system, dfevent, self.neighbors_list, at_idx
@@ -201,7 +200,7 @@ class Refinement:
                         central_atom_index=at_idx,
                         saddle_positions=self.system.positions.copy(),
                         E_saddle=dfevent["energy_barrier"] if self.config.control.active_volume else total_energy + dfevent["energy_barrier"] ,
-                        refined='F'
+                        refined="F"
                     )))
 
                 else : #we refine
@@ -229,7 +228,7 @@ class Refinement:
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "k_prefactor": dfevent["k_prefactor"],
-                    "nu0": dfevent["nu0"],
+                    "nu0": dfevent.get("nu0", None),
                     "neighbors": neighbors.copy()
                 }
 

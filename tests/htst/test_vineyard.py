@@ -10,7 +10,10 @@ import numpy as np
 import pytest
 
 from pykmc.htst.vineyard import vineyard_prefactor
-from pykmc.htst.constants import HBAR_EV_S, HBAR_OMEGA_EV
+from pykmc.config import PhysicalConstants
+
+HBAR_OMEGA_EV = PhysicalConstants.hbar_omega_eV
+HBAR_EV_S = PhysicalConstants.hbar_eV_s
 
 
 # ---------------------------------------------------------------------------

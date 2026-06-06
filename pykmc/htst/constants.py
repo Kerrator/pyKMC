@@ -1,24 +1,20 @@
-"""Eigenvalue → vibrational-frequency conversions for HTST.
+"""Eigenvalue → vibrational-frequency conversion helpers for HTST.
 
 PROVENANCE: vendored from
 apps/PyKMC_Analysis/Analysis/htst/kappa_rpa.py (the proven analysis-side
-implementation, 15 unit tests). Duplicated here to keep pyKMC self-contained;
-the analysis package is not a pyKMC runtime dependency. Keep the two copies in
-sync if either changes.
+implementation). Physical constants live in
+:class:`pykmc.config.PhysicalConstants` (``hbar_omega_eV``, ``hbar_eV_s``,
+``eskm_div_eV_amu_A2``); this module keeps the HTST-specific solver tolerance and
+the unit-conversion functions.
 """
 
 import math
 
-HBAR_OMEGA_EV = 0.06466  # eV / sqrt(eV/(amu·Å²)); see kappa_rpa.py provenance
-HBAR_EV_S = 6.582119569e-16  # ℏ in eV·s (needed by the vendored vineyard_prefactor)
-ZERO_MODE_TOL_EV2 = 1.0e-6  # |λ| below this is a projected-out zero mode
-KB_EV_PER_K = 8.617333e-5  # eV/K (matches pyKMC PhysicalConstants.kb)
+from pykmc.config import PhysicalConstants
 
-# LAMMPS ``dynamical_matrix ... eskm`` (metal units) writes the mass-weighted
-# Hessian scaled by conv_energy = 9648.5 so its eigenvalues are (rad/ps)^2.
-# Divide the matrix by this to recover eV/(amu·Å²) — the convention used by
-# ``normal_modes_from_hessian`` / ``vineyard_prefactor`` (via HBAR_OMEGA_EV).
-ESKM_DIV_EV_AMU_A2 = 9648.5
+# Algorithmic tolerance (NOT a physical constant): |λ| below this is treated as a
+# projected-out zero mode by ``normal_modes_from_hessian``.
+ZERO_MODE_TOL_EV2 = 1.0e-6
 
 
 def eigval_to_omega_eV(lmbda: float) -> float:
@@ -35,7 +31,7 @@ def eigval_to_omega_eV(lmbda: float) -> float:
         ℏω in eV.
 
     """
-    return HBAR_OMEGA_EV * math.sqrt(lmbda)
+    return PhysicalConstants.hbar_omega_eV * math.sqrt(lmbda)
 
 
 def omega_eV_to_hz(omega_eV: float) -> float:
@@ -56,7 +52,7 @@ def omega_eV_to_hz(omega_eV: float) -> float:
         Linear frequency ν in Hz.
 
     """
-    return omega_eV / (2.0 * math.pi * HBAR_EV_S)
+    return omega_eV / (2.0 * math.pi * PhysicalConstants.hbar_eV_s)
 
 
 def hz_to_thz(f_hz: float) -> float:

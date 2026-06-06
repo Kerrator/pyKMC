@@ -6,16 +6,32 @@ from typing import Any
 import numpy as np
 from pytest import MonkeyPatch
 
-from pykmc.event_table import ReferenceEventTable
+from pykmc.event_table import ActiveEventTable, ReferenceEventTable
 
 
-def test_reference_table_has_nu0_and_k_prefactor_columns(
+def test_constant_reference_table_has_no_nu0_column(
     config_Ni_4000at_monovacancy_sia: Any,
 ) -> None:
-    """Fresh reference table carries both the nu0 diagnostic and k_prefactor columns."""
-    table = ReferenceEventTable(config_Ni_4000at_monovacancy_sia)
-    assert "nu0" in table.table.columns
-    assert "k_prefactor" in table.table.columns
+    """Gating: a constant-style table has k_prefactor but NOT nu0 (base schema)."""
+    config = config_Ni_4000at_monovacancy_sia  # style=constant from input.in
+    ref = ReferenceEventTable(config)
+    act = ActiveEventTable(config)
+    assert "k_prefactor" in ref.table.columns
+    assert "nu0" not in ref.table.columns
+    assert "nu0" not in act.table.columns
+
+
+def test_htst_reference_table_has_nu0_and_k_prefactor_columns(
+    config_Ni_4000at_monovacancy_sia: Any,
+) -> None:
+    """Gating: an htst-style table carries both nu0 and k_prefactor."""
+    config = config_Ni_4000at_monovacancy_sia
+    config.rateconstant.style = "htst"
+    ref = ReferenceEventTable(config)
+    act = ActiveEventTable(config)
+    assert "nu0" in ref.table.columns
+    assert "k_prefactor" in ref.table.columns
+    assert "nu0" in act.table.columns
 
 
 def test_build_event_series_stores_directional_nu0(

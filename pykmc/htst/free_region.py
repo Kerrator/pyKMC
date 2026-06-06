@@ -3,6 +3,13 @@
 Assumes an orthogonal simulation cell (matching the orthogonal-cell assumption
 elsewhere in pyKMC, e.g. eventsearch position centering). For triclinic cells,
 swap in ase.geometry.find_mic.
+
+Deliberately NOT reusing the active-volume machinery: ``select_free_indices`` is a
+single continuous-radius minimum-image sphere around one atom index, engine- and
+config-free. ``activevolume.define_AV`` is a two-radius (``ract``/``rmov``) split
+tied to the AV engine and needs a populated ``config.activevolume``;
+``AtomicEnvironment(style="region")`` is RegionConfig spec-based. Both are heavier
+and have no "radius around atom k" entry point, so the small function is kept.
 """
 
 from __future__ import annotations

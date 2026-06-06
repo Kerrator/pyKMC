@@ -1,14 +1,12 @@
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
-from mpi4py import MPI
 import ctypes
 import pypARTn
 import os
-from ...activevolume.active_volume import reset, redefine_atoms, partn_search_AV, partn_refine_AV, position_results_AV
+from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV
 from ...atomic_environment import AtomicEnvironment
 
 from ...result import  (
-    Result,
     ErrorInfo,
     EventSearchOutput,
     Ok,
@@ -16,8 +14,9 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
-from pykmc.htst.prefactor import compute_event_prefactors as _compute_event_prefactors
-from pykmc.htst.constants import thz_to_hz, ESKM_DIV_EV_AMU_A2
+from pykmc.rate_constant.prefactor import compute_event_prefactors as _compute_event_prefactors
+from pykmc.config import PhysicalConstants
+from pykmc.htst.constants import thz_to_hz
 
 
 def initialize_parameters(engine) : 
@@ -194,7 +193,7 @@ def dynamical_matrix_eskm(engine, positions, free_indices=None, dx=1e-2):
     hessian = np.empty((dim, dim))
     for i in range(dim):
         hessian[i] = data[i * nat:(i + 1) * nat].reshape(-1)
-    hessian /= ESKM_DIV_EV_AMU_A2
+    hessian /= PhysicalConstants.eskm_div_eV_amu_A2
     try:
         os.remove(tmp)
     except OSError:
@@ -214,8 +213,7 @@ def set_positions(engine, positions) :
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
 def minimize_with_results(engine, config, positions=None, types=None) :
-    """
-    Minimize and return the minimized positions and the total energy.
+    """Minimize and return the minimized positions and the total energy.
     """
     if positions is not None :
         set_positions(engine=engine, positions=positions)
@@ -233,7 +231,6 @@ def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float
     """ 
     Minimize with fix atom around central atom up to rcut
     """
-
     #define core region and group
     engine.command(f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}")
     engine.command("group frozen_group region sphere_region")
@@ -242,7 +239,7 @@ def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float
     engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
 
     #minimization 
-    engine.command(f"min_style cg")
+    engine.command("min_style cg")
     engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
 
     #unfreeze/delte
@@ -296,7 +293,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
     os.dup2(devnull, 1)
 
-    print('Central Atom', central_atom_idx)
+    print("Central Atom", central_atom_idx)
     #Check to see if system is in AV mode:
     if config.control.active_volume == True:
         atom_map, central_lammps_id=partn_search_AV(engine, config, central_atom_idx, positions, cell, types)
@@ -576,7 +573,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
                             central_atom_index=central_atom_idx,
                             saddle_positions=saddlepositions_results,
                             E_saddle= E_result,
-                            refined='T'
+                            refined="T"
                         )
                     )
         # Synchronize all ranks

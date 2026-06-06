@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import numpy as np
 
-from pykmc.htst.prefactor import EventPrefactors
+from pykmc.rate_constant.prefactor import EventPrefactors
 from pykmc.kmc import KMC
 from pykmc.result import EventSearchOutput
 

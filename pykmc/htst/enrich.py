@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 from .constants import hz_to_thz, thz_to_hz
-from .prefactor import compute_event_prefactors
+from pykmc.rate_constant.prefactor import compute_event_prefactors
 
 ForcesFn = Callable[[np.ndarray], np.ndarray]
 EngineFactory = Callable[[np.ndarray], "tuple[ForcesFn, np.ndarray]"]

@@ -19,8 +19,8 @@ from typing import Callable
 import numpy as np
 import pytest
 
-import pykmc.htst.prefactor as pf
-from pykmc.htst.prefactor import EventPrefactors, compute_event_prefactors
+import pykmc.rate_constant.prefactor as pf
+from pykmc.rate_constant.prefactor import EventPrefactors, compute_event_prefactors
 
 _CELL = np.diag([20.0, 20.0, 20.0])
 _PBC = np.array([True, True, True])
