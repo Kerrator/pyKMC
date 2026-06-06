@@ -13,7 +13,9 @@ def _get_registry() -> dict[str, type[PrefactorBackend]]:
     return {cls.name: cls for cls in PrefactorBackend.__subclasses__()}
 
 
-def create_rate_constant(T: float, prefactor_backend_name: str, **kwargs) -> RateConstant:
+def create_rate_constant(
+    T: float, prefactor_backend_name: str, **kwargs: object
+) -> RateConstant:
     """Instantiate a [`RateConstant`][pykmc.rate_constant.RateConstant] from a backend name and temperature.
 
     Parameters
