@@ -27,7 +27,6 @@ emax_event = 5.0
 emin_event = 0.0
 
 [pARTn] 
-path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 forc_thr = 0.001
 
 [RateConstant] 

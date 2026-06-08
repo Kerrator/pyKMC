@@ -315,18 +315,6 @@
   <details><summary>Description</summary>
   dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.
   </details>
-- **`r_nevalf_max`** : `int`, default = `300`
-  <details><summary>Description</summary>
-  Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max.
-  </details>
-- **`r_max_attempts`** : `int`, default = `5`
-  <details><summary>Description</summary>
-  When adjusting the saddle energy and positions, in some rare cases partn has trouble finding the saddle point and goes back to the minium.In that case, we do another attempt with a different seed.
-  </details>
-- **`r_delr_sad_thr`** : `float`, default = `0.4`
-  <details><summary>Description</summary>
-  When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt.
-  </details>
 - **`r_push_mode`** : `Literal['list', 'rad']`, default = `'list'`
   <details><summary>Description</summary>
   Determines how the initial atomic displacement (push) is generated around the central atom of the currently explored environment:

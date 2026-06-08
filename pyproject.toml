@@ -20,11 +20,15 @@ dependencies = ["ase>=3.24.0", "lammps>=2024.8.29.1.0", "mpi4py>=4.0.2", "numpy>
 dev = [
     "ruff",
     "mkdocs",
-    "mkdocs-material",    
+    "mkdocs-material",
     "mdx_include",
     "pymdown-extensions",
     "mkdocstrings[python]",
     "mkdocs-jupyter",
+    "mike",
+]
+doc = [
+    "pykmc[dev]",
 ]
 
 
