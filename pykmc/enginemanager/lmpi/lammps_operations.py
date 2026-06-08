@@ -274,9 +274,6 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     #Final push 
     artn.set("push_over", config.partn.push_over)
 
-    #Force evaluations
-    artn.set("nevalf_max", config.partn.nevalf_max)
-
     # RUN
     engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
     engine.command("unfix 10")
@@ -429,9 +426,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)
-
-    # Force evaluations
-    artn.set("nevalf_max", config.partn.r_nevalf_max)
 
     #MAX attempt based on delr_sad (from initial position)
     #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
