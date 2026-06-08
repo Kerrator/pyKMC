@@ -304,6 +304,15 @@ class BasinsGenericEvents() :
 
         return Ok(new_system)
 
+    def _absorbing_rate(self, dE: float) -> float:
+        """Scalar transition rate for an absorbing event, for the connectivity table.
+
+        ``RateConstant.compute_rate`` returns a ``RateComponents``; the connectivity
+        table's ``k_forward`` column is a float that gets summed (see ``exit``), so we
+        take ``.rate``.
+        """
+        return self.rate_constant.compute_rate(dE).rate
+
     def refine_absorbing(self, system) :
         """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
         #compute the energy of the state 
@@ -380,7 +389,7 @@ class BasinsGenericEvents() :
                 dE = E_sad
             else:
                 dE = E_sad - E_min
-            k = self.rate_constant.compute_rate(dE)
+            k = self._absorbing_rate(dE)
 
             #also save saddle positions refined 
             idx_state = self.connectivity_table.df.loc[idx].at['state_connexion']
