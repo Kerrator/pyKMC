@@ -1,7 +1,14 @@
+import sys
+from unittest.mock import MagicMock
+try:
+    import ira_mod
+except ImportError:
+    sys.modules['ira_mod'] = MagicMock()
+
 from typing import get_args, get_origin, Union, Optional, Any, Literal
 from pydantic import BaseModel, Field
 import inspect
-from pykmc.config import Config # Assuming pykmc.config contains your Config class
+from pykmc.config import Config
 import os
 
 def format_type(field_type: Any) -> str:
