@@ -1,14 +1,28 @@
 site_name: pyKMC
 theme:
   name: material
+  font:
+    code: JetBrains Mono
   palette:
-    scheme: slate
-    primary: blue grey
-    accent: orange
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep-orange
+      accent: red
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep-orange
+      accent: red
+      toggle:
+        icon: material/brightness-3
+        name: Switch to light mode
+  
   features:
-  - content.code.copy  # Ajoute un bouton "Copier" sur les blocs de code
-  - content.code.annotate  # Active le surlignage de syntaxe
-  - content.code.highlight  # Améliore le rendu du code
+  - content.code.copy  
+  - content.code.annotate  
+  - content.code.highlight  
 
 nav:
   - Home: index.md
@@ -53,7 +67,12 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.superfences
 
+extra:
+  version:
+    provider: mike
+
 plugins:
+  - mike:
   - mkdocstrings:
       handlers:
         python:
@@ -67,5 +86,8 @@ plugins:
             show_root_heading: true
   - search:
   - mkdocs-jupyter:
+extra_css:
+  - stylesheets/gruvbox.css
+
 use_directory_urls: false
 site_url: https://hugomoison.github.io/pyKMC/
