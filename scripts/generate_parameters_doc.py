@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import os
 from typing import get_args, get_origin, Union, Optional, Any, Literal
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ _spec = importlib.util.spec_from_file_location(
     os.path.join(os.path.dirname(__file__), "..", "pykmc", "config.py"),
 )
 _config_module = importlib.util.module_from_spec(_spec)
+sys.modules["pykmc.config"] = _config_module
 _spec.loader.exec_module(_config_module)
 Config = _config_module.Config
 
