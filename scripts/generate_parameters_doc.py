@@ -1,15 +1,16 @@
-import sys
-from unittest.mock import MagicMock
-try:
-    import ira_mod
-except ImportError:
-    sys.modules['ira_mod'] = MagicMock()
-
+import importlib.util
+import os
 from typing import get_args, get_origin, Union, Optional, Any, Literal
 from pydantic import BaseModel, Field
 import inspect
-from pykmc.config import Config
-import os
+
+_spec = importlib.util.spec_from_file_location(
+    "pykmc.config",
+    os.path.join(os.path.dirname(__file__), "..", "pykmc", "config.py"),
+)
+_config_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_config_module)
+Config = _config_module.Config
 
 def format_type(field_type: Any) -> str:
     """Formats a Python type hint into a readable string."""
