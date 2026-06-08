@@ -28,12 +28,10 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: install/installation.md
-  - User Guide : user_guide.md
+      - User Guide: user_guide.md
   - Troubleshooting: troubleshooting.md
-  - KMC Parameters : parameters.md
-  - Tutorial: 
-      - pyKMC Workflow : 0-pyKMC-workflow.md 
-      - Simple example : 1-pyKMC-simple.md
+  - KMC Parameters: parameters.md
+  - Developer Guide: developer_guide.md
   - API Reference: 
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
