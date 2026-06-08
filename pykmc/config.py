@@ -566,14 +566,47 @@ class OTFMLConfig(BaseModel):
     gamma_max: float = Field(
         description="Maximum extrapolation grade; triggers halt and extreme-extrapolation flag.",
     )
-    args: Optional[str] = Field(
+    launcher: Optional[Literal["nested", "fork", "slurm"]] = Field(
         default=None,
-        description="Extra arguments appended verbatim to the retrain command before the dump glob.",
+        description="Execution backend passed as --launcher. Choices: nested, fork, slurm.",
+    )
+    batch_args: Optional[str] = Field(
+        default=None,
+        description="Extra batch arguments passed as --batch-args for slurm. Required when launcher is slurm.",
+    )
+    runner_args: Optional[str] = Field(
+        default=None,
+        description="Extra runner arguments passed as --runner-args for nested MPI or Slurm srun launches.",
+    )
+    sequential_eval: bool = Field(
+        default=False,
+        description="Emit --sequential-eval so selected structures are evaluated one at a time.",
+    )
+    extra_args: Optional[str] = Field(
+        default=None,
+        description="Extra arguments appended verbatim to the retrain command before the dump glob, for remaining kmtp-otf CLI options such as --max_structures.",
     )
     enabled_phases: list[Literal["search", "refine", "minimize"]] = Field(
         default_factory=lambda: ["search", "refine", "minimize"],
         description="OTF phases enabled for retry handling.",
     )
+
+    @model_validator(mode="after")
+    def check_slurm_batch_args(self):
+        if self.launcher == "slurm" and self.batch_args is None:
+            raise ValueError("batch_args is required when launcher is 'slurm'")
+        if self.launcher in {"nested", "fork"} and self.batch_args is not None:
+            raise ValueError(f"batch_args is only valid when launcher is 'slurm', got '{self.launcher}'")
+        if self.launcher == "fork" and self.runner_args is not None:
+            raise ValueError("runner_args is not valid when launcher is 'fork'")
+        return self
+
+    @field_validator("launcher", "batch_args", "runner_args", "extra_args", mode="before")
+    @classmethod
+    def parse_optional_cli_string(cls, v):
+        if isinstance(v, str) and v.strip().lower() in {"", "none"}:
+            return None
+        return v
 
     @field_validator("enabled_phases", mode="before")
     @classmethod

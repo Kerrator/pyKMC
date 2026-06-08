@@ -77,6 +77,7 @@ class OTFMLController:
         self.kmc = kmc
         self.config = kmc.config.otfml
         self.enabled = bool(kmc.config.control.otfml and self.config)
+        self._consecutive_failed_retrain_exit = 0
         if self.enabled:
             ensure_otf_dirs()
 
@@ -150,9 +151,17 @@ class OTFMLController:
         parts.append(f"--training_set {c.training_set_file}")
         parts.append(f"--gamma_tolerance {c.gamma_tolerance}")
         parts.append(f"--gamma_max {c.gamma_max}")
-        if c.args:
-            parts.append(c.args)
-        parts.append(dumps_glob)
+        if c.launcher:
+            parts.append(f"--launcher {c.launcher}")
+        if c.batch_args:
+            parts.append(f"--batch-args=\"{c.batch_args}\"")
+        if c.runner_args:
+            parts.append(f"--runner-args=\"{c.runner_args}\"")
+        if c.sequential_eval:
+            parts.append("--sequential-eval")
+        if c.extra_args:
+            parts.append(c.extra_args)
+        parts.append(f"--extrapolative_dumps {dumps_glob}")
         return " ".join(parts)
 
     def _retrain_reload_and_minimize(self) -> None:
@@ -160,14 +169,19 @@ class OTFMLController:
         full_command = self._build_retrain_command()
         self._log("log", "\t :=> OTFML retraining command: {}".format(full_command))
 
-        clean_env = {
-            k: v
-            for k, v in os.environ.items()
-            if not any(k.startswith(p) for p in self._MPI_PREFIXES)
-        } # does nothing for now
+        # does nothing for now
+        # clean_env = {k: v for k, v in os.environ.items() if not any(k.startswith(p) for p in self._MPI_PREFIXES)}
 
         with self.kmc.manager.sleeping_workers():
-            subprocess.run(full_command, shell=True, check=True, env=clean_env)
+            result = subprocess.run(full_command, shell=True)
+        if result.returncode == 67:
+            self._consecutive_failed_retrain_exit += 1
+            self._log("log", f"\t :=> Retraining exited with code 67 ({self._consecutive_failed_retrain_exit}/5 consecutive)")
+            if self._consecutive_failed_retrain_exit > 5:
+                self._log("log", "Retraining returned exit code 67 more than 5 times in a row; aborting.")
+                self.kmc._close()
+        else:
+            self._consecutive_failed_retrain_exit = 0
 
         was_global = self.kmc.manager.using_global
 
