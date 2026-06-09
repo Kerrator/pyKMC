@@ -328,10 +328,10 @@ class ReferenceEventTable:
             dfevent["idx_ref"] = ref
             dfevent["idx_backward"] = ref 
         else : 
-            dfevent.loc[0].at["idx_ref"] = ref
-            dfevent.loc[0].at["idx_backward"] = ref+1
-            dfevent.loc[1].at["idx_ref"] = ref +1
-            dfevent.loc[1].at["idx_backward"] = ref
+            dfevent.loc[0, "idx_ref"] = ref
+            dfevent.loc[0, "idx_backward"] = ref + 1
+            dfevent.loc[1, "idx_ref"] = ref + 1
+            dfevent.loc[1, "idx_backward"] = ref
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 

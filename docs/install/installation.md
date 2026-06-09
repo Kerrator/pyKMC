@@ -36,21 +36,15 @@ make install-python     # Enables Python bindings
 If LAMMPS is already installed, only the last command (`make install-python`) is necessary.
 
 ### pARTn
-For event search, [pARTn](https://mammasmias.gitlab.io/artn-plugin/sections/Intro.html) can be used with LAMMPS.
-Follow the installation instructions provided [here](https://mammasmias.gitlab.io/artn-plugin/sections/Installation.html):
+For event search, [pARTn](https://mammasmias.gitlab.io/artn-plugin/) can be used with LAMMPS.
+Follow the installation instructions provided [here](https://mammasmias.gitlab.io/artn-plugin/user_guide/Installation.html):
 
-- Run the configuration script:
+- Run the following commands, this will install the python module `pypARTn` into your python env:
 ```bash
 cd /path/to/artn-plugin
-./configure --with-lammps LAMMPS_PATH=/path/to/lammps
-```
-- Compile the plugin:
-```bash
-make lmplib
-```
-Add the interface path to the PYTHONPATH environment variable:
-```bash
-export PYTHONPATH=/your/path/to/artn-plugin/interface:$PYTHONPATH
+cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH=/path/to/lammps/build -DARTN_INSTALL_PYTHON=ON
+cmake --build build
+cmake --install build
 ```
 
 ### IRA
@@ -58,12 +52,8 @@ For point set registration (used during event reconstruction), [IRA](https://mam
 
 Follow the installation instructions provided [here](https://mammasmias.github.io/IterativeRotationsAssignments/#compilation):
 
-- Compile the source code:
+- Compile the source and create the python module `ira_mod`:
 ```bash 
-cd /path/to/ira/src/
-make all
-```
-- Add the interface path to PYTHONPATH:
-```
-export PYTHONPATH=$PYTHONPATH:/your/path/to/IRA/interface
+cd /path/to/ira
+python -m pip install .
 ```
