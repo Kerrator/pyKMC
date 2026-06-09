@@ -108,7 +108,7 @@ class ControlConfig(BaseModel):
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
-    style: Literal["cna", "graph", "cna/graph"] = Field(
+    style: Literal["cna", "graph", "cna/graph", "diamond/graph"] = Field(
         ...,
         description="Method used to characterize and assign an ID to an atom's local atomic environment",
     )
@@ -180,11 +180,6 @@ class PartnConfig(BaseModel):
     delr_thr: float = Field(
         default=0.1, 
         description="Threshold at which an atom is considered to have moved. This threshold affects the npart parameter in the artn.out output."
-    )
-
-    evalf_max: int = Field(
-        default = 9999, 
-        description="to stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max."
     )
 
     #Exploration
@@ -291,7 +286,7 @@ class PartnConfig(BaseModel):
     )
 
     nevalf_max: int = Field(
-        default=500, 
+        default=9999, 
         description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
     )
 
@@ -311,18 +306,13 @@ class PartnConfig(BaseModel):
         description="dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
     )
 
-    path_artnso: str = Field(
-        default=...,
-        description="Path to use to load the plugin with lammps command 'plugin load /path/to/artn-plugin/libartn.so'",
-    )
-
 #################
 #Refinement part#
 #################
 
-    r_evalf_max: int = Field(
+    r_nevalf_max: int = Field(
         default = 300, 
-        description="to stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
+        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
     )
 
     #Max single refinement attempt

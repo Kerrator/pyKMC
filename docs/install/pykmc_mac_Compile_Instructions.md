@@ -181,15 +181,6 @@ make install-python
 cd ../..
 ```
 
-Create symlinks so pARTn can find CMake build outputs:
-
-```bash
-mkdir -p lammps/src/styles
-ln -sf ../../build/styles/lmpinstalledpkgs.h lammps/src/styles/lmpinstalledpkgs.h
-ln -sf ../build/liblammps.dylib lammps/src/liblammps.dylib
-ln -sf ../build/liblammps.dylib lammps/src/liblammps.so
-```
-
 Verify:
 
 ```bash
@@ -200,12 +191,9 @@ python -c "from lammps import lammps; print('LAMMPS OK')"
 
 ## 5. Build IRA
 
-macOS builds `.dylib`, not `.so` — pre-create a symlink so `pip install` works the first time.
 
 ```bash
 cd IterativeRotationsAssignments
-mkdir -p lib
-ln -sf libira.dylib lib/libira.so
 python -m pip install .
 cd ..
 ```
@@ -220,37 +208,18 @@ python -c "import ira_mod; print('IRA OK')"
 
 ## 6. Build pARTn plugin
 
+The following will directly install the `pypARTn` python module into the venv path. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
 ```bash
 cd artn-plugin
-
-./configure --with-lammps LAMMPS_PATH=$(pwd)/../lammps
-```
-
-Patch C++17 support (required by LAMMPS headers):
-
-```bash
-sed -i '' 's/^CXX=mpicxx$/CXX=mpicxx\nCXXFLAGS=-std=c++17/' make.inc
-sed -i '' 's/$(CXX) -g -fPIC -I/$(CXX) -g -fPIC ${CXXFLAGS} -I/g' ENGINES/LAMMPS/Makefile
-```
-
-Build the plugin:
-
-```bash
-make lmplib
-cd ..
-```
-
-Install the `pypARTn` Python interface into the venv:
-
-```bash
-cp artn-plugin/interface/pypARTn.py "$(python -c 'import site; print(site.getsitepackages()[0])')/"
+cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH=$(pwd)/../lammps/build -DARTN_INSTALL_PYTHON=ON
+cmake --build build
+cmake --install build
 ```
 
 Verify:
 
 ```bash
-ls artn-plugin/lib/libartn-lmp.so
-python -c "import pypARTn; print('pypARTn OK')"
+python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
 ```
 
 ---
@@ -276,8 +245,6 @@ Every time you run pyKMC, activate the environment and set these paths:
 ```bash
 source pykmc_env/bin/activate
 export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}"
-export PYTHONPATH=$(pwd)/artn-plugin/interface:$PYTHONPATH
-export PYTHONPATH=$(pwd)/IterativeRotationsAssignments/interface:$PYTHONPATH
 ```
 
 Or simply source the activation script created by the installer:
@@ -290,11 +257,4 @@ Run with MPI (`n = n_sessions + 1` when `engine_use_rank_0 = False`):
 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in
-```
-
-In your `input.in`, set the pARTn library path (use the full absolute path):
-
-```ini
-[pARTn]
-path_artnso = /full/path/to/pykmc/artn-plugin/lib/libartn-lmp.so
 ```

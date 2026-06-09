@@ -1,2 +1,43 @@
-- name : Generate parameters documentation 
-  run : python scripts/generate_parameters_and_tutorial_doc.py
+name: Deploy Documentation
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - automatic-deploy-doc
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[doc]"
+
+      - name: Configure git for mike
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Generate parameters documentation
+        run: python scripts/generate_parameters_doc.py
+
+      - name: Deploy to GitHub Pages
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            mike deploy --push --update-aliases main latest
+          else
+            mike deploy --push develop
+          fi

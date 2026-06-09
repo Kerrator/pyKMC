@@ -321,19 +321,19 @@ class ReferenceEventTable:
             dfevent["idx_ref"] = ref
             dfevent["idx_backward"] = ref 
         else : 
-            dfevent.loc[0].at["idx_ref"] = ref
-            dfevent.loc[0].at["idx_backward"] = ref+1
-            dfevent.loc[1].at["idx_ref"] = ref +1
-            dfevent.loc[1].at["idx_backward"] = ref
+            dfevent.loc[0, "idx_ref"] = ref
+            dfevent.loc[0, "idx_backward"] = ref + 1
+            dfevent.loc[1, "idx_ref"] = ref + 1
+            dfevent.loc[1, "idx_backward"] = ref
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 
-    def has_id_subset_table(self, ids: list[str | bytes]) -> pd.DataFrame:
+    def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
         """Return subset table with event having id in ids.
 
         Parameters
         ----------
-        ids : list[str | bytes]
+        ids : list[str]
             list of IDs.
 
         Returns

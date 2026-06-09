@@ -211,16 +211,17 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     # PARAMETERS :
     delr_threshold = config.eventsearch.delr_thr
 
+    # INITILIZE ARTN on all ranks
+    artn = pypARTn.artn(engine="lmp")
+
     # LAMMPS COMMANDS
-    engine.command("plugin load {}".format(config.partn.path_artnso))
+    engine.command( f"plugin load {artn.lib._name}" )
     atoms_frozen = _make_frozen_group(engine, config, positions, types)
     _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
     engine.command("fix 10 all artn dmax {}".format(config.partn.dmax))
     _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
     engine.command("min_style fire")
 
-    # INITILIZE ARTN on all ranks
-    artn = pypARTn.artn(engine="lmp")
     # SETUP ARTN
     artn.reset_input()
     # Control 
@@ -274,7 +275,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
     artn.set("push_over", config.partn.push_over)
 
     # RUN
-    engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.evalf_max}")
+    engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
     engine.command("unfix 10")
     _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
     _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
@@ -375,7 +376,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
     # LAMMPS COMMANDS
-    engine.command("plugin load {}".format(config.partn.path_artnso))
+    engine.command( f"plugin load {artn.lib._name}" )
     
     # SETUP ARTN
     artn.reset_input()
@@ -426,8 +427,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
     #Convergence
     artn.set("forc_thr", config.partn.r_forc_thr)
 
-
-
     #MAX attempt based on delr_sad (from initial position)
     #Fix that sometime, we go back to the minimum, so saddle point found is the minimum 
     #When using a different seed it solves the problem
@@ -444,7 +443,7 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
         _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
         engine.command("min_style fire")
                 # RUN
-        engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_evalf_max}")
+        engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}")
         engine.command("unfix 10")
         _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
 
