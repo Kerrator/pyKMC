@@ -44,7 +44,7 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
-from .event_recycling import DistanceRecycling
+from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
 
 
@@ -96,6 +96,16 @@ class KMC:
         self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
         self.bias: Bias | None = None
+        # The recycler decides what to carry over between KMC steps at
+        # end-of-step; with no recycler the active table is cleared each
+        # step (same observable behavior as prior releases).
+        self.recycler: Recycling | None = None
+        if self.config.control.recycle:
+            if self.config.eventrecycling.style == "displacement":
+                self.recycler = DistanceRecycling(
+                    movement_thr=self.config.eventrecycling.movement_thr,
+                    distance_thr=self.config.eventrecycling.distance_thr,
+                )
 
     def run(self) -> None:
         """Run the simulation."""
@@ -152,18 +162,9 @@ class KMC:
         last_step +=1
         nsearch = self.config.eventsearch.nsearch
 
-        # Build the persistent active event table once, optionally with a
-        # recycler plugin attached. The recycler decides what to carry over
-        # between KMC steps at end-of-step; with no recycler the table is
-        # cleared each step (same observable behavior as prior releases).
-        recycler = None
-        if self.config.control.recycle:
-            if self.config.eventrecycling.style == "displacement":
-                recycler = DistanceRecycling(
-                    movement_thr=self.config.eventrecycling.movement_thr,
-                    distance_thr=self.config.eventrecycling.distance_thr,
-                )
-        self.active_table = ActiveEventTable(self.config, recycler=recycler)
+        # Build the persistent active event table once, with the recycler
+        # plugin (built in __init__) attached.
+        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps+last_step):

@@ -14,7 +14,7 @@ import pandas as pd
 
 from .event_table import ActiveEventTable
 from .system import System
-from .utils.geometry import per_atom_displacement
+from .utils.geometry import minimum_image_distance, per_atom_displacement
 
 
 class Recycling(ABC):
@@ -98,9 +98,6 @@ class DistanceRecycling(Recycling):
         executed_atom = int(table.loc[executed_idx, "atom_index"])
         executed_pos = system.positions[executed_atom]
 
-        # Per-axis box lengths used for minimum-image wrapping below.
-        cell_lengths = np.linalg.norm(system.cell, axis=1)
-
         keep_rows = []
         for i in table.index:
             # Never recycle the just-executed event itself.
@@ -113,11 +110,13 @@ class DistanceRecycling(Recycling):
                 continue
 
             # (2) Distance check: this central atom must be FAR from the
-            # executed event. PBC minimum-image wrap per axis.
-            dvec = system.positions[atom_idx] - executed_pos
-            for axis in range(3):
-                dvec[axis] -= cell_lengths[axis] * np.round(dvec[axis] / cell_lengths[axis])
-            if np.linalg.norm(dvec) <= self.distance_thr:
+            # executed event (PBC minimum-image).
+            if (
+                minimum_image_distance(
+                    executed_pos, system.positions[atom_idx], system.cell
+                )
+                <= self.distance_thr
+            ):
                 continue
 
             keep_rows.append(i)
