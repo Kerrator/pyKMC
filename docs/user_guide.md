@@ -1,6 +1,6 @@
 # User Guide 
 
-_This is a temporary user guide that aim to provide basic information on the simulation workflow and how to choose simulation's parameters_ 
+This guide walks through the simulation workflow and how to choose a simulation's parameters. For the exhaustive list of every configuration field, see the [KMC Parameters](parameters.md) reference; for a high-level description of the algorithm, see the [Algorithm Overview](general_algorithm.md). 
 
 pyKMC is an on-the-fly kinetic Monte Carlo (KMC) program.
 
@@ -26,7 +26,7 @@ Ni       0.00000000       1.76000000       1.76000000
 The path to this file should be provided using the `initial_config` key. 
 You must also specify : 
 - the number of KMC steps to run with `n_steps`
-- the simulation engine to use to compute energy, forces and perfrom event searches/refinements (e.g., lammps) with the `engine` key
+- the simulation engine to use to compute energy, forces and perform event searches/refinements (e.g., lammps) with the `engine` key
 
 A minimal example of a `[Control]` section would be:
 ```INI 
@@ -156,18 +156,18 @@ style = partn
 nsearch = 50 
 ``` 
 
-When an event is found, it is characterized by two energy barriers, a foward energy barrier $dE_{foward}$ and an inverse energy barrier $dE_{backward}$ : 
+When an event is found, it is characterized by two energy barriers, a forward energy barrier $dE_{forward}$ and an inverse energy barrier $dE_{backward}$ : 
 <div style="text-align: center;">
   <img src="images/pesevent.png" width="400" />
   <div style="font-size: 0.9em; color: gray; margin-top: 5px;">
-    Potential energy surface</code>
+    Potential energy surface
   </div>
 </div>
 
 The event is added to the reference table only if it satisfies all the following conditions:
 
-- $dE_{foward}$ < `emax_event` 
-- $dE_{foward}$ > `emin_event` 
+- $dE_{forward}$ < `emax_event` 
+- $dE_{forward}$ > `emin_event` 
 - $dE_{backward}$ > `emin_event` 
 - $dE_{backward}$ < `energy_asymmetry`x`backward_min` and $dE_{backward}$ > `backward_min` 
 

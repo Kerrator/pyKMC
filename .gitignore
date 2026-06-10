@@ -36,6 +36,9 @@ utils/analyse/*.xyz
 log.lammps
 pykmc.*
 
+# MkDocs build output
+site/
+
 # IDE
 .vscode/**
 .idea/**

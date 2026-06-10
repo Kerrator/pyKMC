@@ -34,8 +34,10 @@ class DetectorThreshold(Detector):
             A pandas DataFrame with all generic events.
         energy_threshold : float
             Energy threshold to considere the system in a basin.
-        idx_reference_event : Optional[int]
-            Index of the generic event in `df_reference_table` of the `pds_selected_active_event`.
+        is_refined : bool, optional
+            Whether `pds_selected_active_event` is a refined (specific) event.
+            When True, the matching generic event is looked up in
+            `df_reference_table` via its ``num_reference_event``. Default is False.
         """
 
         dE_forward = pds_selected_active_event["energy_barrier"]

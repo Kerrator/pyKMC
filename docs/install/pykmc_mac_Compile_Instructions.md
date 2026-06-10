@@ -1,7 +1,7 @@
 # pyKMC macOS Installation Instructions
 
 **Tested on:** macOS (Apple Silicon M-series), March 2026
-**Python:** 3.9–3.13
+**Python:** 3.10–3.13
 **LAMMPS:** `stable_22Jul2025_update3`
 
 > **Tip:** For an automated install, run [`install_pykmc_mac.sh`](install_pykmc_mac.sh) instead of following the manual steps below — the script does everything automatically. See **Automated install** below for how to run it. To install manually, skip to [Section 0](#0-system-prerequisites).
@@ -85,7 +85,7 @@ Install required packages:
 brew install gcc open-mpi cmake fftw
 ```
 
-Python 3.9–3.13 is required. If you don't already have one:
+Python 3.10–3.13 is required. If you don't already have one:
 
 ```bash
 brew install python@3.13
@@ -117,12 +117,12 @@ git clone https://gitlab.com/mammasmias/artn-plugin.git
 
 ---
 
-## 2. Fix Python version constraint
+## 2. Python version
 
-Only needed if using Python 3.13. Edit `pyKMC/pyproject.toml`:
-
-- **Change:** `requires-python = "<3.13,>=3.9"`
-- **To:** `requires-python = "<3.14,>=3.9"`
+pyKMC requires **Python ≥ 3.10** (`requires-python = ">=3.10"` in
+`pyKMC/pyproject.toml`), with no upper bound — Python 3.13 installs without any
+edit. If one of the dependencies does not yet ship a wheel for your Python
+version, fall back to the most recent version that does (3.12 is a safe choice).
 
 ---
 
