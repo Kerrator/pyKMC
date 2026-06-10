@@ -22,26 +22,26 @@ It coordinates three computational components:
 - On-the-fly event discovery via saddle-point search (no precomputed catalog needed)
 - Event reuse across symmetry-equivalent environments
 - Rejection-free KMC event selection
-- **[Basin acceleration](basins.md)** to bridge metastable regions and advance
+- **[Basin acceleration](user_guide/basins.md)** to bridge metastable regions and advance
   simulation time by orders of magnitude
-- **[Active Volumes](active_volumes.md)** to restrict expensive searches to a
+- **[Active Volumes](user_guide/active_volumes.md)** to restrict expensive searches to a
   region around a defect in large systems
 - Multi-element alloy support and MPI-parallel execution
 
 ## Get started
 
-1. **[Install pyKMC](install/installation.md)** — one-shot scripts for macOS and
+1. **[Install pyKMC](user_guide/install/installation.md)** — one-shot scripts for macOS and
    Linux, plus manual build instructions.
-2. **[User Guide](user_guide.md)** — how to set up and run a simulation.
+2. **[User Guide](user_guide/index.md)** — how to set up and run a simulation.
 3. **[KMC Parameters](parameters.md)** — the full configuration reference.
 
 ## Documentation map
 
 | Section | What's there |
 |---|---|
-| [Getting Started](install/installation.md) | Installation and a first simulation |
-| [Concepts](general_algorithm.md) | The KMC algorithm, basins, active volumes, symmetries |
+| [User Guide](user_guide/index.md) | Installation, running simulations, and feature guides |
+| [Theory & Concepts](theory/general_algorithm.md) | The KMC algorithm, transition state theory, and KMC background |
 | [KMC Parameters](parameters.md) | Every configuration field, auto-generated from the code |
 | [Troubleshooting](troubleshooting.md) | Common errors and fixes |
-| [Developer Guide](developer_guide.md) | Contributing, testing, and building the docs |
+| [Developer Guide](developer_guide/index.md) | Contributing, architecture, testing, and building the docs |
 | [API Reference](api/system.md) | Module-by-module API, generated from docstrings |

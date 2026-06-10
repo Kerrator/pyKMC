@@ -18,7 +18,7 @@ pip install pytest         # not in the project dependencies; install separately
 ```
 
 To actually run simulations you also need LAMMPS, and optionally pARTn and IRA —
-see the [installation guide](docs/install/installation.md).
+see the [installation guide](docs/user_guide/install/installation.md).
 
 ## Running the tests
 

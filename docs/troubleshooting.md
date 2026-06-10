@@ -39,7 +39,7 @@ See [`n_sessions`](parameters.md) and `engine_use_rank_0` on the
 
 3. If only `lammps` is missing, you likely skipped `make install-python`
    (make build) or the cmake `make install-python` step. Rebuild following the
-   [installation guide](install/installation.md).
+   [installation guide](user_guide/install/installation.md).
 
 ## `mpi4py` segfault (crash in `MPI_Allreduce`)
 
@@ -99,7 +99,7 @@ cutoff thick so boundary atoms feel correct forces.
 
 **Fix:** increase `ract`/`rmov`, and use `AV_debug = True` in the
 `[ActiveVolume]` section to check whether the volume is large enough. See
-[Active Volumes](active_volumes.md).
+[Active Volumes](user_guide/active_volumes.md).
 
 ## Event search appears to hang
 
@@ -110,5 +110,5 @@ large environments or many search attempts (`nsearch`). This is usually slow
 progress, not a hang.
 
 **Fix:** monitor CPU usage to confirm work is happening. Consider reducing the
-number of searches per environment, or use [Active Volumes](active_volumes.md)
+number of searches per environment, or use [Active Volumes](user_guide/active_volumes.md)
 to shrink the region searched in large systems.

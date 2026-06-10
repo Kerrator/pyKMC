@@ -5,7 +5,7 @@ enumerating a fixed event list on a predefined lattice, it discovers transition
 events from the atomic configuration as the simulation runs, and reuses them
 wherever an equivalent local environment appears. This page describes the
 overall workflow; the configuration fields that control it are documented on the
-[KMC Parameters](parameters.md) page.
+[KMC Parameters](../parameters.md) page.
 
 ## Components
 
@@ -45,7 +45,7 @@ Each step repeats the following:
         of the initial configuration. pyKMC keeps only the operations that map
         the event's displacement to a distinct result, storing the unique
         symmetry and permutation matrices alongside the event. See
-        [Symmetries](symmetries.md).
+        [Symmetries](../user_guide/symmetries.md).
 
 3. **Build specific events and select.** Generic events that contribute
    significantly to the total rate are **refined** (and their symmetry-equivalent
@@ -56,7 +56,7 @@ Each step repeats the following:
 
 4. **Basin handling (optional).** If the selected event has both its forward and
    backward barriers below the basin threshold, the system has entered a
-   metastable basin. The [basin algorithm](basins.md) explores the connected
+   metastable basin. The [basin algorithm](../user_guide/basins.md) explores the connected
    transient states, solves for the mean exit time, selects an exit state, and
    replaces the single hop with a super-event that bridges the whole basin.
 
@@ -68,8 +68,8 @@ Each step repeats the following:
 
 ## Accelerations
 
-- **[Basins](basins.md)** bridge fast, low-barrier hops between metastable
+- **[Basins](../user_guide/basins.md)** bridge fast, low-barrier hops between metastable
   states with a single super-event, advancing simulated time by many orders of
   magnitude.
-- **[Active Volumes](active_volumes.md)** restrict searches and refinements to a
+- **[Active Volumes](../user_guide/active_volumes.md)** restrict searches and refinements to a
   region around a defect, making large systems tractable.

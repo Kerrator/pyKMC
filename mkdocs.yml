@@ -27,20 +27,26 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started:
-      - Installation: install/installation.md
-      - macOS Compile Instructions: install/pykmc_mac_Compile_Instructions.md
-      - Linux Compile Instructions: install/pykmc_linux_Compile_Instructions.md
-      - User Guide: user_guide.md
-  - Concepts:
-      - Algorithm Overview: general_algorithm.md
-      - Basins: basins.md
-      - Active Volumes: active_volumes.md
-      - Symmetries: symmetries.md
-  - KMC Parameters: parameters.md
+  - User Guide:
+      - Overview: user_guide/index.md
+      - Installation:
+          - Install pyKMC: user_guide/install/installation.md
+          - macOS Compile Instructions: user_guide/install/pykmc_mac_Compile_Instructions.md
+          - Linux Compile Instructions: user_guide/install/pykmc_linux_Compile_Instructions.md
+      - Parallelization: user_guide/parallelization.md
+      - Basins: user_guide/basins.md
+      - Active Volumes: user_guide/active_volumes.md
+      - Symmetries: user_guide/symmetries.md
+      - KMC Parameters: parameters.md
+  - Theory & Concepts:
+      - Algorithm Overview: theory/general_algorithm.md
+      - Transition State Theory: theory/tst.md
+      - Kinetic Monte Carlo: theory/kmc.md
   - Troubleshooting: troubleshooting.md
   - Developer Guide:
-      - Overview: developer_guide.md
+      - Overview: developer_guide/index.md
+      - Architecture: developer_guide/architecture.md
+      - MPI & Parallel Execution: developer_guide/mpi.md
       - Strategy pattern: dev_strategy_pattern.md
       - Engine: dev_engine.md
       - Code formatting: dev_code_formatting.md
