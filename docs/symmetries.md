@@ -1,5 +1,5 @@
 # Symmetries
-When a generic event is found, a Pandas Series is created containing, among other information, the initial and final positionsyof the event.
+When a generic event is found, a Pandas Series is created containing, among other information, the initial and final positions of the event.
 
 <p align="center">
   <img src="images/symmetries_initial_final_positions.png"  width="400"/>

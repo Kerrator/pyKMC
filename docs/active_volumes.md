@@ -31,7 +31,7 @@ that are included in the AV, and captures the state of the overall system. The m
 be moved during event searches and refinement. A frozen buffer region is made on the exterior of the AV in order to accurately model
 the forces between atoms near the boundary.
 
-FIGURE of AV
+<!-- TODO: add a figure illustrating the active and movable radii and the buffer region. -->
 
 ## Algorithm
 1. **Reset LAMMPS Instance**: LAMMPS is cleared to prevent carry over of previous AV conditions
