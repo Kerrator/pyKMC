@@ -73,9 +73,15 @@ class BasinsGenericEvents() :
         result = self.construct_connexion_table()
         if not result.is_ok() : 
             return result
-        #reorder states index 
+        #reorder states index
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
+        #Normalize the transient flag by index range. reorder_states_index() numbers the
+        #transient states first (0..n_transient-1) and absorbing states after, but the
+        #per-row 'transient' flag set during exploration can be stale after change_state_index()
+        #merges duplicates. Recompute it from the post-reorder index range.
+        n_transient, _ = self._connectivity_state_counts()
+        self.connectivity_table.df["transient"] = self.connectivity_table.df["state_connexion"].apply(lambda x: x < n_transient)
         #Refine absorbing states
         self.manager.use_local()
         result =self.refine_absorbing(system)
@@ -119,6 +125,7 @@ class BasinsGenericEvents() :
         self.selector = FPTASelector()
         new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
+        self._next_state_index = 1  #monotonic state-index counter (state 0 is the initial state)
 
 
     def construct_connexion_table(self) : 
@@ -195,12 +202,17 @@ class BasinsGenericEvents() :
             self.states_to_explore.remove(to_explore)
             self.explored_states.append(to_explore)
 
-            #Merge state connectivity table to basin connectivity table 
+            #Merge state connectivity table to basin connectivity table
             self.connectivity_table.merge(self.explorer.connectivity_table)
             #Clrean explorer connectivity table
             self.explorer.clear()
             self.update_to_explore()
-            #Clean heaby state object : 
+            #Advance the monotonic index counter past every index now in the table.
+            #It must never decrease: change_state_index() can remap a high index to a
+            #lower one, dropping the table max, and reading that max would reuse an index
+            #already in explored_states (silently truncating exploration).
+            self._advance_next_state_index()
+            #Clean heaby state object :
             self.states[to_explore].release_heavy_objects()
             
         return Ok(None)
@@ -217,12 +229,36 @@ class BasinsGenericEvents() :
         """
         pass
 
-    def get_last_state_index(self) : 
-        if self.current_state == 0 : #connextion table is empty
-            new_state_connexion = 1 
-        else : #last state connexion +1
-            new_state_connexion = int(self.connectivity_table.get_table()['state_connexion'].iloc[-1]+1)
-        return new_state_connexion
+    def get_last_state_index(self) :
+        """Return the next available state index (monotonically increasing).
+
+        A monotonic counter prevents index reuse: when change_state_index() remaps a
+        high-valued index to a lower one the table max drops, and the old
+        ``state_connexion.iloc[-1] + 1`` scheme would then hand back an index already
+        present in explored_states, so update_to_explore() would skip it.
+        """
+        return self._next_state_index
+
+    def _advance_next_state_index(self) -> None:
+        """Move the monotonic counter past the largest index in the table (never back)."""
+        table = self.connectivity_table.get_table()
+        if len(table) == 0:
+            return
+        current_max = int(max(table["state"].max(), table["state_connexion"].max()))
+        self._next_state_index = max(self._next_state_index, current_max + 1)
+
+    def _connectivity_state_counts(self) -> tuple[int, int]:
+        """Return (n_transient, n_absorbing) from the connectivity table.
+
+        Transient states are the explored sources (the ``state`` column); absorbing
+        states appear only as ``state_connexion`` targets.
+        """
+        table = self.connectivity_table.get_table()
+        if len(table) == 0:
+            return 0, 0
+        transient_states = set(table["state"])
+        all_states = transient_states | set(table["state_connexion"])
+        return len(transient_states), len(all_states) - len(transient_states)
     
     def update_to_explore(self) : 
         #Find all state index in the connexion table : 
