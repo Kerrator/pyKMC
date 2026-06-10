@@ -343,9 +343,11 @@ srun --ntasks=$SLURM_NTASKS --distribution=block:block \
      python -m pykmc -in input.in
 ```
 
-With `engine_use_rank_0 = False`, set `n_sessions = ntasks − 1` in the pyKMC input
-(e.g. `n_sessions = 191` for a full Trillium node; the smoke-test example with
-`n_sessions = 7` runs as `srun --ntasks=8`).
+Set `n_sessions` (the number of parallel LAMMPS instances, `[Control]` section) to at
+most `ntasks − 1`: rank 0 runs the main KMC loop and the remaining ranks are split
+among the instances. With `n_sessions = ntasks − 1` each instance gets a single rank
+(e.g. the example input with `n_sessions = 7` runs as `srun --ntasks=8`; a full
+Trillium node supports up to `n_sessions = 191`).
 
 **Narval / Beluga (per-core scheduling)** — the pattern used by existing production
 sbatch scripts (not re-exercised in the Trillium validation):
