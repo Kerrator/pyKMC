@@ -18,42 +18,50 @@ theme:
       toggle:
         icon: material/brightness-3
         name: Switch to light mode
-  
+
   features:
-  - content.code.copy  
-  - content.code.annotate  
-  - content.code.highlight  
+  - content.code.copy
+  - content.code.annotate
+  - content.code.highlight
 
 nav:
   - Home: index.md
   - Getting Started:
       - Installation: install/installation.md
+      - macOS Compile Instructions: install/pykmc_mac_Compile_Instructions.md
+      - Linux Compile Instructions: install/pykmc_linux_Compile_Instructions.md
       - User Guide: user_guide.md
-  - Troubleshooting: troubleshooting.md
+  - Concepts:
+      - Algorithm Overview: general_algorithm.md
+      - Basins: basins.md
+      - Active Volumes: active_volumes.md
+      - Symmetries: symmetries.md
   - KMC Parameters: parameters.md
+  - Troubleshooting: troubleshooting.md
   - Developer Guide: developer_guide.md
-  - API Reference: 
+  - API Reference:
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
       - AtomicEnvironment: api/atomic_environment.md
       - Config: api/config.md
       - Log: api/log.md
       - Algorithms: api/algorithms.md
-      - KMC: api/kmc.md 
+      - KMC: api/kmc.md
       - Environments: api/environments.md
-      - Engine: api/engine.md
-      - LammpsEngine: api/lammpsengine.md
-      - EventTable : api/event_table.md
-      - EventSearch : api/eventsearch.md
-      - Refinement : api/refinement.md
-      - PointSetRegistration : api/point_set_registration.md
-      - Symmetries : api/symmetries.md
-      - RateConstante : api/rate_constant.md
-      - Initialize : api/initializer.md
-      - Result : api/result.md
-      - Info: api/info_simulations.md
+      - EventTable: api/event_table.md
+      - EventSearch: api/eventsearch.md
+      - Bias: api/bias.md
+      - Refinement: api/refinement.md
+      - PointSetRegistration: api/point_set_registration.md
+      - Symmetries: api/symmetries.md
+      - RateConstant: api/rate_constant.md
+      - Basins: api/basins.md
+      - ActiveVolume: api/active_volume.md
+      - Initialize: api/initialized.md
+      - Result: api/result.md
+      - Info: api/info_simulation.md
       - Utils: api/utils.md
-      - run : api/run.md
+      - Run: api/run.md
 
 markdown_extensions:
   - pymdownx.arithmatex:

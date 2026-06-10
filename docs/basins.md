@@ -27,12 +27,12 @@ During a KMC step, if the selected event has both forward and backward barriers 
 It explores the basin, computes the exit time, and determines the exit state.
 Once finished, the selected event in the KMC loop is replaced with the basin event.
 
-FIGURE
+<!-- TODO: add a figure illustrating basin entry and the super-event replacement. -->
 
 While exploring, the main objective is to build a connectivity table containing all information required to apply the exit algorithm.
 This table is stored as a `pandas.DataFrame`, managed by a `Connectivity` object (merge, remove, search for connections, ...).
 
-FIGURE
+<!-- TODO: add a figure of the connectivity table / state-transition graph. -->
 
 Column meaning:
 
