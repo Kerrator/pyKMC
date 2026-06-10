@@ -1,19 +1,20 @@
-from .detection import Detector
-from .exploration import Explorer, BasinGenericEventExplorer
+import logging
+import time
+
+from .exploration import BasinGenericEventExplorer
 from .connectivity import BasinStatesConnectivity
 from .selection import FPTASelector
 from . import fingerprinting
-from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
-from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match, Reconstruction
+from dataclasses import dataclass
+from pykmc import System, Config, NeighborsList, AtomicEnvironment, PointSetRegistration, check_match, Reconstruction
 from typing import Optional
 from ..utils import geometry
 from ..rate_constant import compute_rate_Eyring
-import pandas as pd
-import copy
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok, BasinOutput
+from pykmc.result import Result, Ok, Err, ErrorInfo, ErrorType, BasinOutput
+
+logger = logging.getLogger("log")
 
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
@@ -39,7 +40,7 @@ class StateData:
         if self.system is not None : 
             if self.neighbors_list is None : 
                 self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)  
-            if self.environment is None : 
+            if self.environment is None :
                 self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add)
 
 
@@ -66,13 +67,18 @@ class BasinsGenericEvents() :
     
     def execute(self, system) : 
         """ 
-        run the basin exploration and select an event from a system, corresponding to the first state in the basin, it is assumed that this state is transient.
+        Run the basin exploration and select an event from a system, corresponding to the first state in the basin, it is assumed that this state is transient.
         """
         #initialize the basin
         self._initialize(system)
-        #explore the basin
-        result = self.construct_connexion_table()
-        if not result.is_ok() : 
+        #explore the basin (strategy from [BASIN]: serial one-state-at-a-time BFS, or
+        #wavefront per-level batching across the MPI session pool)
+        strategy = self.config.basin.strategy if self.config.basin is not None else "serial"
+        if strategy == "wavefront" :
+            result = self.construct_connexion_table_parallel()
+        else :
+            result = self.construct_connexion_table()
+        if not result.is_ok() :
             return result
         #reorder states index
         mapping = self.connectivity_table.reorder_states_index()
@@ -126,13 +132,14 @@ class BasinsGenericEvents() :
         self.selector = FPTASelector(solver=self.config.basin.solver if self.config.basin is not None else "auto")
         new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
         self._state_fingerprints = {}  #state_index -> fingerprint vector (dedup pre-filter cache)
+        self._was_capped = False  #set when max_states converts the remaining frontier to absorbing
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
         self._next_state_index = 1  #monotonic state-index counter (state 0 is the initial state)
 
 
     def construct_connexion_table(self) : 
         """ 
-        explore the basin and construct the connextion table
+        Explore the basin and construct the connextion table
         """
         #Loop over state to explore 
         while len(self.states_to_explore) != 0 :
@@ -221,13 +228,13 @@ class BasinsGenericEvents() :
 
     def select_event(self) : 
         """ 
-        select an event base on the selector algorithm
+        Select an event base on the selector algorithm
         """
         pass
 
     def get_seletec_event(self) : 
         """ 
-        convinient method
+        Convinient method
         """
         pass
 
@@ -264,14 +271,13 @@ class BasinsGenericEvents() :
     
     def update_to_explore(self) : 
         #Find all state index in the connexion table : 
-        unique_states = set(self.connectivity_table.get_table()['state']).union(set(self.connectivity_table.get_table()['state_connexion']))
+        unique_states = set(self.connectivity_table.get_table()["state"]).union(set(self.connectivity_table.get_table()["state_connexion"]))
         self.states_to_explore =  list(unique_states.difference(set(self.explored_states)))
 
 
     def system_from_state(self, from_state, event_idx, central_atom, sym_idx) : 
-        """ Reconstruct the generic event to generate new state from state
+        """Reconstruct the generic event to generate new state from state
         """
-
         ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx] #event where event_idx == idx_ref
         if ref_event.empty:
             raise ValueError(f"idx_ref={event_idx} not found in reference table")
@@ -284,7 +290,7 @@ class BasinsGenericEvents() :
 
         supposed_initial_positions = np.array(ref_event["initial_positions"], copy=True)
         supposed_final_positions = np.array(ref_event["final_positions"], copy=True)
-        saddle_positions = np.array(ref_event['saddle_positions'], copy=True)
+        saddle_positions = np.array(ref_event["saddle_positions"], copy=True)
 
         #Apply the generic event to the current state 
 
@@ -310,7 +316,7 @@ class BasinsGenericEvents() :
             
         # Apply symmetry matrix if sym != 0
         if sym_idx != 0 :
-            sym_matrices = ref_event['sym_matrix']
+            sym_matrices = ref_event["sym_matrix"]
             sym_matrix = sym_matrices[sym_idx]
             supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
             saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
@@ -350,7 +356,7 @@ class BasinsGenericEvents() :
         #for all row in connectivity table where we need to refine
         futures_context = {} #idx → { "min": f_min, "saddle": f_sad }
         for idx, row in self.connectivity_table.df.iterrows() : 
-            if row['transient']  == False : #need to refine
+            if row["transient"]  == False : #need to refine
                 #tmp_system = copy.deepcopy(self.states[row["state"]].system)
                 tmp_system = System(positions=self.states[row["state"]].system.positions.copy(), types=self.states[row["state"]].system.types, cell=self.states[row["state"]].system.cell, pbc=True, index=np.arange(len(self.states[row["state"]].system.types)))
                 #get tmp_system energy 
@@ -361,7 +367,7 @@ class BasinsGenericEvents() :
                     raise ValueError(f"idx_ref={row['event_connexion']} not found in reference table")
                 ref_event = ref_event.iloc[0].copy()
                 #ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
-                saddle_positions = ref_event['saddle_positions'].copy()
+                saddle_positions = ref_event["saddle_positions"].copy()
                 #Apply PSR between event initial position and environment positions of the central_atoms
 
 
@@ -380,11 +386,11 @@ class BasinsGenericEvents() :
 
                 # Apply symmetry matrix if sym != 0
                 if row["sym"] != 0 :
-                    sym_matrices = ref_event['sym_matrix']
+                    sym_matrices = ref_event["sym_matrix"]
                     sym_matrix = sym_matrices[row["sym"]]
                     saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][row["sym"]])
                 saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
-                neighbors = self.states[row["state"]].neighbors_list.get_neighbors('rcut', row["central_atom"])
+                neighbors = self.states[row["state"]].neighbors_list.get_neighbors("rcut", row["central_atom"])
 
                 if self.config.control.active_volume==True:
                     # add a job to manager queue
@@ -423,8 +429,8 @@ class BasinsGenericEvents() :
             k = compute_rate_Eyring(dE, self.config)
 
             #also save saddle positions refined 
-            idx_state = self.connectivity_table.df.loc[idx].at['state_connexion']
-            central_atom = self.connectivity_table.df.loc[idx].at['central_atom']
+            idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
+            central_atom = self.connectivity_table.df.loc[idx].at["central_atom"]
             #self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
             self.absorbing_saddle_positions[idx_state] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
@@ -513,3 +519,547 @@ class BasinsGenericEvents() :
             self._state_fingerprints[state_index] = fingerprinting.compute_fingerprint(
                 self.config, system.positions, system.cell, system.pbc
             )
+
+    # ──────────────────────────────────────────────────────────────────
+    # Wavefront-parallel basin exploration (strategy = 'wavefront')
+    # ──────────────────────────────────────────────────────────────────
+
+    def _transport_error(self, operation: str, exc: Exception) :
+        """Wrap a session/engine transport failure as Err(MPI_REMOTE_ERROR)."""
+        return Err(
+            ErrorInfo(
+                type=ErrorType.MPI_REMOTE_ERROR,
+                message=f"{operation} failed: {exc}",
+            )
+        )
+
+    def _prepare_reconstruct_kwargs(self, from_state: int, event_idx: int, central_atom: int, sym_idx: int) -> dict :
+        """Prepare keyword arguments for manager.basin_reconstruct().
+
+        Gathers all data needed by the engine to perform PSR + minimize.
+        """
+        ref_event = self.reference_table.table[self.reference_table.table["idx_ref"] == event_idx]
+        if ref_event.empty:
+            raise ValueError(f"idx_ref={event_idx} not found in reference table")
+        ref_event = ref_event.iloc[0].copy()
+
+        self.states[from_state].ensure_full_state(self.config)
+        neighbor_indices = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
+
+        return {
+            "config": self.config,
+            "from_positions": self.states[from_state].system.positions.copy(),
+            "from_types": list(self.states[from_state].system.types),
+            "cell": self.states[from_state].system.cell.copy(),
+            "pbc": self.states[from_state].system.pbc,
+            "ref_initial_positions": np.array(ref_event["initial_positions"], copy=True),
+            "ref_saddle_positions": np.array(ref_event["saddle_positions"], copy=True),
+            "ref_final_positions": np.array(ref_event["final_positions"], copy=True),
+            "ref_initial_types": ref_event.get("initial_types"),
+            "sym_matrices": ref_event["sym_matrix"],
+            "sym_perms": ref_event["sym_perm"],
+            "central_atom": central_atom,
+            "sym_idx": sym_idx,
+            "neighbor_indices": neighbor_indices,
+            "matching_score_thr": self.config.psr.matching_score_thr,
+            "kmax_factor": self.config.ira.kmax_factor,
+            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+        }
+
+    def _result_from_mpi(self, mpi_result: "dict | None", from_state: int) -> "Result[System, ErrorInfo]" :
+        """Convert an engine basin_reconstruct payload to Ok(System) or Err(ErrorInfo)."""
+        if mpi_result is None or not mpi_result.get("ok"):
+            error_type_str = mpi_result.get("error_type", "UNKNOWN") if mpi_result else "UNKNOWN"
+            message = mpi_result.get("message", "Unknown error") if mpi_result else "No result from engine"
+            error_type = getattr(ErrorType, error_type_str, ErrorType.MPI_REMOTE_ERROR)
+            return Err(ErrorInfo(type=error_type, message=message))
+
+        import ase.geometry
+        cell = self.states[from_state].system.cell
+        pbc = self.states[from_state].system.pbc
+        positions = ase.geometry.wrap_positions(
+            positions=mpi_result["min2_positions"], cell=cell, pbc=pbc)
+        new_system = System(
+            positions=positions,
+            types=self.states[from_state].system.types,
+            cell=cell,
+            pbc=pbc,
+            index=np.arange(len(self.states[from_state].system.types)))
+        return Ok(new_system)
+
+    def _reconstruct_state_mpi(self, from_state: int, event_idx: int, central_atom: int, sym_idx: int) -> "Result[System, ErrorInfo]" :
+        """Reconstruct a state via a session-pool engine (PSR + minimize); blocks on the future.
+
+        The MPI counterpart of system_from_state() for use while the manager is in
+        local (session-pool) mode.
+        """
+        kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
+        future = self.manager.basin_reconstruct(**kwargs)
+        try:
+            mpi_result = future.result()
+        except Exception as exc:
+            return self._transport_error("basin_reconstruct", exc)
+        return self._result_from_mpi(mpi_result, from_state)
+
+    def _materialize_frontier_state(self, state_idx: int) -> "Result[int, ErrorInfo]" :
+        """Reconstruct a frontier state so it can be treated as an absorbing exit."""
+        if state_idx in self.states:
+            return Ok(state_idx)
+
+        from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=state_idx)
+        result = self._reconstruct_state_mpi(from_state, event_idx, central_atom, sym_idx)
+        if not result.is_ok():
+            return result
+
+        new_system = result.ok_value()
+        existing_state = self.is_new_state(new_system)
+        if existing_state != -1:
+            self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing_state)
+            return Ok(existing_state)
+
+        self._add_state(state_index=state_idx, system=new_system, transient=is_transient)
+        self.states[from_state].release_heavy_objects()
+        return Ok(state_idx)
+
+    def _cap_remaining_as_absorbing(self) -> "Result[None, ErrorInfo]" :
+        """Convert all remaining frontier states to absorbing and clear the queue."""
+        self._was_capped = True
+        capped = list(self.states_to_explore)
+        for state_idx in capped:
+            result = self._materialize_frontier_state(state_idx)
+            if not result.is_ok():
+                return result
+
+            materialized_idx = result.ok_value()
+            if materialized_idx != state_idx:
+                if state_idx not in self.explored_states:
+                    self.explored_states.append(state_idx)
+                continue
+
+            self.connectivity_table.change_state_to_absorbing(state_idx)
+            if state_idx in self.states:
+                self.states[state_idx].transient = False
+                self.states[state_idx].release_heavy_objects()
+            if state_idx not in self.explored_states:
+                self.explored_states.append(state_idx)
+        self.states_to_explore.clear()
+        logger.warning(
+            "[Basin] Capped %d remaining frontier states as absorbing (max_states reached).",
+            len(capped),
+        )
+        return Ok(None)
+
+    def _prepare_explore_kwargs(self, state_idx: int, start_index: int) -> dict :
+        """Prepare keyword arguments for manager.basin_explore()."""
+        import pickle
+
+        self.states[state_idx].ensure_full_state(self.config)
+        state = self.states[state_idx]
+
+        config_dict = {
+            "rnei": self.config.atomicenvironment.rnei,
+            "rcut": self.config.atomicenvironment.rcut,
+            "neighbors_add": self.config.atomicenvironment.neighbors_add,
+            "ae_style": self.config.atomicenvironment.style,
+            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+            "coordination_threshold": self.config.atomicenvironment.coordination_threshold,
+            "energy_thr": self.config.basin.energy_thr,
+        }
+
+        return {
+            "config_dict": config_dict,
+            "reference_table_data": pickle.dumps(self.reference_table.table),
+            "state_positions": state.system.positions.copy(),
+            "state_types": list(state.system.types),
+            "state_cell": state.system.cell.copy(),
+            "state_pbc": state.system.pbc,
+            "state_index": state_idx,
+            "start_index": start_index,
+        }
+
+    def _explore_states_parallel(self, states_batch: list[int], n_workers: int = 4) -> "Result[None, ErrorInfo]" :
+        """Explore multiple transient states in parallel via the MPI session pool.
+
+        Each engine explores with local indices starting from 0. After collection,
+        rows are remapped to contiguous global indices by adding an offset equal to
+        ``_next_state_index`` at merge time (no index gaps, no index reuse).
+        """
+        if not states_batch:
+            return Ok(None)
+
+        # Submit all exploration tasks with local (zero-based) indices
+        futures = {}
+        for state_idx in states_batch:
+            kwargs = self._prepare_explore_kwargs(state_idx, start_index=0)
+            futures[state_idx] = self.manager.basin_explore(**kwargs)
+
+        # Collect results sequentially; remap local -> global indices
+        for _state_idx, future in futures.items():
+            try:
+                rows = future.result()
+            except Exception as exc:
+                return self._transport_error("basin_explore", exc)
+            if isinstance(rows, dict) and not rows.get("ok", True):
+                return Err(ErrorInfo(
+                    type=ErrorType.MPI_REMOTE_ERROR,
+                    message=f"basin_explore failed on engine: {rows.get('message', 'unknown')}"))
+            if rows:
+                offset = self._next_state_index
+                for row in rows:
+                    row["state_connexion"] += offset
+                local_max = max(r["state_connexion"] for r in rows)
+                self._next_state_index = local_max + 1
+                self.connectivity_table.add_connectivity_batch(rows)
+
+        return Ok(None)
+
+    def is_new_state_batch(self, new_systems: "dict[int, System]") -> dict[int, int] :
+        """Check multiple reconstructed systems for duplicates at once.
+
+        Unlike serial is_new_state(), this also cross-checks the new states against
+        each other: two states reconstructed in the same wavefront can be duplicates
+        of each other, and missing that leads to exponential blowup of the basin.
+
+        Parameters
+        ----------
+        new_systems : dict[int, System]
+            Mapping state_idx -> System for newly reconstructed states.
+
+        Returns
+        -------
+        dict[int, int]
+            Mapping state_idx -> existing_state_idx for duplicates,
+            state_idx -> -1 for genuinely new states.
+
+        """
+        results = {}
+
+        # Pre-compute fingerprints for the new systems
+        new_fingerprints = {}
+        for idx, system in new_systems.items():
+            new_fingerprints[idx] = fingerprinting.compute_fingerprint(
+                self.config, system.positions, system.cell, system.pbc)
+
+        # Build kd-trees for existing states (None marks mixed-PBC fallback)
+        existing_trees = {}
+        for idx, state_data in self.states.items():
+            if state_data.system is not None:
+                if state_data.system.pbc is None or np.all(state_data.system.pbc):
+                    box = np.diag(state_data.system.cell).tolist()
+                    wrapped = self._wrap_positions(state_data.system.positions, state_data.system.cell)
+                    existing_trees[idx] = cKDTree(wrapped, boxsize=box)
+                else:
+                    existing_trees[idx] = None  # fallback to manual comparison
+
+        existing_fp_items = list(self._state_fingerprints.items())
+        fp_tol = fingerprinting.fingerprint_tolerance(self.config)
+
+        for new_idx, system in new_systems.items():
+            match = -1
+            fp_new = new_fingerprints[new_idx]
+
+            # Fingerprint pre-filter against existing states
+            if existing_fp_items:
+                candidate_indices = []
+                for si, fp in existing_fp_items:
+                    if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= fp_tol:
+                        candidate_indices.append(si)
+            else:
+                candidate_indices = list(existing_trees.keys())
+
+            for existing_idx in candidate_indices:
+                if existing_idx not in existing_trees:
+                    continue
+                tree = existing_trees[existing_idx]
+                if tree is not None:
+                    wrapped_query = self._wrap_positions(system.positions, system.cell)
+                    distances, _ = tree.query(wrapped_query, k=1)
+                    if np.max(distances) < 0.3:
+                        match = existing_idx
+                        break
+                else:
+                    state_data = self.states[existing_idx]
+                    if self.are_structures_equivalent(system.positions, state_data.system.positions,
+                                                      cell=system.cell, pbc=system.pbc):
+                        match = existing_idx
+                        break
+
+            # Cross-check within this batch (two new states may be duplicates of each other)
+            if match == -1:
+                for other_idx in list(results.keys()):
+                    if results[other_idx] != -1:
+                        continue  # this one is already a duplicate itself
+                    if other_idx in new_systems:
+                        fp_other = new_fingerprints[other_idx]
+                        # Fingerprint pre-filter within the batch
+                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > fp_tol:
+                            continue
+                        if self.are_structures_equivalent(system.positions,
+                                                          new_systems[other_idx].positions,
+                                                          cell=system.cell, pbc=system.pbc):
+                            match = other_idx
+                            break
+
+            results[new_idx] = match
+        return results
+
+    def _reconstruct_wavefront_batch(self, to_reconstruct: list[int]) -> "Result[tuple, ErrorInfo]" :
+        """Phase A: reconstruct one wavefront's worth of states via the session pool."""
+        reconstructed = {}
+        transition_info = {}
+        if not to_reconstruct:
+            return Ok((reconstructed, transition_info, 0))
+
+        for state_idx in to_reconstruct:
+            transition_info[state_idx] = self.connectivity_table.get_transition_to_state(target_state=state_idx)
+
+        futures = {}
+        for state_idx in to_reconstruct:
+            from_state, event_idx, central_atom, sym_idx, is_transient = transition_info[state_idx]
+            kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
+            futures[state_idx] = (from_state, self.manager.basin_reconstruct(**kwargs))
+
+        reconstruction_error = None
+        for state_idx, (from_state, future) in futures.items():
+            try:
+                mpi_result = future.result()
+            except Exception as exc:
+                result = self._transport_error("basin_reconstruct", exc)
+                logger.warning("[Basin] Reconstruction transport failed for state %d: %s", state_idx, result.err_value())
+                if reconstruction_error is None:
+                    reconstruction_error = result
+                continue
+            result = self._result_from_mpi(mpi_result, from_state)
+            if result.is_ok():
+                reconstructed[state_idx] = result.ok_value()
+                continue
+
+            logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
+            if reconstruction_error is None:
+                reconstruction_error = result
+
+        if reconstruction_error is not None:
+            return reconstruction_error
+        return Ok((reconstructed, transition_info, len(to_reconstruct)))
+
+    def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict) -> "tuple[list[int], int, int]" :
+        """Phase B: dedup the reconstructed batch and register the genuinely new states."""
+        if len(reconstructed) > 1:
+            dedup_results = self.is_new_state_batch(reconstructed)
+        elif len(reconstructed) == 1:
+            dedup_results = {}
+            for state_idx, system in reconstructed.items():
+                dedup_results[state_idx] = self.is_new_state(system)
+        else:
+            dedup_results = {}
+
+        new_transient = []
+        n_duplicates = 0
+        n_absorbing = 0
+        for state_idx in to_reconstruct:
+            existing = dedup_results.get(state_idx, -1)
+            if existing != -1:
+                self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing)
+                self.explored_states.append(state_idx)
+                self.states_to_explore.remove(state_idx)
+                n_duplicates += 1
+                continue
+
+            is_transient = transition_info[state_idx][4]
+            self._add_state(state_index=state_idx, system=reconstructed[state_idx], transient=is_transient)
+
+            t0 = time.perf_counter()
+            self.states[state_idx].ensure_full_state(self.config)
+            prof["ensure_state"] += time.perf_counter() - t0
+
+            if self.is_states_has_unknown_environments(self.states[state_idx]):
+                self.connectivity_table.change_state_to_absorbing(state_idx)
+                self.states[state_idx].transient = False
+                is_transient = False
+
+            if not is_transient:
+                self.states_to_explore.remove(state_idx)
+                self.explored_states.append(state_idx)
+                self.states[state_idx].release_heavy_objects()
+                n_absorbing += 1
+            else:
+                new_transient.append(state_idx)
+
+        return new_transient, n_duplicates, n_absorbing
+
+    def _write_timing_checkpoint(self, prof: dict, elapsed: float, n_transient: int, n_absorbing: int, n_duplicates: int, n_processed: int) -> None :
+        """Write timing summary files readable by toolkit/basin_testing/compare_scaling.py."""
+        strategy = self.config.basin.strategy if self.config.basin is not None else "serial"
+        n_workers = self.config.basin.n_workers if self.config.basin is not None else 1
+        n_conn = len(self.connectivity_table.df) if not self.connectivity_table.df.empty else 0
+
+        ckpt_path = f"basin_timing_{strategy}.txt"
+        with open(ckpt_path, "w") as f:
+            f.write("# Basin timing checkpoint\n")
+            f.write(f"strategy = {strategy}\n")
+            f.write(f"n_workers = {n_workers}\n")
+            f.write(f"wall_time_s = {elapsed:.3f}\n")
+            f.write(f"states_transient = {n_transient}\n")
+            f.write(f"states_absorbing = {n_absorbing}\n")
+            f.write(f"states_total = {n_transient + n_absorbing}\n")
+            f.write(f"connectivity_rows = {n_conn}\n")
+            f.write(f"n_duplicates = {n_duplicates}\n")
+            f.write(f"n_processed = {n_processed}\n")
+            for phase, t in sorted(prof.items(), key=lambda x: -x[1]):
+                pct = 100.0 * t / elapsed if elapsed > 0 else 0
+                f.write(f"prof_{phase} = {t:.3f}\n")
+                f.write(f"pct_{phase} = {pct:.1f}\n")
+        logger.info("[Basin] Timing checkpoint written to %s", ckpt_path)
+
+        # Also write the level_complete format for compare_scaling.py compatibility
+        level_path = "basin_connectivity_0_L0_level_complete.txt"
+        with open(level_path, "w") as f:
+            f.write("# Basin level complete checkpoint\n")
+            f.write("level = 0\n")
+            f.write(f"wall_time_s = {elapsed:.3f}\n")
+            f.write(f"level_wall_time_s = {elapsed:.3f}\n")
+            f.write(f"states_total = {n_transient + n_absorbing}\n")
+            f.write(f"connectivity_rows = {n_conn}\n")
+
+    def _finalize_exploration_run(self, t_start: float, prof: dict, n_processed: int, n_duplicates: int, strategy_label: "str | None" = None) -> "Result[None, ErrorInfo]" :
+        """Log the run summary + profiling breakdown and write timing checkpoints."""
+        elapsed = time.perf_counter() - t_start
+        n_transient, n_absorbing_final = self._connectivity_state_counts()
+        label = f" ({strategy_label})" if strategy_label else ""
+        logger.info(
+            "[Basin] COMPLETE%s: %d transient + %d absorbing states | %d connectivity rows | processed=%d | duplicates=%d | %.1fs",
+            label,
+            n_transient,
+            n_absorbing_final,
+            len(self.connectivity_table.df),
+            n_processed,
+            n_duplicates,
+            elapsed,
+        )
+
+        top_level = {k: v for k, v in prof.items() if k not in ("other", "psr", "minimize")}
+        prof["other"] = elapsed - sum(top_level.values())
+        for phase, t in sorted(top_level.items(), key=lambda x: -x[1]):
+            pct = 100.0 * t / elapsed if elapsed > 0 else 0
+            logger.info("[Basin] PROFILING:   %-15s %8.2fs  %5.1f%%", phase, t, pct)
+
+        self._write_timing_checkpoint(prof, elapsed, n_transient, n_absorbing_final, n_duplicates, n_processed)
+        return Ok(None)
+
+    def construct_connexion_table_parallel(self) -> "Result[None, ErrorInfo]" :
+        """Wavefront-parallel BFS: process whole frontiers instead of one state at a time.
+
+        Phases per wavefront:
+            A. Batch reconstruction (PSR + minimize) across the MPI session pool
+            B. Batch deduplication (incl. intra-batch cross-check)
+            C. Parallel exploration of the new transient states
+            D. Merge and update the frontier queue
+        """
+        n_workers = self.config.basin.n_workers if self.config.basin is not None else 1
+        max_states = self.config.basin.max_states if self.config.basin is not None else None
+
+        t_start = time.perf_counter()
+        n_explored = 0
+        n_duplicates = 0
+        n_absorbing = 0
+        n_processed = 0
+        prof = {"reconstruct": 0.0, "psr": 0.0, "minimize": 0.0,
+                "dedup": 0.0, "ensure_state": 0.0, "explore": 0.0,
+                "merge": 0.0, "other": 0.0}
+
+        # Switch to the session pool for basin reconstruction (parallel minimization)
+        self.manager.use_local()
+
+        t_last_log = t_start
+
+        try:
+            while len(self.states_to_explore) != 0:
+                # Check the max_states cap
+                if max_states is not None and n_explored >= max_states:
+                    logger.warning("[Basin] max_states=%d reached. Capping.", max_states)
+                    result = self._cap_remaining_as_absorbing()
+                    if not result.is_ok():
+                        return result
+                    break
+
+                batch = list(self.states_to_explore)
+
+                # Separate: states that need reconstruction vs state 0 (already exists)
+                to_reconstruct = [s for s in batch if s not in self.states]
+                already_exist = [s for s in batch if s in self.states]
+
+                # ── Phase A: Batch reconstruction ──
+                reconstructed = {}
+                transition_info = {}
+                if to_reconstruct:
+                    t0 = time.perf_counter()
+                    result = self._reconstruct_wavefront_batch(to_reconstruct)
+                    prof["reconstruct"] += time.perf_counter() - t0
+                    if not result.is_ok():
+                        return result
+                    reconstructed, transition_info, processed_count = result.ok_value()
+                    n_processed += processed_count
+
+                # ── Phase B: Batch deduplication ──
+                # Always batch dedup in the wavefront loop: serial is_new_state() only
+                # checks against self.states (not the other batch members), so duplicates
+                # within the same wavefront would go undetected.
+                t0 = time.perf_counter()
+                new_transient, duplicates_delta, absorbing_delta = self._register_wavefront_states(
+                    to_reconstruct,
+                    reconstructed,
+                    transition_info,
+                    prof,
+                )
+                prof["dedup"] += time.perf_counter() - t0
+                n_duplicates += duplicates_delta
+                n_absorbing += absorbing_delta
+
+                # Also include pre-existing states that still need exploration (e.g. state 0)
+                for state_idx in already_exist:
+                    if state_idx in self.states_to_explore:
+                        new_transient.append(state_idx)
+
+                # ── Phase C: Exploration via MPI engines ──
+                if new_transient:
+                    t0 = time.perf_counter()
+                    result = self._explore_states_parallel(new_transient, n_workers=n_workers)
+                    prof["explore"] += time.perf_counter() - t0
+                    if not result.is_ok():
+                        return result
+
+                    # Mark explored
+                    for state_idx in new_transient:
+                        if state_idx in self.states_to_explore:
+                            self.states_to_explore.remove(state_idx)
+                        if state_idx not in self.explored_states:
+                            self.explored_states.append(state_idx)
+                        self.states[state_idx].release_heavy_objects()
+                        n_explored += 1
+
+                # ── Phase D: Update the frontier queue ──
+                t0 = time.perf_counter()
+                self.update_to_explore()
+                prof["merge"] += time.perf_counter() - t0
+
+                elapsed = time.perf_counter() - t_start
+                logger.debug("[Basin] wavefront done | explored=%d | to_explore=%d | states=%d | dup=%d | abs=%d | %.1fs",
+                             n_explored, len(self.states_to_explore), len(self.states), n_duplicates, n_absorbing, elapsed)
+
+                # Periodic progress log (every 30s)
+                now = time.perf_counter()
+                if now - t_last_log >= 30.0:
+                    logger.info(
+                        "[Basin] PROGRESS (wavefront): explored=%d | to_explore=%d | states=%d | duplicates=%d | absorbing=%d | %.0fs elapsed",
+                        n_explored, len(self.states_to_explore), len(self.states), n_duplicates, n_absorbing, now - t_start,
+                    )
+                    t_last_log = now
+        finally:
+            self.manager.use_global()
+        return self._finalize_exploration_run(
+            t_start,
+            prof,
+            n_processed,
+            n_duplicates,
+            strategy_label="wavefront",
+        )
