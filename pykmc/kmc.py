@@ -210,6 +210,10 @@ class KMC:
             active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
             self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
 
+            # == Site-specific prefactors for refined events (htst/rpa) ==
+            # After dedup so duplicates never cost a Hessian; before use_global so
+            # the batch fans out over the local session pool.
+            active_table.backfill_refined_prefactors(self.system, self.neighbors_list)
 
             # == Update System ==
             self.manager.use_global()
@@ -526,7 +530,7 @@ class KMC:
             The active event table object.
 
         """
-        active_table = ActiveEventTable(self.config)
+        active_table = ActiveEventTable(self.config, manager=self.manager)
         active_table.add_events(events)
         return active_table
 

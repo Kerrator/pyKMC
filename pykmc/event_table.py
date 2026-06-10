@@ -656,9 +656,21 @@ class ActiveEventTable:
 
     """
 
-    def __init__(self, config: Config, event_dataframe: pd.DataFrame = None):
+    def __init__(
+        self,
+        config: Config,
+        event_dataframe: pd.DataFrame = None,
+        manager: object = None,
+    ):
         self.config = config
+        self.manager = manager
         self._htst_active = config.rateconstant.style in ("htst", "rpa")
+        self.rate_constant = create_rate_constant(
+            T=config.rateconstant.T,
+            prefactor_backend_name=config.rateconstant.style,
+            config=config.rateconstant,
+            manager=manager,
+        )
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -762,7 +774,71 @@ class ActiveEventTable:
         if self._htst_active:
             dfactive["nu0"] = event_refinement_output.nu0
         return dfactive
-    
+
+    def backfill_refined_prefactors(self, system: System, neighbors_list: object) -> None:
+        """Recompute nu0 at the per-site refined saddle for refined rows.
+
+        Called AFTER ``remove_duplicates`` (duplicates never cost a Hessian)
+        and inside the KMC loop's local-mode window. Only rows with
+        ``refined == "T"`` participate -- refinement's ``e_thr`` already gates
+        these to the probable events; ``"F"``/``"B"`` rows keep the values
+        inherited from the reference table. Full event geometry is rebuilt from
+        the current system minimum plus the row's neighbor-cropped arrays (the
+        same ``get_neighbors("rcut", atom)`` crop refinement applied), one
+        batch is fanned out through the backend, and each row's ``nu0``/``k``
+        are patched in place; a None nu0 keeps the inherited values (logged).
+
+        Parameters
+        ----------
+        system : System
+            The current system (its positions are the min1 of every active event).
+        neighbors_list : NeighborsList
+            The step's neighbor list (the one refinement cropped with).
+
+        """
+        if not self._htst_active:
+            return
+        refined_rows = self.table[self.table["refined"] == "T"]
+        if refined_rows.empty:
+            return
+        backfill: "list[tuple[int, dict[str, object]]]" = []
+        for idx, row in refined_rows.iterrows():
+            neighbors = np.asarray(
+                neighbors_list.get_neighbors("rcut", int(row["atom_index"])), dtype=int
+            )
+            full_saddle = system.positions.copy()
+            full_saddle[neighbors] = row["saddle_positions"]
+            full_min2 = system.positions.copy()
+            full_min2[neighbors] = row["final_positions"]
+            backfill.append(
+                (
+                    idx,
+                    {
+                        "central_atom_idx": int(row["atom_index"]),
+                        "min1_positions": system.positions.copy(),
+                        "saddle_positions": full_saddle,
+                        "min2_positions": full_min2,
+                        "types": list(system.types),
+                        "cell": system.cell,
+                    },
+                )
+            )
+        futures = self.rate_constant.compute_prefactors_batch(
+            [item[1] for item in backfill], self.config
+        )
+        for (idx, _payload), fut in zip(backfill, futures, strict=True):
+            pre = fut.result()
+            if pre.nu0_forward is None:
+                logger.info(
+                    "[htst] refined nu0 fallback, keeping inherited values "
+                    "(active row %s): %s", idx, pre.reason
+                )
+                continue
+            dE = float(self.table.loc[idx, "energy_barrier"])
+            rc = self.rate_constant.compute_rate(dE, nu0=pre.nu0_forward)
+            self.table.loc[idx, "k"] = rc.rate
+            self.table.loc[idx, "nu0"] = pre.nu0_forward
+
     def remove(self, ind: int|list[int]) -> None :
         """Remove event at row = ind
 
