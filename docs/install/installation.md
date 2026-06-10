@@ -1,8 +1,28 @@
 # Installation 
 
+## Automated install (Linux / macOS)
+
+One-shot installer scripts build a complete working stack (pyKMC + LAMMPS +
+pARTn + IRA) into a `pykmc/` folder under your current directory:
+
+- **Linux** (Ubuntu/Debian, RHEL-based) and **DRAC/Alliance HPC clusters**:
+  [`install_pykmc_linux.sh`](install_pykmc_linux.sh) — full walkthrough in the
+  [Linux instructions](pykmc_linux_Compile_Instructions.md)
+- **macOS** (Apple Silicon): [`install_pykmc_mac.sh`](install_pykmc_mac.sh) —
+  full walkthrough in the [macOS instructions](pykmc_mac_Compile_Instructions.md)
+
+On DRAC/Alliance clusters the script auto-detects the cluster and skips the
+`sudo` package stage: load the toolchain modules first, run it on a **login
+node**, from a directory under `$SCRATCH`. See the
+[cluster notes](pykmc_linux_Compile_Instructions.md#drac-alliance-hpc-clusters)
+for module loads, filesystem rules, and sbatch templates. Both the script and
+the manual steps were validated end-to-end on Trillium (2026-06).
+
+The sections below describe the manual installation of each component.
+
 ## Python Environment 
 
-It is recommended to use a dedicated Python environment for pyKMC to prevent package conflicts. Ensure you have Python >= 3.9 installed.
+It is recommended to use a dedicated Python environment for pyKMC to prevent package conflicts. Ensure you have Python >= 3.10 installed.
 
 To create a new virtual environment using venv:
 ```bash
