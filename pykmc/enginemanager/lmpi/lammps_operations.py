@@ -78,6 +78,49 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
+def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np.ndarray | None", cell: "np.ndarray | None", types: "np.ndarray | list[str] | None") -> None:
+    """Restore the full system if an active-volume operation changed the atom count.
+
+    Active-volume pARTn operations rebuild the LAMMPS engine with only the
+    active-volume subset of atoms. If the engine is then reused for a full-system
+    operation (minimize, basin reconstruction, energy evaluation), the atom counts
+    no longer match and LAMMPS operates on a stale subset. This guard compares the
+    engine's atom count against the expected full system and reinitializes when
+    they differ.
+    """
+    from ...system import System
+
+    if positions is None or cell is None or types is None:
+        raise ValueError(
+            "Full-system positions, cell, and types are required to restore the LAMMPS engine."
+        )
+
+    expected_natoms = len(positions)
+    engine_natoms = int(engine.lmp.get_natoms())
+    if engine_natoms == expected_natoms:
+        return
+
+    logger.debug(
+        "[LAMMPS] Restoring full system after active-volume operation (%d -> %d atoms)",
+        engine_natoms,
+        expected_natoms,
+    )
+    system = System(
+        positions=np.array(positions, copy=True),
+        types=np.array(types, copy=True),
+        cell=np.array(cell, copy=True),
+        pbc=np.array([True, True, True], dtype=bool),
+        index=np.arange(expected_natoms),
+    )
+    #Clear and rebuild the engine with the full system (same sequence the
+    #engine boot path uses; boundary stays fully periodic).
+    engine.lmp.command("clear")
+    initialize_parameters(engine)
+    initialize_system(engine, system)
+    initialize_potential(engine, config)
+
+
+
 def minimize(engine, config, positions=None) :
     if positions is not None :
         set_positions(engine=engine, positions=positions)
@@ -197,7 +240,20 @@ def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
         engine.command("group g_frozen delete")
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, types=None) :
+def partn_search(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None) :
+    """Run a pARTn event search; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, and exceptions) so the engine is
+    never left holding only the active-volume subset of atoms.
+    """
+    try:
+        return _partn_search_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_search_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
@@ -365,7 +421,20 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                 )
             )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, types=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
+def partn_refine(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
+    """Refine a saddle point; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, max-attempt exhaustion, and
+    exceptions) so the engine is never left holding only the active-volume subset.
+    """
+    try:
+        return _partn_refine_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types, saddle_idx=saddle_idx, saddle_positions=saddle_positions, minimize_outter_atoms=minimize_outter_atoms)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
