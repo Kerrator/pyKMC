@@ -196,29 +196,55 @@ def fingerprint_tolerance(config: Config) -> float:
     return 0.5
 
 
-def compute_fingerprint(
-    config: Config, positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray
-) -> np.ndarray:
-    """Compute a structural fingerprint, dispatching from the config.
-
-    1. ``atoms_of_interest_fingerprint`` if ``[BASIN] fingerprint_coordination_thr`` is
-       set (explicit override).
-    2. ``atoms_of_interest_fingerprint`` if the AtomicEnvironment style is
-       'coordination' / 'coordination/graph', deriving the threshold as
-       ``coordination_threshold + 1``.
-    3. ``com_fingerprint`` otherwise.
-    """
+def _derived_coord_thr(config: Config) -> "int | None":
+    """Return the atoms-of-interest threshold: explicit override, else style-derived."""
     if config.basin is not None and config.basin.fingerprint_coordination_thr is not None:
-        return atoms_of_interest_fingerprint(
-            positions, cell, pbc,
-            rnei=config.atomicenvironment.rnei,
-            coord_thr=config.basin.fingerprint_coordination_thr,
-        )
+        return config.basin.fingerprint_coordination_thr
     if (config.atomicenvironment.style in ("coordination", "coordination/graph")
             and config.atomicenvironment.coordination_threshold is not None):
+        return config.atomicenvironment.coordination_threshold + 1
+    return None
+
+
+def compute_fingerprint(
+    config: Config, positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray
+) -> "np.ndarray | None":
+    """Compute a structural fingerprint, dispatching from ``[BASIN] fingerprint_mode``.
+
+    - ``off``: return None — the caller must skip the pre-filter entirely (benchmark
+      baseline measuring raw deduplication cost).
+    - ``com``: force the full COM-distance fingerprint.
+    - ``atoms_of_interest``: force the undercoordinated-atoms fingerprint; the threshold
+      is ``fingerprint_coordination_thr`` or coordination_threshold + 1, and a
+      ValueError is raised when neither is derivable.
+    - ``auto`` (default): atoms-of-interest when a threshold is derivable (explicit
+      override or a coordination-based AtomicEnvironment style), else COM-distance.
+    """
+    mode = config.basin.fingerprint_mode if config.basin is not None else "auto"
+
+    if mode == "off":
+        return None
+    if mode == "com":
+        return com_fingerprint(positions, cell, pbc)
+
+    coord_thr = _derived_coord_thr(config)
+    if mode == "atoms_of_interest":
+        if coord_thr is None:
+            raise ValueError(
+                "fingerprint_mode = 'atoms_of_interest' needs fingerprint_coordination_thr "
+                "or a coordination-based AtomicEnvironment style to derive the threshold."
+            )
         return atoms_of_interest_fingerprint(
             positions, cell, pbc,
             rnei=config.atomicenvironment.rnei,
-            coord_thr=config.atomicenvironment.coordination_threshold + 1,
+            coord_thr=coord_thr,
+        )
+
+    # auto
+    if coord_thr is not None:
+        return atoms_of_interest_fingerprint(
+            positions, cell, pbc,
+            rnei=config.atomicenvironment.rnei,
+            coord_thr=coord_thr,
         )
     return com_fingerprint(positions, cell, pbc)

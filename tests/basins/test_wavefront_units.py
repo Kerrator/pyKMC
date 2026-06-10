@@ -36,10 +36,12 @@ def _make_basin(config) -> BasinsGenericEvents:
     return basin
 
 
-def _com_config() -> SimpleNamespace:
+def _com_config(fingerprint_mode: str = "auto") -> SimpleNamespace:
     """Config stub routing compute_fingerprint to the COM-distance fallback."""
     return SimpleNamespace(
-        basin=SimpleNamespace(fingerprint_coordination_thr=None, fingerprint_tolerance=1.0),
+        basin=SimpleNamespace(fingerprint_mode=fingerprint_mode,
+                              fingerprint_coordination_thr=None, fingerprint_tolerance=1.0,
+                              strategy="wavefront", n_workers=2),
         atomicenvironment=SimpleNamespace(style="graph", coordination_threshold=None, rnei=3.0),
     )
 
@@ -79,6 +81,54 @@ class TestIsNewStateBatch:
     def test_empty_batch(self):
         basin = _make_basin(_com_config())
         assert basin.is_new_state_batch({}) == {}
+
+    def test_off_mode_still_finds_duplicates(self):
+        """With fingerprint_mode='off' the pre-filter is skipped but dedup must still work."""
+        config = _com_config(fingerprint_mode="off")
+        basin = _make_basin(config)
+
+        base = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0],
+                         [1.0, 2.0, 1.0], [1.0, 1.0, 2.0]])
+        sys_a = _make_system(base)
+        sys_a_copy = _make_system(base.copy())
+        sys_b = _make_system(base + np.array([4.0, 4.0, 4.0]))
+
+        basin.states[0] = StateData(system=sys_a, environment=None, neighbors_list=None)
+        # off mode: nothing cached
+        assert fingerprinting.compute_fingerprint(config, sys_a.positions, sys_a.cell, sys_a.pbc) is None
+
+        results = basin.is_new_state_batch({5: sys_a_copy, 6: sys_b})
+        assert results[5] == 0    # duplicate found via full comparison, no pre-filter
+        assert results[6] == -1   # translated cluster = different state
+
+        # serial path too
+        assert basin.is_new_state(sys_a_copy) == 0
+        assert basin.is_new_state(sys_b) == -1
+
+
+class TestSerialTimingCheckpoint:
+
+    def test_finalizer_writes_serial_checkpoints(self, tmp_path, monkeypatch):
+        """_finalize_exploration_run writes the timing files compare_scaling.py reads."""
+        monkeypatch.chdir(tmp_path)
+        config = _com_config()
+        config.basin.strategy = "serial"
+        basin = _make_basin(config)
+        basin.connectivity_table.add_connectivity(
+            state=0, state_connexion=1, event_connexion=10, central_atom=0, sym=0,
+            transient=False, dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+
+        import time as _time
+        prof = {"reconstruct": 0.1, "psr": 0.0, "minimize": 0.0, "dedup": 0.2,
+                "ensure_state": 0.0, "explore": 0.05, "merge": 0.01, "other": 0.0}
+        result = basin._finalize_exploration_run(_time.perf_counter() - 1.0, prof, 3, 1,
+                                                 strategy_label="serial")
+        assert result.is_ok()
+        assert (tmp_path / "basin_timing_serial.txt").exists()
+        assert (tmp_path / "basin_connectivity_0_L0_level_complete.txt").exists()
+        content = (tmp_path / "basin_timing_serial.txt").read_text()
+        assert "strategy = serial" in content
+        assert "wall_time_s" in content
 
 
 class TestCapRemainingAsAbsorbing:

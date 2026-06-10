@@ -16,9 +16,17 @@ class TestBasinConfig:
         assert cfg.strategy == "serial"
         assert cfg.n_workers == 4
         assert cfg.max_states is None
+        assert cfg.fingerprint_mode == "auto"
         assert cfg.fingerprint_coordination_thr is None
         assert cfg.fingerprint_tolerance is None
         assert cfg.solver == "auto"
+
+    def test_fingerprint_mode_values(self) -> None:
+        """All four fingerprint modes are accepted; anything else is rejected."""
+        for mode in ("auto", "com", "atoms_of_interest", "off"):
+            assert BasinConfig(fingerprint_mode=mode).fingerprint_mode == mode
+        with pytest.raises(ValidationError):
+            BasinConfig(fingerprint_mode="none")
 
     def test_accepts_full_parallel_config(self) -> None:
         """All parallel/fingerprint/solver fields accept their intended values."""

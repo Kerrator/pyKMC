@@ -88,3 +88,60 @@ class TestFingerprinting:
         dense = rng.uniform(0, 10, size=(200, 3))  # every atom has many neighbours within rnei
         out = fp.atoms_of_interest_fingerprint(dense, cell, pbc, rnei=2.0, coord_thr=1)
         assert out.size == 0
+
+
+class TestFingerprintModeDispatch:
+    """compute_fingerprint must honour [BASIN] fingerprint_mode."""
+
+    @staticmethod
+    def _config(mode, *, style="graph", coord_thr=None, fp_thr=None):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            basin=SimpleNamespace(fingerprint_mode=mode,
+                                  fingerprint_coordination_thr=fp_thr,
+                                  fingerprint_tolerance=None),
+            atomicenvironment=SimpleNamespace(style=style,
+                                              coordination_threshold=coord_thr,
+                                              rnei=1.5),
+        )
+
+    _positions = np.array([[0.5, 0.5, 0.5], [1.5, 0.5, 0.5],
+                           [0.5, 1.5, 0.5], [0.5, 0.5, 1.5]])
+    _cell = np.diag([10.0, 10.0, 10.0])
+    _pbc = np.array([True, True, True])
+
+    def test_off_returns_none(self):
+        cfg = self._config("off", style="coordination/graph", coord_thr=8)
+        assert fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc) is None
+
+    def test_com_forced_even_with_coordination_style(self):
+        cfg = self._config("com", style="coordination/graph", coord_thr=8)
+        out = fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc)
+        expected = fp.com_fingerprint(self._positions, self._cell, self._pbc)
+        assert np.allclose(out, expected)
+
+    def test_atoms_of_interest_forced_with_explicit_thr(self):
+        cfg = self._config("atoms_of_interest", fp_thr=10)
+        out = fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc)
+        expected = fp.atoms_of_interest_fingerprint(
+            self._positions, self._cell, self._pbc, rnei=1.5, coord_thr=10)
+        assert np.allclose(out, expected)
+
+    def test_atoms_of_interest_without_thr_raises(self):
+        import pytest
+        cfg = self._config("atoms_of_interest")
+        with pytest.raises(ValueError, match="fingerprint_coordination_thr"):
+            fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc)
+
+    def test_auto_derives_from_coordination_style(self):
+        cfg = self._config("auto", style="coordination/graph", coord_thr=9)
+        out = fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc)
+        expected = fp.atoms_of_interest_fingerprint(
+            self._positions, self._cell, self._pbc, rnei=1.5, coord_thr=10)
+        assert np.allclose(out, expected)
+
+    def test_auto_falls_back_to_com(self):
+        cfg = self._config("auto")  # graph style, no thresholds
+        out = fp.compute_fingerprint(cfg, self._positions, self._cell, self._pbc)
+        expected = fp.com_fingerprint(self._positions, self._cell, self._pbc)
+        assert np.allclose(out, expected)

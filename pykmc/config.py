@@ -490,7 +490,7 @@ class PSRConfig(BaseModel):
     )
 
 class ActiveVolume(BaseModel):
-    """ Active Volume Parameters"""
+    """Active Volume Parameters"""
 
     ract: float = Field(
         default=6.0,
@@ -570,6 +570,17 @@ class BasinConfig(BaseModel):
         gt=0,
         description="Maximum transient states to explore. When reached, the remaining "
         "frontier is converted to absorbing states and exploration stops. None = unlimited.",
+    )
+
+    fingerprint_mode: Literal["auto", "com", "atoms_of_interest", "off"] = Field(
+        default="auto",
+        description="Which structural fingerprint the deduplication pre-filter uses. "
+        "'auto' (default): atoms-of-interest when fingerprint_coordination_thr is set or the "
+        "AtomicEnvironment style is coordination-based, else the full COM-distance fingerprint. "
+        "'com' forces the COM-distance fingerprint; 'atoms_of_interest' forces the "
+        "undercoordinated-atoms fingerprint (requires a derivable threshold); 'off' disables "
+        "the pre-filter entirely so every known state is structurally compared (slowest, "
+        "useful as a benchmark baseline).",
     )
 
     fingerprint_coordination_thr: Optional[int] = Field(

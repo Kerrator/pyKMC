@@ -137,33 +137,49 @@ class BasinsGenericEvents() :
         self._next_state_index = 1  #monotonic state-index counter (state 0 is the initial state)
 
 
-    def construct_connexion_table(self) : 
-        """ 
-        Explore the basin and construct the connextion table
+    def construct_connexion_table(self) :
+        """Explore the basin and construct the connextion table.
+
+        Per-phase timings are accumulated like the wavefront strategy and written to
+        the same timing checkpoints at the end, so serial and wavefront runs can be
+        compared directly with toolkit/basin_testing/compare_scaling.py.
         """
-        #Loop over state to explore 
+        t_start = time.perf_counter()
+        n_processed = 0
+        n_duplicates = 0
+        prof = {"reconstruct": 0.0, "psr": 0.0, "minimize": 0.0,
+                "dedup": 0.0, "ensure_state": 0.0, "explore": 0.0,
+                "merge": 0.0, "other": 0.0}
+
+        #Loop over state to explore
         while len(self.states_to_explore) != 0 :
-            #next state to explore : 
+            #next state to explore :
             to_explore = self.states_to_explore[0]
 
-            if to_explore not in self.states : #always true except at the start (to_explore = 0) 
-                #We need to create the state 
+            if to_explore not in self.states : #always true except at the start (to_explore = 0)
+                #We need to create the state
                     #find a state and an event from which we go to the state that we want to create
                 from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=to_explore)
 
                     #Create new system by applying (reconstruction) the generic event to the from_state
-                result = self.system_from_state(from_state, event_idx, central_atom, sym_idx) 
-                if not result.is_ok() : 
+                t0 = time.perf_counter()
+                result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
+                prof["reconstruct"] += time.perf_counter() - t0
+                n_processed += 1
+                if not result.is_ok() :
                     return result
                 new_system = result.ok_value()
 
-                    #Check if it is a new_system or already in states 
-                is_new_state = self.is_new_state(new_system) 
-                if is_new_state != -1 : #It already exists 
+                    #Check if it is a new_system or already in states
+                t0 = time.perf_counter()
+                is_new_state = self.is_new_state(new_system)
+                prof["dedup"] += time.perf_counter() - t0
+                if is_new_state != -1 : #It already exists
                     #update table
                     self.connectivity_table.change_state_index(current_index=to_explore, new_index=is_new_state)
                     self.explored_states.append(to_explore)
                     self.states_to_explore.remove(to_explore)
+                    n_duplicates += 1
 
                     #Cleaning
                     self.states[from_state].release_heavy_objects()
@@ -172,17 +188,19 @@ class BasinsGenericEvents() :
                 #add state
                 self._add_state(state_index=to_explore, system=new_system, transient=is_transient)
 
-                #ENSURE FULL STATE TO EXPLORE 
+                #ENSURE FULL STATE TO EXPLORE
+                t0 = time.perf_counter()
                 self.states[to_explore].ensure_full_state(self.config)
+                prof["ensure_state"] += time.perf_counter() - t0
                 #Check if unknown atomic environments
-                if self.is_states_has_unknown_environments(self.states[to_explore]) : 
-                    #We consider that this state is an absorbing one because we need to search new events (in main KMC loop) 
-                    #Need to update the connectivity table 
-                    self.connectivity_table.change_state_to_absorbing(to_explore) 
+                if self.is_states_has_unknown_environments(self.states[to_explore]) :
+                    #We consider that this state is an absorbing one because we need to search new events (in main KMC loop)
+                    #Need to update the connectivity table
+                    self.connectivity_table.change_state_to_absorbing(to_explore)
                     self.states[to_explore].transient = False
                     is_transient = False
-                
-                if not is_transient : 
+
+                if not is_transient :
                     self.states_to_explore.remove(to_explore)
                     self.explored_states.append(to_explore)
 
@@ -196,22 +214,27 @@ class BasinsGenericEvents() :
                 #Release heavy objet memory
                 self.states[from_state].release_heavy_objects()
 
-            
 
 
-            #Explore state 
+
+            #Explore state
             self.current_state = to_explore
             last_state_connectivity = self.get_last_state_index()
 
-            #Ensure full state to explore 
+            #Ensure full state to explore
+            t0 = time.perf_counter()
             self.states[to_explore].ensure_full_state(self.config)
+            prof["ensure_state"] += time.perf_counter() - t0
+            t0 = time.perf_counter()
             self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
-            
-            #to_explore has been explored : 
+            prof["explore"] += time.perf_counter() - t0
+
+            #to_explore has been explored :
             self.states_to_explore.remove(to_explore)
             self.explored_states.append(to_explore)
 
             #Merge state connectivity table to basin connectivity table
+            t0 = time.perf_counter()
             self.connectivity_table.merge(self.explorer.connectivity_table)
             #Clrean explorer connectivity table
             self.explorer.clear()
@@ -221,10 +244,17 @@ class BasinsGenericEvents() :
             #lower one, dropping the table max, and reading that max would reuse an index
             #already in explored_states (silently truncating exploration).
             self._advance_next_state_index()
+            prof["merge"] += time.perf_counter() - t0
             #Clean heaby state object :
             self.states[to_explore].release_heavy_objects()
-            
-        return Ok(None)
+
+        return self._finalize_exploration_run(
+            t_start,
+            prof,
+            n_processed,
+            n_duplicates,
+            strategy_label="serial",
+        )
 
     def select_event(self) : 
         """ 
@@ -449,19 +479,23 @@ class BasinsGenericEvents() :
         fp_new = fingerprinting.compute_fingerprint(self.config, system.positions, system.cell, system.pbc)
         fp_tol = fingerprinting.fingerprint_tolerance(self.config)
 
-        # Vectorized fingerprint rejection: compare against all cached fingerprints at once
-        fp_items = [
-            (si, fp)
-            for si, fp in self._state_fingerprints.items()
-            if len(fp) == len(fp_new)
-        ]
-        if fp_items:
-            indices, fps = zip(*fp_items)
-            fp_matrix = np.vstack(fps)
-            max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
-            candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
-        else:
+        if fp_new is None:
+            # fingerprint_mode = 'off': no pre-filter, structurally compare every state
             candidates = list(self.states.keys())
+        else:
+            # Vectorized fingerprint rejection: compare against all cached fingerprints at once
+            fp_items = [
+                (si, fp)
+                for si, fp in self._state_fingerprints.items()
+                if len(fp) == len(fp_new)
+            ]
+            if fp_items:
+                indices, fps = zip(*fp_items)
+                fp_matrix = np.vstack(fps)
+                max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
+                candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
+            else:
+                candidates = list(self.states.keys())
 
         for state_index in candidates:
             state_data = self.states[state_index]
@@ -514,11 +548,15 @@ class BasinsGenericEvents() :
         new_state =  StateData(system=system, environment=atomic_environment, neighbors_list=neighbors_list, transient=transient,  visited=visited)
 
         self.states[state_index]= new_state
-        #Cache the dedup fingerprint for this state (pre-filter for is_new_state)
+        #Cache the dedup fingerprint for this state (pre-filter for is_new_state).
+        #None (fingerprint_mode = 'off') is not cached: with no pre-filter there is
+        #nothing to compare against.
         if system is not None :
-            self._state_fingerprints[state_index] = fingerprinting.compute_fingerprint(
+            fp = fingerprinting.compute_fingerprint(
                 self.config, system.positions, system.cell, system.pbc
             )
+            if fp is not None :
+                self._state_fingerprints[state_index] = fp
 
     # ──────────────────────────────────────────────────────────────────
     # Wavefront-parallel basin exploration (strategy = 'wavefront')
@@ -759,7 +797,8 @@ class BasinsGenericEvents() :
             fp_new = new_fingerprints[new_idx]
 
             # Fingerprint pre-filter against existing states
-            if existing_fp_items:
+            # (fp_new None = fingerprint_mode 'off': compare against every state)
+            if fp_new is not None and existing_fp_items:
                 candidate_indices = []
                 for si, fp in existing_fp_items:
                     if len(fp) == len(fp_new) and np.max(np.abs(fp - fp_new)) <= fp_tol:
@@ -791,8 +830,10 @@ class BasinsGenericEvents() :
                         continue  # this one is already a duplicate itself
                     if other_idx in new_systems:
                         fp_other = new_fingerprints[other_idx]
-                        # Fingerprint pre-filter within the batch
-                        if len(fp_other) == len(fp_new) and np.max(np.abs(fp_other - fp_new)) > fp_tol:
+                        # Fingerprint pre-filter within the batch (skipped when 'off')
+                        if (fp_new is not None and fp_other is not None
+                                and len(fp_other) == len(fp_new)
+                                and np.max(np.abs(fp_other - fp_new)) > fp_tol):
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,

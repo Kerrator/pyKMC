@@ -447,6 +447,10 @@
   <details><summary>Description</summary>
   Maximum transient states to explore. When reached, the remaining frontier is converted to absorbing states and exploration stops. None = unlimited.
   </details>
+- **`fingerprint_mode`** : `Literal['auto', 'com', 'atoms_of_interest', 'off']`, default = `'auto'`
+  <details><summary>Description</summary>
+  Which structural fingerprint the deduplication pre-filter uses. 'auto' (default): atoms-of-interest when fingerprint_coordination_thr is set or the AtomicEnvironment style is coordination-based, else the full COM-distance fingerprint. 'com' forces the COM-distance fingerprint; 'atoms_of_interest' forces the undercoordinated-atoms fingerprint (requires a derivable threshold); 'off' disables the pre-filter entirely so every known state is structurally compared (slowest, useful as a benchmark baseline).
+  </details>
 - **`fingerprint_coordination_thr`** : `int`, optional
   <details><summary>Description</summary>
   Atoms-of-interest fingerprint threshold for basin deduplication. Atoms with fewer neighbors (within rnei) than this threshold are 'atoms of interest'. The fingerprint has two components: (1) sorted distances from a periodic-aware (circular mean) defect centre-of-mass to each undercoordinated atom, and (2) the distance from defect COM to bulk COM. The circular mean ensures invariance under any periodic representation. Typical value: 9 for FCC surfaces. If None and the AtomicEnvironment style is 'coordination' or 'coordination/graph', auto-derives as coordination_threshold + 1. Otherwise falls back to the full COM-distance fingerprint.
