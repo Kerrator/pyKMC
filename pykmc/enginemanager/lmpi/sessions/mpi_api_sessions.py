@@ -24,6 +24,7 @@ class MpiApiSession :
     It should live on the rank 0 of the MPI World communicator.
     It should knows on which ranks the LAMMPS engine is running.
     """
+
     def __init__(self, messenger: MpiMessenger, engine_ranks, session_id) -> None:
         self.messenger = messenger
         self.engine_ranks = engine_ranks
@@ -38,8 +39,7 @@ class MpiApiSession :
         
 
     def send_message(self, msg: dict,  expect_status: bool = True) -> None:
-        """
-        Send a message to the engine's master rank.
+        """Send a message to the engine's master rank.
         """
         self.messenger.send(msg, dest=self.engine_master_rank, tag=2)
         #NOTE : If a lot of message are sent, it will slow down a lot, it is ok if it's just at the initialization, but if 
@@ -48,8 +48,7 @@ class MpiApiSession :
             self.receive_status()
 
     def receive_status(self) -> None:
-        """
-        Receive the status of the engine.
+        """Receive the status of the engine.
         """
         msg = self.messenger.recv(source=self.engine_master_rank, tag = 0)
         if msg.get("type") == "status":
@@ -61,57 +60,53 @@ class MpiApiSession :
 
     #@session_locked
     def command(self, cmd: str) -> None:
-        """
-        Send a LAMMPS command to the engine.
+        """Send a LAMMPS command to the engine.
         """
         #print(f"[Session] Sending command: {cmd}")
         self.send_message({"type": "command", "value": cmd})
 
     #@session_locked
     def use_local(self) -> None:
-        """
-        Instruct the engine to use local pool
+        """Instruct the engine to use local pool
         """
         #print(f"[Session {self.session_id}] sending 'use local' to rank {self.engine_master_rank}")
         self.send_message({"type": "use_local"})
 
     def use_global(self) -> None:
-        """
-        Instruct the engine to use global pool
+        """Instruct the engine to use global pool
         """
         #print(f"[Session {self.session_id}] sending 'use global' to rank {self.engine_master_rank}")
         self.send_message({"type": "use_global"})
 
     #@session_locked
     def close(self, wait_status: bool = False) -> None:
-        """
-        Instruct the engine to shut down.
+        """Instruct the engine to shut down.
+
         Parameters
         ----------
         wait_status : bool, default False
             If True, wait for the engine to send a status message (for normal sessions).
             If False, just send the close message (for global / long-running engines).
+
         """
         print(f"[Session] Sending close message to engine at rank {self.engine_master_rank}")
         self.send_message({"type": "close"}, expect_status=wait_status)
         self._is_alive = False
 
     def is_alive(self) -> bool:
-        """
-        Check if the engine is alive.
+        """Check if the engine is alive.
         """
         return self._is_alive   
     
     def is_busy(self) -> bool:
-        """
-        Check if the engine is busy.
+        """Check if the engine is busy.
         """
         return self._is_busy
     
     #ACTIONS 
     #@session_locked
     def initialize_parameters(self) -> None :
-        """ 
+        """
         Initialize LAMMPS engine with default parameters
         """
         #print(f"[Session {self.session_id}] Initializing Lammps parameters")
@@ -189,11 +184,46 @@ class MpiApiSession :
         try :
             self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions, "types": types}})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
+            if msg.get("type") == "result" :
                 return msg["value"]
-            else : 
+            else :
                 raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+        finally :
+            self._is_busy = False
+
+    def _receive_result_or_error(self) -> object:
+        """Receive a tag-1 reply, raising on explicit remote failures."""
+        msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+        msg_type = msg.get("type")
+        if msg_type == "result":
+            return msg.get("value")
+        if msg_type == "error":
+            value = msg.get("value", {})
+            operation = value.get("operation", "unknown operation")
+            error_type = value.get("error_type", "RuntimeError")
+            message = value.get("message", "Unknown remote error")
+            raise RuntimeError(
+                f"Remote {operation} failed on engine rank {self.engine_master_rank} "
+                f"({error_type}): {message}"
+            )
+        raise RuntimeError(f"Unexpected message type: {msg}")
+
+    def basin_reconstruct(self, **kwargs: object) -> object:
+        """Send a basin reconstruction task to the engine and return the result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_reconstruct", "value": kwargs})
+            return self._receive_result_or_error()
+        finally:
+            self._is_busy = False
+
+    def basin_explore(self, **kwargs: object) -> object:
+        """Send a basin exploration task to the engine and return the result."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "basin_explore", "value": kwargs})
+            return self._receive_result_or_error()
+        finally:
             self._is_busy = False
 
     #@session_locked

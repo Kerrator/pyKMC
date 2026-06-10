@@ -19,8 +19,7 @@ class Manager:
     """A class to manage a pool of Lammps sessions."""
 
     def __init__(self, sessions: list[MpiApiSession], global_session: MpiApiSession = None) -> None:
-        """
-        Initialize the LammpsPoolManager with a specified number of sessions.
+        """Initialize the LammpsPoolManager with a specified number of sessions.
         """
         self.sessions = sessions
         self.global_session = global_session
@@ -38,15 +37,14 @@ class Manager:
             self.workers.append(t)
 
     def broadcast_command(self, cmd: str):
-        """
-        Send the same command to all sessions and wait for all to finish.
+        """Send the same command to all sessions and wait for all to finish.
         """
         #print("[PoolManager] Broadcasting command:", cmd)
         for session in self.sessions:
             session.command(cmd)
 
-    def initialize_sessions(self, config, system) : 
-        """ 
+    def initialize_sessions(self, config, system) :
+        """
         Initialize engines with the same system and config
         """
         print("[Manager] use local")
@@ -66,16 +64,14 @@ class Manager:
 
 
     def use_local(self):
-        """
-        Have engines switch from global pool to local pools
+        """Have engines switch from global pool to local pools
         """
         if self.using_global:
             self.global_session.use_local()
             self.using_global = False
 
     def use_global(self):
-        """
-        Have engines switch from local pools to global pool
+        """Have engines switch from local pools to global pool
         """
         if not self.using_global:
             for session in self.sessions :
@@ -180,9 +176,16 @@ class Manager:
         future = self.submit_job("partn_refine", {"config": config, "central_atom_idx": central_atom, "positions": positions, "cell":cell, "types":types, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions})
         return future
 
+    def basin_reconstruct(self, **kwargs: object) -> Future :
+        """Submit a basin state reconstruction (PSR + 2x minimize) to the session pool."""
+        return self.submit_job("basin_reconstruct", kwargs)
+
+    def basin_explore(self, **kwargs: object) -> Future :
+        """Submit a basin state exploration (reference-table lookups) to the session pool."""
+        return self.submit_job("basin_explore", kwargs)
+
     def close_all(self):
-        """
-        Close all sessions and their underlying engines.
+        """Close all sessions and their underlying engines.
         """
         #print("[PoolManager] Closing all sessions.")
         if self.global_session is not None :
@@ -193,7 +196,7 @@ class Manager:
 
     def __getattr__(self, name:str) :
         """Check if method start with global_, if yes, then return global_session.method"""
-        if name.startswith('global_'):
+        if name.startswith("global_"):
             method_name = name[7:]  # remove prefixe 'global_'
             if not self.global_session:
                 raise RuntimeError("Global session is not available")
