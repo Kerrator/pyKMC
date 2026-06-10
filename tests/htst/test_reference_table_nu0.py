@@ -34,12 +34,15 @@ def test_htst_reference_table_has_nu0_and_k_prefactor_columns(
     assert "nu0" in act.table.columns
 
 
-def test_build_event_series_stores_directional_nu0(
+def test_build_event_series_is_k0_placeholder(
     config_Ni_4000at_monovacancy_sia: Any,
     system_single_type_fcc: Any,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Forward row keeps nu0_forward, backward row keeps nu0_backward; k uses them.
+    """The series builder writes k0-placeholder rates and a None nu0 column.
+
+    Per-event nu0 is patched AFTERWARDS by the accepted-events backfill
+    (see test_reference_backfill.py for the directional patch assertions).
 
     Notes
     -----
@@ -49,8 +52,8 @@ def test_build_event_series_stores_directional_nu0(
     Python lists from ``NeighborsList``, which triggers a numpy 0d-array error
     (``list == scalar`` is a scalar bool).  We monkeypatch
     ``pykmc.event_table.NeighborsList`` so that each per-atom list is
-    returned as a numpy array, keeping the test focused on nu0/k bookkeeping
-    without altering production code.
+    returned as a numpy array, keeping the test focused on the rate
+    bookkeeping without altering production code.
 
     """
     import pykmc.event_table as _et
@@ -78,7 +81,7 @@ def test_build_event_series_stores_directional_nu0(
     cell = sys_.cell
 
     # A trivial "event" where min1 == saddle == min2 is enough to exercise the
-    # series builder's nu0/k bookkeeping (we are not testing the physics here).
+    # series builder's rate bookkeeping (we are not testing the physics here).
     fwd, bwd = table._build_event_series(
         min1_positions=positions,
         saddle_positions=positions,
@@ -87,15 +90,12 @@ def test_build_event_series_stores_directional_nu0(
         dE_forward=0.5,
         dE_backward=0.7,
         cell=cell,
-        nu0_forward=5.0e12,
-        nu0_backward=3.0e12,
     )
-    assert fwd["nu0"] == 5.0e12
-    assert bwd["nu0"] == 3.0e12
-    # Load-bearing wiring: the nu0 kwarg reaches the htst backend, so the resolved
-    # prefactor is nu0 (NOT the k0 fallback). This single assertion guards the
-    # whole per-event nu0 path (active events freeze this prefactor).
-    assert fwd["k_prefactor"] == 5.0e12
-    assert bwd["k_prefactor"] == 3.0e12
-    assert math.isclose(fwd["k"], table.rate_constant.compute_rate(0.5, nu0=5.0e12).rate)
-    assert math.isclose(bwd["k"], table.rate_constant.compute_rate(0.7, nu0=3.0e12).rate)
+    k0 = config.rateconstant.k0
+    assert fwd["nu0"] is None
+    assert bwd["nu0"] is None
+    # Placeholder semantics: no per-event nu0 yet -> htst backend resolves to k0.
+    assert fwd["k_prefactor"] == k0
+    assert bwd["k_prefactor"] == k0
+    assert math.isclose(fwd["k"], table.rate_constant.compute_rate(0.5).rate)
+    assert math.isclose(bwd["k"], table.rate_constant.compute_rate(0.7).rate)

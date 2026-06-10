@@ -1,5 +1,7 @@
 """Module implementing Classes to manage reference events and active events."""
 
+import logging
+
 import pandas as pd
 from .rate_constant import create_rate_constant
 from .rate_constant.rate_constant import rate_from_prefactor
@@ -21,6 +23,8 @@ from .result import (
 from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr
 
+logger = logging.getLogger(__name__)
+
 
 class ReferenceEventTable:
     """Store reference events and manage them.
@@ -32,8 +36,9 @@ class ReferenceEventTable:
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, manager: object = None) -> None:
         self.config = config
+        self.manager = manager
         # nu0 is an HTST/RPA-only diagnostic column; a constant run's schema stays
         # identical to the base. See gating below.
         self._htst_active = config.rateconstant.style in ("htst", "rpa")
@@ -41,18 +46,28 @@ class ReferenceEventTable:
             T=config.rateconstant.T,
             prefactor_backend_name=config.rateconstant.style,
             config=config.rateconstant,
+            manager=manager,
         )
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput]
+        self, events: list[EventSearchOutput], types: "list[str] | None" = None
     ) -> Result[pd.DataFrame, ErrorInfo]:
-        """Events events to the table dataframe.
+        """Add events to the table dataframe, then backfill per-event prefactors.
+
+        Each accepted event is added with a k0-placeholder rate; for the
+        htst/rpa styles the full-geometry payloads of ONLY the accepted events
+        are then batched through ``rate_constant.compute_prefactors_batch``
+        (one concurrent nu0 job per event) and the rows are patched in place.
+        Rejected and duplicate events never cost a Hessian.
 
         Parameters
         ----------
         events : list[EventSearchOutput]
             list of EventSearchOutput dataclass with events to be added to the table dataframe.
+        types : list[str] | None
+            Per-atom chemical symbols of the full system (required for the
+            htst/rpa prefactor payloads; unused for the constant style).
 
         Returns
         -------
@@ -61,6 +76,7 @@ class ReferenceEventTable:
 
         """
         results_is_valid_events = []
+        backfill: "list[tuple[int, int | None, dict[str, object]]]" = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self.is_valid_new_event(
@@ -71,24 +87,76 @@ class ReferenceEventTable:
                     dE_forward=ev.dE_forward,
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
-                    nu0_forward=ev.nu0_forward,
-                    nu0_backward=ev.nu0_backward,
                 )
             results_is_valid_events.append(res)
-            if res.is_ok() : 
-                self.add(res.ok_value()) 
-        #df_valid_events = self.get_valid_events(results_is_valid_events)
-
-
-        #Check if events in results are not the same : 
-
-
-
-
-        #for df in df_valid_events:
-        #    self.add(df)
+            if res.is_ok():
+                df = res.ok_value()
+                self.add(df)  # assigns idx_ref/idx_backward in place
+                if self._htst_active:
+                    if types is None:
+                        raise RuntimeError(
+                            "htst/rpa add_events requires the system `types` to "
+                            "build the per-event prefactor payloads"
+                        )
+                    fwd_ref = int(df.iloc[0]["idx_ref"])
+                    bwd_ref = int(df.iloc[1]["idx_ref"]) if len(df) > 1 else None
+                    # Payload uses the FULL EventSearchOutput geometry (table rows
+                    # store neighbor-subset positions, unusable for the Hessian).
+                    backfill.append(
+                        (
+                            fwd_ref,
+                            bwd_ref,
+                            {
+                                "central_atom_idx": ev.move_atom_index,
+                                "min1_positions": ev.min1_positions,
+                                "saddle_positions": ev.saddle_positions,
+                                "min2_positions": ev.min2_positions,
+                                "types": list(types),
+                                "cell": ev.cell,
+                            },
+                        )
+                    )
+        if self._htst_active and backfill:
+            self._backfill_prefactors(backfill)
 
         return results_is_valid_events
+
+    def _backfill_prefactors(
+        self, backfill: "list[tuple[int, int | None, dict[str, object]]]"
+    ) -> None:
+        """Batch-compute nu0 for newly accepted events and patch their rows.
+
+        One fan-out for the whole batch (one job per event over the session
+        pool); the forward row receives ``nu0_forward`` and the backward row
+        (when present) ``nu0_backward``. A None nu0 leaves the k0-placeholder
+        row untouched (the fallback) and is logged.
+        """
+        payloads = [item[2] for item in backfill]
+        futures = self.rate_constant.compute_prefactors_batch(payloads, self.config)
+        for (fwd_ref, bwd_ref, _payload), fut in zip(backfill, futures, strict=True):
+            pre = fut.result()
+            self._patch_row(fwd_ref, pre.nu0_forward)
+            if bwd_ref is not None:
+                self._patch_row(bwd_ref, pre.nu0_backward)
+            if pre.nu0_forward is None or (bwd_ref is not None and pre.nu0_backward is None):
+                logger.info(
+                    "[htst] nu0 fallback to k0 (idx_ref %s): %s", fwd_ref, pre.reason
+                )
+
+    def _patch_row(self, idx_ref: int, nu0: "float | None") -> None:
+        """Overwrite k/k_prefactor/nu0 on the row with this idx_ref (mask-keyed).
+
+        ``idx_ref`` is a logical id (remove()/pickle can desync it from the
+        DataFrame position), so the row is located by mask, never by .iloc.
+        """
+        if nu0 is None:
+            return  # placeholder k0 values are already correct
+        mask = self.table["idx_ref"] == idx_ref
+        dE = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+        rc = self.rate_constant.compute_rate(dE, nu0=nu0)
+        self.table.loc[mask, "k"] = rc.rate
+        self.table.loc[mask, "k_prefactor"] = rc.prefactor
+        self.table.loc[mask, "nu0"] = nu0
 
     def is_valid_new_event(
         self,
@@ -99,8 +167,6 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
-        nu0_forward: float | None = None,
-        nu0_backward: float | None = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -120,10 +186,6 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
-        nu0_forward : float | None
-            Forward Vineyard prefactor nu0 (Hz) for this event, or None.
-        nu0_backward : float | None
-            Backward Vineyard prefactor nu0 (Hz) for this event, or None.
 
         Returns
         -------
@@ -195,8 +257,6 @@ class ReferenceEventTable:
                 dE_forward=dE_forward,
                 dE_backward=dE_backward,
                 cell=cell,
-                nu0_forward=nu0_forward,
-                nu0_backward=nu0_backward,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -372,10 +432,8 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
-        nu0_forward: float | None = None,
-        nu0_backward: float | None = None,
     ) -> tuple[pd.Series, pd.Series]:
-        """Build foward and backward events Series.
+        """Build foward and backward events Series (k0-placeholder rates).
 
         Parameters
         ----------
@@ -393,10 +451,6 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
-        nu0_forward : float | None
-            Forward Vineyard prefactor nu0 (Hz), threaded into the forward rate.
-        nu0_backward : float | None
-            Backward Vineyard prefactor nu0 (Hz), threaded into the backward rate.
 
         Returns
         -------
@@ -404,6 +458,12 @@ class ReferenceEventTable:
             tuple containing :
             - a pd.Series of the foward reaction.
             - a pd.Series of the backward reaction.
+
+        Notes
+        -----
+        Rates are built WITHOUT a per-event nu0 (the htst/rpa backend resolves
+        to its k0 fallback here); for accepted events ``_backfill_prefactors``
+        patches k/k_prefactor/nu0 afterwards from the batched engine results.
 
         """
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
@@ -476,7 +536,7 @@ class ReferenceEventTable:
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
                 "final_positions": min2_positions[neighbor_list_forwward],
                 "energy_barrier": dE_forward,
-                "k": (rc_forward := self.rate_constant.compute_rate(dE_forward, nu0=nu0_forward)).rate,
+                "k": (rc_forward := self.rate_constant.compute_rate(dE_forward)).rate,
                 "k_prefactor": rc_forward.prefactor,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
@@ -501,7 +561,7 @@ class ReferenceEventTable:
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
                 "energy_barrier": dE_backward,
-                "k": (rc_backward := self.rate_constant.compute_rate(dE_backward, nu0=nu0_backward)).rate,
+                "k": (rc_backward := self.rate_constant.compute_rate(dE_backward)).rate,
                 "k_prefactor": rc_backward.prefactor,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
@@ -514,8 +574,9 @@ class ReferenceEventTable:
         )
 
         if self._htst_active:
-            dfevent_forward["nu0"] = nu0_forward
-            dfevent_backward["nu0"] = nu0_backward
+            # placeholder; _backfill_prefactors fills the accepted rows
+            dfevent_forward["nu0"] = None
+            dfevent_backward["nu0"] = None
 
         return dfevent_forward, dfevent_backward
     

@@ -119,7 +119,11 @@ class Initializer:
             )
         else:
             self.kmc.loggers.info("log", ":=> Generate a empty reference table")
-        self.kmc.reference_table = ReferenceEventTable(self.kmc.config)
+        # The manager must already be attached to the KMC (run.py assigns it
+        # BEFORE _initialize) so the htst/rpa backend can fan out nu0 batches.
+        self.kmc.reference_table = ReferenceEventTable(
+            self.kmc.config, manager=self.kmc.manager
+        )
 
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""

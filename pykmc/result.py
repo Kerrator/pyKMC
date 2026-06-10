@@ -142,11 +142,6 @@ class EventSearchOutput:
         Index of the atom that moved the most during the transition.
     cell : Optional[np.ndarray]
         Simulation cell, if applicable.
-    nu0_forward : Optional[float]
-        Forward Vineyard prefactor nu0 (Hz), stamped by KMC.attach_prefactors for
-        the 'htst'/'rpa' styles; None for 'constant' or on per-event fallback.
-    nu0_backward : Optional[float]
-        Backward Vineyard prefactor nu0 (Hz); see ``nu0_forward``.
 
     """
 
@@ -159,8 +154,6 @@ class EventSearchOutput:
     move_atom_index: int
     #map: np.ndarray
     cell: Optional[np.ndarray] = None
-    nu0_forward: Optional[float] = None
-    nu0_backward: Optional[float] = None
 
 
 @dataclass

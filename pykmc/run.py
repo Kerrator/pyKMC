@@ -27,10 +27,11 @@ def main() -> None:
     factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0, has_global=True)
     manager = factory.launch()
     if manager is not None: #On rank 0
-        kmc = KMC(config) 
-        kmc._initialize()
+        kmc = KMC(config)
+        # The manager must be attached BEFORE _initialize: the reference table
+        # captures it at construction (htst/rpa nu0 batch fan-out).
         kmc.manager = manager
-#        kmc = KMC(config)
+        kmc._initialize()
         kmc.run()
 
 
