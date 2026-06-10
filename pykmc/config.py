@@ -528,6 +528,14 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+class ReconstructionConfig(BaseModel):
+    """Reconstruction parameters."""
+
+    push_fraction: float = Field(
+        default=0.15,
+        description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
+    )
+
 class BasinConfig(BaseModel):
     """Basin parameters"""
 
@@ -574,6 +582,8 @@ class Config(BaseModel):
     ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
+
+    reconstruction: ReconstructionConfig = Field(default_factory=ReconstructionConfig, description="Reconstruction parameters")
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
