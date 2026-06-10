@@ -1,7 +1,7 @@
 # pyKMC
 
 Python framework for adaptive Kinetic Monte Carlo (aKMC) simulations.  
-Full documentation: [LINK](https://hugomoison.github.io/pyKMC)
+Full documentation: [hugomoison.github.io/pyKMC](https://hugomoison.github.io/pyKMC) — use the version switcher to pick `latest` (main branch) or `develop`.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ pyKMC currently requires LAMMPS, pARTn and IRA (no alternative implementations e
 - [IRA](https://github.com/mammasmias/IterativeRotationsAssignments) : shape matching library
 
 > [!NOTE]
-> Detailed install instructions and automation scripts are available in `docs/install/`.
+> Detailed install instructions and the one-shot install scripts (`install_pykmc_mac.sh`, `install_pykmc_linux.sh`) are available in `docs/user_guide/install/`.
 
 ## Installation
 
@@ -68,7 +68,7 @@ More details available in the [IRA documentation](https://mammasmias.github.io/I
 
 ## Usage
 
-Running pyKMC requires MPI and an input file. See the [documention](https://hugomoison.github.io/pyKMC) and `/examples` for for input file format and examples.
+Running pyKMC requires MPI and an input file. See the [documentation](https://hugomoison.github.io/pyKMC) and `/examples` for input file format and examples.
 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in
