@@ -24,8 +24,9 @@ class ConstantBackend(PrefactorBackend):
     """
     name = "constant"
 
-    def __init__(self, config: ConstantBackendConfig) -> None:
+    def __init__(self, config: ConstantBackendConfig, manager: object = None) -> None:
         self.config = config
+        self.manager = manager  # accepted for ctor uniformity; unused
 
     def compute(self, **kwargs: object) -> float:
         """Return the constant prefactor.
