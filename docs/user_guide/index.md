@@ -1,6 +1,6 @@
 # User Guide 
 
-This guide walks through the simulation workflow and how to choose a simulation's parameters. For the exhaustive list of every configuration field, see the [KMC Parameters](parameters.md) reference; for a high-level description of the algorithm, see the [Algorithm Overview](general_algorithm.md). 
+This guide walks through the simulation workflow and how to choose a simulation's parameters. For the exhaustive list of every configuration field, see the [KMC Parameters](../parameters.md) reference; for a high-level description of the algorithm, see the [Algorithm Overview](../theory/general_algorithm.md). 
 
 pyKMC is an on-the-fly kinetic Monte Carlo (KMC) program.
 
@@ -86,22 +86,22 @@ In this mode, pyKMC counts the number of neighbors around each atom and checks w
     - Otherwise, it is labeled "noncrystal".
 This style should be only use when setting in the `[Control]` section `reconstruction = False`. (_Not working anymore for the moment_).
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
-  <img src="images/atomic_env_base.png" width="220" />
+  <img src="../images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">
     Using style=cna gives: 
   </div>
-  <img src="images/atomic_env_cna.png" width="300" />
+  <img src="../images/atomic_env_cna.png" width="300" />
 </div>
 
 - graph : 
 In this style, pyKMC constructs a graph from each atom's environment using pyNauty. 
 A unique, canonical certificate (a binary) is then computed using pyNauty, serving as the atom’s environment ID.
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
-  <img src="images/atomic_env_base.png" width="220" />
+  <img src="../images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">
     Using style=graph gives: 
   </div>
-  <img src="images/atomic_env_graph.png" width="300" />
+  <img src="../images/atomic_env_graph.png" width="300" />
 </div>
 
 - cna/graph : 
@@ -111,11 +111,11 @@ This hybrid mode provides a compromise:
     - If an atom is labeled "crystal", it keeps this simple ID. 
     - If it is labeled "noncrystal", a graph-based ID is computed. 
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
-  <img src="images/atomic_env_base.png" width="220" />
+  <img src="../images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">
     Using style=cna/graph gives: 
   </div>
-  <img src="images/atomic_env_cnagraph.png" width="300" />
+  <img src="../images/atomic_env_cnagraph.png" width="300" />
 </div>
 
 When searching for an event around a "noncrystal" atom, it may happen that another atom ends up being the one that moves the most. In this case, the resulting event will be tagged with the graph ID of that other atom.
@@ -126,7 +126,7 @@ To avoid this issue, you can instruct pyKMC to expand the graph style to the nth
 For example, when looking at a vacancy with `neighbors_add = 1` it will gives : 
 
 <div style="text-align: center;">
-<img src="images/atomic_env_radd.png" width="400" />
+<img src="../images/atomic_env_radd.png" width="400" />
 </div>
 
 Finally, the `[AtomicEnvironment]` section of the INI configuration file will look like this : 
@@ -158,7 +158,7 @@ nsearch = 50
 
 When an event is found, it is characterized by two energy barriers, a forward energy barrier $dE_{forward}$ and an inverse energy barrier $dE_{backward}$ : 
 <div style="text-align: center;">
-  <img src="images/pesevent.png" width="400" />
+  <img src="../images/pesevent.png" width="400" />
   <div style="font-size: 0.9em; color: gray; margin-top: 5px;">
     Potential energy surface
   </div>
@@ -291,32 +291,8 @@ Once both the input file and the initial configuration file are ready, launch th
 python -m pykmc -in <your_input_file_name> 
 ``` 
 
-## Using multiple lammps instances 
-
-To speed up event searches and the refinement part of the KMC loop, it is possible to use multiple LAMMPS instances.
-Each instance runs independently on a separate set of cores.
-
-The number of instances is defined by the n_sessions parameter in the [Control] section of the input file.
-The main KMC loop always runs on the main rank (rank 0), but you can choose whether the LAMMPS instances should use all other ranks only, or include rank 0 as well.
-This behavior is controlled by the engine_use_rank_0 parameter in the [Control] section.
-Note that enabling the use of rank 0 may slightly slow down the simulation, since that instance communicates via threads rather than MPI messages.
-
-For example, if you have 8 cores available and want to run 4 LAMMPS instances, each on different ranks than the master one, your input file should contain the following parameters:
-
-```INI 
-[Control]
-...
-n_sessions = 4 
-engine_use_rank_0 = False 
-... 
-``` 
-
-You can then start the simulation with:
-```bash 
-mpirun -n 8 python -m pykmc -in <your_input_file> 
-``` 
-The available cores will be automatically split according to your configuration.
-In this example, the LAMMPS instances will run on ranks 1–2, 3–4, 5–6, and 7, while the main KMC loop runs on rank 0.
+To speed up event searches and refinements with multiple LAMMPS instances running
+in parallel, see [Parallelization](parallelization.md).
 
 
 
