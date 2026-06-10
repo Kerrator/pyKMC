@@ -2,6 +2,7 @@ from .detection import Detector
 from .exploration import Explorer, BasinGenericEventExplorer
 from .connectivity import BasinStatesConnectivity
 from .selection import FPTASelector
+from . import fingerprinting
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from pykmc import System, Config, NeighborsList, AtomicEnvironment, ReferenceEventTable, PointSetRegistration, check_match, Reconstruction
@@ -124,6 +125,7 @@ class BasinsGenericEvents() :
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
         self.selector = FPTASelector()
         new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
+        self._state_fingerprints = {}  #state_index -> fingerprint vector (dedup pre-filter cache)
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
         self._next_state_index = 1  #monotonic state-index counter (state 0 is the initial state)
 
@@ -431,24 +433,57 @@ class BasinsGenericEvents() :
         return Ok(None)
 
 
-    def is_new_state(self, system) : 
-        #Loop over all other system in self.states to see if system is already known
+    def is_new_state(self, system) :
+        """Return the index of an equivalent known state, or -1 if the state is new.
 
-        for state_index, state_data in self.states.items():
-            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell) 
-            if are_equivalent : 
+        A cheap Chebyshev fingerprint pre-filter (see :mod:`pykmc.basins.fingerprinting`)
+        narrows the candidates before the full structural comparison, which dominates
+        deduplication cost as the basin grows.
+        """
+        fp_new = fingerprinting.compute_fingerprint(self.config, system.positions, system.cell, system.pbc)
+        fp_tol = fingerprinting.fingerprint_tolerance(self.config)
+
+        # Vectorized fingerprint rejection: compare against all cached fingerprints at once
+        fp_items = [
+            (si, fp)
+            for si, fp in self._state_fingerprints.items()
+            if len(fp) == len(fp_new)
+        ]
+        if fp_items:
+            indices, fps = zip(*fp_items)
+            fp_matrix = np.vstack(fps)
+            max_diffs = np.max(np.abs(fp_matrix - fp_new[np.newaxis, :]), axis=1)
+            candidates = [indices[i] for i in np.where(max_diffs <= fp_tol)[0]]
+        else:
+            candidates = list(self.states.keys())
+
+        for state_index in candidates:
+            state_data = self.states[state_index]
+            if state_data.system is None:
+                continue
+            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell)
+            if are_equivalent :
                 return state_index
-        return -1 
+        return -1
 
+    @staticmethod
+    def _wrap_positions(positions: np.ndarray, cell: np.ndarray) -> np.ndarray:
+        """Wrap positions into [0, box) for cKDTree periodic queries."""
+        box = np.diag(cell)
+        return np.mod(positions, box)
 
     def are_structures_equivalent(self, pos1, pos2, cell, tol=0.3):
 
         if len(pos1) != len(pos2):
             return False
 
+        # Wrap into the box before the boxsize-aware kd-tree query (correct periodic
+        # nearest-neighbour even when minimized positions drift outside [0, box)).
         box = np.diag(cell).tolist()
-        tree2 = cKDTree(pos2, boxsize=box)
-        distances, _ = tree2.query(pos1, k=1)
+        wrapped1 = self._wrap_positions(pos1, cell)
+        wrapped2 = self._wrap_positions(pos2, cell)
+        tree2 = cKDTree(wrapped2, boxsize=box)
+        distances, _ = tree2.query(wrapped1, k=1)
 
         return np.max(distances) < tol
 
@@ -473,3 +508,8 @@ class BasinsGenericEvents() :
         new_state =  StateData(system=system, environment=atomic_environment, neighbors_list=neighbors_list, transient=transient,  visited=visited)
 
         self.states[state_index]= new_state
+        #Cache the dedup fingerprint for this state (pre-filter for is_new_state)
+        if system is not None :
+            self._state_fingerprints[state_index] = fingerprinting.compute_fingerprint(
+                self.config, system.positions, system.cell, system.pbc
+            )
