@@ -120,4 +120,4 @@ print('All imports OK')
 ```
 
 A successful run prints `All imports OK`. If an import fails, see
-[Troubleshooting](../troubleshooting.md).
+[Troubleshooting](../../troubleshooting.md).

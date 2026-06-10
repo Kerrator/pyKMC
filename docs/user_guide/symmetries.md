@@ -2,13 +2,13 @@
 When a generic event is found, a Pandas Series is created containing, among other information, the initial and final positions of the event.
 
 <p align="center">
-  <img src="images/symmetries_initial_final_positions.png"  width="400"/>
+  <img src="../images/symmetries_initial_final_positions.png"  width="400"/>
 </p>
 
 To determine all symmetry-equivalent events:
 
 <p align="center">
-  <img src="images/symmetries_equivalent_events.png" width="400"/>
+  <img src="../images/symmetries_equivalent_events.png" width="400"/>
 </p>
 
 We use SOFI, a module from the IRA library, which provides all the symmetry operations of the atomic structure corresponding to the initial positions. After calling SOFI, we obtain an object that includes both the symmetry matrices and the associated permutation matrices.

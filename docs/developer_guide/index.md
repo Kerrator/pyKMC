@@ -33,7 +33,7 @@ pip install -e ".[dev]"   # ruff, mkdocs, mkdocstrings, mike, ...
 pip install pytest         # not in the project dependencies; install separately
 ```
 
-(See the [installation guide](install/installation.md) for the LAMMPS / pARTn /
+(See the [installation guide](../user_guide/install/installation.md) for the LAMMPS / pARTn /
 IRA components needed to actually run simulations.)
 
 ## Running the tests
