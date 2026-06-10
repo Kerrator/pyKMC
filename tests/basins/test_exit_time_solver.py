@@ -1,8 +1,8 @@
-import numpy as np 
+import numpy as np
 import numpy.testing as npt
-from pykmc.basins import solve_master_equation, BisectionSolver
+from pykmc.basins import solve_master_equation, BisectionSolver, QSDSolver
 
-class TestSolver : 
+class TestSolver :
 
     def test_solve_master_equation(self, test_logger):
 
@@ -58,9 +58,43 @@ class TestSolver :
 
         res = solver.solve()
 
-        if res.is_ok() : 
+        if res.is_ok() :
             t_exit = res.ok_value().t_exit
             test_logger.debug("Find t_exit = {}ps".format(t_exit))
-        else : 
+        else :
             err = res.err_value()
             test_logger.debug("Err while searching t_exit : {}".format(err))
+
+    def test_qsd_solver_two_state(self, test_logger) :
+        """QSD solver: closed-form exit time for a stiff two-transient generator.
+
+        Two transient states with fast mutual mixing rate w and small, equal escape
+        rate g. The quasi-stationary distribution is uniform (pi = [0.5, 0.5]), so
+        k_eff = g and t_exit = -ln(1 - r) / g.
+        """
+        w = 1.0e3   # fast transient mixing
+        g = 1.0e-3  # slow absorbing escape
+        # Reduced generator (columns ~ rates out): 2 transient + merged absorbing.
+        # Diagonal = total out-rate; off-diagonal transient = -mixing; last row = -escape.
+        M = np.array([
+            [w + g,   -w,      0.0],
+            [-w,       w + g,  0.0],
+            [-g,      -g,      0.0],
+        ])
+        r = 0.9
+        solver = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0]), r=r)
+        res = solver.solve()
+        assert res.is_ok()
+        npt.assert_allclose(solver.qsd, [0.5, 0.5], atol=1e-9)
+        npt.assert_allclose(solver.k_eff, g, rtol=1e-6)
+        npt.assert_allclose(res.ok_value().t_exit, -np.log(1.0 - r) / g, rtol=1e-6)
+
+    def test_qsd_solver_no_escape_errors(self, test_logger) :
+        """QSD solver returns Err when no absorbing escape is possible (k_eff <= 0)."""
+        M = np.array([
+            [1.0, -1.0, 0.0],
+            [-1.0, 1.0, 0.0],
+            [0.0,  0.0, 0.0],   # zero escape rates
+        ])
+        res = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0]), r=0.9).solve()
+        assert not res.is_ok()

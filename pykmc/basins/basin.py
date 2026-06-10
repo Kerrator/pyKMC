@@ -123,7 +123,7 @@ class BasinsGenericEvents() :
         self.explored_states = [] 
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(config=self.config, reference_table=self.reference_table)
-        self.selector = FPTASelector()
+        self.selector = FPTASelector(solver=self.config.basin.solver if self.config.basin is not None else "auto")
         new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
         self._state_fingerprints = {}  #state_index -> fingerprint vector (dedup pre-filter cache)
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
