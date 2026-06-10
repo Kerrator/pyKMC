@@ -428,12 +428,36 @@
 ## `Basin` Section (optional)
 
 <details><summary>Section Overview</summary>
-  Basin parameters
+  Basin parameters.
 </details>
 
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
+  </details>
+- **`strategy`** : `Literal['serial', 'wavefront']`, default = `'serial'`
+  <details><summary>Description</summary>
+  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool.
+  </details>
+- **`n_workers`** : `int`, default = `4`
+  <details><summary>Description</summary>
+  Number of MPI sessions used for the parallel basin phases when strategy = 'wavefront'.
+  </details>
+- **`max_states`** : `int`, optional
+  <details><summary>Description</summary>
+  Maximum transient states to explore. When reached, the remaining frontier is converted to absorbing states and exploration stops. None = unlimited.
+  </details>
+- **`fingerprint_coordination_thr`** : `int`, optional
+  <details><summary>Description</summary>
+  Atoms-of-interest fingerprint threshold for basin deduplication. Atoms with fewer neighbors (within rnei) than this threshold are 'atoms of interest'. The fingerprint has two components: (1) sorted distances from a periodic-aware (circular mean) defect centre-of-mass to each undercoordinated atom, and (2) the distance from defect COM to bulk COM. The circular mean ensures invariance under any periodic representation. Typical value: 9 for FCC surfaces. If None and the AtomicEnvironment style is 'coordination' or 'coordination/graph', auto-derives as coordination_threshold + 1. Otherwise falls back to the full COM-distance fingerprint.
+  </details>
+- **`fingerprint_tolerance`** : `float`, optional
+  <details><summary>Description</summary>
+  Maximum element-wise (Chebyshev) difference for the atoms-of-interest fingerprint pre-filter. If None, defaults to 0.5. Recommended: 1.0 for the best balance of speed and correctness (0.5 can miss true duplicates).
+  </details>
+- **`solver`** : `Literal['auto', 'bisection', 'qsd']`, default = `'auto'`
+  <details><summary>Description</summary>
+  Exit-time solver for the absorbing Markov chain. 'auto' picks the QSD (quasi-stationary distribution) solver for stiff generators (transient/absorbing rate ratio > 1e6) and the bisection solver otherwise. 'bisection' and 'qsd' force a specific solver.
   </details>
 
 ---
