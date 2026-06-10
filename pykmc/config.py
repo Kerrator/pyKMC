@@ -538,6 +538,7 @@ class ReconstructionConfig(BaseModel):
 
 class BasinConfig(BaseModel):
     """Basin parameters"""
+    style: Literal["global", "global/reconstruction"] = Field(default="global", description="Basin style used.")
 
     energy_thr: float = Field(
     default = 0.0,
