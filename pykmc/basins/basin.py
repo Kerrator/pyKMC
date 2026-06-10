@@ -612,17 +612,21 @@ class BasinsGenericEvents() :
             error_type = getattr(ErrorType, error_type_str, ErrorType.MPI_REMOTE_ERROR)
             return Err(ErrorInfo(type=error_type, message=message))
 
-        import ase.geometry
-        cell = self.states[from_state].system.cell
-        pbc = self.states[from_state].system.pbc
-        positions = ase.geometry.wrap_positions(
-            positions=mpi_result["min2_positions"], cell=cell, pbc=pbc)
+        from_system = self.states[from_state].system
+        # Route the engine's minimized positions through System.update_positions,
+        # exactly like the serial path (system_from_state). It wraps into the cell
+        # AND clamps tiny negative coordinates to zero - both needed: LAMMPS minimize
+        # can leave coordinates slightly outside the box (it only re-wraps on
+        # reneighbouring), and ase-style wrapping shifts boundary atoms (a slab layer
+        # at exactly z = 0) slightly negative. Either case kills the periodic cKDTree
+        # in NeighborsList.
         new_system = System(
-            positions=positions,
-            types=self.states[from_state].system.types,
-            cell=cell,
-            pbc=pbc,
-            index=np.arange(len(self.states[from_state].system.types)))
+            positions=from_system.positions.copy(),
+            types=from_system.types,
+            cell=from_system.cell,
+            pbc=from_system.pbc,
+            index=np.arange(len(from_system.types)))
+        new_system.update_positions(np.array(mpi_result["min2_positions"], copy=True))
         return Ok(new_system)
 
     def _reconstruct_state_mpi(self, from_state: int, event_idx: int, central_atom: int, sym_idx: int) -> "Result[System, ErrorInfo]" :

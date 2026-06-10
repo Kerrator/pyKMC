@@ -106,6 +106,50 @@ class TestIsNewStateBatch:
         assert basin.is_new_state(sys_b) == -1
 
 
+class TestResultFromMpi:
+
+    def test_engine_positions_sanitized_into_box(self):
+        """Engine positions at/over the cell boundary must survive _result_from_mpi.
+
+        Regression (both directions): re-wrapping with ase.geometry.wrap_positions
+        shifted boundary atoms (a slab layer at z = 0) to ~-5e-6, and raw LAMMPS
+        minimize output can sit slightly OUTSIDE the box (LAMMPS only re-wraps on
+        reneighbouring). Either kills the periodic cKDTree in NeighborsList
+        ('Negative input data...' / 'Some input data are greater than the size...').
+        _result_from_mpi must route through System.update_positions, which wraps and
+        clamps exactly like the serial path.
+        """
+        from scipy.spatial import cKDTree
+
+        config = _com_config()
+        basin = _make_basin(config)
+        from_positions = np.array([[0.0, 0.0, 0.0], [2.0, 2.0, 0.0],
+                                   [1.0, 1.0, 1.5], [3.0, 3.0, 1.5]])
+        basin.states[0] = StateData(system=_make_system(from_positions),
+                                    environment=None, neighbors_list=None)
+
+        # engine output: one atom slightly negative, one slightly past the box edge
+        engine_positions = from_positions.copy()
+        engine_positions[0, 2] = -5.0e-6          # ase-style boundary negative
+        engine_positions[3, 0] = 10.0 + 3.0e-7    # LAMMPS drift past the box
+
+        mpi_result = {"ok": True, "min2_positions": engine_positions, "min2_etot": -1.0}
+        result = basin._result_from_mpi(mpi_result, from_state=0)
+        assert result.is_ok()
+        pos = result.ok_value().positions
+        box = np.diag(result.ok_value().cell)
+        assert (pos >= 0.0).all()
+        assert (pos < box).all()
+        # the exact construction NeighborsList performs must not raise
+        cKDTree(pos, boxsize=box.tolist())
+
+    def test_error_payload_maps_to_err(self):
+        basin = _make_basin(_com_config())
+        result = basin._result_from_mpi({"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
+                                         "message": "no match"}, from_state=0)
+        assert not result.is_ok()
+
+
 class TestSerialTimingCheckpoint:
 
     def test_finalizer_writes_serial_checkpoints(self, tmp_path, monkeypatch):
