@@ -518,6 +518,12 @@ class RateConstantConfig(BaseModel):
         description="HTST: require exactly one negative saddle mode; otherwise fall "
         "back to k0 for that event.",
     )
+    premin: bool = Field(
+        default=True,
+        description="HTST: before each dynamical_matrix Hessian, relax the "
+        "surroundings of the event core (atoms within atomicenvironment.rcut of "
+        "the central atom held fixed, environment minimized).",
+    )
 
     @model_validator(mode="after")
     def _check_nu0_window(self) -> "RateConstantConfig":

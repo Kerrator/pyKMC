@@ -66,6 +66,7 @@ class _RC:
     nu0_min_THz = 1e-6
     nu0_max_THz = 1e6
     require_one_negative_mode = True
+    premin = False  # pin the original path; premin behavior is owned by test_premin_av
 
 
 class _Cfg:
@@ -121,6 +122,7 @@ class _RCXval:
     nu0_min_THz = 1e-6
     nu0_max_THz = 1e6
     require_one_negative_mode = True
+    premin = False  # pin the canonical ~12.6 THz path; premin owned by test_premin_av
 
 
 class _CfgXval:

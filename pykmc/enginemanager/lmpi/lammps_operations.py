@@ -3,7 +3,7 @@ from ase.data import atomic_numbers, atomic_masses
 import ctypes
 import pypARTn
 import os
-from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV
+from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_AV, make_AV, redefine_atoms, reset
 from ...atomic_environment import AtomicEnvironment
 
 from ...result import  (
@@ -14,7 +14,7 @@ from ...result import  (
     ErrorType,
     EventRefinementOutput,
 )
-from pykmc.rate_constant.prefactor import compute_event_prefactors as _compute_event_prefactors
+from pykmc.rate_constant.prefactor import EventPrefactors, compute_event_prefactors as _compute_event_prefactors
 from pykmc.config import PhysicalConstants
 from pykmc.htst.constants import thz_to_hz
 
@@ -114,23 +114,96 @@ def get_forces(engine, positions=None):
         return result
 
 
+def _prefactors_failure(reason: str) -> EventPrefactors:
+    """Uniform graceful-fallback result (the op must never raise)."""
+    return EventPrefactors(
+        nu0_forward=None, nu0_backward=None, n_free=0, n_neg_saddle=-1,
+        ok_forward=False, ok_backward=False, reason=reason,
+    )
+
+
+def _premin_surroundings(
+    engine: object, config: object, positions: np.ndarray, central_atom_idx: int
+) -> np.ndarray:
+    """Relax the surroundings of the event core before a Hessian.
+
+    The core (atoms within ``atomicenvironment.rcut`` of the central atom) is
+    frozen and the environment is minimized — the same ``minimize_freeze_core``
+    pattern ``partn_refine`` uses. Freezing the core is what makes this safe at
+    the saddle geometry. Returns the relaxed positions.
+    """
+    set_positions(engine, positions)
+    engine.command("run 0")  # rebuild neighbour lists after the scatter
+    minimize_freeze_core(
+        engine, positions[int(central_atom_idx)], config.atomicenvironment.rcut, maxiter=10
+    )
+    return get_positions(engine)
+
+
 def compute_event_prefactors(
-    engine,
-    config,
-    central_atom_idx,
-    min1_positions,
-    saddle_positions,
-    min2_positions,
-    types,
-    cell,
-):
-    """Per-event Vineyard nu0 on one session: binds get_forces to the orchestrator.
+    engine: object,
+    config: object,
+    central_atom_idx: int,
+    min1_positions: np.ndarray,
+    saddle_positions: np.ndarray,
+    min2_positions: np.ndarray,
+    types: "list[str]",
+    cell: np.ndarray,
+) -> EventPrefactors:
+    """Per-event Vineyard nu0 on one session: binds the eskm Hessian to the orchestrator.
 
     Runs entirely on this engine; concurrency comes from one job per event
     (see Manager.compute_event_prefactors). Never raises — returns an
     EventPrefactors whose nu0_* are None on any failure.
+
+    Optional behaviors:
+    - ``config.rateconstant.premin`` (default True): each geometry's
+      surroundings are relaxed (event core within ``atomicenvironment.rcut``
+      frozen) before its Hessian, via ``minimize_freeze_core``.
+    - ``config.control.active_volume``: the engine is re-defined to the cropped
+      AV subsystem around the central atom (buffer frozen, ``partn_search_AV``
+      pattern); geometries/types/indices are remapped to AV-local before the
+      Hessians. Requires ``activevolume.ract >= rateconstant.free_radius``.
     """
     rc = config.rateconstant
+    min1 = min1_positions
+    sad = saddle_positions
+    min2 = min2_positions
+    central = int(central_atom_idx)
+    types_used = list(types)
+
+    try:
+        if getattr(getattr(config, "control", None), "active_volume", False):
+            ract = config.activevolume.ract
+            if ract < rc.free_radius:
+                return _prefactors_failure(
+                    f"active volume ract ({ract}) < free_radius ({rc.free_radius}); "
+                    "the AV must contain the Hessian free region"
+                )
+            # Mirror partn_search_AV: rebuild the engine as the AV subsystem.
+            reset(engine, config, cell)
+            av_positions, av_idx, buffer_idx = define_AV(config, central, min1, cell)
+            atom_map = np.array(av_idx, dtype=int)
+            map_type = {
+                atom_type: {"ref": i + 1}
+                for i, atom_type in enumerate(sorted(set(types_used)))
+            }
+            int_types = np.array([map_type[t]["ref"] for t in types_used])
+            redefine_atoms(engine, av_positions, int_types[atom_map])
+            make_AV(engine, atom_map, buffer_idx)
+            # Crop geometries and remap indices to the AV-local frame.
+            min1 = min1[atom_map]
+            sad = sad[atom_map]
+            min2 = min2[atom_map]
+            types_used = [types_used[i] for i in atom_map]
+            central = int(np.where(atom_map == int(central_atom_idx))[0][0])
+
+        if getattr(rc, "premin", True):
+            min1 = _premin_surroundings(engine, config, min1, central)
+            sad = _premin_surroundings(engine, config, sad, central)
+            min2 = _premin_surroundings(engine, config, min2, central)
+    except Exception as exc:  # AV setup / pre-min failure -> graceful k0 fallback
+        return _prefactors_failure(f"{type(exc).__name__}: {exc}")
 
     def hessian_fn(positions, free_indices):
         # Use the configured finite-difference step so the dynamical_matrix
@@ -146,11 +219,11 @@ def compute_event_prefactors(
     return _compute_event_prefactors(
         forces_fn=None,
         hessian_fn=hessian_fn,
-        min1=min1_positions,
-        saddle=saddle_positions,
-        min2=min2_positions,
-        types=list(types),
-        central_index=int(central_atom_idx),
+        min1=min1,
+        saddle=sad,
+        min2=min2,
+        types=types_used,
+        central_index=central,
         free_radius=rc.free_radius,
         fd_step=rc.fd_step,
         cell=cell,
