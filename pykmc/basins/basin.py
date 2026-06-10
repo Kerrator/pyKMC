@@ -203,9 +203,6 @@ class BasinsGenericEvents() :
             #Clean heaby state object : 
             self.states[to_explore].release_heavy_objects()
             
-            if to_explore == 1 : #TESTST 
-                self.connectivity_table.save("test.pickle")
-
         return Ok(None)
 
     def select_event(self) : 
@@ -286,16 +283,26 @@ class BasinsGenericEvents() :
 
         # Move system do saddle positions
         neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
-        new_system.update_positions(saddle_positions, atom_idx = neighbors)
 
-        #Reconstruct the event
-        #future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
-        #min_pos, _ = future.result()
+        if self.config.basin.style == "global" : 
+            new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
+            min2_pos, _ = self.manager.global_minimize_with_results(self.config, positions=new_system.positions.copy())
+            new_system.update_positions(min2_pos)
 
-        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors)
-        if not result.is_ok() :
-            return result
-        new_system.update_positions(result.ok_value().min2_positions)
+        elif self.config.basin.style == "global/reconstruction" : 
+            new_system.update_positions(saddle_positions, atom_idx = neighbors)
+
+            #Reconstruct the event
+            #future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
+            #min_pos, _ = future.result()
+
+            result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors)
+            if not result.is_ok() :
+                return result
+            new_system.update_positions(result.ok_value().min2_positions)
+        
+        else : 
+            raise ValueError(f"Unknown {self.config.basin.style} style parameter.")
 
         return Ok(new_system)
 
