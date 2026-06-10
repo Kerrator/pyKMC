@@ -37,6 +37,63 @@ class TestStatesConnectivity :
         conn1.change_state_index(2,1)
         test_logger.debug("After update state index : df = {} \n".format(conn1.get_table()))
 
+    def test_batch_insert_matches_serial(self, test_logger) :
+        """add_connectivity_batch + merge_batch must produce the same table as per-row adds.
+
+        This guards the lazy row-buffer rewrite: the O(N^2)-avoiding fast paths must be
+        observationally identical to repeated add_connectivity().
+        """
+        from pykmc.basins import BasinStatesConnectivity
+
+        rows = [
+            dict(state=0, state_connexion=i, event_connexion=10 + i, central_atom=i,
+                 sym=0, transient=(i % 2 == 0), dE_forward=0.1 * i, k_forward=1.0,
+                 dE_backward=0.2 * i, k_backward=1.0)
+            for i in range(1, 6)
+        ]
+
+        serial = BasinStatesConnectivity()
+        for r in rows :
+            serial.add_connectivity(**r)
+
+        batched = BasinStatesConnectivity()
+        batched.add_connectivity_batch(rows)
+
+        import pandas as pd
+        pd.testing.assert_frame_equal(
+            serial.df.reset_index(drop=True), batched.df.reset_index(drop=True)
+        )
+
+        #merge_batch of two single-row tables == two serial adds
+        a = BasinStatesConnectivity(); a.add_connectivity(**rows[0])
+        b = BasinStatesConnectivity(); b.add_connectivity(**rows[1])
+        merged = BasinStatesConnectivity()
+        merged.merge_batch([a, b])
+        ref = BasinStatesConnectivity()
+        ref.add_connectivity(**rows[0]); ref.add_connectivity(**rows[1])
+        pd.testing.assert_frame_equal(
+            merged.df.reset_index(drop=True), ref.df.reset_index(drop=True)
+        )
+
+    def test_save_load_roundtrip_formats(self, test_logger, tmp_path) :
+        """save()/load() round-trip the table for pickle, csv, and parquet."""
+        from pykmc.basins import BasinStatesConnectivity, StatesConnectivity
+
+        conn = BasinStatesConnectivity()
+        conn.add_connectivity(state=0, state_connexion=1, event_connexion=11, central_atom=3,
+                              sym=0, transient=True, dE_forward=0.1, k_forward=2.0,
+                              dE_backward=0.3, k_backward=4.0)
+        import pandas as pd
+        for ext in ("pickle", "csv", "parquet") :
+            path = str(tmp_path / f"conn.{ext}")
+            conn.save(path)
+            loaded = StatesConnectivity.load(path)
+            pd.testing.assert_frame_equal(
+                conn.df.reset_index(drop=True),
+                loaded.df.reset_index(drop=True),
+                check_dtype=False,  # csv loses exact dtypes; values must still match
+            )
+
     def test_reorder_then_transient_normalization(self, test_logger) :
         """After reorder, the per-row transient flag must match the index range.
 
