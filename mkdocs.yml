@@ -1,26 +1,37 @@
 site_name: pyKMC
 theme:
   name: material
+  font:
+    code: JetBrains Mono
   palette:
-    scheme: slate
-    primary: blue grey
-    accent: orange
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep-orange
+      accent: red
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep-orange
+      accent: red
+      toggle:
+        icon: material/brightness-3
+        name: Switch to light mode
+  
   features:
-  - content.code.copy  # Ajoute un bouton "Copier" sur les blocs de code
-  - content.code.annotate  # Active le surlignage de syntaxe
-  - content.code.highlight  # Améliore le rendu du code
+  - content.code.copy  
+  - content.code.annotate  
+  - content.code.highlight  
 
 nav:
   - Home: index.md
   - Getting Started:
       - Installation: install/installation.md
-  - User Guide : user_guide.md
-  - Restarting a Simulation: restart.md
+      - User Guide: user_guide.md
   - Troubleshooting: troubleshooting.md
-  - KMC Parameters : parameters.md
-  - Tutorial: 
-      - pyKMC Workflow : 0-pyKMC-workflow.md 
-      - Simple example : 1-pyKMC-simple.md
+  - KMC Parameters: parameters.md
+  - Developer Guide: developer_guide.md
   - API Reference: 
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
@@ -54,7 +65,12 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.superfences
 
+extra:
+  version:
+    provider: mike
+
 plugins:
+  - mike:
   - mkdocstrings:
       handlers:
         python:
@@ -68,5 +84,8 @@ plugins:
             show_root_heading: true
   - search:
   - mkdocs-jupyter:
+extra_css:
+  - stylesheets/gruvbox.css
+
 use_directory_urls: false
 site_url: https://hugomoison.github.io/pyKMC/
