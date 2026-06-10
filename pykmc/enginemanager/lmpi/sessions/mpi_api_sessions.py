@@ -252,6 +252,46 @@ class MpiApiSession :
         finally :
             self._is_busy = False
 
+    def get_forces(self, positions: "np.ndarray | None" = None) -> "np.ndarray":
+        """Request the (N, 3) forces from the engine (run 0 + gather)."""
+        self._is_busy = True
+        try:
+            self.send_message({"type": "get_forces", "value": {"positions": positions}})
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result":
+                return msg["value"]
+            else:
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
+            self._is_busy = False
+
+    def dynamical_matrix_eskm(
+        self,
+        positions: "np.ndarray",
+        free_indices: "np.ndarray | list[int] | None" = None,
+        dx: float = 1e-2,
+    ) -> "np.ndarray":
+        """Request the mass-weighted partial Hessian (LAMMPS eskm) from the engine."""
+        self._is_busy = True
+        try:
+            self.send_message(
+                {
+                    "type": "dynamical_matrix_eskm",
+                    "value": {
+                        "positions": positions,
+                        "free_indices": free_indices,
+                        "dx": dx,
+                    },
+                }
+            )
+            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+            if msg.get("type") == "result":
+                return msg["value"]
+            else:
+                raise RuntimeError(f"Unexpected message type: {msg}")
+        finally:
+            self._is_busy = False
+
     def compute_event_prefactors(
         self, config, central_atom_idx, min1_positions, saddle_positions,
         min2_positions, types, cell,

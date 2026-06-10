@@ -372,7 +372,7 @@ class TestLammpsApiMpiEngine :
 
 
     @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
-    def test_minimize_with_results_manager(self, system: System, config: Config)  : 
+    def test_minimize_with_results_manager(self, system: System, config: Config)  :
         factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0)
         manager = factory.launch()
         if manager is None:
@@ -383,6 +383,42 @@ class TestLammpsApiMpiEngine :
         positions, total_energy = futures.result()
         print(positions)
         print(total_energy)
+        manager.close_all()
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_compute_forces_and_dynamical_matrix_manager(self, system: System, config: Config) -> None:
+        """Forces + eskm Hessian round-trip through the session pool (local mode).
+
+        Uses the n_sessions=7 / engine_use_rank_0=False layout (mpirun -n 8) --
+        the rank-0-as-engine mode of the fixture config has a known deadlock on
+        this branch lineage (fixed separately on develop-refactoring, PR #70).
+        """
+        if MPI.COMM_WORLD.Get_size() < 8:
+            pytest.skip("needs mpirun -n 8 (n_sessions=7, engine_use_rank_0=False)")
+        config.control.n_sessions = 7
+        config.control.engine_use_rank_0 = False
+        factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0)
+        manager = factory.launch()
+        if manager is None:
+            return  # Engine processes stop here
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        # jobs run on the LOCAL session pool; engines end initialization in global mode
+        manager.use_local()
+
+        f = manager.compute_forces(positions=system.positions.copy())
+        forces = f.result()
+        assert forces.shape == (system.positions.shape[0], 3)
+        assert np.isfinite(forces).all()
+
+        free = [0, 1]
+        g = manager.compute_dynamical_matrix(
+            positions=system.positions.copy(), free_indices=free, dx=0.01
+        )
+        hessian = g.result()
+        assert hessian.shape == (3 * len(free), 3 * len(free))
+        assert np.isfinite(hessian).all()
+        assert np.allclose(hessian, hessian.T)  # symmetrized by the op
         manager.close_all()
 
         

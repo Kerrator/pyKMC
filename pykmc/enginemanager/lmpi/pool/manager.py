@@ -193,6 +193,19 @@ class Manager:
             futures.append(f)
         return futures
 
+    def compute_forces(self, positions: object = None) -> Future:
+        """Compute the (N, 3) forces on one session of the pool."""
+        return self.submit_job("get_forces", {"positions": positions})
+
+    def compute_dynamical_matrix(
+        self, positions: object, free_indices: object = None, dx: float = 1e-2
+    ) -> Future:
+        """Compute the mass-weighted partial Hessian (eskm) on one session of the pool."""
+        return self.submit_job(
+            "dynamical_matrix_eskm",
+            {"positions": positions, "free_indices": free_indices, "dx": dx},
+        )
+
     def close_all(self):
         """
         Close all sessions and their underlying engines.

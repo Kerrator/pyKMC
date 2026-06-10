@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, compute_event_prefactors
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, compute_event_prefactors, get_forces, dynamical_matrix_eskm
 from ...messenger import QueueMessenger, MpiMessenger
 
 class MpiApiEngine() : 
@@ -57,6 +57,8 @@ class MpiApiEngine() :
             "minimize_with_results" : minimize_with_results,
             "get_potential_energy" : get_potential_energy,
             "compute_event_prefactors": compute_event_prefactors,
+            "get_forces": get_forces,
+            "dynamical_matrix_eskm": dynamical_matrix_eskm,
         }
 
 
