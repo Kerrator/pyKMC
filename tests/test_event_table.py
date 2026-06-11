@@ -46,3 +46,17 @@ def test_remove_duplicates_skips_dealloying_rows():
 
     # Both rows survive; the dealloying row is never compared for duplicates.
     assert len(table.table) == 2
+
+
+def test_dealloying_active_table_clear_primitive():
+    # The KMC loop drops all carried-over rows after a dealloying step because
+    # remove_atom shifts every index above the removed atom. This covers the
+    # clear expression used there: empty the rows, keep the schema.
+    df = _migration_rows_without_event_type()
+    table = ActiveEventTable(config=_minimal_config(), event_dataframe=df)
+    columns_before = list(table.table.columns)
+
+    table.table = table.table.iloc[0:0].reset_index(drop=True)
+
+    assert len(table.table) == 0
+    assert list(table.table.columns) == columns_before

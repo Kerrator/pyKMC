@@ -417,6 +417,13 @@ class KMC:
                 elapsed_real
             )
 
+            if is_dealloying:
+                # remove_atom shifted every index above the removed atom, so any
+                # carried-over active events (recycled or not) now point at the
+                # wrong atoms. The active table is the only persistent structure
+                # holding absolute atom indices across steps; drop all rows.
+                self.active_table.table = self.active_table.table.iloc[0:0].reset_index(drop=True)
+
             # == Update variables ==
             self.neighbors_list = NeighborsList(
                 self.system,
