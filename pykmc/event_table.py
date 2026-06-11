@@ -688,6 +688,7 @@ class ActiveEventTable:
             }
             if self._htst_active:
                 columns["nu0"] = pd.Series(dtype="float64")
+                columns["nu0_refined"] = pd.Series(dtype="bool")
             self.table = pd.DataFrame(columns)
 
     def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
@@ -773,6 +774,9 @@ class ActiveEventTable:
         )
         if self._htst_active:
             dfactive["nu0"] = event_refinement_output.nu0
+            # False until backfill_refined_prefactors attempts this row; rows
+            # recycled across steps keep True and are never recomputed.
+            dfactive["nu0_refined"] = False
         return dfactive
 
     def backfill_refined_prefactors(self, system: System, neighbors_list: object) -> None:
@@ -798,7 +802,11 @@ class ActiveEventTable:
         """
         if not self._htst_active:
             return
-        refined_rows = self.table[self.table["refined"] == "T"]
+        # Skip rows already attempted (e.g. recycled across KMC steps): each
+        # refined event costs at most ONE Hessian batch over its lifetime.
+        refined_rows = self.table[
+            (self.table["refined"] == "T") & (~self.table["nu0_refined"].astype(bool))
+        ]
         if refined_rows.empty:
             return
         backfill: "list[tuple[int, dict[str, object]]]" = []
@@ -828,6 +836,9 @@ class ActiveEventTable:
         )
         for (idx, _payload), fut in zip(backfill, futures, strict=True):
             pre = fut.result()
+            # Mark attempted regardless of outcome so a recycled row (or a
+            # systematically failing geometry) is never re-submitted.
+            self.table.loc[idx, "nu0_refined"] = True
             if pre.nu0_forward is None:
                 logger.info(
                     "[htst] refined nu0 fallback, keeping inherited values "

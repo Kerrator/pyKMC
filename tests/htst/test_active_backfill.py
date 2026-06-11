@@ -184,3 +184,36 @@ def test_constant_style_is_noop(
     table.backfill_refined_prefactors(sys_, nl)
 
     assert fake.calls == []
+
+
+def test_recycled_rows_are_not_recomputed(setup: Any) -> None:
+    """Rows that already got a site-specific nu0 never cost a second Hessian.
+
+    Simulates event recycling (the active table persists across steps and
+    refined rows survive pruning): a second backfill pass must submit ZERO
+    payloads for already-computed rows.
+    """
+    config, sys_, nl, neighbors = setup
+    fake = FakeManager([_prefactors(5.0e12), _prefactors(9.0e12)])
+    table = ActiveEventTable(config, manager=fake)
+    table.add_events([_refined_event(sys_, neighbors, 0, "T", nu0_inherited=7.0e11)])
+
+    table.backfill_refined_prefactors(sys_, nl)  # step N: computes
+    table.backfill_refined_prefactors(sys_, nl)  # step N+1: row was recycled
+
+    assert len(fake.calls) == 1  # no second fan-out
+    assert table.table.iloc[0]["nu0"] == 5.0e12  # first result kept
+
+
+def test_fallback_rows_are_not_retried(setup: Any) -> None:
+    """A failed nu0 is attempted once, not re-attempted every recycled step."""
+    config, sys_, nl, neighbors = setup
+    fake = FakeManager([_prefactors(None), _prefactors(5.0e12)])
+    table = ActiveEventTable(config, manager=fake)
+    table.add_events([_refined_event(sys_, neighbors, 0, "T", nu0_inherited=7.0e11)])
+
+    table.backfill_refined_prefactors(sys_, nl)
+    table.backfill_refined_prefactors(sys_, nl)
+
+    assert len(fake.calls) == 1
+    assert table.table.iloc[0]["nu0"] == 7.0e11  # inherited value kept
