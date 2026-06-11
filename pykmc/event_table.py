@@ -791,8 +791,12 @@ class ActiveEventTable:
         tol_energy = 0.1 #eV
         grouped = []
 
-        # Only check migration events for duplicates (dealloying events have no saddle positions)
-        migration_table = self.table[self.table.get("event_type", "migration") != "dealloying"]
+        # Only check migration events for duplicates (dealloying events have no saddle positions).
+        # Tables without the column (e.g. loaded from an older pickle) are all-migration.
+        if "event_type" in self.table.columns:
+            migration_table = self.table[self.table["event_type"] != "dealloying"]
+        else:
+            migration_table = self.table
 
         for idx, row in migration_table.iterrows():
             central_atom = row["atom_index"]
