@@ -308,10 +308,10 @@ class KMC:
                     else :
                        self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
                        self.system.update_positions(basin.states[0].system.positions)
-                       self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                       self._apply_original_migration_event(result_reconstruction)
                 else :
                     self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
-                    self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                    self._apply_original_migration_event(result_reconstruction)
                 if basin.connectivity_table is not None :
                     basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
                 #update delta_t, ktot (use basin infos)
@@ -324,8 +324,7 @@ class KMC:
                 )
                 self.active_table.recycler = saved_recycler
             else :
-                self.system.update_positions(result_reconstruction.ok_value().min2_positions)
-                self.total_energy = result_reconstruction.ok_value().min2_etot
+                self._apply_original_migration_event(result_reconstruction)
                 # == Event recycling: prune the active table for next step ==
                 self.active_table.prune_for_recycling(
                     idx_selected_event, self.system, self._pre_exec_positions,
@@ -690,6 +689,11 @@ class KMC:
         """
         new_positions = active_table.table.loc[idx_selected_event].at["final_positions"]
         self.system.update_positions(new_positions)
+
+    def _apply_original_migration_event(self, result_reconstruction: Ok[ReconstructionOutput]) -> None:
+        reconstruction_output = result_reconstruction.ok_value()
+        self.system.update_positions(reconstruction_output.min2_positions)
+        self.total_energy = reconstruction_output.min2_etot
 
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
