@@ -803,6 +803,23 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
         t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
         delr2 = compute_delr(supposed_final, t2[nbr_indices], cell, pbc=pbc)
         if delr2 > matching_score_thr:
+            if os.environ.get("PYKMC_BASIN_DEBUG") == "1":
+                try:
+                    diffs = t2[nbr_indices] - supposed_final
+                    diffs_mic, _ = ase.geometry.find_mic(diffs, cell, pbc=pbc)
+                    magnitudes = np.linalg.norm(diffs_mic, axis=1)
+                    order = np.argsort(-magnitudes)
+                    topk = min(10, len(order))
+                    top = [
+                        (int(nbr_indices[i]), float(magnitudes[i]))
+                        for i in order[:topk]
+                    ]
+                    logger.warning(
+                        "[basin_reconstruct] MIN2 FAIL delr2=%.4f top |Δ| per-atom: %s",
+                        delr2, top,
+                    )
+                except Exception as exc:
+                    logger.warning("[basin_reconstruct] diag dump failed: %s", exc)
             return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
                     "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
 
