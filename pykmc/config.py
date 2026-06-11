@@ -553,7 +553,16 @@ class ReconstructionConfig(BaseModel):
 class BasinConfig(BaseModel):
     """Basin parameters."""
 
-    style: Literal["global", "global/reconstruction"] = Field(default="global", description="Basin style used.")
+    style: Literal["global", "global/reconstruction"] = Field(
+        default="global",
+        description="How basin states are generated from reference events, on both the "
+        "host-side serial path and the engine-side wavefront path. 'global' sets the "
+        "PSR-predicted final positions and minimizes once (no delr validation gates; "
+        "mislandings onto known states are absorbed by deduplication). "
+        "'global/reconstruction' performs the full reconstruction: transplant the saddle, "
+        "push toward and minimize both minima, and validate each against the PSR "
+        "prediction (delr1/delr2 vs psr.matching_score_thr).",
+    )
 
     energy_thr: float = Field(
     default = 0.0,
@@ -565,8 +574,7 @@ class BasinConfig(BaseModel):
         description="Basin BFS strategy. 'serial' explores one transient state at a time. "
         "'wavefront' batches each BFS frontier so reconstruction, deduplication, and "
         "exploration run per level, distributing reconstruction across the MPI session pool. "
-        "Wavefront reconstruction follows the 'global/reconstruction' style semantics "
-        "(saddle + push + two validated minimizations) regardless of the style setting.",
+        "Both strategies honor the 'style' setting for how each state is reconstructed.",
     )
 
     n_workers: int = Field(

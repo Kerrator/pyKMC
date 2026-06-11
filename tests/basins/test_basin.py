@@ -134,3 +134,70 @@ class TestBasin :
                 assert out.t_exit > 0.0, "{}: non-positive t_exit".format(label)
                 assert out.exit_state >= counts["n_transient"], "{}: exit not absorbing".format(label)
 
+    def test_serial_wavefront_equivalence_global_style(self, test_logger, config_Cu, reference_table_Cu_fake, system_Cu, visited_environments_Cu) :
+        """Same equivalence gate with style='global' pinned for both legs.
+
+        Validates the engine-side skip-reconstruction path (basin_reconstruct
+        honoring config.basin.style) against the host-side global path.
+        """
+        factory = ManagerFactory(n_sessions=config_Cu.control.n_sessions, use_rank_0=config_Cu.control.engine_use_rank_0)
+        manager = factory.launch()
+
+        if manager is not None: #On rank 0
+            try:
+                manager.initialize_sessions(config_Cu, system_Cu)
+
+                config_Cu.basin.style = "global"
+
+                config_Cu.basin.strategy = "serial"
+                result_serial, df_serial = _run_basin(
+                    manager, config_Cu, reference_table_Cu_fake, visited_environments_Cu, system_Cu)
+
+                config_Cu.basin.strategy = "wavefront"
+                result_wave, df_wave = _run_basin(
+                    manager, config_Cu, reference_table_Cu_fake, visited_environments_Cu, system_Cu)
+            finally:
+                manager.close_all()
+
+            assert result_serial.is_ok(), "serial basin failed: {}".format(result_serial.err_value())
+            assert result_wave.is_ok(), "wavefront basin failed: {}".format(result_wave.err_value())
+
+            sc = eqh.basin_state_counts(df_serial)
+            wc = eqh.basin_state_counts(df_wave)
+            print("[equivalence/global]", "serial:", sc, "| wavefront:", wc, flush=True)
+            test_logger.info("[equivalence/global] serial: {} | wavefront: {}".format(sc, wc))
+
+            eqh.assert_connectivity_equivalent(df_serial, df_wave, level="invariant")
+
+    def test_wavefront_budget_cap_lazy_exit(self, test_logger, config_Cu, reference_table_Cu_fake, system_Cu, visited_environments_Cu) :
+        """With max_states=1 the wavefront basin caps its frontier as deferred
+        absorbing states and still returns a valid exit (materialized lazily)."""
+        factory = ManagerFactory(n_sessions=config_Cu.control.n_sessions, use_rank_0=config_Cu.control.engine_use_rank_0)
+        manager = factory.launch()
+
+        if manager is not None: #On rank 0
+            try:
+                manager.initialize_sessions(config_Cu, system_Cu)
+
+                config_Cu.basin.style = "global/reconstruction"
+                config_Cu.basin.strategy = "wavefront"
+                config_Cu.basin.max_states = 1
+                basin = BasinsGenericEvents(config=config_Cu, reference_table=reference_table_Cu_fake,
+                                            known_environments=visited_environments_Cu, manager=None)
+                basin.manager = manager
+                result = basin.execute(system=system_Cu)
+                df = basin.connectivity_table.df.copy()
+                was_capped = basin._was_capped
+            finally:
+                config_Cu.basin.max_states = None
+                manager.close_all()
+
+            assert result.is_ok(), "capped basin failed: {}".format(result.err_value())
+            assert was_capped, "max_states=1 did not trigger the cap"
+            out = result.ok_value()
+            counts = eqh.basin_state_counts(df)
+            print("[budget-cap]", counts, "exit_state:", out.exit_state, flush=True)
+            assert out.t_exit > 0.0
+            assert out.exit_state >= counts["n_transient"]
+            assert out.final_positions is not None
+

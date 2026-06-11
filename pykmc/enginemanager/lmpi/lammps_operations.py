@@ -726,19 +726,30 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
             saddle = transform_positions(saddle, rmat, tr, perm)
             supposed_final = transform_positions(supposed_final, rmat, tr, perm)
 
-            # Build new system positions with saddle applied
-            new_positions = np.array(from_positions, copy=True)
-            new_positions[neighbor_indices] = saddle
+            style = config.basin.style if config.basin is not None else "global/reconstruction"
+            if style == "global":
+                #Skip-reconstruction style: land directly on the PSR-predicted final
+                #state and minimize once, with no delr gates — the engine-side mirror
+                #of the host-side 'global' semantics (basin.py system_from_state).
+                #Mislandings that equal a known state are absorbed by dedup; genuinely
+                #new mislandings enter the table under a transition they did not take.
+                new_positions = np.array(from_positions, copy=True)
+                new_positions[neighbor_indices] = supposed_final
+                proceed = {"step": "min_global", "positions": new_positions}
+            else:
+                # Build new system positions with saddle applied
+                new_positions = np.array(from_positions, copy=True)
+                new_positions[neighbor_indices] = saddle
 
-            # Push toward min1
-            saddle_toward_min1 = push_towards(
-                new_positions[neighbor_indices], supposed_initial,
-                fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
-            tmp_positions = np.array(new_positions, copy=True)
-            tmp_positions[neighbor_indices] = saddle_toward_min1
-            proceed = {"step": "min1", "positions": tmp_positions,
-                       "supposed_initial": supposed_initial, "supposed_final": supposed_final,
-                       "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+                # Push toward min1
+                saddle_toward_min1 = push_towards(
+                    new_positions[neighbor_indices], supposed_initial,
+                    fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                tmp_positions = np.array(new_positions, copy=True)
+                tmp_positions[neighbor_indices] = saddle_toward_min1
+                proceed = {"step": "min1", "positions": tmp_positions,
+                           "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                           "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
 
     # Broadcast control signal to all ranks
     proceed = engine.engine_comm.bcast(proceed, root=0)
@@ -746,6 +757,20 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     if proceed is None or (isinstance(proceed, dict) and proceed.get("ok") is False):
         if engine.rank == 0:
             return proceed
+        return None
+
+    # --- style='global' short-circuit: one minimize from supposed_final, no gates ---
+    if isinstance(proceed, dict) and proceed.get("step") == "min_global":
+        set_positions(engine=engine, positions=proceed["positions"])
+        av_rmov = _basin_av_rmov(config)
+        if av_rmov is not None:
+            _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+        else:
+            minimize(engine, config)
+        min2_pos = get_positions(engine)
+        min2_etot = get_total_energy(engine)
+        if engine.rank == 0:
+            return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
         return None
 
     # --- Minimize toward min1 (all ranks) ---

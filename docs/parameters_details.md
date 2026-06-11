@@ -437,7 +437,7 @@
 
 - **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
   <details><summary>Description</summary>
-  Basin style used.
+  How basin states are generated from reference events, on both the host-side serial path and the engine-side wavefront path. 'global' sets the PSR-predicted final positions and minimizes once (no delr validation gates; mislandings onto known states are absorbed by deduplication). 'global/reconstruction' performs the full reconstruction: transplant the saddle, push toward and minimize both minima, and validate each against the PSR prediction (delr1/delr2 vs psr.matching_score_thr).
   </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
@@ -445,7 +445,7 @@
   </details>
 - **`strategy`** : `Literal['serial', 'wavefront']`, default = `'serial'`
   <details><summary>Description</summary>
-  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool. Wavefront reconstruction follows the 'global/reconstruction' style semantics (saddle + push + two validated minimizations) regardless of the style setting.
+  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool. Both strategies honor the 'style' setting for how each state is reconstructed.
   </details>
 - **`n_workers`** : `int`, default = `4`
   <details><summary>Description</summary>
