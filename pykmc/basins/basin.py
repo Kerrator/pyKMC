@@ -84,14 +84,24 @@ class BasinsGenericEvents() :
             result = self.construct_connexion_table()
         if not result.is_ok() :
             return result
+        #A budget can in principle fire before state 0 was even explored, leaving an
+        #empty table; fall back to the plain KMC event instead of crashing downstream.
+        if len(self.connectivity_table.df) == 0:
+            return Err(ErrorInfo(
+                type=ErrorType.BASIN_NO_VIABLE_EXIT,
+                message="basin exploration produced no connectivity rows"))
         #reorder states index
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
         #Remap the exit-machinery containers through the same mapping (deferred /
         #excluded states have connectivity rows, so they appear in the mapping).
+        #The fingerprint cache MUST be remapped too: the lazy exit path runs
+        #is_new_state() post-reorder, and stale keys would crash or silently
+        #scramble the dedup pre-filter.
         self._exit_excluded_states = {mapping.get(s, s) for s in self._exit_excluded_states}
         self._deferred_states = {mapping.get(s, s) for s in self._deferred_states}
         self._deferred_systems = {mapping.get(s, s): v for s, v in self._deferred_systems.items()}
+        self._state_fingerprints = {mapping.get(s, s): fp for s, fp in self._state_fingerprints.items()}
         #Normalize the transient flag by index range. reorder_states_index() numbers the
         #transient states first (0..n_transient-1) and absorbing states after, but the
         #per-row 'transient' flag set during exploration can be stale after change_state_index()
@@ -111,6 +121,10 @@ class BasinsGenericEvents() :
         t_exit = result.ok_value().t_exit
         exit_state = result.ok_value().exit_state
 
+        #Snapshot k_tot from the same flags the generator that produced t_exit saw:
+        #lazy materialization below can merge states and shift the flags.
+        k_tot = self.connectivity_table.df.loc[self.connectivity_table.df["transient"] == False, "k_forward"].sum()  # noqa: E712
+
         #Deferred exits (budget-capped frontier) are materialized lazily here; a
         #materialization failure excludes that exit and redraws another.
         result = self._resolve_exit_state(t_exit, exit_state)
@@ -118,20 +132,26 @@ class BasinsGenericEvents() :
             return result
         exit_state = result.ok_value()
 
+        #Re-normalize the per-row transient flag: a lazy merge (change_state_index)
+        #can leave rows pointing at indices whose flag no longer matches the
+        #'absorbing iff index >= n_transient' invariant the persisted table assumes.
+        n_transient, _ = self._connectivity_state_counts()
+        self.connectivity_table.df["transient"] = self.connectivity_table.df["state_connexion"].apply(lambda x: x < n_transient)
+
         from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
-        #Ensure from_state is state are full 
+        #Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
 
         neighbors = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
-        return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions, 
-                              central_atom=central_atom, 
-                              saddle_positions=self.absorbing_saddle_positions[exit_state], 
-                              final_positions=self.states[exit_state].system.positions[neighbors], 
+        return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions,
+                              central_atom=central_atom,
+                              saddle_positions=self.absorbing_saddle_positions[exit_state],
+                              final_positions=self.states[exit_state].system.positions[neighbors],
                               neighbors=neighbors,
-                              energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"], 
-                              k_tot = self.connectivity_table.df.loc[self.connectivity_table.df["transient"] == False, "k_forward"].sum(),
+                              energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"],
+                              k_tot = k_tot,
                               t_exit = t_exit,
-                              exit_state = exit_state, 
+                              exit_state = exit_state,
                               from_state = from_state,
                               num_reference_event= event_idx))
         
@@ -581,8 +601,10 @@ class BasinsGenericEvents() :
                 candidates = list(self.states.keys())
 
         for state_index in candidates:
-            state_data = self.states[state_index]
-            if state_data.system is None:
+            #.get(): defense-in-depth — a cache/states keyspace desync must degrade
+            #to a missed pre-filter hit, not kill a multi-day run with KeyError.
+            state_data = self.states.get(state_index)
+            if state_data is None or state_data.system is None:
                 continue
             are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell)
             if are_equivalent :
@@ -749,14 +771,19 @@ class BasinsGenericEvents() :
         return Ok(state_idx)
 
     def _budget_breach_reason(self, n_explored: int, t_start: float) -> "str | None" :
-        """Return the breached [BASIN] budget as a label, or None when within budget."""
+        """Return the breached [BASIN] budget as a label, or None when within budget.
+
+        Never fires before the entry state was explored (n_explored == 0): a basin
+        with zero explored states has no connectivity rows and no possible exit, so
+        capping it would only produce a degenerate table.
+        """
         bc = self.config.basin
-        if bc is None:
+        if bc is None or n_explored == 0:
             return None
         if bc.max_states is not None and n_explored >= bc.max_states:
             return f"max_states={bc.max_states}"
         if bc.max_total_states is not None and \
-                len(self.states) + len(self._deferred_states) >= bc.max_total_states:
+                len(self.states) + len(self._deferred_states) + self._n_failed >= bc.max_total_states:
             return f"max_total_states={bc.max_total_states}"
         if bc.max_basin_walltime_s is not None and \
                 time.perf_counter() - t_start >= bc.max_basin_walltime_s:
@@ -831,7 +858,11 @@ class BasinsGenericEvents() :
             existing = self.is_new_state(new_system)
             if existing != -1:
                 self.connectivity_table.change_state_index(current_index=exit_state, new_index=existing)
-                if existing not in self.absorbing_saddle_positions and exit_state in self.absorbing_saddle_positions:
+                #Never transplant a saddle onto an excluded state: its rows belong
+                #to a different transition geometry.
+                if existing not in self.absorbing_saddle_positions \
+                        and existing not in self._exit_excluded_states \
+                        and exit_state in self.absorbing_saddle_positions:
                     self.absorbing_saddle_positions[existing] = self.absorbing_saddle_positions[exit_state]
                 return Ok(existing)
             self._add_state(state_index=exit_state, system=new_system, transient=False)
@@ -844,7 +875,9 @@ class BasinsGenericEvents() :
             return result
         materialized = result.ok_value()
         if materialized != exit_state:
-            if materialized not in self.absorbing_saddle_positions and exit_state in self.absorbing_saddle_positions:
+            if materialized not in self.absorbing_saddle_positions \
+                    and materialized not in self._exit_excluded_states \
+                    and exit_state in self.absorbing_saddle_positions:
                 self.absorbing_saddle_positions[materialized] = self.absorbing_saddle_positions[exit_state]
         else:
             self.connectivity_table.change_state_to_absorbing(exit_state)
@@ -863,11 +896,12 @@ class BasinsGenericEvents() :
             if result.is_ok():
                 resolved = result.ok_value()
                 n_transient, _ = self._connectivity_state_counts()
-                if resolved >= n_transient:
+                if resolved >= n_transient and resolved not in self._exit_excluded_states:
                     return Ok(resolved)
-                #Merged into a transient state: not a viable exit; exclude and redraw.
+                #Merged into a transient or excluded state: not a viable exit;
+                #exclude and redraw.
                 logger.warning(
-                    "[Basin] exit state %d merged into transient %d; redrawing exit",
+                    "[Basin] exit state %d resolved to transient or excluded state %d; redrawing exit",
                     exit_state, resolved,
                 )
             else:
@@ -977,6 +1011,11 @@ class BasinsGenericEvents() :
         """
         results = {}
 
+        # Early-out: the deadline can already be spent before any comparison —
+        # skip the per-state pre-work (fingerprints, tree builds) entirely.
+        if deadline is not None and time.perf_counter() >= deadline:
+            return {idx: DEDUP_DEFERRED for idx in new_systems}
+
         # Pre-compute fingerprints for the new systems
         new_fingerprints = {}
         for idx, system in new_systems.items():
@@ -1076,6 +1115,7 @@ class BasinsGenericEvents() :
             kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
             futures[state_idx] = (from_state, self.manager.basin_reconstruct(**kwargs))
 
+        transport_failed: set[int] = set()
         for state_idx, (from_state, future) in futures.items():
             try:
                 mpi_result = future.result()
@@ -1083,6 +1123,7 @@ class BasinsGenericEvents() :
                 result = self._transport_error("basin_reconstruct", exc)
                 logger.warning("[Basin] Reconstruction transport failed for state %d: %s", state_idx, result.err_value())
                 failed[state_idx] = result.err_value()
+                transport_failed.add(state_idx)
                 continue
             result = self._result_from_mpi(mpi_result, from_state)
             if result.is_ok():
@@ -1092,24 +1133,20 @@ class BasinsGenericEvents() :
             logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
             failed[state_idx] = result.err_value()
 
-        #Dead-pool guard: when EVERY state failed with a transport error, the
-        #session pool is gone — degrading further is pointless; abort to the KMC
-        #fallback (today's behavior).
-        if len(failed) == len(to_reconstruct) and failed and all(
-                err.type == ErrorType.MPI_REMOTE_ERROR for err in failed.values()):
+        #Dead-pool guard: only the future.result() exception path can evidence a
+        #dead pool — an engine that delivered an {"ok": False} payload is alive by
+        #construction, so engine-reported failures (whatever their error_type
+        #string) stay per-state. Abort only when EVERY state failed at the
+        #transport layer.
+        if failed and len(failed) == len(to_reconstruct) and transport_failed == set(failed):
             return Err(next(iter(failed.values())))
         return Ok((reconstructed, transition_info, failed))
 
     def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict, failed: "dict[int, ErrorInfo] | None" = None, deadline: "float | None" = None) -> "tuple[list[int], int, int]" :
         """Phase B: dedup the reconstructed batch and register the genuinely new states."""
-        if len(reconstructed) > 1:
-            dedup_results = self.is_new_state_batch(reconstructed, deadline=deadline)
-        elif len(reconstructed) == 1:
-            dedup_results = {}
-            for state_idx, system in reconstructed.items():
-                dedup_results[state_idx] = self.is_new_state(system)
-        else:
-            dedup_results = {}
+        #Single-state batches go through the batch path too: it is equivalent for
+        #size 1 (the intra-batch cross-check is a no-op) and honors the deadline.
+        dedup_results = self.is_new_state_batch(reconstructed, deadline=deadline) if reconstructed else {}
 
         new_transient = []
         n_duplicates = 0
@@ -1283,6 +1320,15 @@ class BasinsGenericEvents() :
                 # frontier each iteration, so leftover states are picked up next pass.
                 if max_frontier is not None and len(batch) > max_frontier:
                     batch = batch[:max_frontier]
+                # Clamp the batch to the remaining max_total_states capacity so the
+                # overshoot is ~0 instead of one whole frontier (leftover states are
+                # capped/deferred at the next loop-top check).
+                bc = self.config.basin
+                if bc is not None and bc.max_total_states is not None:
+                    remaining = bc.max_total_states - (
+                        len(self.states) + len(self._deferred_states) + self._n_failed)
+                    if len(batch) > remaining:
+                        batch = batch[:max(remaining, 1)]
 
                 # Separate: states that need reconstruction vs state 0 (already exists)
                 to_reconstruct = [s for s in batch if s not in self.states]

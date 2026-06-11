@@ -840,9 +840,11 @@ class KMC:
             initial_config = restart_latest.xyz
         With final=True the legacy end-of-run restart_<step>.npz is also written.
         """
+        #Write BOTH tmp files first, then rename xyz before npz: the npz (which
+        #the resume path trusts for step/time) must never point ahead of the
+        #snapshot it describes; a kill between the two renames at worst re-runs
+        #one interval.
         np.savez("restart_latest.tmp.npz", last_step=last_step, last_time=last_time)
-        os.replace("restart_latest.tmp.npz", "restart_latest.npz")
-
         atoms = Atoms(
             self.system.types,
             positions=self.system.positions,
@@ -851,6 +853,7 @@ class KMC:
         )
         write("restart_latest.tmp.xyz", atoms)
         os.replace("restart_latest.tmp.xyz", "restart_latest.xyz")
+        os.replace("restart_latest.tmp.npz", "restart_latest.npz")
 
         if final:
             np.savez("restart_"+str(last_step)+".npz",

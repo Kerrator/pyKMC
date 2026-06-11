@@ -433,7 +433,7 @@ class TestBudgetBreachReason:
         basin = _make_basin(config)
         t_now = _time.perf_counter()
 
-        assert basin._budget_breach_reason(0, t_now) is None
+        assert basin._budget_breach_reason(1, t_now) is None
 
         config.basin.max_states = 5
         assert basin._budget_breach_reason(5, t_now) == "max_states=5"
@@ -442,17 +442,25 @@ class TestBudgetBreachReason:
 
         config.basin.max_total_states = 2
         basin.states = {0: None, 1: None}
-        assert basin._budget_breach_reason(0, t_now) == "max_total_states=2"
+        assert basin._budget_breach_reason(1, t_now) == "max_total_states=2"
         basin.states = {0: None}
         basin._deferred_states = {7}
-        assert basin._budget_breach_reason(0, t_now) == "max_total_states=2"
+        assert basin._budget_breach_reason(1, t_now) == "max_total_states=2"
         basin._deferred_states = set()
-        assert basin._budget_breach_reason(0, t_now) is None
+        basin._n_failed = 1  # failed-absorbing states count toward the total
+        assert basin._budget_breach_reason(1, t_now) == "max_total_states=2"
+        basin._n_failed = 0
+        assert basin._budget_breach_reason(1, t_now) is None
         config.basin.max_total_states = None
 
         config.basin.max_basin_walltime_s = 0.001
-        assert basin._budget_breach_reason(0, t_now - 1.0) == "max_basin_walltime_s=0.001"
-        assert basin._budget_breach_reason(0, _time.perf_counter() + 100.0) is None
+        assert basin._budget_breach_reason(1, t_now - 1.0) == "max_basin_walltime_s=0.001"
+        assert basin._budget_breach_reason(1, _time.perf_counter() + 100.0) is None
+
+        # never fires before the entry state was explored, whatever the budgets
+        config.basin.max_states = 1
+        config.basin.max_basin_walltime_s = 0.001
+        assert basin._budget_breach_reason(0, t_now - 1.0) is None
 
 
 class TestDedupDeadline:

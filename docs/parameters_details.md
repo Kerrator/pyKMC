@@ -457,7 +457,7 @@
   </details>
 - **`max_total_states`** : `int`, optional
   <details><summary>Description</summary>
-  Cap on total distinct states (transient + absorbing, including deferred) discovered in one basin. On breach the remaining frontier is capped as deferred absorbing states without reconstruction or deduplication. None = unlimited.
+  Cap on total distinct states (transient + absorbing, including deferred and failed) discovered in one basin; the initial state counts toward it. On breach the remaining frontier is capped as deferred absorbing states without reconstruction or deduplication. Never fires before the initial state was explored. None = unlimited.
   </details>
 - **`max_basin_walltime_s`** : `float`, optional
   <details><summary>Description</summary>

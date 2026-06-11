@@ -595,8 +595,10 @@ class BasinConfig(BaseModel):
         default=None,
         gt=0,
         description="Cap on total distinct states (transient + absorbing, including "
-        "deferred) discovered in one basin. On breach the remaining frontier is capped as "
-        "deferred absorbing states without reconstruction or deduplication. None = unlimited.",
+        "deferred and failed) discovered in one basin; the initial state counts toward it. "
+        "On breach the remaining frontier is capped as deferred absorbing states without "
+        "reconstruction or deduplication. Never fires before the initial state was "
+        "explored. None = unlimited.",
     )
 
     max_basin_walltime_s: Optional[float] = Field(
