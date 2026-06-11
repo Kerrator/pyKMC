@@ -172,6 +172,14 @@ class Manager:
         for session in self.sessions:
             session.reload_potential(config)
 
+    def reload_all(self, config) -> None:
+        """Reload potentials in all sessions. Ends in global mode, ready for minimize."""
+        self.use_local()
+        self.reload_all_potentials(config)
+        if self.global_session is not None:
+            self.use_global()
+            self.global_session.reload_potential(config)
+
     def submit_job(self, method_name: str, params: dict = None) -> Future:
 
         future = Future()

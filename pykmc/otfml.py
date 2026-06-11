@@ -184,21 +184,12 @@ class OTFMLController:
             self._consecutive_failed_retrain_exit = 0
 
         was_global = self.kmc.manager.using_global
-
-        self.kmc.manager.use_local()
-        self.kmc.manager.reload_all_potentials(self.kmc.config)
-        if self.kmc.manager.global_session is not None:
-            self.kmc.manager.use_global()
-            self.kmc.manager.global_reload_potential(self.kmc.config)
-
-        if was_global:
-            self.kmc.manager.use_global()
-        else:
-            self.kmc.manager.use_local()
-
+        self.kmc.manager.reload_all(self.kmc.config)
         self.kmc._minimize_system_once()
         self.kmc.manager.use_local()
         self.kmc.manager.set_all_positions(self.kmc.system.positions)
+        if was_global:
+            self.kmc.manager.use_global()
 
     _MPI_PREFIXES = ("OMPI_0000", "PMI_0000", "I_MPI_0000", "MPI_0000", "HYDRA_0000", "MPIEXEC_0000")
 
