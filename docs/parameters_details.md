@@ -32,6 +32,10 @@
   <details><summary>Description</summary>
   File with restart informations.
   </details>
+- **`restart_save_interval`** : `int`, default = `50`
+  <details><summary>Description</summary>
+  Write restart files (restart_latest.npz + restart_latest.xyz, atomic tmp+rename) every N KMC steps so a killed run can resume from the last interval: set restart_file = restart_latest.npz and initial_config = restart_latest.xyz. None disables in-loop saves; the end-of-run restart_<step>.npz is always written.
+  </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.
@@ -450,6 +454,22 @@
 - **`max_states`** : `int`, optional
   <details><summary>Description</summary>
   Maximum transient states to explore. When reached, the remaining frontier is converted to absorbing states and exploration stops. None = unlimited.
+  </details>
+- **`max_total_states`** : `int`, optional
+  <details><summary>Description</summary>
+  Cap on total distinct states (transient + absorbing, including deferred) discovered in one basin. On breach the remaining frontier is capped as deferred absorbing states without reconstruction or deduplication. None = unlimited.
+  </details>
+- **`max_basin_walltime_s`** : `float`, optional
+  <details><summary>Description</summary>
+  Wall-time budget (seconds) for one basin exploration, checked at each loop iteration and between states inside batch deduplication. On breach, remaining work is capped as deferred absorbing states. None = unlimited. Production suggestion: 7200.
+  </details>
+- **`max_frontier_size`** : `int`, optional
+  <details><summary>Description</summary>
+  Wavefront only: maximum states reconstructed and deduplicated per iteration; larger frontiers are processed in chunks (bounds per-level memory and gives the wall-time check chunk granularity). Does not change which states are explored. None = whole frontier at once.
+  </details>
+- **`max_failed_fraction`** : `float`, default = `0.2`
+  <details><summary>Description</summary>
+  Abort the basin (fall back to the plain KMC event) when more than this fraction of attempted state reconstructions failed. Failed states below the budget are kept as non-selectable absorbing states with their exploration barriers.
   </details>
 - **`fingerprint_mode`** : `Literal['auto', 'com', 'atoms_of_interest', 'off']`, default = `'auto'`
   <details><summary>Description</summary>

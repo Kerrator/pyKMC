@@ -53,9 +53,18 @@ class ControlConfig(BaseModel):
         description="Path to a list of visited environment generated from a previous simulation."
     )
 
-    restart_file: Optional[str] = Field( 
-        default = None, 
+    restart_file: Optional[str] = Field(
+        default = None,
         description="File with restart informations."
+    )
+
+    restart_save_interval: Optional[int] = Field(
+        default=50,
+        gt=0,
+        description="Write restart files (restart_latest.npz + restart_latest.xyz, atomic "
+        "tmp+rename) every N KMC steps so a killed run can resume from the last interval: "
+        "set restart_file = restart_latest.npz and initial_config = restart_latest.xyz. "
+        "None disables in-loop saves; the end-of-run restart_<step>.npz is always written.",
     )
 
     reconstruction: Optional[bool] = Field(
@@ -572,6 +581,41 @@ class BasinConfig(BaseModel):
         gt=0,
         description="Maximum transient states to explore. When reached, the remaining "
         "frontier is converted to absorbing states and exploration stops. None = unlimited.",
+    )
+
+    max_total_states: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Cap on total distinct states (transient + absorbing, including "
+        "deferred) discovered in one basin. On breach the remaining frontier is capped as "
+        "deferred absorbing states without reconstruction or deduplication. None = unlimited.",
+    )
+
+    max_basin_walltime_s: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Wall-time budget (seconds) for one basin exploration, checked at each "
+        "loop iteration and between states inside batch deduplication. On breach, remaining "
+        "work is capped as deferred absorbing states. None = unlimited. Production "
+        "suggestion: 7200.",
+    )
+
+    max_frontier_size: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Wavefront only: maximum states reconstructed and deduplicated per "
+        "iteration; larger frontiers are processed in chunks (bounds per-level memory and "
+        "gives the wall-time check chunk granularity). Does not change which states are "
+        "explored. None = whole frontier at once.",
+    )
+
+    max_failed_fraction: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Abort the basin (fall back to the plain KMC event) when more than this "
+        "fraction of attempted state reconstructions failed. Failed states below the budget "
+        "are kept as non-selectable absorbing states with their exploration barriers.",
     )
 
     fingerprint_mode: Literal["auto", "com", "atoms_of_interest", "off"] = Field(

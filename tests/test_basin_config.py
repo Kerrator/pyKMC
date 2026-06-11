@@ -16,6 +16,10 @@ class TestBasinConfig:
         assert cfg.strategy == "serial"
         assert cfg.n_workers == 4
         assert cfg.max_states is None
+        assert cfg.max_total_states is None
+        assert cfg.max_basin_walltime_s is None
+        assert cfg.max_frontier_size is None
+        assert cfg.max_failed_fraction == 0.2
         assert cfg.fingerprint_mode == "auto"
         assert cfg.fingerprint_coordination_thr is None
         assert cfg.fingerprint_tolerance is None
@@ -45,6 +49,22 @@ class TestBasinConfig:
         assert cfg.fingerprint_tolerance == 1.0
         assert cfg.solver == "qsd"
 
+    def test_accepts_budget_config(self) -> None:
+        """The exploration-budget knobs accept their intended values."""
+        cfg = BasinConfig(
+            max_total_states=10000,
+            max_basin_walltime_s=7200.0,
+            max_frontier_size=128,
+            max_failed_fraction=0.5,
+        )
+        assert cfg.max_total_states == 10000
+        assert cfg.max_basin_walltime_s == 7200.0
+        assert cfg.max_frontier_size == 128
+        assert cfg.max_failed_fraction == 0.5
+        # boundary values of the failure budget
+        assert BasinConfig(max_failed_fraction=0.0).max_failed_fraction == 0.0
+        assert BasinConfig(max_failed_fraction=1.0).max_failed_fraction == 1.0
+
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -53,6 +73,11 @@ class TestBasinConfig:
             {"solver": "spectral"},
             {"n_workers": 0},
             {"max_states": 0},
+            {"max_total_states": 0},
+            {"max_basin_walltime_s": 0},
+            {"max_frontier_size": 0},
+            {"max_failed_fraction": -0.1},
+            {"max_failed_fraction": 1.1},
         ],
     )
     def test_rejects_invalid_values(self, kwargs: dict) -> None:
