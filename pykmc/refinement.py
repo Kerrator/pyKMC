@@ -75,7 +75,12 @@ class Refinement:
         self.results = None
         self.tasks = []
 
-    def execute(self, df_reference_events: pd.DataFrame, total_energy) -> None:
+    def execute(
+        self,
+        df_reference_events: pd.DataFrame,
+        total_energy,
+        existing_pairs: set[tuple[int, int]] | None = None,
+    ) -> None:
         """Execute event refinements for each reference event in the df_reference_events dataframe.
 
         It stores the results of the event refinements in self.results.
@@ -84,9 +89,13 @@ class Refinement:
         ----------
         df_reference_events : pd.DataFrame
             dataframe of reference events to refine.
+        existing_pairs : set[tuple[int, int]] | None, optional
+            `(atom_index, num_reference_event)` pairs already present in the
+            active event table (carried over from the previous step). These
+            are skipped during refinement.
 
         """
-        tasks = self.build_tasks(df_reference_events, total_energy)
+        tasks = self.build_tasks(df_reference_events, total_energy, existing_pairs=existing_pairs)
         self.loggers.info("log", "\t :=> Refining {} events".format(len(tasks)))
         self.tasks = tasks
         self.results = [None] * len(tasks)
@@ -94,9 +103,10 @@ class Refinement:
             self.results[task_id] = result
 
     def build_tasks(
-        self, df_reference_events: pd.DataFrame, total_energy: float
+        self, df_reference_events: pd.DataFrame, total_energy: float, existing_pairs: set | None = None
     ) -> list[RefinementTask]:
         """Build refinement tasks with stable ids and rerun context."""
+        existing_pairs = existing_pairs or set()
         raw_tasks = []
         task_id = 0
         supposed_ktot = 0.0
@@ -104,7 +114,10 @@ class Refinement:
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["id_initial"]
             )
+            ref_idx = int(dfevent["idx_ref"])
             for at_idx in atoms_refine_idx:
+                if (at_idx, ref_idx) in existing_pairs:
+                    continue
                 for symmetry_index, _sym in enumerate(dfevent.at["sym_matrix"]):
                     raw_tasks.append((task_id, at_idx, dfevent, symmetry_index))
                     supposed_ktot += dfevent.at["k"]

@@ -100,6 +100,11 @@ class ControlConfig(BaseModel):
         description="Incorporate AV's into simulations, recommended for large systems"
     )
 
+    recycle: Optional[bool] = Field(
+        default=False,
+        description="Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.",
+    )
+
     bias: Optional[bool] = Field(
         default=False,
         description="Enable event selection bias. Requires a [Bias] section."
@@ -185,11 +190,6 @@ class PartnConfig(BaseModel):
     delr_thr: float = Field(
         default=0.1,
         description="Threshold at which an atom is considered to have moved. This threshold affects the npart parameter in the artn.out output."
-    )
-
-    evalf_max: int = Field(
-        default = 9999,
-        description="to stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max."
     )
 
     #Exploration
@@ -296,7 +296,7 @@ class PartnConfig(BaseModel):
     )
 
     nevalf_max: int = Field(
-        default=500,
+        default=9999,
         description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
     )
 
@@ -320,9 +320,9 @@ class PartnConfig(BaseModel):
 #Refinement part#
 #################
 
-    r_evalf_max: int = Field(
-        default = 300,
-        description="to stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
+    r_nevalf_max: int = Field(
+        default=300,
+        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
     )
 
     #Max single refinement attempt
@@ -626,12 +626,44 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+class ReconstructionConfig(BaseModel):
+    """Reconstruction parameters."""
+
+    push_fraction: float = Field(
+        default=0.15,
+        description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
+    )
+
 class BasinConfig(BaseModel):
     """Basin parameters"""
+    style: Literal["global", "global/reconstruction"] = Field(default="global", description="Basin style used.")
 
     energy_thr: float = Field(
     default = 0.0,
     description="Energy threshold"
+    )
+
+
+class EventRecyclingConfig(BaseModel):
+    """Event recycling parameters. Required when control.recycle = True."""
+
+    style: Literal["displacement"] = Field(
+        ...,
+        description=(
+            "Method used to decide which events can be recycled. "
+            "'displacement' = central atom moved less than movement_thr AND is "
+            "farther than distance_thr from the executed event."
+        ),
+    )
+    movement_thr: float = Field(
+        default=0.02,
+        description="Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.",
+        gt=0.0,
+    )
+    distance_thr: float = Field(
+        default=10.0,
+        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image) from the executed event's central atom pass the distance check.",
+        gt=0.0,
     )
 
 
@@ -923,7 +955,14 @@ class Config(BaseModel):
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
+    reconstruction: ReconstructionConfig = Field(default_factory=ReconstructionConfig, description="Reconstruction parameters")
+
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
+
+    eventrecycling: Optional[EventRecyclingConfig] = Field(
+        default=None,
+        description="Event recycling parameters. Required when control.recycle = True.",
+    )
 
     inactive_atoms: Optional[RegionConfig] = Field(
         default=None,
@@ -1031,6 +1070,7 @@ class Config(BaseModel):
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True) : ["basin"],
             ("control.active_volume", True) : ["activevolume"],
+            ("control.recycle", True) : ["eventrecycling"],
             ("control.bias", True) : ["bias"],
             ("control.otfml", True): ["otfml"],
         }

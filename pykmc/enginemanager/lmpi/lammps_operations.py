@@ -489,7 +489,7 @@ def partn_search(
         artn.set("push_over", config.partn.push_over)
 
         # RUN
-        engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.evalf_max}")
+        engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
     except Exception as exc:
         recovery_error = None
         try:
@@ -743,7 +743,7 @@ def partn_refine(
             _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
             engine.command("min_style fire")
             # RUN
-            engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_evalf_max}")
+            engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}")
             engine.command("unfix 10")
             _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
 

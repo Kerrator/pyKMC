@@ -16,7 +16,6 @@ cp input.in.template input.in
 `input.in` files are user-specific and are not tracked. Do not modify input.in.template.
 
 2. Edit ```input.in``` if needed. 
-You will need to update the path to the pARTn plugin if it is used (`path_artnso`).
 3. Run the simulation. Default template values are intended to be run in parallel with mpi using at least 8 cores. For example : 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in 

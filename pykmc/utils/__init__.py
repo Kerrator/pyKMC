@@ -7,4 +7,7 @@ __all__ = [
     "compute_distances",
     "count_moved_atoms",
     "compute_delr_max",
+    "compute_delr_l2",
+    "per_atom_displacement",
+    "minimum_image_distance",
 ]

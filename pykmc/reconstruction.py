@@ -26,7 +26,6 @@ class Reconstruction:
         cell,
         delr_thr,
         neighbors=None,
-        fraction=0.15,
     ):
         """From a saddle point, try to reconstruct the event to see if it matches the
         supposed min1 and min2 positions, and that the to minima are connected.
@@ -56,8 +55,6 @@ class Reconstruction:
         neighbors : _type_, optional
             _description_, by default None
             typically the neighors list of the in the atomic environment of the atom on which we apply the event
-        fraction : float, optional
-            _description_, by default 0.15
         """
 
         if neighbors is None:  # len min1 == len min2 == len saddle pos
@@ -70,15 +67,13 @@ class Reconstruction:
         saddle_toward_min1_pos = push_towards(
             saddle_positions[neighbors],
             supposed_min1_positions,
-            fraction=0.15,
+            fraction=self.config.reconstruction.push_fraction,
             cell=cell,
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
-        # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = self.manager.global_minimize_with_results(
             self.config, positions=tmp_positions, types=self.types
         )
-        #        min1_pos, _ = future.result()
 
         # compaire min1_pos with system current positions
         t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=True)
@@ -100,7 +95,7 @@ class Reconstruction:
             saddle_toward_min2_pos = push_towards(
                 saddle_positions[neighbors],
                 supposed_min2_positions,
-                fraction=0.15,
+                fraction=self.config.reconstruction.push_fraction,
                 cell=cell,
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
