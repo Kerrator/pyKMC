@@ -82,6 +82,8 @@ def push_towards(current_positions, target_positions, fraction = 0.1, cell = Non
             pbc = np.array([True, True, True])
         box = np.diag(cell)
         pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
         if np.all(pbc_arr):
             displacement -= np.round(displacement / box) * box
         else:
@@ -107,6 +109,8 @@ def compute_delr(positions_1, positions_2, cell=None, pbc=None) :
             pbc = np.array([True, True, True])
         cell_lengths = np.linalg.norm(cell, axis=1)
         pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
 
         #apply pbc only in periodic dimensions
         for i in range(3) :
