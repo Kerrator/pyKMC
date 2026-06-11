@@ -193,7 +193,20 @@ class FPTASelector():
         self._use_qsd = False
         self._qsd = None
         exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
-        return exit_time_solver.solve()
+        result = exit_time_solver.solve()
+        if not result.is_ok() and self.solver == "auto":
+            #The bisection's matrix exponential can fail below the stiffness
+            #heuristic too; the QSD solver is the analytic backstop. Forced
+            #'bisection' stays strict (it exists for benchmarking).
+            logger.warning("[FPTA] bisection failed (%s); falling back to QSD solver",
+                           result.err_value())
+            qsd_solver = QSDSolver(self.M_abs_reduced, p0, r1)
+            qsd_result = qsd_solver.solve()
+            if qsd_result.is_ok():
+                self._use_qsd = True
+                self._qsd = qsd_solver.qsd
+                return qsd_result
+        return result
 
     def select_absorbing_state(self, t_exit: float, excluded_states: "set[int] | None" = None) -> "int | None":
         """Find which absorbing state is reached at the given exit time.

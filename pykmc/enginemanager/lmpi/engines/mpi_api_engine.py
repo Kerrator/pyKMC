@@ -136,12 +136,16 @@ class MpiApiEngine() :
                 break
 
             if result is not None:
+                if isinstance(result, dict) and "__handler_error__" in result:
+                    reply = {"type": "error", "value": result["__handler_error__"]}
+                else:
+                    reply = {"type": "result", "value": result}
                 if entry_global_mode:
                     if self.global_rank == 0 :
-                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.global_messenger.send(reply, dest=0, tag=1)
                 else:
                     if self.local_rank == 0 :
-                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.local_messenger.send(reply, dest=0, tag=1)
 
     def _send_status(self, messenger) :
         """Send the status of the engine to the session."""
@@ -189,7 +193,15 @@ class MpiApiEngine() :
                 return result
             except Exception as e:
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
-            finally : 
+                #Return an error marker so run_engine_loop sends an error reply.
+                #Without it the handler result is None, no reply is sent, and the
+                #session blocks forever in recv waiting for one.
+                return {"__handler_error__": {
+                    "operation": msg_type,
+                    "error_type": type(e).__name__,
+                    "message": str(e),
+                }}
+            finally :
                 entry_engine_comm.barrier()
 
 

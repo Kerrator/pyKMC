@@ -232,11 +232,7 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}]  get potential energy")
         try :
             self.send_message({"type": "get_total_energy", "value": {"positions": positions}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" :
-                return msg["value"]
-            else :
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally :
             self._is_busy = False
 
@@ -274,10 +270,6 @@ class MpiApiSession :
         #print(f"[Session] Launching pARTn search")
         try :
             self.send_message({"type": "partn_refine", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell":cell, "types":types, "saddle_idx":saddle_idx, "saddle_positions":saddle_positions}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+            return self._receive_result_or_error()
+        finally :
             self._is_busy = False

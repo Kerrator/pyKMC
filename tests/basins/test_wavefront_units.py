@@ -328,3 +328,118 @@ class TestMaterializeExitState:
         assert basin.states[1].system is not None
         assert basin.states[1].transient is False
         assert 1 not in basin._deferred_states
+
+
+class _FakeFuture:
+    def __init__(self, payload=None, exc=None):
+        self._payload = payload
+        self._exc = exc
+
+    def result(self):
+        if self._exc is not None:
+            raise self._exc
+        return self._payload
+
+
+class TestReconstructWavefrontBatch:
+
+    def _basin_with_transitions(self, targets):
+        config = _com_config()
+        basin = _make_basin(config)
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        basin.states[0] = StateData(system=_make_system(pos), environment=None,
+                                    neighbors_list=None, transient=True)
+        for target in targets:
+            basin.connectivity_table.add_connectivity(
+                state=0, state_connexion=target, event_connexion=10 + target,
+                central_atom=0, sym=0, transient=True,
+                dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+        basin._prepare_reconstruct_kwargs = lambda *a, **k: {}
+        return basin
+
+    def test_single_failure_is_nonfatal(self, monkeypatch):
+        """One error payload among ok payloads: batch returns Ok with the failure
+        keyed in `failed` and the good states reconstructed."""
+        basin = self._basin_with_transitions([1, 2])
+        pos_ok = basin.states[0].system.positions + 4.0
+
+        payloads = {
+            1: _FakeFuture({"ok": True, "min2_positions": pos_ok, "min2_etot": -1.0}),
+            2: _FakeFuture({"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
+                            "message": "delr2 = 2.46"}),
+        }
+        calls = iter([payloads[1], payloads[2]])
+        basin.manager = SimpleNamespace(basin_reconstruct=lambda **kw: next(calls))
+
+        result = basin._reconstruct_wavefront_batch([1, 2])
+
+        assert result.is_ok()
+        reconstructed, transition_info, failed = result.ok_value()
+        assert set(reconstructed.keys()) == {1}
+        assert set(failed.keys()) == {2}
+        from pykmc.result import ErrorType
+        assert failed[2].type == ErrorType.RECONSTRUCTION_INVALID_MIN2
+
+    def test_dead_pool_aborts(self):
+        """Every state failing with a transport error means the pool is gone: Err."""
+        basin = self._basin_with_transitions([1, 2])
+        basin.manager = SimpleNamespace(
+            basin_reconstruct=lambda **kw: _FakeFuture(exc=RuntimeError("session gone")))
+
+        result = basin._reconstruct_wavefront_batch([1, 2])
+
+        from pykmc.result import ErrorType
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.MPI_REMOTE_ERROR
+
+
+class TestSkipRefinement:
+
+    def test_fallback_saddle_keeps_row_selectable(self):
+        """With a fallback saddle the exit stays selectable; without one it is
+        excluded from the exit draw."""
+        config = _com_config()
+        basin = _make_basin(config)
+        for target, transient in ((1, False), (2, False)):
+            basin.connectivity_table.add_connectivity(
+                state=0, state_connexion=target, event_connexion=10 + target,
+                central_atom=0, sym=0, transient=transient,
+                dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+        df = basin.connectivity_table.df  # materialize rows
+
+        saddle = np.array([[0.5, 0.5, 0.5]])
+        idx_with = df[df["state_connexion"] == 1].index[0]
+        idx_without = df[df["state_connexion"] == 2].index[0]
+
+        n = basin._skip_refinement(idx_with, {"fallback_saddle": saddle}, "transport: boom", 0)
+        n = basin._skip_refinement(idx_without, None, "PSR failed", n)
+
+        assert n == 2
+        assert np.allclose(basin.absorbing_saddle_positions[1], saddle)
+        assert 1 not in basin._exit_excluded_states
+        assert basin._exit_excluded_states == {2}
+
+
+class TestFailureBudget:
+
+    def test_budget_breach_aborts_basin(self, tmp_path, monkeypatch):
+        """failed/attempted above max_failed_fraction turns the finalizer into Err."""
+        from pykmc.result import ErrorType
+
+        monkeypatch.chdir(tmp_path)  # the finalizer writes timing checkpoints to CWD
+        config = _com_config()
+        config.basin.max_failed_fraction = 0.2
+        basin = _make_basin(config)
+        basin._n_reconstruction_attempts = 10
+        basin._n_failed = 3
+
+        import time
+        result = basin._finalize_exploration_run(
+            t_start=time.perf_counter(), prof={"reconstruct": 0.0}, n_processed=10, n_duplicates=0)
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.BASIN_TOO_MANY_FAILED_STATES
+
+        basin._n_failed = 2  # exactly at the budget: allowed
+        result = basin._finalize_exploration_run(
+            t_start=time.perf_counter(), prof={"reconstruct": 0.0}, n_processed=10, n_duplicates=0)
+        assert result.is_ok()

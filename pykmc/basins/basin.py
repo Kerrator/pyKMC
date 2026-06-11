@@ -183,8 +183,13 @@ class BasinsGenericEvents() :
                 result = self.system_from_state(from_state, event_idx, central_atom, sym_idx)
                 prof["reconstruct"] += time.perf_counter() - t0
                 n_processed += 1
+                self._n_reconstruction_attempts += 1
                 if not result.is_ok() :
-                    return result
+                    #Non-fatal: keep the row as a non-selectable absorbing state and
+                    #move on (same rule as the wavefront path).
+                    self._mark_failed_absorbing(to_explore, result.err_value())
+                    self.states[from_state].release_heavy_objects()
+                    continue
                 new_system = result.ok_value()
 
                     #Check if it is a new_system or already in states
@@ -397,12 +402,40 @@ class BasinsGenericEvents() :
 
         return Ok(new_system)
 
+    def _skip_refinement(self, idx: int, ctx: "dict | None", reason: str, n_skipped: int) -> int :
+        """Per-row refinement failure: keep the row's exploration barrier/rate.
+
+        The generic dE_forward/k_forward already in the table are exactly what the
+        FPTA generator was built from for transient edges, so the table stays
+        self-consistent; the row only misses the refined values. When a host-side
+        PSR-transformed saddle is available it is stored so the row remains a
+        selectable exit (the exit event is re-reconstructed and validated by KMC
+        after the basin anyway); without one the exit is excluded from the draw.
+        """
+        state_connexion = int(self.connectivity_table.df.loc[idx].at["state_connexion"])
+        if ctx is not None and ctx.get("fallback_saddle") is not None:
+            self.absorbing_saddle_positions[state_connexion] = ctx["fallback_saddle"]
+        else:
+            self._exit_excluded_states.add(state_connexion)
+        logger.warning(
+            "[Basin] refine_absorbing: row %d (exit state %d) kept unrefined barrier (%s)",
+            idx, state_connexion, reason,
+        )
+        return n_skipped + 1
+
     def refine_absorbing(self, system) :
-        """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
-        #compute the energy of the state 
+        """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event.
+
+        Per-row failures are non-fatal: a row whose PSR or engine refinement fails
+        keeps the exploration barrier/rate already in the table (see
+        _skip_refinement) instead of aborting the whole basin — previously one bad
+        row discarded an arbitrarily expensive exploration.
+        """
+        #compute the energy of the state
         #for all row in connectivity table where we need to refine
+        n_skipped = 0
         futures_context = {} #idx → { "min": f_min, "saddle": f_sad }
-        for idx, row in self.connectivity_table.df.iterrows() : 
+        for idx, row in self.connectivity_table.df.iterrows() :
             if row["transient"]  == False : #need to refine
                 #tmp_system = copy.deepcopy(self.states[row["state"]].system)
                 tmp_system = System(positions=self.states[row["state"]].system.positions.copy(), types=self.states[row["state"]].system.types, cell=self.states[row["state"]].system.cell, pbc=True, index=np.arange(len(self.states[row["state"]].system.types)))
@@ -422,13 +455,15 @@ class BasinsGenericEvents() :
                 self.states[row["state"]].ensure_full_state(self.config)
 
                 result = PointSetRegistration(self.config, tmp_system, ref_event , self.states[row["state"]].neighbors_list, row["central_atom"]).match()
-                if not result.is_ok(): #PSR Err
-                    return result
-                    # Check if PointSetRegistration match is valid 
+                if not result.is_ok(): #PSR Err — no transform, so no fallback saddle either
+                    n_skipped = self._skip_refinement(idx, None, f"PSR failed: {result.err_value()}", n_skipped)
+                    continue
+                    # Check if PointSetRegistration match is valid
                 result = check_match(result, self.config.psr.matching_score_thr)
-                if not result.is_ok() : #PSR matching score not valid : 
-                    return result
-                else : 
+                if not result.is_ok() : #PSR matching score not valid :
+                    n_skipped = self._skip_refinement(idx, None, f"PSR score: {result.err_value()}", n_skipped)
+                    continue
+                else :
                     psr_output = result.ok_value() #get psr results
 
                 # Apply symmetry matrix if sym != 0
@@ -453,21 +488,30 @@ class BasinsGenericEvents() :
                     #refine
                     future2 = self.manager.partn_refine(self.config, row["central_atom"], tmp_system.positions.copy()) #send copy not reference !
                 
-                #save future in context : 
+                #save future in context (fallback_saddle: host-side PSR-transformed
+                #saddle, used to keep the row selectable if engine refinement fails)
                 futures_context[idx] = {
             "min": future1,
-            "saddle": future2, 
-            "neighbors": neighbors}
-                
-                #RELEASE MEMORY : 
+            "saddle": future2,
+            "neighbors": neighbors,
+            "fallback_saddle": np.array(saddle_positions, copy=True)}
+
+                #RELEASE MEMORY :
                 self.states[row["state"]].release_heavy_objects()
 
         #modify connectivity table entry future1 hold min energy, future2 holds E_saddle
         for idx, ctx in futures_context.items():
-            E_min    = ctx["min"].result()
-            result_sad = ctx["saddle"].result()
-            if not result_sad.is_ok() : 
-                return result_sad
+            try:
+                E_min    = ctx["min"].result()
+                result_sad = ctx["saddle"].result()
+            except Exception as exc:
+                #Engine/session transport failure (e.g. a remote LAMMPS 'Lost atoms'
+                #raised through the error reply) — previously this killed the run.
+                n_skipped = self._skip_refinement(idx, ctx, f"transport: {exc}", n_skipped)
+                continue
+            if not result_sad.is_ok() :
+                n_skipped = self._skip_refinement(idx, ctx, str(result_sad.err_value()), n_skipped)
+                continue
             E_sad = result_sad.ok_value().E_saddle
             if self.config.control.active_volume==True:
                 dE = E_sad
@@ -483,6 +527,13 @@ class BasinsGenericEvents() :
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
             self.connectivity_table.df.loc[idx, "k_forward"] = k
+
+        if n_skipped > 0:
+            n_total = int((self.connectivity_table.df["transient"] == False).sum())  # noqa: E712
+            logger.warning(
+                "[Basin] refine_absorbing: %d/%d rows kept unrefined barriers",
+                n_skipped, n_total,
+            )
         return Ok(None)
 
 
@@ -963,11 +1014,18 @@ class BasinsGenericEvents() :
         return results
 
     def _reconstruct_wavefront_batch(self, to_reconstruct: list[int]) -> "Result[tuple, ErrorInfo]" :
-        """Phase A: reconstruct one wavefront's worth of states via the session pool."""
+        """Phase A: reconstruct one wavefront's worth of states via the session pool.
+
+        Per-state failures are non-fatal: failed states are reported in the
+        ``failed`` mapping and handled by _register_wavefront_states (kept as
+        non-selectable absorbing states). Only a whole-batch transport failure —
+        the session pool itself is gone — aborts the basin.
+        """
         reconstructed = {}
         transition_info = {}
+        failed: dict[int, "ErrorInfo"] = {}
         if not to_reconstruct:
-            return Ok((reconstructed, transition_info, 0))
+            return Ok((reconstructed, transition_info, failed))
 
         for state_idx in to_reconstruct:
             transition_info[state_idx] = self.connectivity_table.get_transition_to_state(target_state=state_idx)
@@ -978,15 +1036,13 @@ class BasinsGenericEvents() :
             kwargs = self._prepare_reconstruct_kwargs(from_state, event_idx, central_atom, sym_idx)
             futures[state_idx] = (from_state, self.manager.basin_reconstruct(**kwargs))
 
-        reconstruction_error = None
         for state_idx, (from_state, future) in futures.items():
             try:
                 mpi_result = future.result()
             except Exception as exc:
                 result = self._transport_error("basin_reconstruct", exc)
                 logger.warning("[Basin] Reconstruction transport failed for state %d: %s", state_idx, result.err_value())
-                if reconstruction_error is None:
-                    reconstruction_error = result
+                failed[state_idx] = result.err_value()
                 continue
             result = self._result_from_mpi(mpi_result, from_state)
             if result.is_ok():
@@ -994,14 +1050,17 @@ class BasinsGenericEvents() :
                 continue
 
             logger.warning("[Basin] Reconstruction failed for state %d: %s", state_idx, result.err_value())
-            if reconstruction_error is None:
-                reconstruction_error = result
+            failed[state_idx] = result.err_value()
 
-        if reconstruction_error is not None:
-            return reconstruction_error
-        return Ok((reconstructed, transition_info, len(to_reconstruct)))
+        #Dead-pool guard: when EVERY state failed with a transport error, the
+        #session pool is gone — degrading further is pointless; abort to the KMC
+        #fallback (today's behavior).
+        if len(failed) == len(to_reconstruct) and failed and all(
+                err.type == ErrorType.MPI_REMOTE_ERROR for err in failed.values()):
+            return Err(next(iter(failed.values())))
+        return Ok((reconstructed, transition_info, failed))
 
-    def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict) -> "tuple[list[int], int, int]" :
+    def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict, failed: "dict[int, ErrorInfo] | None" = None) -> "tuple[list[int], int, int]" :
         """Phase B: dedup the reconstructed batch and register the genuinely new states."""
         if len(reconstructed) > 1:
             dedup_results = self.is_new_state_batch(reconstructed)
@@ -1016,6 +1075,11 @@ class BasinsGenericEvents() :
         n_duplicates = 0
         n_absorbing = 0
         for state_idx in to_reconstruct:
+            if failed and state_idx in failed:
+                self._mark_failed_absorbing(state_idx, failed[state_idx])
+                n_absorbing += 1
+                continue
+
             existing = dedup_results.get(state_idx, -1)
             if existing != -1:
                 self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing)
@@ -1064,6 +1128,7 @@ class BasinsGenericEvents() :
             f.write(f"connectivity_rows = {n_conn}\n")
             f.write(f"n_duplicates = {n_duplicates}\n")
             f.write(f"n_processed = {n_processed}\n")
+            f.write(f"n_failed = {self._n_failed}\n")
             for phase, t in sorted(prof.items(), key=lambda x: -x[1]):
                 pct = 100.0 * t / elapsed if elapsed > 0 else 0
                 f.write(f"prof_{phase} = {t:.3f}\n")
@@ -1103,6 +1168,18 @@ class BasinsGenericEvents() :
             logger.info("[Basin] PROFILING:   %-15s %8.2fs  %5.1f%%", phase, t, pct)
 
         self._write_timing_checkpoint(prof, elapsed, n_transient, n_absorbing_final, n_duplicates, n_processed)
+
+        #Failure budget: sparse failures only perturb individual channels (the rate
+        #mass is preserved and the exit draw skips them); systematic failures mean
+        #the basin cannot be trusted, so fall back to the plain KMC event.
+        if self._n_reconstruction_attempts > 0:
+            failed_fraction = self._n_failed / self._n_reconstruction_attempts
+            max_failed = self.config.basin.max_failed_fraction if self.config.basin is not None else 0.2
+            if failed_fraction > max_failed:
+                return Err(ErrorInfo(
+                    type=ErrorType.BASIN_TOO_MANY_FAILED_STATES,
+                    message=f"{self._n_failed}/{self._n_reconstruction_attempts} state reconstructions "
+                            f"failed (max_failed_fraction = {max_failed})"))
         return Ok(None)
 
     def construct_connexion_table_parallel(self) -> "Result[None, ErrorInfo]" :
@@ -1150,14 +1227,16 @@ class BasinsGenericEvents() :
                 # ── Phase A: Batch reconstruction ──
                 reconstructed = {}
                 transition_info = {}
+                failed = {}
                 if to_reconstruct:
                     t0 = time.perf_counter()
                     result = self._reconstruct_wavefront_batch(to_reconstruct)
                     prof["reconstruct"] += time.perf_counter() - t0
                     if not result.is_ok():
                         return result
-                    reconstructed, transition_info, processed_count = result.ok_value()
-                    n_processed += processed_count
+                    reconstructed, transition_info, failed = result.ok_value()
+                    n_processed += len(to_reconstruct)
+                    self._n_reconstruction_attempts += len(to_reconstruct)
 
                 # ── Phase B: Batch deduplication ──
                 # Always batch dedup in the wavefront loop: serial is_new_state() only
@@ -1169,6 +1248,7 @@ class BasinsGenericEvents() :
                     reconstructed,
                     transition_info,
                     prof,
+                    failed=failed,
                 )
                 prof["dedup"] += time.perf_counter() - t0
                 n_duplicates += duplicates_delta

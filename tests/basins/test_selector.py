@@ -47,6 +47,36 @@ class TestSelector :
         test_logger.debug("And reduced matrix : \n {}".format(selector.M_abs_reduced))
         test_logger.debug("Got exit time = {} and exit state = {}".format(result.ok_value().t_exit, result.ok_value().exit_state))
 
+    def test_auto_fallback_bisection_to_qsd(self, monkeypatch) :
+        """solver='auto': when bisection fails below the stiffness heuristic, the
+        QSD solver is tried as a backstop; forced 'bisection' stays strict."""
+        from pykmc.result import Err, ErrorInfo, ErrorType
+        from pykmc.basins import selection as selection_mod
+
+        mild = np.array([
+            [0.3, -0.1, 0.0],
+            [-0.1, 0.3, 0.0],
+            [-0.2, -0.2, 0.0],
+        ])
+        failing = Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message="boom"))
+
+        class _FailingBisection:
+            def __init__(self, *a, **k):
+                pass
+            def solve(self):
+                return failing
+
+        monkeypatch.setattr(selection_mod, "BisectionSolver", _FailingBisection)
+
+        sel = FPTASelector(solver="auto"); sel.M_abs_reduced = mild
+        result = sel.get_exit_time()
+        assert result.is_ok()
+        assert sel._use_qsd is True
+
+        sel = FPTASelector(solver="bisection"); sel.M_abs_reduced = mild
+        result = sel.get_exit_time()
+        assert not result.is_ok()
+
     def test_excluded_states_never_selected(self, connectivity_table_Cu) :
         """Excluded absorbing states get zero probability; the draw avoids them."""
         selector = FPTASelector()
