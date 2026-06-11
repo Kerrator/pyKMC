@@ -17,7 +17,7 @@ class Reconstruction:
         self.manager = manager #Manager objet that can perform minimization and return minimized positions
         self.types = types
 
-    def reconstruct(self, supposed_min1_positions, supposed_min2_positions, saddle_positions, cell, delr_thr, neighbors = None, fraction = 0.15, pbc=True) :
+    def reconstruct(self, supposed_min1_positions, supposed_min2_positions, saddle_positions, cell, delr_thr, neighbors = None, pbc=True) :
         """From a saddle point, try to reconstruct the event to see if it matches the 
         supposed min1 and min2 positions, and that the to minima are connected.
 
@@ -45,9 +45,7 @@ class Reconstruction:
         cell : 
         neighbors : _type_, optional
             _description_, by default None
-            typically the neighors list of the in the atomic environment of the atom on which we apply the event 
-        fraction : float, optional
-            _description_, by default 0.15
+            typically the neighors list of the in the atomic environment of the atom on which we apply the event
         """
 
         if neighbors is None : #len min1 == len min2 == len saddle pos
@@ -57,7 +55,7 @@ class Reconstruction:
         tmp_positions = copy.deepcopy(saddle_positions)
 
         #Move toward min1 positions
-        saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=0.15, cell = cell, pbc=pbc)
+        saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=self.config.reconstruction.push_fraction, cell = cell, pbc=pbc)
         tmp_positions[neighbors] = saddle_toward_min1_pos
         #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)
@@ -76,7 +74,7 @@ class Reconstruction:
                 )
         else : 
             #positions towards min2 :
-            saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=0.15, cell = cell, pbc=pbc)
+            saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=self.config.reconstruction.push_fraction, cell = cell, pbc=pbc)
             tmp_positions[neighbors] = saddle_toward_min2_pos
             #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
             min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)

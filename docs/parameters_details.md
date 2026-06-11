@@ -69,6 +69,10 @@
   <details><summary>Description</summary>
   Incorporate AV's into simulations, recommended for large systems
   </details>
+- **`recycle`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.
+  </details>
 - **`bias`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Enable event selection bias. Requires a [Bias] section.
@@ -439,9 +443,26 @@
   Basin parameters
 </details>
 
+- **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
+  <details><summary>Description</summary>
+  Basin style used.
+  </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
+  </details>
+
+---
+
+## `Reconstruction` Section (mandatory)
+
+<details><summary>Section Overview</summary>
+  Reconstruction parameters.
+</details>
+
+- **`push_fraction`** : `float`, default = `0.15`
+  <details><summary>Description</summary>
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
 
 ---
@@ -487,6 +508,27 @@
 - **`eligible_types`** : `list[str]`, optional
   <details><summary>Description</summary>
   If provided, only atoms of these element types are eligible for dealloying. If None, all under-coordinated atoms are eligible.
+  </details>
+
+---
+
+## `Eventrecycling` Section (optional)
+
+<details><summary>Section Overview</summary>
+  Event recycling parameters. Required when control.recycle = True.
+</details>
+
+- **`style`** : `Literal['displacement']`, mandatory
+  <details><summary>Description</summary>
+  Method used to decide which events can be recycled. 'displacement' = central atom moved less than movement_thr AND is farther than distance_thr from the executed event.
+  </details>
+- **`movement_thr`** : `float`, default = `0.02`
+  <details><summary>Description</summary>
+  Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.
+  </details>
+- **`distance_thr`** : `float`, default = `10.0`
+  <details><summary>Description</summary>
+  Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image) from the executed event's central atom pass the distance check.
   </details>
 
 ---

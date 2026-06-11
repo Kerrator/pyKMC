@@ -100,6 +100,11 @@ class ControlConfig(BaseModel):
         description="Incorporate AV's into simulations, recommended for large systems"
     )
 
+    recycle: Optional[bool] = Field(
+        default=False,
+        description="Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.",
+    )
+
     bias: Optional[bool] = Field(
         default=False,
         description="Enable event selection bias. Requires a [Bias] section."
@@ -565,8 +570,17 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+class ReconstructionConfig(BaseModel):
+    """Reconstruction parameters."""
+
+    push_fraction: float = Field(
+        default=0.15,
+        description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
+    )
+
 class BasinConfig(BaseModel):
     """Basin parameters"""
+    style: Literal["global", "global/reconstruction"] = Field(default="global", description="Basin style used.")
 
     energy_thr: float = Field(
     default = 0.0,
@@ -605,6 +619,28 @@ class DealloyingConfig(BaseModel):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v
 
+
+class EventRecyclingConfig(BaseModel):
+    """Event recycling parameters. Required when control.recycle = True."""
+
+    style: Literal["displacement"] = Field(
+        ...,
+        description=(
+            "Method used to decide which events can be recycled. "
+            "'displacement' = central atom moved less than movement_thr AND is "
+            "farther than distance_thr from the executed event."
+        ),
+    )
+    movement_thr: float = Field(
+        default=0.02,
+        description="Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.",
+        gt=0.0,
+    )
+    distance_thr: float = Field(
+        default=10.0,
+        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image) from the executed event's central atom pass the distance check.",
+        gt=0.0,
+    )
 
 class RegionConfig(BaseModel):
     """Selects atoms by type, index, or geometric region (union semantics).
@@ -831,9 +867,16 @@ class Config(BaseModel):
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
+    reconstruction: ReconstructionConfig = Field(default_factory=ReconstructionConfig, description="Reconstruction parameters")
+
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
     dealloying: Optional[DealloyingConfig] = Field(default=None, description="Dealloying event parameters. If provided, atom removal events are enabled.")
+
+    eventrecycling: Optional[EventRecyclingConfig] = Field(
+        default=None,
+        description="Event recycling parameters. Required when control.recycle = True.",
+    )
 
     inactive_atoms: Optional[RegionConfig] = Field(
         default=None,
@@ -941,7 +984,8 @@ class Config(BaseModel):
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True) : ["basin"],
             ("control.active_volume", True) : ["activevolume"],
-            ("control.bias", True) : ["bias"]
+            ("control.recycle", True) : ["eventrecycling"],
+            ("control.bias", True) : ["bias"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():

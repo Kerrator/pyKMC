@@ -1,6 +1,13 @@
 """Module containing function to apply geometric transformations."""
 
-__all__ = ["transform_positions", "translate", "push_towards", "compute_delr"]
+__all__ = [
+    "transform_positions",
+    "translate",
+    "push_towards",
+    "compute_delr",
+    "per_atom_displacement",
+    "minimum_image_distance",
+]
 import ase.geometry
 import numpy as np
 
@@ -113,5 +120,69 @@ def compute_delr(positions_1, positions_2, cell=None, pbc=None) :
     delr = np.max(distances)
 
     return delr
+
+
+def per_atom_displacement(
+    positions_pre: np.ndarray,
+    positions_post: np.ndarray,
+    cell: np.ndarray,
+) -> np.ndarray:
+    """Per-atom PBC-aware displacement magnitude (orthorhombic minimum-image).
+
+    Same minimum-image trick as `compute_delr`, but returns the full per-atom
+    array of Euclidean distances instead of just the maximum.
+
+    Parameters
+    ----------
+    positions_pre : np.ndarray
+        Shape (N, 3) positions before the displacement.
+    positions_post : np.ndarray
+        Shape (N, 3) positions after the displacement.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+
+    Returns
+    -------
+    np.ndarray
+        Shape (N,) of per-atom displacement magnitudes in Angstroms.
+
+    """
+    disp = positions_post - positions_pre
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    for i in range(3):
+        disp[:, i] -= cell_lengths[i] * np.round(disp[:, i] / cell_lengths[i])
+    return np.linalg.norm(disp, axis=1)
+
+
+def minimum_image_distance(
+    position_a: np.ndarray,
+    position_b: np.ndarray,
+    cell: np.ndarray,
+) -> float:
+    """PBC minimum-image Euclidean distance between two positions (orthorhombic).
+
+    Single-pair counterpart of `per_atom_displacement`: applies the same
+    per-axis minimum-image wrap to the separation vector and returns its norm.
+
+    Parameters
+    ----------
+    position_a : np.ndarray
+        Shape (3,) first position.
+    position_b : np.ndarray
+        Shape (3,) second position.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+
+    Returns
+    -------
+    float
+        Minimum-image distance in Angstroms.
+
+    """
+    dvec = position_b - position_a
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    for i in range(3):
+        dvec[i] -= cell_lengths[i] * np.round(dvec[i] / cell_lengths[i])
+    return float(np.linalg.norm(dvec))
 
 
