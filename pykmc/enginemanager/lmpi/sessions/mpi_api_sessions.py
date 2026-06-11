@@ -137,33 +137,13 @@ class MpiApiSession :
         self.send_message({"type": "minimize", "value" : {"config": config, "positions": positions}})
 
     #@session_locked
-    def get_total_energy(self) -> float :
-        """ 
-        """
-        self._is_busy = True  # Mark the session as busy
-        #print(f"[Session] Get total energy")
-        try : 
-            self.send_message({"type": "get_total_energy"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result":
-                return msg["value"]  
-            else:
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally:
-            self._is_busy = False
-    
-    #@session_locked
     def get_positions(self) -> np.ndarray[float] :
         self._is_busy = True
         #print(f"[Session] Get Positions")
-        try : 
+        try :
             self.send_message({"type": "get_positions"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+            return self._receive_result_or_error()
+        finally :
             self._is_busy = False
 
     #@session_locked
@@ -183,11 +163,7 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
         try :
             self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions, "types": types}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" :
-                return msg["value"]
-            else :
-                raise RuntimeError(f"Unexpected message type: {msg}")
+            return self._receive_result_or_error()
         finally :
             self._is_busy = False
 
@@ -240,14 +216,10 @@ class MpiApiSession :
     def get_potential_energy(self, positions=None) :
         self._is_busy = True
         #print(f"[Session n°{self.session_id}]  get potential energy")
-        try : 
+        try :
             self.send_message({"type": "get_potential_energy"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+            return self._receive_result_or_error()
+        finally :
             self._is_busy = False
 
     #@session_locked
@@ -256,12 +228,8 @@ class MpiApiSession :
         #print(f"[Session] Launching pARTn search")
         try :
             self.send_message({"type": "partn_search", "value": {"config": config, "central_atom_idx": central_atom_idx, "positions": positions, "cell": cell, "types": types}})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result" : 
-                return msg["value"]
-            else : 
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally : 
+            return self._receive_result_or_error()
+        finally :
             self._is_busy = False
 
     #@session_locked

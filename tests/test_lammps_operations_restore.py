@@ -528,23 +528,44 @@ def test_partn_refine_returns_err_for_invalid_active_volume_saddle(monkeypatch):
     assert len(restore_calls) == 1
 
 
-def test_minimize_freeze_outer_sphere_emits_av_geometry(monkeypatch):
-    """The freeze-outer helper must define the AV sphere, freeze atoms outside,
-    run the minimize, and clean up the LAMMPS state afterwards."""
-    engine = _FakeEngine(natoms=10)
+def _freeze_test_geometry():
+    """Line of 6 atoms along x in a 20 A periodic box, central atom at x=1.
+
+    Atom 5 sits at x=17: 16 A away naively but 4 A away through the periodic
+    boundary — the case a non-PBC-aware region sphere gets wrong.
+    """
+    cell = np.diag([20.0, 20.0, 20.0])
+    pbc = np.array([True, True, True])
+    positions = np.array([
+        [1.0, 1.0, 1.0],   # 0: central atom
+        [3.0, 1.0, 1.0],   # 1: 2 A away -> mobile
+        [6.0, 1.0, 1.0],   # 2: 5 A away -> mobile at rmov=6
+        [9.0, 1.0, 1.0],   # 3: 8 A away -> frozen at rmov=6
+        [12.0, 1.0, 1.0],  # 4: 9 A away (MIC) -> frozen
+        [17.0, 1.0, 1.0],  # 5: 4 A away THROUGH the boundary -> mobile
+    ])
+    return positions, cell, pbc
+
+
+def test_minimize_freeze_outer_sphere_uses_minimum_image_selection():
+    """The frozen set must follow the minimum-image convention (matching
+    define_AV): an atom near the opposite box edge is NOT frozen when it is
+    within rmov through the periodic boundary."""
+    engine = _FakeEngine(natoms=6)
     config = SimpleNamespace(
         lammps=SimpleNamespace(min_style="cg", minimize="1e-10 1e-12 100 100")
     )
-    center = np.array([1.5, 2.5, 3.5])
-    rmov = 14.0
+    positions, cell, pbc = _freeze_test_geometry()
 
-    ops._minimize_freeze_outer_sphere(engine, config, center, rmov)
+    ops._minimize_freeze_outer_sphere(engine, config, positions, 0, 6.0, cell, pbc)
 
     cmds = engine.commands
-    # Setup phase
-    assert "region _av_sphere sphere 1.5 2.5 3.5 14.0" in cmds
-    assert "group _av_inner region _av_sphere" in cmds
-    assert "group _av_outer subtract all _av_inner" in cmds
+    group_cmds = [c for c in cmds if c.startswith("group _av_outer id ")]
+    assert len(group_cmds) == 1
+    frozen = {int(t) for t in group_cmds[0].split()[3:]}
+    # LAMMPS ids are 1-based: atoms 3 and 4 (ids 4, 5) are the only ones > 6 A
+    # away under MIC; atom 5 (id 6) is 4 A away through the boundary.
+    assert frozen == {4, 5}
     assert "fix _av_freeze _av_outer setforce 0.0 0.0 0.0" in cmds
     # Minimize phase (issued by ops.minimize)
     assert "min_style cg" in cmds
@@ -552,17 +573,34 @@ def test_minimize_freeze_outer_sphere_emits_av_geometry(monkeypatch):
     # Cleanup phase, in correct order
     cleanup_idx = cmds.index("unfix _av_freeze")
     assert cmds[cleanup_idx + 1] == "group _av_outer delete"
-    assert cmds[cleanup_idx + 2] == "group _av_inner delete"
-    assert cmds[cleanup_idx + 3] == "region _av_sphere delete"
+
+
+def test_minimize_freeze_outer_sphere_no_frozen_atoms_plain_minimize():
+    """With every atom inside rmov there is nothing to freeze: no group/fix
+    commands, just the minimize."""
+    engine = _FakeEngine(natoms=6)
+    config = SimpleNamespace(
+        lammps=SimpleNamespace(min_style="cg", minimize="1e-10 1e-12 100 100")
+    )
+    positions, cell, pbc = _freeze_test_geometry()
+
+    ops._minimize_freeze_outer_sphere(engine, config, positions, 0, 15.0, cell, pbc)
+
+    cmds = engine.commands
+    assert not any(c.startswith("group _av_outer") for c in cmds)
+    assert not any(c.startswith("fix _av_freeze") for c in cmds)
+    assert "min_style cg" in cmds
 
 
 def test_minimize_freeze_outer_sphere_cleans_up_on_error(monkeypatch):
     """If LAMMPS minimize raises, the helper must still tear down the freeze
-    state so subsequent calls don't trip over orphaned regions/groups/fixes."""
-    engine = _FakeEngine(natoms=10)
+    state so subsequent calls don't trip over orphaned groups/fixes — and the
+    cleanup itself must be best-effort (a cleanup failure is swallowed)."""
+    engine = _FakeEngine(natoms=6)
     config = SimpleNamespace(
         lammps=SimpleNamespace(min_style="cg", minimize="1e-10 1e-12 100 100")
     )
+    positions, cell, pbc = _freeze_test_geometry()
 
     def boom(eng, cfg, positions=None):
         raise RuntimeError("simulated lammps failure")
@@ -570,11 +608,9 @@ def test_minimize_freeze_outer_sphere_cleans_up_on_error(monkeypatch):
     monkeypatch.setattr(ops, "minimize", boom)
 
     with pytest.raises(RuntimeError, match="simulated lammps failure"):
-        ops._minimize_freeze_outer_sphere(engine, config, np.zeros(3), 5.0)
+        ops._minimize_freeze_outer_sphere(engine, config, positions, 0, 6.0, cell, pbc)
 
     # Cleanup must have run despite the exception
     cmds = engine.commands
     assert "unfix _av_freeze" in cmds
     assert "group _av_outer delete" in cmds
-    assert "group _av_inner delete" in cmds
-    assert "region _av_sphere delete" in cmds

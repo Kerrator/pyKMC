@@ -128,26 +128,41 @@ def minimize(engine, config, positions=None) :
     engine.command("minimize {}".format(config.lammps.minimize))
 
 
-def _minimize_freeze_outer_sphere(engine, config, center_pos, rmov):
-    """Minimize with atoms outside ``rmov`` of ``center_pos`` zero-forced.
+def _minimize_freeze_outer_sphere(engine, config, positions, central_atom, rmov, cell, pbc):
+    """Minimize with atoms farther than ``rmov`` from the central atom zero-forced.
 
     Mirrors the active-volume buffer geometry: only atoms within rmov of the
     central atom can relax; atoms beyond are frozen at their current positions.
     Used by basin_reconstruct in AV mode so that full-system reconstruction
     matches the constrained geometry under which reference events were captured.
+
+    The frozen set is selected with the minimum-image convention (matching
+    define_AV) rather than a LAMMPS region sphere, which does not wrap across
+    periodic boundaries. Every rank computes the same set from the same inputs,
+    so command lockstep is preserved. Cleanup is best-effort and idempotent: a
+    failure mid-minimize must not strand a group that breaks the next call.
     """
+    import ase.geometry
+
+    diffs = np.asarray(positions, dtype=float) - np.asarray(positions[central_atom], dtype=float)
+    _, dist = ase.geometry.find_mic(diffs, cell, pbc=pbc if pbc is not None else True)
+    frozen_ids = np.where(dist > rmov)[0] + 1  # LAMMPS ids are 1-based
+
     cmd = engine.command
-    cmd(f"region _av_sphere sphere {center_pos[0]} {center_pos[1]} {center_pos[2]} {rmov}")
-    cmd("group _av_inner region _av_sphere")
-    cmd("group _av_outer subtract all _av_inner")
-    cmd("fix _av_freeze _av_outer setforce 0.0 0.0 0.0")
     try:
+        if len(frozen_ids) > 0:
+            for i in range(0, len(frozen_ids), 500):
+                chunk = " ".join(str(int(j)) for j in frozen_ids[i:i + 500])
+                cmd(f"group _av_outer id {chunk}")
+            cmd("fix _av_freeze _av_outer setforce 0.0 0.0 0.0")
         minimize(engine, config)
     finally:
-        cmd("unfix _av_freeze")
-        cmd("group _av_outer delete")
-        cmd("group _av_inner delete")
-        cmd("region _av_sphere delete")
+        if len(frozen_ids) > 0:
+            for cleanup in ("unfix _av_freeze", "group _av_outer delete"):
+                try:
+                    cmd(cleanup)
+                except Exception:
+                    pass  # engine may be mid-error; collective errors raise on all ranks
 
 
 def _basin_av_rmov(config: "Config") -> "float | None":
@@ -673,83 +688,91 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
 
     if engine.rank == 0:
         # --- PSR phase (rank 0 only) ---
-        coords1 = np.array(from_positions[neighbor_indices], copy=True)
-
-        if atom_coloring_mode == "full":
-            typ1 = list(np.array(from_types)[neighbor_indices])
-            typ2 = list(ref_initial_types) if ref_initial_types is not None else typ1
-        else:
-            typ1 = ["X"] * len(coords1)
-            typ2 = typ1
-
-        # Unwrap coords near cell boundaries
-        pbc_arr = pbc if pbc is not None else np.array([True, True, True])
-        cell_lengths = [cell[d][d] for d in range(3)]
-        central_pos = from_positions[central_atom]
-        for i in range(len(coords1)):
-            for dim in range(3):
-                if pbc_arr[dim]:
-                    diff = coords1[i][dim] - central_pos[dim]
-                    if abs(diff) > cell_lengths[dim] / 2:
-                        coords1[i][dim] += np.sign(-diff) * cell_lengths[dim]
-
-        coords2 = np.array(ref_initial_positions)
-        nat1 = len(coords1)
-        nat2 = len(coords2)
-
-        ira = ira_mod.IRA()
+        #Any exception in this rank-0-only block MUST become an error payload:
+        #raising past the bcast below would leave the other engine ranks waiting
+        #in the collective forever (and cross-wire later bcasts).
         try:
-            rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
-        except Exception:
-            proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
-                       "message": "IRA did not find a match"}
+            coords1 = np.array(from_positions[neighbor_indices], copy=True)
 
-        if proceed is None and dh > matching_score_thr:
-            proceed = {"ok": False,
-                       "error_type": "PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD",
-                       "message": f"PSR matching score {dh} above threshold {matching_score_thr}"}
-
-        if proceed is None:
-            # Apply symmetry + PSR transforms
-            supposed_initial = np.array(ref_initial_positions, copy=True)
-            supposed_final = np.array(ref_final_positions, copy=True)
-            saddle = np.array(ref_saddle_positions, copy=True)
-
-            if sym_idx != 0:
-                sym_matrix = sym_matrices[sym_idx]
-                sym_perm = sym_perms[sym_idx]
-                supposed_initial = transform_positions(supposed_initial, sym_matrix, 0, sym_perm)
-                saddle = transform_positions(saddle, sym_matrix, 0, sym_perm)
-                supposed_final = transform_positions(supposed_final, sym_matrix, 0, sym_perm)
-
-            supposed_initial = transform_positions(supposed_initial, rmat, tr, perm)
-            saddle = transform_positions(saddle, rmat, tr, perm)
-            supposed_final = transform_positions(supposed_final, rmat, tr, perm)
-
-            style = config.basin.style if config.basin is not None else "global/reconstruction"
-            if style == "global":
-                #Skip-reconstruction style: land directly on the PSR-predicted final
-                #state and minimize once, with no delr gates — the engine-side mirror
-                #of the host-side 'global' semantics (basin.py system_from_state).
-                #Mislandings that equal a known state are absorbed by dedup; genuinely
-                #new mislandings enter the table under a transition they did not take.
-                new_positions = np.array(from_positions, copy=True)
-                new_positions[neighbor_indices] = supposed_final
-                proceed = {"step": "min_global", "positions": new_positions}
+            if atom_coloring_mode == "full":
+                typ1 = list(np.array(from_types)[neighbor_indices])
+                typ2 = list(ref_initial_types) if ref_initial_types is not None else typ1
             else:
-                # Build new system positions with saddle applied
-                new_positions = np.array(from_positions, copy=True)
-                new_positions[neighbor_indices] = saddle
+                typ1 = ["X"] * len(coords1)
+                typ2 = typ1
 
-                # Push toward min1
-                saddle_toward_min1 = push_towards(
-                    new_positions[neighbor_indices], supposed_initial,
-                    fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
-                tmp_positions = np.array(new_positions, copy=True)
-                tmp_positions[neighbor_indices] = saddle_toward_min1
-                proceed = {"step": "min1", "positions": tmp_positions,
-                           "supposed_initial": supposed_initial, "supposed_final": supposed_final,
-                           "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+            # Unwrap coords near cell boundaries
+            pbc_arr = pbc if pbc is not None else np.array([True, True, True])
+            cell_lengths = [cell[d][d] for d in range(3)]
+            central_pos = from_positions[central_atom]
+            for i in range(len(coords1)):
+                for dim in range(3):
+                    if pbc_arr[dim]:
+                        diff = coords1[i][dim] - central_pos[dim]
+                        if abs(diff) > cell_lengths[dim] / 2:
+                            coords1[i][dim] += np.sign(-diff) * cell_lengths[dim]
+
+            coords2 = np.array(ref_initial_positions)
+            nat1 = len(coords1)
+            nat2 = len(coords2)
+
+            ira = ira_mod.IRA()
+            try:
+                rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
+            except Exception:
+                proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
+                           "message": "IRA did not find a match"}
+
+            if proceed is None and dh > matching_score_thr:
+                proceed = {"ok": False,
+                           "error_type": "PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD",
+                           "message": f"PSR matching score {dh} above threshold {matching_score_thr}"}
+
+            if proceed is None:
+                # Apply symmetry + PSR transforms
+                supposed_initial = np.array(ref_initial_positions, copy=True)
+                supposed_final = np.array(ref_final_positions, copy=True)
+                saddle = np.array(ref_saddle_positions, copy=True)
+
+                if sym_idx != 0:
+                    sym_matrix = sym_matrices[sym_idx]
+                    sym_perm = sym_perms[sym_idx]
+                    supposed_initial = transform_positions(supposed_initial, sym_matrix, 0, sym_perm)
+                    saddle = transform_positions(saddle, sym_matrix, 0, sym_perm)
+                    supposed_final = transform_positions(supposed_final, sym_matrix, 0, sym_perm)
+
+                supposed_initial = transform_positions(supposed_initial, rmat, tr, perm)
+                saddle = transform_positions(saddle, rmat, tr, perm)
+                supposed_final = transform_positions(supposed_final, rmat, tr, perm)
+
+                style = config.basin.style if config.basin is not None else "global/reconstruction"
+                if style == "global":
+                    #Skip-reconstruction style: land directly on the PSR-predicted final
+                    #state and minimize once, with no delr gates — the engine-side mirror
+                    #of the host-side 'global' semantics (basin.py system_from_state).
+                    #Mislandings that equal a known state are absorbed by dedup; genuinely
+                    #new mislandings enter the table under a transition they did not take.
+                    new_positions = np.array(from_positions, copy=True)
+                    new_positions[neighbor_indices] = supposed_final
+                    proceed = {"step": "min_global", "positions": new_positions}
+                else:
+                    # Build new system positions with saddle applied
+                    new_positions = np.array(from_positions, copy=True)
+                    new_positions[neighbor_indices] = saddle
+
+                    # Push toward min1
+                    saddle_toward_min1 = push_towards(
+                        new_positions[neighbor_indices], supposed_initial,
+                        fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                    tmp_positions = np.array(new_positions, copy=True)
+                    tmp_positions[neighbor_indices] = saddle_toward_min1
+                    proceed = {"step": "min1", "positions": tmp_positions,
+                               "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                               "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+        except Exception as exc:
+            logger.exception("[Engine Rank 0] basin reconstruction rank-0 PSR phase failed")
+            proceed = {"ok": False, "error_type": type(exc).__name__,
+                       "message": f"rank-0 PSR phase failed: {exc}"}
 
     # Broadcast control signal to all ranks
     proceed = engine.engine_comm.bcast(proceed, root=0)
@@ -764,7 +787,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
         set_positions(engine=engine, positions=proceed["positions"])
         av_rmov = _basin_av_rmov(config)
         if av_rmov is not None:
-            _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+            _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
         else:
             minimize(engine, config)
         min2_pos = get_positions(engine)
@@ -777,7 +800,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     set_positions(engine=engine, positions=proceed["positions"])
     av_rmov = _basin_av_rmov(config)
     if av_rmov is not None:
-        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+        _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
     else:
         minimize(engine, config)
     min1_pos = get_positions(engine)
@@ -785,25 +808,32 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     # Validate min1 on rank 0
     proceed2 = None
     if engine.rank == 0:
-        supposed_initial = proceed["supposed_initial"]
-        supposed_final = proceed["supposed_final"]
-        saddle_positions = proceed["saddle_positions"]
-        nbr_indices = proceed["neighbor_indices"]
+        #Same rule as the PSR phase: exceptions here must become error payloads,
+        #never raise past the bcast below.
+        try:
+            supposed_initial = proceed["supposed_initial"]
+            supposed_final = proceed["supposed_final"]
+            saddle_positions = proceed["saddle_positions"]
+            nbr_indices = proceed["neighbor_indices"]
 
-        t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
-        delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
-        if delr1 > matching_score_thr:
-            proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
-                        "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
-        else:
-            # Push toward min2
-            saddle_toward_min2 = push_towards(
-                saddle_positions[nbr_indices], supposed_final,
-                fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
-            tmp_positions2 = np.array(saddle_positions, copy=True)
-            tmp_positions2[nbr_indices] = saddle_toward_min2
-            proceed2 = {"step": "min2", "positions": tmp_positions2,
-                        "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+            t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
+            delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
+            if delr1 > matching_score_thr:
+                proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
+                            "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
+            else:
+                # Push toward min2
+                saddle_toward_min2 = push_towards(
+                    saddle_positions[nbr_indices], supposed_final,
+                    fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                tmp_positions2 = np.array(saddle_positions, copy=True)
+                tmp_positions2[nbr_indices] = saddle_toward_min2
+                proceed2 = {"step": "min2", "positions": tmp_positions2,
+                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+        except Exception as exc:
+            logger.exception("[Engine Rank 0] basin reconstruction min1 validation failed")
+            proceed2 = {"ok": False, "error_type": type(exc).__name__,
+                        "message": f"rank-0 min1 validation failed: {exc}"}
 
     proceed2 = engine.engine_comm.bcast(proceed2, root=0)
 
@@ -815,7 +845,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     # --- Minimize toward min2 (all ranks) ---
     set_positions(engine=engine, positions=proceed2["positions"])
     if av_rmov is not None:
-        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+        _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
     else:
         minimize(engine, config)
     min2_pos = get_positions(engine)

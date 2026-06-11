@@ -39,6 +39,17 @@ class MpiApiEngine() :
         self.message_reader_thread = None 
         self.message_queue = queue.Queue() #Queue to hold messages from the session 
 
+        # Operations whose session-side caller waits for a tag-1 reply. Error
+        # replies must be sent ONLY for these: sending one for a fire-and-forget
+        # operation (set_positions, command, ...) leaves an unconsumed message in
+        # the reply stream, and every later reply is then off by one — silently
+        # cross-wiring results between operations.
+        self.REPLY_OPS = {
+            "get_total_energy", "get_positions", "get_potential_energy",
+            "minimize_with_results", "partn_search", "partn_refine",
+            "basin_reconstruct", "basin_explore",
+        }
+
         # Dispatch map of possible lammps operation
         self._operations_map = {
             "use_global": self.use_global,
@@ -137,6 +148,12 @@ class MpiApiEngine() :
 
             if result is not None:
                 if isinstance(result, dict) and "__handler_error__" in result:
+                    if msg.get("type") not in self.REPLY_OPS:
+                        # Fire-and-forget operation: nobody is waiting for a reply,
+                        # and sending one would desync the tag-1 reply stream.
+                        print(f"[Engine Rank {self.rank}] handler error in fire-and-forget "
+                              f"op {msg.get('type')}: {result['__handler_error__'].get('message')}")
+                        continue
                     reply = {"type": "error", "value": result["__handler_error__"]}
                 else:
                     reply = {"type": "result", "value": result}
