@@ -21,6 +21,7 @@ from .result import (
     Ok
 )
 import numpy as np
+import os
 from ase.io import write
 from ase import Atoms
 from .algorithms import rejection_free
@@ -413,6 +414,10 @@ class KMC:
             # == Save Reference Table and List visited environment :
             self._save()
             self._append_snapshot_to_trajectory()
+            # == Periodic restart save: a killed run resumes from the last interval
+            interval = self.config.control.restart_save_interval
+            if interval is not None and step % interval == 0:
+                self._save_restart_file(step, total_time)
             del active_table
             # == Check if only cristalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
@@ -420,7 +425,7 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
-        self._save_restart_file(step, total_time)
+        self._save_restart_file(step, total_time, final=True)
         self._close()
 
     def get_new_environments(self) -> list[str]:
@@ -813,17 +818,36 @@ class KMC:
 
     def _save(self) -> None:
         """Save the reference event table and the list of visited environments."""
-        self.reference_table.save("reference_table.pickle")
+        self.reference_table.save(self.config.control.reference_table_output or "reference_table.pickle")
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
 
-    def _save_restart_file(self, last_step, last_time) :
+    def _save_restart_file(self, last_step, last_time, final: bool = False) -> None :
+        """Atomically write restart info plus a resume-ready snapshot.
+
+        restart_latest.npz (last_step/last_time) and restart_latest.xyz (current
+        minimized positions) are written via tmp + os.replace so a kill mid-write
+        cannot leave a truncated file. Resume with:
+            restart_file = restart_latest.npz
+            initial_config = restart_latest.xyz
+        With final=True the legacy end-of-run restart_<step>.npz is also written.
         """
-        Save end simulation informations
-        """
-        np.savez("restart_"+str(last_step)+".npz",
-                 last_step = last_step,
-                 last_time = last_time)
+        np.savez("restart_latest.tmp.npz", last_step=last_step, last_time=last_time)
+        os.replace("restart_latest.tmp.npz", "restart_latest.npz")
+
+        atoms = Atoms(
+            self.system.types,
+            positions=self.system.positions,
+            cell=self.system.cell,
+            pbc=self.system.pbc,
+        )
+        write("restart_latest.tmp.xyz", atoms)
+        os.replace("restart_latest.tmp.xyz", "restart_latest.xyz")
+
+        if final:
+            np.savez("restart_"+str(last_step)+".npz",
+                     last_step = last_step,
+                     last_time = last_time)
 
 
     def _close(self) -> None:
