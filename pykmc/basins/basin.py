@@ -83,6 +83,11 @@ class BasinsGenericEvents() :
         #reorder states index
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
+        #Remap the exit-machinery containers through the same mapping (deferred /
+        #excluded states have connectivity rows, so they appear in the mapping).
+        self._exit_excluded_states = {mapping.get(s, s) for s in self._exit_excluded_states}
+        self._deferred_states = {mapping.get(s, s) for s in self._deferred_states}
+        self._deferred_systems = {mapping.get(s, s): v for s, v in self._deferred_systems.items()}
         #Normalize the transient flag by index range. reorder_states_index() numbers the
         #transient states first (0..n_transient-1) and absorbing states after, but the
         #per-row 'transient' flag set during exploration can be stale after change_state_index()
@@ -95,12 +100,19 @@ class BasinsGenericEvents() :
         if not result.is_ok() : 
             return result
         #apply selector algorithm to find t_exit and exit_state
-        result = self.selector.select_from_connectivity(self.connectivity_table)
-        if not result.is_ok() : 
+        result = self.selector.select_from_connectivity(self.connectivity_table, excluded_states=self._exit_excluded_states)
+        if not result.is_ok() :
             return result
-        #Construct output KMC needs 
+        #Construct output KMC needs
         t_exit = result.ok_value().t_exit
         exit_state = result.ok_value().exit_state
+
+        #Deferred exits (budget-capped frontier) are materialized lazily here; a
+        #materialization failure excludes that exit and redraws another.
+        result = self._resolve_exit_state(t_exit, exit_state)
+        if not result.is_ok() :
+            return result
+        exit_state = result.ok_value()
 
         from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
         #Ensure from_state is state are full 
@@ -132,7 +144,12 @@ class BasinsGenericEvents() :
         self.selector = FPTASelector(solver=self.config.basin.solver if self.config.basin is not None else "auto")
         new_system = System(positions=system.positions.copy(), types=system.types.copy(), cell=system.cell.copy(), pbc=system.pbc.copy(), index=np.arange(len(system.types)))
         self._state_fingerprints = {}  #state_index -> fingerprint vector (dedup pre-filter cache)
-        self._was_capped = False  #set when max_states converts the remaining frontier to absorbing
+        self._was_capped = False  #set when a budget converts the remaining frontier to absorbing
+        self._exit_excluded_states: set[int] = set()  #absorbing states the exit draw must skip (failed reconstruction)
+        self._deferred_states: set[int] = set()  #absorbing states never reconstructed (budget cap); materialized lazily if selected
+        self._deferred_systems: dict[int, System] = {}  #reconstructed-but-not-deduped systems stashed for lazy materialization
+        self._n_failed = 0  #failed state reconstructions (failure-budget numerator)
+        self._n_reconstruction_attempts = 0  #attempted state reconstructions (failure-budget denominator)
         self._add_state(state_index=0, system=new_system)  #add current state 0 to self.states
         self._next_state_index = 1  #monotonic state-index counter (state 0 is the initial state)
 
@@ -665,33 +682,125 @@ class BasinsGenericEvents() :
         self.states[from_state].release_heavy_objects()
         return Ok(state_idx)
 
-    def _cap_remaining_as_absorbing(self) -> "Result[None, ErrorInfo]" :
-        """Convert all remaining frontier states to absorbing and clear the queue."""
+    def _cap_remaining_as_absorbing(self, reason: str = "max_states") -> "Result[None, ErrorInfo]" :
+        """Convert all remaining frontier states to absorbing WITHOUT reconstructing them.
+
+        Unmaterialized frontier states become 'deferred': they stay selectable as
+        exits (their rows keep the exploration barriers) and are materialized lazily
+        only if the exit draw picks one. The previous implementation reconstructed
+        and deduplicated the whole frontier here, re-entering the very bottleneck
+        the cap exists to avoid. Deferred states are not deduplicated against each
+        other, so duplicates split exit probability among themselves — an accepted
+        bias of an explicitly budget-breached basin (the selected exit is deduped at
+        materialization time).
+        """
         self._was_capped = True
         capped = list(self.states_to_explore)
         for state_idx in capped:
-            result = self._materialize_frontier_state(state_idx)
-            if not result.is_ok():
-                return result
-
-            materialized_idx = result.ok_value()
-            if materialized_idx != state_idx:
-                if state_idx not in self.explored_states:
-                    self.explored_states.append(state_idx)
-                continue
-
             self.connectivity_table.change_state_to_absorbing(state_idx)
             if state_idx in self.states:
                 self.states[state_idx].transient = False
                 self.states[state_idx].release_heavy_objects()
+            else:
+                self._deferred_states.add(state_idx)
             if state_idx not in self.explored_states:
                 self.explored_states.append(state_idx)
         self.states_to_explore.clear()
         logger.warning(
-            "[Basin] Capped %d remaining frontier states as absorbing (max_states reached).",
+            "[Basin] Budget breach (%s): capped %d frontier states as deferred absorbing.",
+            reason,
             len(capped),
         )
         return Ok(None)
+
+    def _mark_failed_absorbing(self, state_idx: int, err: "ErrorInfo") -> None :
+        """Shared rule for a state whose reconstruction failed: keep the connectivity
+        row (the channel physically exists and its exploration barrier is known), flip
+        it absorbing, and exclude it from the exit draw. The parent's total escape
+        rate — and with it t_exit and k_tot — stays exact; only the landing draw is
+        conditioned on 'not a failed state'."""
+        self.connectivity_table.change_state_to_absorbing(state_idx)
+        self._exit_excluded_states.add(state_idx)
+        self._n_failed += 1
+        if state_idx in self.states_to_explore:
+            self.states_to_explore.remove(state_idx)
+        if state_idx not in self.explored_states:
+            self.explored_states.append(state_idx)
+        logger.warning(
+            "[Basin] state %d kept as non-selectable absorbing (reconstruction failed: %s)",
+            state_idx,
+            err,
+        )
+
+    def _materialize_exit_state(self, exit_state: int) -> "Result[int, ErrorInfo]" :
+        """Ensure the selected exit state has a System, materializing lazily if needed.
+
+        Returns the (possibly merged) state index: a deferred state can turn out to
+        be a duplicate of an already-known state once reconstructed.
+        """
+        state_data = self.states.get(exit_state)
+        if state_data is not None and state_data.system is not None:
+            return Ok(exit_state)
+
+        if exit_state in self._deferred_systems:
+            #Reconstructed during exploration but never deduplicated (dedup deadline):
+            #dedup now, against the full state set.
+            new_system = self._deferred_systems.pop(exit_state)
+            self._deferred_states.discard(exit_state)
+            existing = self.is_new_state(new_system)
+            if existing != -1:
+                self.connectivity_table.change_state_index(current_index=exit_state, new_index=existing)
+                if existing not in self.absorbing_saddle_positions and exit_state in self.absorbing_saddle_positions:
+                    self.absorbing_saddle_positions[existing] = self.absorbing_saddle_positions[exit_state]
+                return Ok(existing)
+            self._add_state(state_index=exit_state, system=new_system, transient=False)
+            return Ok(exit_state)
+
+        #Never reconstructed (budget cap): one engine reconstruction + dedup.
+        self._deferred_states.discard(exit_state)
+        result = self._materialize_frontier_state(exit_state)
+        if not result.is_ok():
+            return result
+        materialized = result.ok_value()
+        if materialized != exit_state:
+            if materialized not in self.absorbing_saddle_positions and exit_state in self.absorbing_saddle_positions:
+                self.absorbing_saddle_positions[materialized] = self.absorbing_saddle_positions[exit_state]
+        else:
+            self.connectivity_table.change_state_to_absorbing(exit_state)
+            if exit_state in self.states:
+                self.states[exit_state].transient = False
+        return Ok(materialized)
+
+    def _resolve_exit_state(self, t_exit: float, exit_state: int) -> "Result[int, ErrorInfo]" :
+        """Materialize the drawn exit; on failure exclude it and redraw another.
+
+        t_exit is not recomputed: excluding an exit only conditions the landing draw,
+        not the generator, so only select_absorbing_state() re-runs.
+        """
+        while True:
+            result = self._materialize_exit_state(exit_state)
+            if result.is_ok():
+                resolved = result.ok_value()
+                n_transient, _ = self._connectivity_state_counts()
+                if resolved >= n_transient:
+                    return Ok(resolved)
+                #Merged into a transient state: not a viable exit; exclude and redraw.
+                logger.warning(
+                    "[Basin] exit state %d merged into transient %d; redrawing exit",
+                    exit_state, resolved,
+                )
+            else:
+                logger.warning(
+                    "[Basin] exit state %d failed materialization (%s); redrawing exit",
+                    exit_state, result.err_value(),
+                )
+            self._exit_excluded_states.add(exit_state)
+            exit_state = self.selector.select_absorbing_state(
+                t_exit, excluded_states=self._exit_excluded_states)
+            if exit_state is None:
+                return Err(ErrorInfo(
+                    type=ErrorType.BASIN_NO_VIABLE_EXIT,
+                    message="all absorbing exits failed materialization or were excluded"))
 
     def _prepare_explore_kwargs(self, state_idx: int, start_index: int) -> dict :
         """Prepare keyword arguments for manager.basin_explore()."""

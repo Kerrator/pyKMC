@@ -4,7 +4,7 @@ import numpy as np
 from .exit_time_solver import BisectionSolver, QSDSolver
 from .connectivity import StatesConnectivity
 from .utils import solve_master_equation
-from pykmc.result import Result, Ok, ErrorInfo, BasinSelectorOutput, BasinExitTimeSolverOutput
+from pykmc.result import Result, Ok, Err, ErrorInfo, ErrorType, BasinSelectorOutput, BasinExitTimeSolverOutput
 
 logger = logging.getLogger("log")
 
@@ -43,19 +43,23 @@ class FPTASelector():
         self._use_qsd = False #set by get_exit_time; selects the exit-state weighting
         self._qsd = None #quasi-stationary distribution when the QSD solver was used
 
-    def select_from_connectivity(self, connectivity_table: StatesConnectivity) -> Result[BasinSelectorOutput, ErrorInfo] : 
+    def select_from_connectivity(self, connectivity_table: StatesConnectivity, excluded_states: "set[int] | None" = None) -> Result[BasinSelectorOutput, ErrorInfo] :
         """Find both an exit time and an exit absorbing state from a `StatesConnectivity` object.
 
         Parameters
         ----------
-        connectivity_table : StatesConnectivity 
-            StatesConnectivity object. 
+        connectivity_table : StatesConnectivity
+            StatesConnectivity object.
+        excluded_states : set[int], optional
+            Absorbing state indices that must not be selected as the exit (e.g.
+            states whose reconstruction failed). Their rate mass still contributes
+            to the generator — and so to t_exit — only the landing draw skips them.
 
         Returns
         -------
         Result[BasinSelectorOutput, ErrorInfo]
             - Ok(BasinSelectorOutput(t_exit, exit_state) ) on success.
-            - Err(ErrorInfo) if exit time solver failed.
+            - Err(ErrorInfo) if exit time solver failed or no viable exit remains.
 
         """
         #Number of transient states
@@ -69,11 +73,15 @@ class FPTASelector():
         #Find exit time :
         result = self.get_exit_time()
         if not result.is_ok() : #Solver Err when determining t_exit
-            return result 
+            return result
         t_exit = result.ok_value().t_exit
 
         #Find exit state
-        exit_state = self.select_absorbing_state(t_exit=t_exit)
+        exit_state = self.select_absorbing_state(t_exit=t_exit, excluded_states=excluded_states)
+        if exit_state is None :
+            return Err(ErrorInfo(
+                type=ErrorType.BASIN_NO_VIABLE_EXIT,
+                message="every absorbing exit is excluded from the exit draw"))
 
         return Ok(BasinSelectorOutput(t_exit=t_exit, exit_state=exit_state))
 
@@ -187,19 +195,23 @@ class FPTASelector():
         exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
         return exit_time_solver.solve()
 
-    def select_absorbing_state(self, t_exit: float) -> int: 
+    def select_absorbing_state(self, t_exit: float, excluded_states: "set[int] | None" = None) -> "int | None":
         """Find which absorbing state is reached at the given exit time.
 
         Parameters
         ----------
         t_exit : float
-            Exit time. 
+            Exit time.
+        excluded_states : set[int], optional
+            Absorbing state indices (full-matrix numbering) whose probability is
+            zeroed before the draw.
 
         Returns
         -------
-        int
+        int or None
             Index of the absorbing state selected (matching the original
-            numbering of the full matrix M_abs).
+            numbering of the full matrix M_abs), or None when exclusions leave
+            no probability mass to draw from.
 
         """
         n_transient = len(self.M_abs_reduced) - 1
@@ -229,9 +241,20 @@ class FPTASelector():
         #adjust so sum gives 1 (clamp numerical negatives first)
         p_absorbing = np.real(p_absorbing)
         p_absorbing = np.maximum(p_absorbing, 0)
+
+        #Zero excluded exits before normalizing (their mass redistributes over the rest)
+        if excluded_states:
+            for j in excluded_states:
+                j_idx = j - n_transient
+                if 0 <= j_idx < len(p_absorbing):
+                    p_absorbing[j_idx] = 0.0
+
         total = np.sum(p_absorbing)
         if total > 0:
             p_absorbing = p_absorbing / total
+        elif excluded_states:
+            #The uniform fallback would resurrect excluded states; report instead.
+            return None
         else:
             p_absorbing = np.ones(len(p_absorbing)) / len(p_absorbing)
 

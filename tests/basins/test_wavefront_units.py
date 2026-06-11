@@ -33,6 +33,12 @@ def _make_basin(config) -> BasinsGenericEvents:
     basin.states_to_explore = []
     basin.explored_states = []
     basin.connectivity_table = BasinStatesConnectivity()
+    basin._exit_excluded_states = set()
+    basin._deferred_states = set()
+    basin._deferred_systems = {}
+    basin._n_failed = 0
+    basin._n_reconstruction_attempts = 0
+    basin.absorbing_saddle_positions = {}
     return basin
 
 
@@ -207,3 +213,118 @@ class TestCapRemainingAsAbsorbing:
         assert not df[df["state_connexion"].isin([1, 2])]["transient"].any()
         assert basin.states[1].transient is False
         assert basin.states[2].transient is False
+        assert basin._deferred_states == set()
+
+    def test_unmaterialized_frontier_deferred_without_reconstruction(self):
+        """Unmaterialized frontier states are capped as deferred absorbing states with
+        NO engine reconstruction or deduplication (basin.manager is not even set here,
+        so any manager use would raise AttributeError)."""
+        config = _com_config()
+        basin = _make_basin(config)
+
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        basin.states[0] = StateData(system=_make_system(pos),
+                                    environment=None, neighbors_list=None,
+                                    transient=True)
+        basin.states_to_explore = [1, 2]
+
+        for target in (1, 2):
+            basin.connectivity_table.add_connectivity(
+                state=0, state_connexion=target, event_connexion=10 + target,
+                central_atom=0, sym=0, transient=True,
+                dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+
+        result = basin._cap_remaining_as_absorbing(reason="max_basin_walltime_s=1.0")
+
+        assert result.is_ok()
+        assert basin._was_capped is True
+        assert basin.states_to_explore == []
+        assert basin._deferred_states == {1, 2}
+        assert 1 not in basin.states and 2 not in basin.states
+        df = basin.connectivity_table.df
+        assert not df[df["state_connexion"].isin([1, 2])]["transient"].any()
+        # rows keep their exploration rates (k_tot / t_exit stay exact)
+        assert (df[df["state_connexion"].isin([1, 2])]["k_forward"] == 1.0).all()
+
+
+class TestMarkFailedAbsorbing:
+
+    def test_row_kept_absorbing_and_excluded_from_exit_draw(self):
+        """A failed state keeps its connectivity row (rate mass preserved), flips
+        absorbing, leaves the frontier, and is excluded from the exit draw."""
+        config = _com_config()
+        basin = _make_basin(config)
+
+        basin.states_to_explore = [1]
+        basin.connectivity_table.add_connectivity(
+            state=0, state_connexion=1, event_connexion=11,
+            central_atom=0, sym=0, transient=True,
+            dE_forward=0.2, k_forward=2.0, dE_backward=0.2, k_backward=2.0)
+
+        from pykmc.result import ErrorInfo, ErrorType
+        err = ErrorInfo(type=ErrorType.RECONSTRUCTION_INVALID_MIN2, message="delr2 = 2.46")
+        basin._mark_failed_absorbing(1, err)
+
+        df = basin.connectivity_table.df
+        row = df[df["state_connexion"] == 1].iloc[0]
+        assert row["transient"] == False  # noqa: E712 (pandas bool)
+        assert row["k_forward"] == 2.0
+        assert basin._exit_excluded_states == {1}
+        assert basin._n_failed == 1
+        assert basin.states_to_explore == []
+        assert basin.explored_states == [1]
+
+
+class TestMaterializeExitState:
+
+    def test_deferred_system_is_deduped_and_merged(self):
+        """A deferred system that equals a known state merges into it (row remap +
+        saddle positions copied)."""
+        config = _com_config()
+        basin = _make_basin(config)
+
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        basin.states[0] = StateData(system=_make_system(pos), environment=None,
+                                    neighbors_list=None, transient=True)
+        basin.states[1] = StateData(system=_make_system(pos + 3.0), environment=None,
+                                    neighbors_list=None, transient=False)
+        basin._state_fingerprints[1] = fingerprinting.compute_fingerprint(
+            config, basin.states[1].system.positions,
+            basin.states[1].system.cell, basin.states[1].system.pbc)
+
+        # state 2: deferred, physically identical to state 1
+        basin._deferred_states.add(2)
+        basin._deferred_systems[2] = _make_system(pos + 3.0)
+        basin.absorbing_saddle_positions[2] = np.array([[0.5, 0.5, 0.5]])
+        basin.connectivity_table.add_connectivity(
+            state=0, state_connexion=2, event_connexion=12,
+            central_atom=0, sym=0, transient=False,
+            dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+
+        result = basin._materialize_exit_state(2)
+
+        assert result.is_ok()
+        assert result.ok_value() == 1
+        assert 2 not in basin._deferred_systems
+        df = basin.connectivity_table.df
+        assert (df["state_connexion"] == 1).any() and not (df["state_connexion"] == 2).any()
+        assert 1 in basin.absorbing_saddle_positions
+
+    def test_deferred_system_new_state_is_added(self):
+        """A genuinely new deferred system is added to states as absorbing."""
+        config = _com_config()
+        basin = _make_basin(config)
+
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        basin.states[0] = StateData(system=_make_system(pos), environment=None,
+                                    neighbors_list=None, transient=True)
+        basin._deferred_states.add(1)
+        basin._deferred_systems[1] = _make_system(pos + 4.0)
+
+        result = basin._materialize_exit_state(1)
+
+        assert result.is_ok()
+        assert result.ok_value() == 1
+        assert basin.states[1].system is not None
+        assert basin.states[1].transient is False
+        assert 1 not in basin._deferred_states

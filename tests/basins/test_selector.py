@@ -46,3 +46,39 @@ class TestSelector :
         test_logger.debug("FTPASelector build Generator matrix : \n {}".format(selector.M_abs))
         test_logger.debug("And reduced matrix : \n {}".format(selector.M_abs_reduced))
         test_logger.debug("Got exit time = {} and exit state = {}".format(result.ok_value().t_exit, result.ok_value().exit_state))
+
+    def test_excluded_states_never_selected(self, connectivity_table_Cu) :
+        """Excluded absorbing states get zero probability; the draw avoids them."""
+        selector = FPTASelector()
+        result = selector.select_from_connectivity(connectivity_table_Cu)
+        assert result.is_ok()
+        t_exit = result.ok_value().t_exit
+        n_transient = len(selector.M_abs_reduced) - 1
+        n_states = len(selector.M_abs)
+        absorbing = set(range(n_transient, n_states))
+
+        # exclude one absorbing state: 200 draws must never land on it
+        excluded = {n_transient}
+        for _ in range(200):
+            choice = selector.select_absorbing_state(t_exit, excluded_states=excluded)
+            assert choice is not None
+            assert choice not in excluded
+            assert choice in absorbing
+
+    def test_all_excluded_returns_none_and_err(self, connectivity_table_Cu) :
+        """With every absorbing exit excluded the draw returns None and
+        select_from_connectivity maps it to Err(BASIN_NO_VIABLE_EXIT)."""
+        from pykmc.result import ErrorType
+
+        selector = FPTASelector()
+        result = selector.select_from_connectivity(connectivity_table_Cu)
+        assert result.is_ok()
+        t_exit = result.ok_value().t_exit
+        n_transient = len(selector.M_abs_reduced) - 1
+        all_absorbing = set(range(n_transient, len(selector.M_abs)))
+
+        assert selector.select_absorbing_state(t_exit, excluded_states=all_absorbing) is None
+
+        result = selector.select_from_connectivity(connectivity_table_Cu, excluded_states=all_absorbing)
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.BASIN_NO_VIABLE_EXIT
