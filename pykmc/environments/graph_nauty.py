@@ -9,7 +9,7 @@ def graph(
     environment_list: list[list[int]],
     atom_idx: list[int] = None,
     types: list[str] = None,
-) -> list[bytes]:
+) -> list[str]:
     """Compute atoms's graph ID.
 
     Parameters

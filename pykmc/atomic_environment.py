@@ -164,7 +164,7 @@ class AtomicEnvironment:
 
     def compute_coordinationgraph(
         self, neighbors_list: list[list[int]], environment_list: list[list[int]]
-    ) -> list[str | bytes]:
+    ) -> list[str]:
         """Compute coordination-based classification, then Graph Topology for non-crystal atoms.
 
         Parameters
@@ -176,7 +176,7 @@ class AtomicEnvironment:
 
         Returns
         -------
-        list[str | bytes]
+        list[str]
             atomic environment ID for each atom
 
         """
