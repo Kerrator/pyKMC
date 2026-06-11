@@ -43,7 +43,7 @@ class ReferenceEventTable:
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput]
+        self, events: list[EventSearchOutput], pbc: np.ndarray | None = None
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Events events to the table dataframe.
 
@@ -51,6 +51,9 @@ class ReferenceEventTable:
         ----------
         events : list[EventSearchOutput]
             list of EventSearchOutput dataclass with events to be added to the table dataframe.
+        pbc : np.ndarray, optional
+            Per-dimension periodic boundary conditions of the source system; None
+            keeps the historical fully periodic assumption.
 
         Returns
         -------
@@ -70,6 +73,7 @@ class ReferenceEventTable:
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
                     types=ev.types,
+                    pbc=pbc,
                 )
             results_is_valid_events.append(res)
             if res.is_ok() : 
@@ -97,6 +101,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        pbc: np.ndarray | None = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -188,6 +193,7 @@ class ReferenceEventTable:
                 dE_backward=dE_backward,
                 cell=cell,
                 types=types,
+                pbc=pbc,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -369,6 +375,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        pbc: np.ndarray | None = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -388,6 +395,11 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        pbc : np.ndarray, optional
+            Per-dimension periodic boundary conditions of the source system; None
+            keeps the historical fully periodic assumption. Without it, surface
+            (mixed-PBC) systems would get graph IDs and symmetries computed with
+            wrong boundary conditions.
 
         Returns
         -------
@@ -404,6 +416,7 @@ class ReferenceEventTable:
         min1system = System()
         min1system.positions = min1_positions
         min1system.cell = cell
+        min1system.pbc = pbc
         min1neighbors_list = NeighborsList(
             min1system,
             self.config.atomicenvironment.rnei,
@@ -413,6 +426,7 @@ class ReferenceEventTable:
         saddlesystem = System()
         saddlesystem.positions = saddle_positions
         saddlesystem.cell = cell
+        saddlesystem.pbc = pbc
         saddleneighbors_list = NeighborsList(
             saddlesystem,
             self.config.atomicenvironment.rnei,
@@ -422,6 +436,7 @@ class ReferenceEventTable:
         min2system = System()
         min2system.positions = min2_positions
         min2system.cell = cell
+        min2system.pbc = pbc
         min2neighbors_list = NeighborsList(
             min2system,
             self.config.atomicenvironment.rnei,

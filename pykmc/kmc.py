@@ -569,7 +569,7 @@ class KMC:
             List of event dataframe that has been added to the reference event table.
 
         """
-        results_is_valid_events = self.reference_table.add_events(events)
+        results_is_valid_events = self.reference_table.add_events(events, pbc=self.system.pbc)
         self.loggers.info(
             "log",
             "\t :=> Adding {} events to the reference table".format(

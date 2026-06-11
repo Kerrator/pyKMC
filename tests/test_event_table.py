@@ -60,3 +60,50 @@ def test_dealloying_active_table_clear_primitive():
 
     assert len(table.table) == 0
     assert list(table.table.columns) == columns_before
+
+
+def test_is_valid_new_event_threads_pbc_to_temp_systems(monkeypatch):
+    """_build_event_series must carry the source system's pbc into its temp
+    Systems, otherwise NeighborsList assumes full periodicity and surface
+    systems get graph IDs computed with wrong boundary conditions."""
+    import pykmc.event_table as et
+    from pykmc.event_table import ReferenceEventTable
+
+    seen_pbc = []
+
+    class _SpyNeighborsList:
+        def __init__(self, system, rnei, rcut):
+            seen_pbc.append(system.pbc)
+            raise RuntimeError("stop after recording pbc")
+
+    monkeypatch.setattr(et, "NeighborsList", _SpyNeighborsList)
+
+    config = SimpleNamespace(
+        atomicenvironment=SimpleNamespace(
+            atom_coloring_mode="grey", rnei=3.0, rcut=6.0, neighbors_add=0.0
+        ),
+        eventsearch=SimpleNamespace(
+            min_energy_barrier=0.0, max_energy_barrier=100.0, energy_asymmetry=100.0
+        ),
+    )
+    table = ReferenceEventTable.__new__(ReferenceEventTable)
+    table.config = config
+
+    pbc = np.array([True, True, False])
+    positions = np.random.default_rng(0).random((4, 3)) * 5.0
+    try:
+        table._build_event_series(
+            min1_positions=positions,
+            saddle_positions=positions,
+            min2_positions=positions,
+            index_move=0,
+            dE_forward=0.5,
+            dE_backward=0.5,
+            cell=np.diag([5.0, 5.0, 5.0]),
+            pbc=pbc,
+        )
+    except RuntimeError:
+        pass  # the spy aborts after the first NeighborsList construction
+
+    assert len(seen_pbc) == 1
+    assert np.array_equal(seen_pbc[0], pbc)
