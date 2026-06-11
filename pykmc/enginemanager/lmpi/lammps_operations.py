@@ -121,6 +121,28 @@ def minimize(engine, config, positions=None) :
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
+
+def _minimize_freeze_outer_sphere(engine, config, center_pos, rmov):
+    """Minimize with atoms outside ``rmov`` of ``center_pos`` zero-forced.
+
+    Mirrors the active-volume buffer geometry: only atoms within rmov of the
+    central atom can relax; atoms beyond are frozen at their current positions.
+    Used by basin_reconstruct in AV mode so that full-system reconstruction
+    matches the constrained geometry under which reference events were captured.
+    """
+    cmd = engine.command
+    cmd(f"region _av_sphere sphere {center_pos[0]} {center_pos[1]} {center_pos[2]} {rmov}")
+    cmd("group _av_inner region _av_sphere")
+    cmd("group _av_outer subtract all _av_inner")
+    cmd("fix _av_freeze _av_outer setforce 0.0 0.0 0.0")
+    try:
+        minimize(engine, config)
+    finally:
+        cmd("unfix _av_freeze")
+        cmd("group _av_outer delete")
+        cmd("group _av_inner delete")
+        cmd("region _av_sphere delete")
+
 def get_total_energy(engine, positions=None) :
     if positions is not None :
         set_positions(engine=engine, positions=positions)
@@ -360,7 +382,7 @@ def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
                       ref_initial_positions, ref_saddle_positions, ref_final_positions,
                       ref_initial_types, sym_matrices, sym_perms, central_atom, sym_idx,
                       neighbor_indices, matching_score_thr, kmax_factor,
-                      atom_coloring_mode):
+                      atom_coloring_mode, active_volume_rmov=None):
     """Perform full basin reconstruction on engine ranks: PSR + 2x minimize.
 
     Rank 0 does PSR (IRA point set registration) and position manipulation.
@@ -457,7 +479,10 @@ def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
 
     # --- Minimize toward min1 (all ranks) ---
     set_positions(engine=engine, positions=proceed["positions"])
-    minimize(engine, config)
+    if active_volume_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], active_volume_rmov)
+    else:
+        minimize(engine, config)
     min1_pos = get_positions(engine)
 
     # Validate min1 on rank 0
@@ -494,7 +519,10 @@ def basin_reconstruct(engine, config, from_positions, from_types, cell, pbc,
 
     # --- Minimize toward min2 (all ranks) ---
     set_positions(engine=engine, positions=proceed2["positions"])
-    minimize(engine, config)
+    if active_volume_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], active_volume_rmov)
+    else:
+        minimize(engine, config)
     min2_pos = get_positions(engine)
     min2_etot = get_total_energy(engine)
 
@@ -606,7 +634,18 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
     #Set positions
     if config.control.active_volume==True:
-        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, type, saddle_idx, saddle_positions)
+        try:
+            E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, type, saddle_idx, saddle_positions)
+        except ValueError as exc:
+            _ensure_full_system(engine, config, positions, cell, type)
+            if engine.rank == 0:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                        message=str(exc),
+                    )
+                )
+            return None
     else:
         central_lammps_id=[central_atom_idx+1]
         E_init=0

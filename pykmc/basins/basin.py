@@ -389,6 +389,11 @@ class BasinsGenericEvents() :
         self.states[from_state].ensure_full_state(self.config)
         neighbor_indices = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
 
+        active_volume_rmov = (
+            self.config.activevolume.rmov
+            if self.config.control.active_volume
+            else None
+        )
         return {
             "config": self.config,
             "from_positions": self.states[from_state].system.positions.copy(),
@@ -407,6 +412,7 @@ class BasinsGenericEvents() :
             "matching_score_thr": self.config.psr.matching_score_thr,
             "kmax_factor": self.config.ira.kmax_factor,
             "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+            "active_volume_rmov": active_volume_rmov,
         }
 
     def _result_from_mpi(self, mpi_result, from_state):
