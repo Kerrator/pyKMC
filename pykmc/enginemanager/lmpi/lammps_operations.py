@@ -127,6 +127,36 @@ def minimize(engine, config, positions=None) :
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
 
+
+def _minimize_freeze_outer_sphere(engine, config, center_pos, rmov):
+    """Minimize with atoms outside ``rmov`` of ``center_pos`` zero-forced.
+
+    Mirrors the active-volume buffer geometry: only atoms within rmov of the
+    central atom can relax; atoms beyond are frozen at their current positions.
+    Used by basin_reconstruct in AV mode so that full-system reconstruction
+    matches the constrained geometry under which reference events were captured.
+    """
+    cmd = engine.command
+    cmd(f"region _av_sphere sphere {center_pos[0]} {center_pos[1]} {center_pos[2]} {rmov}")
+    cmd("group _av_inner region _av_sphere")
+    cmd("group _av_outer subtract all _av_inner")
+    cmd("fix _av_freeze _av_outer setforce 0.0 0.0 0.0")
+    try:
+        minimize(engine, config)
+    finally:
+        cmd("unfix _av_freeze")
+        cmd("group _av_outer delete")
+        cmd("group _av_inner delete")
+        cmd("region _av_sphere delete")
+
+
+def _basin_av_rmov(config: "Config") -> "float | None":
+    """Outer-sphere freeze radius for basin reconstruction, or None when AV is off."""
+    if config.control.active_volume and config.activevolume is not None:
+        return config.activevolume.rmov
+    return None
+
+
 def get_total_energy(engine, positions=None) :
     if positions is not None :
         set_positions(engine=engine, positions=positions)
@@ -438,7 +468,19 @@ def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_id
 
     #Set positions
     if config.control.active_volume==True:
-        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        try:
+            E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        except ValueError as exc:
+            #Invalid saddle geometry for the active volume (atom outside the
+            #active radius or missing from the AV map): report instead of crash.
+            if engine.rank == 0:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                        message=str(exc),
+                    )
+                )
+            return None
     else:
         central_lammps_id=[central_atom_idx+1]
         E_init=0
@@ -708,7 +750,11 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
 
     # --- Minimize toward min1 (all ranks) ---
     set_positions(engine=engine, positions=proceed["positions"])
-    minimize(engine, config)
+    av_rmov = _basin_av_rmov(config)
+    if av_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+    else:
+        minimize(engine, config)
     min1_pos = get_positions(engine)
 
     # Validate min1 on rank 0
@@ -743,7 +789,10 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
 
     # --- Minimize toward min2 (all ranks) ---
     set_positions(engine=engine, positions=proceed2["positions"])
-    minimize(engine, config)
+    if av_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions[central_atom], av_rmov)
+    else:
+        minimize(engine, config)
     min2_pos = get_positions(engine)
     min2_etot = get_total_energy(engine)
 

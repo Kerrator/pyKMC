@@ -5,7 +5,7 @@ from ase.data import atomic_numbers, atomic_masses
 import pypARTn
 import numpy as np
 import ctypes
-from ase.geometry import find_mic
+from ase.geometry import find_mic, wrap_positions
 from ..system import System
 from ..config import Config
 
@@ -159,10 +159,30 @@ def partn_refine_AV(engine, config, central_atom_idx:int, positions, cell, type,
     else:
         E_init=get_potential_energy(engine)
 
+    saddle_idx = np.asarray(saddle_idx, dtype=int)
+    saddle_positions = wrap_positions(
+        positions=np.asarray(saddle_positions, dtype=float),
+        cell=cell,
+        pbc=True,
+    )
+
     core_idx=[]
     core_ids=[]
+    center = positions[central_atom_idx]
+    r_a = config.activevolume.ract
     for i, atom_idx in enumerate(saddle_idx):
-        index = int(np.where(atom_map == atom_idx)[0])  # index in atom map where this value is true
+        matches = np.where(atom_map == atom_idx)[0]
+        if matches.size != 1:
+            raise ValueError(
+                f"saddle atom {atom_idx} matched {matches.size} atoms in AV map (expected exactly 1)"
+            )
+        index = int(matches[0])
+        _, distance = find_mic(saddle_positions[i] - center, cell, pbc=True)
+        if distance > r_a + 1.0e-8:
+            raise ValueError(
+                f"saddle atom {atom_idx} is {distance:.6f} A from AV center "
+                f"after wrapping, outside active radius {r_a:.6f} A"
+            )
         av_positions[index] = saddle_positions[i]
         core_idx.append(index)  # Atom id
         core_ids.append(index + 1)
