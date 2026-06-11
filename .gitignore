@@ -9,10 +9,7 @@ examples/**
 !examples/**/Ni_v6_2.0_LKBeland2016.eam
 !examples/**/Cu01.eam.alloy
 !examples/**/FeC-Becquart2013.eam
-!examples/**/FeNiCr_EDDE_V2.eam
 !examples/**/input.in
-!examples/**/Ni_Fe_FCC_8x8x8_Ni95_Fe05_minimized.xyz
-!examples/NiFe_fcc_2047at_monovacancy/
 !examples/**/Si.sw
 
 
