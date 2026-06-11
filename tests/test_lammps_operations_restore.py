@@ -16,9 +16,13 @@ class _FakeComm:
 class _FakeLammps:
     def __init__(self, natoms):
         self._natoms = natoms
+        self.commands = []
 
     def get_natoms(self):
         return self._natoms
+
+    def command(self, cmd):
+        self.commands.append(cmd)
 
 
 class _FakeEngine:
@@ -169,21 +173,23 @@ def _patch_stdout_redirect(monkeypatch):
 def test_ensure_full_system_reinitializes_after_atom_count_mismatch(monkeypatch):
     captured = {}
 
-    def fake_reinitialize(engine, config, system):
-        captured["engine"] = engine
-        captured["config"] = config
-        captured["system"] = system
-
     engine = _FakeEngine(natoms=2)
     config = SimpleNamespace(lammps=SimpleNamespace(boundary="p p p"))
     positions = np.array([[0.0, 0.0, 0.0], [0.4, 0.4, 0.4], [0.8, 0.8, 0.8]])
     cell = np.eye(3)
     types = np.array(["Ni", "Ni", "Ni"])
 
-    monkeypatch.setattr(ops, "reinitialize_system", fake_reinitialize)
+    #_ensure_full_system inlines the rebuild: clear + the same initialize sequence
+    #the engine boot path uses. Capture each stage instead of one reinit function.
+    monkeypatch.setattr(ops, "initialize_parameters", lambda eng: captured.update(params_engine=eng))
+    monkeypatch.setattr(ops, "initialize_system", lambda eng, system: captured.update(system=system))
+    monkeypatch.setattr(ops, "initialize_potential", lambda eng, cfg: captured.update(config=cfg))
 
     ops._ensure_full_system(engine, config, positions, cell, types)
 
+    assert engine.lmp.commands == ["clear"]
+    assert captured["params_engine"] is engine
+    assert captured["config"] is config
     system = captured["system"]
     assert np.array_equal(system.positions, positions)
     assert np.array_equal(system.cell, cell)

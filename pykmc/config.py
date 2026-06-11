@@ -555,7 +555,9 @@ class BasinConfig(BaseModel):
         default="serial",
         description="Basin BFS strategy. 'serial' explores one transient state at a time. "
         "'wavefront' batches each BFS frontier so reconstruction, deduplication, and "
-        "exploration run per level, distributing reconstruction across the MPI session pool.",
+        "exploration run per level, distributing reconstruction across the MPI session pool. "
+        "Wavefront reconstruction follows the 'global/reconstruction' style semantics "
+        "(saddle + push + two validated minimizations) regardless of the style setting.",
     )
 
     n_workers: int = Field(

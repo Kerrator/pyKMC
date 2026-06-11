@@ -431,13 +431,17 @@
   Basin parameters.
 </details>
 
+- **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
+  <details><summary>Description</summary>
+  Basin style used.
+  </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
   </details>
 - **`strategy`** : `Literal['serial', 'wavefront']`, default = `'serial'`
   <details><summary>Description</summary>
-  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool.
+  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool. Wavefront reconstruction follows the 'global/reconstruction' style semantics (saddle + push + two validated minimizations) regardless of the style setting.
   </details>
 - **`n_workers`** : `int`, default = `4`
   <details><summary>Description</summary>
@@ -462,6 +466,19 @@
 - **`solver`** : `Literal['auto', 'bisection', 'qsd']`, default = `'auto'`
   <details><summary>Description</summary>
   Exit-time solver for the absorbing Markov chain. 'auto' picks the QSD (quasi-stationary distribution) solver for stiff generators (transient/absorbing rate ratio > 1e6) and the bisection solver otherwise. 'bisection' and 'qsd' force a specific solver.
+  </details>
+
+---
+
+## `Reconstruction` Section (mandatory)
+
+<details><summary>Section Overview</summary>
+  Reconstruction parameters.
+</details>
+
+- **`push_fraction`** : `float`, default = `0.15`
+  <details><summary>Description</summary>
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
 
 ---

@@ -601,7 +601,9 @@ class BasinsGenericEvents() :
             "neighbor_indices": neighbor_indices,
             "matching_score_thr": self.config.psr.matching_score_thr,
             "kmax_factor": self.config.ira.kmax_factor,
-            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
+            #getattr: multi-element coloring ships on a separate branch; without it the
+            #engine uses the uncolored ("grey") IRA matching path.
+            "atom_coloring_mode": getattr(self.config.atomicenvironment, "atom_coloring_mode", "grey"),
         }
 
     def _result_from_mpi(self, mpi_result: "dict | None", from_state: int) -> "Result[System, ErrorInfo]" :
@@ -703,8 +705,11 @@ class BasinsGenericEvents() :
             "rcut": self.config.atomicenvironment.rcut,
             "neighbors_add": self.config.atomicenvironment.neighbors_add,
             "ae_style": self.config.atomicenvironment.style,
-            "atom_coloring_mode": self.config.atomicenvironment.atom_coloring_mode,
-            "coordination_threshold": self.config.atomicenvironment.coordination_threshold,
+            #getattr: multi-element coloring / coordination styles ship on a separate
+            #branch; the engine builds its AtomicEnvironment kwargs from these only
+            #when they carry non-default values.
+            "atom_coloring_mode": getattr(self.config.atomicenvironment, "atom_coloring_mode", "grey"),
+            "coordination_threshold": getattr(self.config.atomicenvironment, "coordination_threshold", None),
             "energy_thr": self.config.basin.energy_thr,
         }
 
@@ -823,7 +828,7 @@ class BasinsGenericEvents() :
                 else:
                     state_data = self.states[existing_idx]
                     if self.are_structures_equivalent(system.positions, state_data.system.positions,
-                                                      cell=system.cell, pbc=system.pbc):
+                                                      cell=system.cell):
                         match = existing_idx
                         break
 
@@ -841,7 +846,7 @@ class BasinsGenericEvents() :
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,
-                                                          cell=system.cell, pbc=system.pbc):
+                                                          cell=system.cell):
                             match = other_idx
                             break
 

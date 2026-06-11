@@ -197,12 +197,18 @@ def fingerprint_tolerance(config: Config) -> float:
 
 
 def _derived_coord_thr(config: Config) -> "int | None":
-    """Return the atoms-of-interest threshold: explicit override, else style-derived."""
+    """Return the atoms-of-interest threshold: explicit override, else style-derived.
+
+    The style-derived fallback reads ``coordination_threshold`` via getattr because
+    the coordination-based AtomicEnvironment styles ship on a separate branch; on a
+    config without them this simply returns None (COM fallback).
+    """
     if config.basin is not None and config.basin.fingerprint_coordination_thr is not None:
         return config.basin.fingerprint_coordination_thr
+    coord_thr = getattr(config.atomicenvironment, "coordination_threshold", None)
     if (config.atomicenvironment.style in ("coordination", "coordination/graph")
-            and config.atomicenvironment.coordination_threshold is not None):
-        return config.atomicenvironment.coordination_threshold + 1
+            and coord_thr is not None):
+        return coord_thr + 1
     return None
 
 

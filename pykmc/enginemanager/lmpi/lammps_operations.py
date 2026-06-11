@@ -690,7 +690,8 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
 
             # Push toward min1
             saddle_toward_min1 = push_towards(
-                new_positions[neighbor_indices], supposed_initial, fraction=0.15, cell=cell, pbc=pbc)
+                new_positions[neighbor_indices], supposed_initial,
+                fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
             tmp_positions = np.array(new_positions, copy=True)
             tmp_positions[neighbor_indices] = saddle_toward_min1
             proceed = {"step": "min1", "positions": tmp_positions,
@@ -726,7 +727,8 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
         else:
             # Push toward min2
             saddle_toward_min2 = push_towards(
-                saddle_positions[nbr_indices], supposed_final, fraction=0.15, cell=cell, pbc=pbc)
+                saddle_positions[nbr_indices], supposed_final,
+                fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
             tmp_positions2 = np.array(saddle_positions, copy=True)
             tmp_positions2[nbr_indices] = saddle_toward_min2
             proceed2 = {"step": "min2", "positions": tmp_positions2,
@@ -831,14 +833,20 @@ def _basin_explore_impl(engine: "MpiApiEngine", config_dict: dict, reference_tab
                     cell=np.array(state_cell), pbc=state_pbc,
                     index=np.arange(len(state_types)))
     neighbors_list = NeighborsList(system, config_dict["rnei"], config_dict["rcut"])
-    types_for_env = system.types if config_dict["atom_coloring_mode"] == "full" else None
+    #Pass the multi-element kwargs only when they carry non-default values: the
+    #coloring-aware AtomicEnvironment signature ships on a separate branch, and the
+    #default call must stay valid against the plain signature.
+    env_kwargs = {}
+    if config_dict.get("atom_coloring_mode", "grey") == "full":
+        env_kwargs["types"] = system.types
+    if config_dict.get("coordination_threshold") is not None:
+        env_kwargs["coordination_threshold"] = config_dict["coordination_threshold"]
     environment = AtomicEnvironment(
         config_dict["ae_style"],
         neighbors_list.neighbors_list["rnei"],
         neighbors_list.neighbors_list["rcut"],
         config_dict["neighbors_add"],
-        types=types_for_env,
-        coordination_threshold=config_dict.get("coordination_threshold"))
+        **env_kwargs)
 
     # Proxy for StateData (the explorer only reads system/environment/neighbors_list)
     class _StateProxy:

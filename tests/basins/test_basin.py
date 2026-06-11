@@ -2,7 +2,7 @@
 
 These need a real MPI launch (the session pool blocks single-process):
 
-    /Users/stephenkerr/openmpi/bin/mpirun -n 8 python -m pytest tests/basins/test_basin.py -v
+    mpirun -n 8 python -m pytest tests/basins/test_basin.py -v
 
 with ``n_sessions = 7`` from tests/data/input_Cu.in (``engine_use_rank_0 = False``
 requires world_size >= n_sessions + 1).
@@ -94,6 +94,12 @@ class TestBasin :
         if manager is not None: #On rank 0
             try:
                 manager.initialize_sessions(config_Cu, system_Cu)
+
+                # Match reconstruction semantics between the two legs: wavefront
+                # implements the 'global/reconstruction' path (saddle + push + two
+                # validated minimizations) distributed over the session pool, so the
+                # serial leg must use the same style for the comparison to be exact.
+                config_Cu.basin.style = "global/reconstruction"
 
                 config_Cu.basin.strategy = "serial"
                 result_serial, df_serial = _run_basin(
