@@ -503,7 +503,6 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
 
         attempt +=1
         artn.set("zseed", config.partn.zseed)
-        print("NEW ATTEMPT")
 
     else: #fail after max attemps
         _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
