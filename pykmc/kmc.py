@@ -418,11 +418,9 @@ class KMC:
             )
 
             if is_dealloying:
-                # remove_atom shifted every index above the removed atom, so any
-                # carried-over active events (recycled or not) now point at the
-                # wrong atoms. The active table is the only persistent structure
-                # holding absolute atom indices across steps; drop all rows.
-                self.active_table.table = self.active_table.table.iloc[0:0].reset_index(drop=True)
+                # Placed after the output logging above, which still reads the
+                # executed dealloying row from the table.
+                self._drop_stale_active_events()
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
@@ -769,6 +767,16 @@ class KMC:
         reconstruction_output = result_reconstruction.ok_value()
         self.system.update_positions(reconstruction_output.min2_positions)
         self.total_energy = reconstruction_output.min2_etot
+
+    def _drop_stale_active_events(self) -> None:
+        """Empty the active table after an atom-count change (dealloying).
+
+        remove_atom shifts every index above the removed atom, so any
+        carried-over active events (recycled or not) would point at the wrong
+        atoms. The active table is the only persistent structure holding
+        absolute atom indices across steps; drop all rows, keep the schema.
+        """
+        self.active_table.table = self.active_table.table.iloc[0:0].reset_index(drop=True)
 
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""

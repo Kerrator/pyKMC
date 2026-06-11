@@ -39,7 +39,7 @@ def _simple_cubic_system(pbc: "np.ndarray") -> System:
     )
 
 
-def test_mixed_pbc_rcut_includes_central_atom() :
+def test_mixed_pbc_rcut_includes_central_atom() -> None :
     """Mixed-PBC environments must match the periodic convention.
 
     The rcut environment includes the central atom itself (event building

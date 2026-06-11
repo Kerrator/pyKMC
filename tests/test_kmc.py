@@ -35,3 +35,24 @@ def test_apply_original_migration_event_restores_positions_and_total_energy():
 
     assert np.allclose(kmc.system.positions, reconstructed_system.positions)
     assert kmc.total_energy == -7.5
+
+
+def test_drop_stale_active_events_empties_table_and_keeps_schema() -> None:
+    """The post-dealloying helper empties rows and keeps the schema."""
+    import pandas as pd
+
+    from pykmc.event_table import ActiveEventTable
+
+    kmc = KMC(config=Mock())
+    kmc.active_table = ActiveEventTable(
+        config=Mock(),
+        event_dataframe=pd.DataFrame(
+            {"atom_index": [3, 7], "energy_barrier": [0.5, 0.9]}
+        ),
+    )
+    columns_before = list(kmc.active_table.table.columns)
+
+    kmc._drop_stale_active_events()
+
+    assert len(kmc.active_table.table) == 0
+    assert list(kmc.active_table.table.columns) == columns_before
