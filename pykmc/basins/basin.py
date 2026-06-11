@@ -16,6 +16,10 @@ from pykmc.result import Result, Ok, Err, ErrorInfo, ErrorType, BasinOutput
 
 logger = logging.getLogger("log")
 
+#Sentinel returned by is_new_state_batch for states whose deduplication was cut
+#short by the wall-time deadline: not a duplicate (-1 means new), but deferred.
+DEDUP_DEFERRED = -2
+
 #TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 #TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
 #TODO: Think about parallized exploration 
@@ -164,12 +168,22 @@ class BasinsGenericEvents() :
         t_start = time.perf_counter()
         n_processed = 0
         n_duplicates = 0
+        n_explored = 0
         prof = {"reconstruct": 0.0, "psr": 0.0, "minimize": 0.0,
                 "dedup": 0.0, "ensure_state": 0.0, "explore": 0.0,
                 "merge": 0.0, "other": 0.0}
 
         #Loop over state to explore
         while len(self.states_to_explore) != 0 :
+            # Budget checks (max_states / max_total_states / max_basin_walltime_s);
+            # serial dedup is per-state already, so loop-top granularity suffices.
+            reason = self._budget_breach_reason(n_explored, t_start)
+            if reason is not None:
+                result = self._cap_remaining_as_absorbing(reason)
+                if not result.is_ok():
+                    return result
+                break
+
             #next state to explore :
             to_explore = self.states_to_explore[0]
 
@@ -250,6 +264,7 @@ class BasinsGenericEvents() :
             t0 = time.perf_counter()
             self.explorer.explore(state=self.states[to_explore], state_index=self.current_state, start_index=last_state_connectivity)
             prof["explore"] += time.perf_counter() - t0
+            n_explored += 1
 
             #to_explore has been explored :
             self.states_to_explore.remove(to_explore)
@@ -733,6 +748,21 @@ class BasinsGenericEvents() :
         self.states[from_state].release_heavy_objects()
         return Ok(state_idx)
 
+    def _budget_breach_reason(self, n_explored: int, t_start: float) -> "str | None" :
+        """Return the breached [BASIN] budget as a label, or None when within budget."""
+        bc = self.config.basin
+        if bc is None:
+            return None
+        if bc.max_states is not None and n_explored >= bc.max_states:
+            return f"max_states={bc.max_states}"
+        if bc.max_total_states is not None and \
+                len(self.states) + len(self._deferred_states) >= bc.max_total_states:
+            return f"max_total_states={bc.max_total_states}"
+        if bc.max_basin_walltime_s is not None and \
+                time.perf_counter() - t_start >= bc.max_basin_walltime_s:
+            return f"max_basin_walltime_s={bc.max_basin_walltime_s}"
+        return None
+
     def _cap_remaining_as_absorbing(self, reason: str = "max_states") -> "Result[None, ErrorInfo]" :
         """Convert all remaining frontier states to absorbing WITHOUT reconstructing them.
 
@@ -920,7 +950,7 @@ class BasinsGenericEvents() :
 
         return Ok(None)
 
-    def is_new_state_batch(self, new_systems: "dict[int, System]") -> dict[int, int] :
+    def is_new_state_batch(self, new_systems: "dict[int, System]", deadline: "float | None" = None) -> dict[int, int] :
         """Check multiple reconstructed systems for duplicates at once.
 
         Unlike serial is_new_state(), this also cross-checks the new states against
@@ -931,12 +961,18 @@ class BasinsGenericEvents() :
         ----------
         new_systems : dict[int, System]
             Mapping state_idx -> System for newly reconstructed states.
+        deadline : float, optional
+            time.perf_counter() value after which remaining states are not compared
+            at all and get DEDUP_DEFERRED instead (deduplication is the dominant
+            basin cost; this bounds a single batch's dedup to the wall-time budget
+            with per-state granularity).
 
         Returns
         -------
         dict[int, int]
             Mapping state_idx -> existing_state_idx for duplicates,
-            state_idx -> -1 for genuinely new states.
+            state_idx -> -1 for genuinely new states,
+            state_idx -> DEDUP_DEFERRED for states cut off by the deadline.
 
         """
         results = {}
@@ -962,6 +998,10 @@ class BasinsGenericEvents() :
         fp_tol = fingerprinting.fingerprint_tolerance(self.config)
 
         for new_idx, system in new_systems.items():
+            if deadline is not None and time.perf_counter() >= deadline:
+                results[new_idx] = DEDUP_DEFERRED
+                continue
+
             match = -1
             fp_new = new_fingerprints[new_idx]
 
@@ -1060,10 +1100,10 @@ class BasinsGenericEvents() :
             return Err(next(iter(failed.values())))
         return Ok((reconstructed, transition_info, failed))
 
-    def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict, failed: "dict[int, ErrorInfo] | None" = None) -> "tuple[list[int], int, int]" :
+    def _register_wavefront_states(self, to_reconstruct: list[int], reconstructed: "dict[int, System]", transition_info: dict, prof: dict, failed: "dict[int, ErrorInfo] | None" = None, deadline: "float | None" = None) -> "tuple[list[int], int, int]" :
         """Phase B: dedup the reconstructed batch and register the genuinely new states."""
         if len(reconstructed) > 1:
-            dedup_results = self.is_new_state_batch(reconstructed)
+            dedup_results = self.is_new_state_batch(reconstructed, deadline=deadline)
         elif len(reconstructed) == 1:
             dedup_results = {}
             for state_idx, system in reconstructed.items():
@@ -1081,6 +1121,19 @@ class BasinsGenericEvents() :
                 continue
 
             existing = dedup_results.get(state_idx, -1)
+            if existing == DEDUP_DEFERRED:
+                #Dedup deadline hit: keep the already-paid-for reconstruction for
+                #lazy materialization, flip the row absorbing. The loop-top budget
+                #check fires next and caps the rest of the frontier.
+                self.connectivity_table.change_state_to_absorbing(state_idx)
+                self._deferred_states.add(state_idx)
+                self._deferred_systems[state_idx] = reconstructed[state_idx]
+                if state_idx in self.states_to_explore:
+                    self.states_to_explore.remove(state_idx)
+                if state_idx not in self.explored_states:
+                    self.explored_states.append(state_idx)
+                n_absorbing += 1
+                continue
             if existing != -1:
                 self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing)
                 self.explored_states.append(state_idx)
@@ -1192,9 +1245,14 @@ class BasinsGenericEvents() :
             D. Merge and update the frontier queue
         """
         n_workers = self.config.basin.n_workers if self.config.basin is not None else 1
-        max_states = self.config.basin.max_states if self.config.basin is not None else None
+        max_frontier = self.config.basin.max_frontier_size if self.config.basin is not None else None
+        max_walltime = self.config.basin.max_basin_walltime_s if self.config.basin is not None else None
 
         t_start = time.perf_counter()
+        #Deadline threaded into the dedup hot loop: the observed pathology was a
+        #single frontier whose deduplication alone consumed hours between budget
+        #checks, so the check must live between states inside the batch.
+        dedup_deadline = (t_start + max_walltime) if max_walltime is not None else None
         n_explored = 0
         n_duplicates = 0
         n_absorbing = 0
@@ -1210,15 +1268,21 @@ class BasinsGenericEvents() :
 
         try:
             while len(self.states_to_explore) != 0:
-                # Check the max_states cap
-                if max_states is not None and n_explored >= max_states:
-                    logger.warning("[Basin] max_states=%d reached. Capping.", max_states)
-                    result = self._cap_remaining_as_absorbing()
+                # Budget checks (max_states / max_total_states / max_basin_walltime_s)
+                reason = self._budget_breach_reason(n_explored, t_start)
+                if reason is not None:
+                    result = self._cap_remaining_as_absorbing(reason)
                     if not result.is_ok():
                         return result
                     break
 
                 batch = list(self.states_to_explore)
+                # Frontier chunking: bounds per-level memory and gives the wall-time
+                # check chunk granularity. Later chunks dedup against earlier-chunk
+                # states through self.states; update_to_explore() re-derives the
+                # frontier each iteration, so leftover states are picked up next pass.
+                if max_frontier is not None and len(batch) > max_frontier:
+                    batch = batch[:max_frontier]
 
                 # Separate: states that need reconstruction vs state 0 (already exists)
                 to_reconstruct = [s for s in batch if s not in self.states]
@@ -1249,6 +1313,7 @@ class BasinsGenericEvents() :
                     transition_info,
                     prof,
                     failed=failed,
+                    deadline=dedup_deadline,
                 )
                 prof["dedup"] += time.perf_counter() - t0
                 n_duplicates += duplicates_delta

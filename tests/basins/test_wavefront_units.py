@@ -47,7 +47,10 @@ def _com_config(fingerprint_mode: str = "auto") -> SimpleNamespace:
     return SimpleNamespace(
         basin=SimpleNamespace(fingerprint_mode=fingerprint_mode,
                               fingerprint_coordination_thr=None, fingerprint_tolerance=1.0,
-                              strategy="wavefront", n_workers=2),
+                              strategy="wavefront", n_workers=2,
+                              max_states=None, max_total_states=None,
+                              max_basin_walltime_s=None, max_frontier_size=None,
+                              max_failed_fraction=0.2),
         atomicenvironment=SimpleNamespace(style="graph", coordination_threshold=None, rnei=3.0),
     )
 
@@ -418,6 +421,95 @@ class TestSkipRefinement:
         assert np.allclose(basin.absorbing_saddle_positions[1], saddle)
         assert 1 not in basin._exit_excluded_states
         assert basin._exit_excluded_states == {2}
+
+
+class TestBudgetBreachReason:
+
+    def test_each_knob_fires(self):
+        """Each budget knob produces its own breach label; unset knobs do not fire."""
+        import time as _time
+
+        config = _com_config()
+        basin = _make_basin(config)
+        t_now = _time.perf_counter()
+
+        assert basin._budget_breach_reason(0, t_now) is None
+
+        config.basin.max_states = 5
+        assert basin._budget_breach_reason(5, t_now) == "max_states=5"
+        assert basin._budget_breach_reason(4, t_now) is None
+        config.basin.max_states = None
+
+        config.basin.max_total_states = 2
+        basin.states = {0: None, 1: None}
+        assert basin._budget_breach_reason(0, t_now) == "max_total_states=2"
+        basin.states = {0: None}
+        basin._deferred_states = {7}
+        assert basin._budget_breach_reason(0, t_now) == "max_total_states=2"
+        basin._deferred_states = set()
+        assert basin._budget_breach_reason(0, t_now) is None
+        config.basin.max_total_states = None
+
+        config.basin.max_basin_walltime_s = 0.001
+        assert basin._budget_breach_reason(0, t_now - 1.0) == "max_basin_walltime_s=0.001"
+        assert basin._budget_breach_reason(0, _time.perf_counter() + 100.0) is None
+
+
+class TestDedupDeadline:
+
+    def test_past_deadline_defers_everything(self):
+        """A deadline already in the past defers every state without comparisons."""
+        from pykmc.basins.basin import DEDUP_DEFERRED
+
+        config = _com_config()
+        basin = _make_basin(config)
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        batch = {1: _make_system(pos + 1.0), 2: _make_system(pos + 2.0)}
+
+        results = basin.is_new_state_batch(batch, deadline=0.0)
+        assert results == {1: DEDUP_DEFERRED, 2: DEDUP_DEFERRED}
+
+    def test_no_deadline_keeps_full_dedup(self):
+        """deadline=None preserves the original behavior (duplicates detected)."""
+        config = _com_config()
+        basin = _make_basin(config)
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        # 1 and 2 are identical -> the second must dedup onto the first
+        batch = {1: _make_system(pos + 1.0), 2: _make_system(pos + 1.0)}
+
+        results = basin.is_new_state_batch(batch, deadline=None)
+        assert results[1] == -1
+        assert results[2] == 1
+
+    def test_register_stashes_deferred_system(self):
+        """A DEDUP_DEFERRED state is flipped absorbing with its system stashed for
+        lazy materialization."""
+        config = _com_config()
+        basin = _make_basin(config)
+        pos = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+        basin.states[0] = StateData(system=_make_system(pos), environment=None,
+                                    neighbors_list=None, transient=True)
+        basin.states_to_explore = [1, 2]
+        for target in (1, 2):
+            basin.connectivity_table.add_connectivity(
+                state=0, state_connexion=target, event_connexion=10 + target,
+                central_atom=0, sym=0, transient=True,
+                dE_forward=0.1, k_forward=1.0, dE_backward=0.1, k_backward=1.0)
+
+        reconstructed = {1: _make_system(pos + 1.0), 2: _make_system(pos + 2.0)}
+        transition_info = {s: (0, 10 + s, 0, 0, True) for s in (1, 2)}
+        prof = {"ensure_state": 0.0}
+
+        new_transient, n_dup, n_abs = basin._register_wavefront_states(
+            [1, 2], reconstructed, transition_info, prof, deadline=0.0)
+
+        assert new_transient == []
+        assert n_dup == 0 and n_abs == 2
+        assert basin._deferred_states == {1, 2}
+        assert set(basin._deferred_systems.keys()) == {1, 2}
+        assert basin.states_to_explore == []
+        df = basin.connectivity_table.df
+        assert not df[df["state_connexion"].isin([1, 2])]["transient"].any()
 
 
 class TestFailureBudget:
