@@ -72,7 +72,10 @@ class NeighborsList:
                 self.neighbors_list["rnei"].append(mapped)
                 if self.rcut is not None:
                     raw = tree.query_ball_point(positions[i], self.rcut)
-                    mapped = sorted(set(index_map[j] for j in raw) - {i})
+                    # Keep the central atom, matching the fully periodic branch:
+                    # downstream event building locates the moving atom inside
+                    # its own rcut environment.
+                    mapped = sorted(set(index_map[j] for j in raw))
                     self.neighbors_list["rcut"].append(mapped)
 
     def get_neighbors(self, cutoff_type: float, idx: int) -> list[int]:

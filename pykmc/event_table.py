@@ -448,8 +448,11 @@ class ReferenceEventTable:
             types=graph_types,
         )[0]
 
-        neighbor_list_forwward = min1neighbors_list.neighbors_list["rcut"][index_move]
-        neighbor_list_backward = min2neighbors_list.neighbors_list["rcut"][index_move]
+        # query_ball_point can hand back Python lists; np.where(list == scalar)
+        # silently compares the whole list to the scalar, so coerce to arrays
+        # before the move_atom_idx lookups below.
+        neighbor_list_forwward = np.asarray(min1neighbors_list.neighbors_list["rcut"][index_move])
+        neighbor_list_backward = np.asarray(min2neighbors_list.neighbors_list["rcut"][index_move])
 
         # Local types for the forward/backward neighbor lists
         local_types_forward = list(np.array(types)[neighbor_list_forwward]) if types is not None else None
