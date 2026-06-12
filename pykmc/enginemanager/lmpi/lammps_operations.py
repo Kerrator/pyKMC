@@ -300,25 +300,45 @@ def minimize_with_results(engine, config, positions=None, types=None) :
     if engine.rank == 0 :
         return new_positions, total_energy
     
-def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) : 
-    """ 
-    Minimize with fix atom around central atom up to rcut
+def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) :
     """
-    #define core region and group
-    engine.command(f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}")
-    engine.command("group frozen_group region sphere_region")
+    Minimize with fix atom around central atom up to rcut
 
-    #freeze core region 
-    engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+    The frozen core is selected with the minimum-image convention from the
+    engine's own positions and box, not with a LAMMPS ``region sphere``:
+    regions are never wrapped across periodic boundaries, so a sphere
+    overlapping a box edge silently drops the wrapped-side neighbors from
+    the frozen group. Assumes an orthogonal box. ``gather_atoms`` returns
+    the same array on every rank, so all ranks build the same group
+    commands and lockstep is preserved.
+    """
+    import ase.geometry
 
-    #minimization 
-    engine.command("min_style cg")
-    engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
+    raw = engine.lmp.gather_atoms("x", 1, 3)
+    positions = np.ctypeslib.as_array(raw).reshape(-1, 3)
+    boxlo, boxhi, _xy, _yz, _xz, periodicity, _change = engine.lmp.extract_box()
+    cell = np.diag(np.asarray(boxhi, dtype=float) - np.asarray(boxlo, dtype=float))
+    pbc = [bool(p) for p in periodicity]
 
-    #unfreeze/delte
-    engine.command("unfix freeze")
-    engine.command("group frozen_group delete")
-    engine.command("region sphere_region delete")
+    diffs = positions - np.asarray(central_atom_positions, dtype=float)
+    _, dist = ase.geometry.find_mic(diffs, cell, pbc=pbc)
+    core_ids = np.where(dist <= rcut)[0] + 1  # LAMMPS ids are 1-based
+    if len(core_ids) == 0:
+        return
+
+    try:
+        for i in range(0, len(core_ids), 500):
+            chunk = " ".join(str(int(j)) for j in core_ids[i:i + 500])
+            engine.command(f"group frozen_group id {chunk}")
+        engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+        engine.command("min_style cg")
+        engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
+    finally:
+        for cleanup in ("unfix freeze", "group frozen_group delete"):
+            try:
+                engine.command(cleanup)
+            except Exception:
+                pass  # engine may be mid-error; do not strand the group
 
 def _make_frozen_group(engine, config, positions, types) -> bool:
     """Resolve frozen atoms and create g_frozen group. Returns True if any atoms are frozen."""
