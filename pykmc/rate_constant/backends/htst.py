@@ -3,6 +3,8 @@
 import math
 from typing import TYPE_CHECKING, Optional, Protocol
 
+from pykmc.htst.constants import hz_to_per_ps
+
 from .base import PrefactorBackend
 
 if TYPE_CHECKING:
@@ -15,8 +17,8 @@ class HtstBackendConfig(Protocol):
     Parameters
     ----------
     k0 : float
-        Per-event fallback prefactor (Hz), used when the Vineyard ``nu0`` is
-        unavailable. Must be in the SAME units as ``nu0`` (Hz).
+        Per-event fallback prefactor (ps⁻¹), used when the Vineyard ``nu0`` is
+        unavailable. Same units as the constant-style ``k0`` and the rate layer.
 
     """
 
@@ -32,7 +34,9 @@ class HtstBackend(PrefactorBackend):
     HtstBackend.compute(nu0=...)``. ``dE`` and ``T`` are handled by
     ``RateConstant``, not here.
 
-    Both ``nu0`` and the ``k0`` fallback are linear frequencies in Hz.
+    ``nu0`` arrives in Hz (from the Vineyard calculation) and is converted to
+    ps⁻¹ here so the rate layer and KMC clock receive a ps⁻¹ prefactor; the
+    ``k0`` fallback is already in ps⁻¹.
 
     Batch computation: :meth:`compute_prefactors_batch` fans one nu0 job per
     payload over the injected engine ``manager``. The API is direction-agnostic
@@ -48,10 +52,14 @@ class HtstBackend(PrefactorBackend):
         self.manager = manager
 
     def compute(self, **kwargs: object) -> float:
-        """Return the per-event Vineyard ``nu0`` (Hz) when finite, else ``k0``."""
+        """Return the per-event Vineyard prefactor in ps⁻¹ when finite, else ``k0``.
+
+        ``nu0`` is supplied in Hz and converted to ps⁻¹ (the unit the rate layer
+        and KMC clock expect); the ``k0`` fallback is already in ps⁻¹.
+        """
         nu0 = kwargs.get("nu0")
         if isinstance(nu0, (int, float)) and math.isfinite(nu0):
-            return float(nu0)
+            return hz_to_per_ps(float(nu0))
         return self.config.k0
 
     def compute_prefactors_batch(
