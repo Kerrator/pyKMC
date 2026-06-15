@@ -134,6 +134,6 @@ def test_facade_passthrough() -> None:
 def test_compute_unchanged_with_manager_param() -> None:
     """The sync compute() contract is untouched by the new ctor param."""
     backend = HtstBackend(_RC(), manager=None)
-    assert backend.compute(nu0=2.0e12) == 2.0e12
+    assert backend.compute(nu0=2.0e12) == 2.0e12 * 1e-12  # nu0 Hz -> ps^-1
     assert backend.compute(nu0=None) == 10.0
     assert ConstantBackend(_RC()).compute() == 10.0

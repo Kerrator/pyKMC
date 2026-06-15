@@ -138,8 +138,8 @@ def test_htst_backfills_accepted_event(
     assert payloads[0]["central_atom_idx"] == 0
     assert payloads[0]["min1_positions"] is not None
     row = table.table.iloc[0]
-    assert row["nu0"] == 5.0e12
-    assert row["k_prefactor"] == 5.0e12
+    assert row["nu0"] == 5.0e12  # nu0 column stays Hz (diagnostic; pylatkmc consumer)
+    assert row["k_prefactor"] == 5.0e12 * 1e-12  # resolved prefactor is ps^-1
     assert math.isclose(row["k"], table.rate_constant.compute_rate(de, nu0=5.0e12).rate)
 
 
@@ -242,9 +242,9 @@ def test_backfill_patches_directional_rows(
 
     fwd_row = table.table[table.table["idx_ref"] == fwd_ref].iloc[0]
     bwd_row = table.table[table.table["idx_ref"] == bwd_ref].iloc[0]
-    assert fwd_row["nu0"] == 5.0e12
-    assert fwd_row["k_prefactor"] == 5.0e12
+    assert fwd_row["nu0"] == 5.0e12  # nu0 column stays Hz (diagnostic)
+    assert fwd_row["k_prefactor"] == 5.0e12 * 1e-12  # resolved prefactor is ps^-1
     assert math.isclose(fwd_row["k"], table.rate_constant.compute_rate(0.5, nu0=5.0e12).rate)
-    assert bwd_row["nu0"] == 3.0e12
-    assert bwd_row["k_prefactor"] == 3.0e12
+    assert bwd_row["nu0"] == 3.0e12  # nu0 column stays Hz (diagnostic)
+    assert bwd_row["k_prefactor"] == 3.0e12 * 1e-12  # resolved prefactor is ps^-1
     assert math.isclose(bwd_row["k"], table.rate_constant.compute_rate(0.7, nu0=3.0e12).rate)

@@ -34,7 +34,7 @@ def test_constant_backend_ignores_nu0() -> None:
 def test_htst_backend_uses_nu0_else_k0() -> None:
     """HtstBackend returns nu0 when finite, else the k0 fallback."""
     backend = HtstBackend(_cfg(k0=10.0))
-    assert backend.compute(nu0=5e12) == 5e12
+    assert backend.compute(nu0=5e12) == 5e12 * 1e-12  # nu0 Hz -> ps^-1
     assert backend.compute() == 10.0
     assert backend.compute(nu0=None) == 10.0
     assert backend.compute(nu0=float("nan")) == 10.0
@@ -43,7 +43,7 @@ def test_htst_backend_uses_nu0_else_k0() -> None:
 def test_rpa_backend_is_direct_subclass_and_bare_vineyard() -> None:
     """RpaBackend must subclass PrefactorBackend DIRECTLY (non-transitive registry)."""
     assert RpaBackend in PrefactorBackend.__subclasses__()
-    assert RpaBackend(_cfg(k0=10.0)).compute(nu0=7e12) == 7e12
+    assert RpaBackend(_cfg(k0=10.0)).compute(nu0=7e12) == 7e12 * 1e-12  # nu0 Hz -> ps^-1
 
 
 def test_factory_dispatch_and_unknown_raises() -> None:
@@ -58,9 +58,9 @@ def test_rate_constant_compute_rate() -> None:
     """compute_rate threads nu0 to the backend and applies the Eyring exponential."""
     rc = create_rate_constant(T=100.0, prefactor_backend_name="htst", config=_cfg(k0=10.0))
     out = rc.compute_rate(0.5, nu0=5e12)
-    assert out.prefactor == 5e12
-    assert math.isclose(out.rate, 5e12 * math.exp(-0.5 / (KB * 100.0)))
-    assert rc.compute_rate(0.5).prefactor == 10.0  # fallback to k0
+    assert out.prefactor == 5e12 * 1e-12  # nu0 Hz -> ps^-1
+    assert math.isclose(out.rate, 5e12 * 1e-12 * math.exp(-0.5 / (KB * 100.0)))
+    assert rc.compute_rate(0.5).prefactor == 10.0  # fallback to k0 (already ps^-1)
 
 
 def test_rate_from_prefactor_helper() -> None:

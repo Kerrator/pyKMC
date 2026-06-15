@@ -25,7 +25,9 @@ def test_constant_style_uses_k0() -> None:
 
 def test_htst_uses_nu0_when_present() -> None:
     """HTST style uses the supplied finite nu0 as the prefactor."""
-    assert math.isclose(_rate("htst", 0.5, nu0=5e12), 5e12 * math.exp(-0.5 / (KB * 300.0)))
+    assert math.isclose(
+        _rate("htst", 0.5, nu0=5e12), 5e12 * 1e-12 * math.exp(-0.5 / (KB * 300.0))
+    )  # nu0 Hz -> ps^-1
 
 
 def test_htst_falls_back_to_k0_when_nu0_none() -> None:
@@ -42,7 +44,9 @@ def test_htst_falls_back_when_nu0_not_finite() -> None:
 
 def test_rpa_uses_nu0_like_htst() -> None:
     """RPA style is bare-Vineyard for now: uses nu0 when present."""
-    assert math.isclose(_rate("rpa", 0.5, nu0=7e12), 7e12 * math.exp(-0.5 / (KB * 300.0)))
+    assert math.isclose(
+        _rate("rpa", 0.5, nu0=7e12), 7e12 * 1e-12 * math.exp(-0.5 / (KB * 300.0))
+    )  # nu0 Hz -> ps^-1
 
 
 def test_unknown_backend_raises() -> None:
