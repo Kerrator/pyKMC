@@ -63,3 +63,14 @@ def hz_to_thz(f_hz: float) -> float:
 def thz_to_hz(f_thz: float) -> float:
     """Convert a frequency from THz to Hz."""
     return f_thz * 1.0e12
+
+
+def hz_to_per_ps(f_hz: float) -> float:
+    """Convert a linear frequency from Hz (s⁻¹) to ps⁻¹.
+
+    The rate layer and the KMC clock work in ps⁻¹ (``delta_t`` comes out in ps
+    and is later scaled to seconds), so a ν₀ produced in Hz must be converted
+    before it is used as a rate prefactor. Numerically ps⁻¹ ≡ THz, hence the
+    same 1e-12 factor as :func:`hz_to_thz`.
+    """
+    return f_hz * 1.0e-12
