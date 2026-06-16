@@ -863,6 +863,15 @@ def basin_reconstruct(engine: "MpiApiEngine", config: "Config", from_positions: 
         if engine.rank == 0:
             return {"ok": False, "error_type": type(exc).__name__, "message": str(exc)}
         return None
+    finally:
+        # Heal the pooled engine before it returns to the session pool: a
+        # reconstruction minimize that loses atoms leaves a reduced atom count,
+        # which would poison every later set_positions on this reused engine
+        # (lammps_scatter_atoms: Atom-IDs must exist). Like the partn AV ops,
+        # restore the full system. Cheap no-op when nothing was lost (the
+        # atom-count check returns early); get_natoms is global so all engine
+        # ranks take the same branch (no collective divergence).
+        _ensure_full_system(engine, config, from_positions, cell, from_types)
 
 
 def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_positions: np.ndarray,
