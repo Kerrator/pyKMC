@@ -42,4 +42,5 @@ style = ira
 [IRA]
 
 [Basin]
+style = global/reconstruction
 energy_thr = 0.5

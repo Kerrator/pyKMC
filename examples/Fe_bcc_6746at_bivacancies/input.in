@@ -41,4 +41,5 @@ matching_score_thr = 0.3
 kmax_factor = 2.0
 
 [Basin]
+style = global/reconstruction
 energy_thr = 0.6

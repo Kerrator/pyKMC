@@ -618,7 +618,9 @@ class BasinConfig(BaseModel):
         "mislandings onto known states are absorbed by deduplication). "
         "'global/reconstruction' performs the full reconstruction: transplant the saddle, "
         "push toward and minimize both minima, and validate each against the PSR "
-        "prediction (delr1/delr2 vs psr.matching_score_thr).",
+        "prediction (delr1/delr2 vs psr.matching_score_thr). 'global/reconstruction' is "
+        "the more robust choice for production: 'global' lands directly on the predicted "
+        "final geometry and can lose atoms in the minimize on some systems.",
     )
 
     energy_thr: float = Field(
