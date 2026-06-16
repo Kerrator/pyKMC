@@ -614,3 +614,96 @@ def test_minimize_freeze_outer_sphere_cleans_up_on_error(monkeypatch):
     cmds = engine.commands
     assert "unfix _av_freeze" in cmds
     assert "group _av_outer delete" in cmds
+
+
+# --- basin_reconstruct: must leave the pooled engine whole (issue B) ---------
+#
+# A basin reconstruction sets full-system positions then minimizes; on a bad
+# geometry LAMMPS can lose atoms, leaving the engine with a reduced atom count.
+# Because the engine is reused from the session pool, that corruption then
+# poisons every later set_positions ("scatter_atoms: Atom-IDs must exist").
+# Like the partn active-volume ops, basin_reconstruct must restore the full
+# system on exit via ``_ensure_full_system`` -- on BOTH the success and the
+# failure path.
+
+
+def _basin_reconstruct_args():
+    from_positions = np.array([[0.0, 0.0, 0.0], [0.4, 0.4, 0.4]])
+    from_types = np.array(["Ni", "Ni"])
+    cell = np.eye(3)
+    pbc = np.array([True, True, True])
+    return dict(
+        from_positions=from_positions,
+        from_types=from_types,
+        cell=cell,
+        pbc=pbc,
+        ref_initial_positions=from_positions.copy(),
+        ref_saddle_positions=from_positions.copy(),
+        ref_final_positions=from_positions.copy(),
+        ref_initial_types=list(from_types),
+        sym_matrices=[np.eye(3)],
+        sym_perms=[np.array([0, 1])],
+        central_atom=0,
+        sym_idx=0,
+        neighbor_indices=np.array([0, 1]),
+        matching_score_thr=0.4,
+        kmax_factor=2.0,
+        atom_coloring_mode="grey",
+    )
+
+
+def test_basin_reconstruct_restores_full_system_on_success(monkeypatch):
+    """A successful reconstruction must still restore the full system on exit."""
+    engine = _FakeEngine(natoms=2)
+    config = SimpleNamespace(basin=SimpleNamespace(style="global/reconstruction"))
+    args = _basin_reconstruct_args()
+    restore_calls = []
+
+    monkeypatch.setattr(
+        ops, "_basin_reconstruct_impl",
+        lambda *a, **k: {"ok": True, "min2_positions": args["from_positions"], "min2_etot": -1.0},
+    )
+    monkeypatch.setattr(
+        ops, "_ensure_full_system",
+        lambda engine, config, positions, cell, types: restore_calls.append(
+            (positions.copy(), cell.copy(), np.array(types, copy=True))
+        ),
+    )
+
+    result = ops.basin_reconstruct(engine, config, **args)
+
+    assert result["ok"] is True
+    assert len(restore_calls) == 1
+    assert np.array_equal(restore_calls[0][0], args["from_positions"])
+    assert np.array_equal(restore_calls[0][2], args["from_types"])
+
+
+def test_basin_reconstruct_restores_full_system_on_failure(monkeypatch):
+    """A reconstruction whose engine work raises must still restore the engine.
+
+    This is the corruption-cascade guard: a lost-atoms minimize raises, and the
+    engine must be healed before it returns to the pool, or every later
+    set_positions on the reused engine fails.
+    """
+    engine = _FakeEngine(natoms=2)
+    config = SimpleNamespace(basin=SimpleNamespace(style="global/reconstruction"))
+    args = _basin_reconstruct_args()
+    restore_calls = []
+
+    def boom(*a, **k):
+        raise RuntimeError("Lost atoms: original 2 current 1")
+
+    monkeypatch.setattr(ops, "_basin_reconstruct_impl", boom)
+    monkeypatch.setattr(
+        ops, "_ensure_full_system",
+        lambda engine, config, positions, cell, types: restore_calls.append(positions.copy()),
+    )
+
+    result = ops.basin_reconstruct(engine, config, **args)
+
+    # Failure is reported as an error payload (rank 0) ...
+    assert result["ok"] is False
+    assert "Lost atoms" in result["message"]
+    # ... and the engine was healed on the way out.
+    assert len(restore_calls) == 1
+    assert np.array_equal(restore_calls[0], args["from_positions"])
