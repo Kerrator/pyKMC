@@ -1,3 +1,6 @@
+import logging
+from typing import TYPE_CHECKING
+
 import numpy as np
 from ase.data import atomic_numbers, atomic_masses
 import ctypes
@@ -5,6 +8,12 @@ import pypARTn
 import os
 from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_AV, make_AV, redefine_atoms, reset
 from ...atomic_environment import AtomicEnvironment
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from ...config import Config
+    from ..engines.mpi_api_engine import MpiApiEngine
 
 from ...result import  (
     ErrorInfo,
@@ -17,6 +26,8 @@ from ...result import  (
 from pykmc.rate_constant.prefactor import EventPrefactors, compute_event_prefactors as _compute_event_prefactors
 from pykmc.config import PhysicalConstants
 from pykmc.htst.constants import thz_to_hz
+
+logger = logging.getLogger("log")
 
 
 def initialize_parameters(engine) : 
@@ -70,11 +81,99 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
+def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np.ndarray | None", cell: "np.ndarray | None", types: "np.ndarray | list[str] | None") -> None:
+    """Restore the full system if an active-volume operation changed the atom count.
+
+    Active-volume pARTn operations rebuild the LAMMPS engine with only the
+    active-volume subset of atoms. If the engine is then reused for a full-system
+    operation (minimize, basin reconstruction, energy evaluation), the atom counts
+    no longer match and LAMMPS operates on a stale subset. This guard compares the
+    engine's atom count against the expected full system and reinitializes when
+    they differ.
+    """
+    from ...system import System
+
+    if positions is None or cell is None or types is None:
+        raise ValueError(
+            "Full-system positions, cell, and types are required to restore the LAMMPS engine."
+        )
+
+    expected_natoms = len(positions)
+    engine_natoms = int(engine.lmp.get_natoms())
+    if engine_natoms == expected_natoms:
+        return
+
+    logger.debug(
+        "[LAMMPS] Restoring full system after active-volume operation (%d -> %d atoms)",
+        engine_natoms,
+        expected_natoms,
+    )
+    system = System(
+        positions=np.array(positions, copy=True),
+        types=np.array(types, copy=True),
+        cell=np.array(cell, copy=True),
+        pbc=np.array([True, True, True], dtype=bool),
+        index=np.arange(expected_natoms),
+    )
+    #Clear and rebuild the engine with the full system (same sequence the
+    #engine boot path uses; boundary stays fully periodic).
+    engine.lmp.command("clear")
+    initialize_parameters(engine)
+    initialize_system(engine, system)
+    initialize_potential(engine, config)
+
+
+
 def minimize(engine, config, positions=None) :
     if positions is not None :
         set_positions(engine=engine, positions=positions)
     engine.command("min_style {}".format(config.lammps.min_style))
     engine.command("minimize {}".format(config.lammps.minimize))
+
+
+def _minimize_freeze_outer_sphere(engine, config, positions, central_atom, rmov, cell, pbc):
+    """Minimize with atoms farther than ``rmov`` from the central atom zero-forced.
+
+    Mirrors the active-volume buffer geometry: only atoms within rmov of the
+    central atom can relax; atoms beyond are frozen at their current positions.
+    Used by basin_reconstruct in AV mode so that full-system reconstruction
+    matches the constrained geometry under which reference events were captured.
+
+    The frozen set is selected with the minimum-image convention (matching
+    define_AV) rather than a LAMMPS region sphere, which does not wrap across
+    periodic boundaries. Every rank computes the same set from the same inputs,
+    so command lockstep is preserved. Cleanup is best-effort and idempotent: a
+    failure mid-minimize must not strand a group that breaks the next call.
+    """
+    import ase.geometry
+
+    diffs = np.asarray(positions, dtype=float) - np.asarray(positions[central_atom], dtype=float)
+    _, dist = ase.geometry.find_mic(diffs, cell, pbc=pbc if pbc is not None else True)
+    frozen_ids = np.where(dist > rmov)[0] + 1  # LAMMPS ids are 1-based
+
+    cmd = engine.command
+    try:
+        if len(frozen_ids) > 0:
+            for i in range(0, len(frozen_ids), 500):
+                chunk = " ".join(str(int(j)) for j in frozen_ids[i:i + 500])
+                cmd(f"group _av_outer id {chunk}")
+            cmd("fix _av_freeze _av_outer setforce 0.0 0.0 0.0")
+        minimize(engine, config)
+    finally:
+        if len(frozen_ids) > 0:
+            for cleanup in ("unfix _av_freeze", "group _av_outer delete"):
+                try:
+                    cmd(cleanup)
+                except Exception:
+                    pass  # engine may be mid-error; collective errors raise on all ranks
+
+
+def _basin_av_rmov(config: "Config") -> "float | None":
+    """Outer-sphere freeze radius for basin reconstruction, or None when AV is off."""
+    if config.control.active_volume and config.activevolume is not None:
+        return config.activevolume.rmov
+    return None
+
 
 def get_total_energy(engine, positions=None) :
     if positions is not None :
@@ -380,7 +479,20 @@ def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
         engine.command("group g_frozen delete")
 
 
-def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, types=None) :
+def partn_search(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None) :
+    """Run a pARTn event search; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, and exceptions) so the engine is
+    never left holding only the active-volume subset of atoms.
+    """
+    try:
+        return _partn_search_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_search_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
@@ -548,11 +660,36 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                 )
             )
 
-def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, types=None, saddle_idx = None, saddle_positions = None, minimize_outter_atoms: bool = True) :
+def partn_refine(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
+    """Refine a saddle point; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, max-attempt exhaustion, and
+    exceptions) so the engine is never left holding only the active-volume subset.
+    """
+    try:
+        return _partn_refine_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types, saddle_idx=saddle_idx, saddle_positions=saddle_positions, minimize_outter_atoms=minimize_outter_atoms)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
-        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        try:
+            E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        except ValueError as exc:
+            #Invalid saddle geometry for the active volume (atom outside the
+            #active radius or missing from the AV map): report instead of crash.
+            if engine.rank == 0:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                        message=str(exc),
+                    )
+                )
+            return None
     else:
         central_lammps_id=[central_atom_idx+1]
         E_init=0
@@ -689,3 +826,368 @@ def partn_refine(engine, config, central_atom_idx:int , positions = None, cell =
             )
         return None
 
+
+def basin_reconstruct(engine: "MpiApiEngine", config: "Config", from_positions: np.ndarray,
+                      from_types: "np.ndarray | list[str]", cell: np.ndarray,
+                      pbc: "np.ndarray | None",
+                      ref_initial_positions: np.ndarray, ref_saddle_positions: np.ndarray,
+                      ref_final_positions: np.ndarray, ref_initial_types: "list[str] | None",
+                      sym_matrices: "list[np.ndarray]", sym_perms: "list[np.ndarray]",
+                      central_atom: int, sym_idx: int,
+                      neighbor_indices: "np.ndarray | list[int]", matching_score_thr: float,
+                      kmax_factor: float, atom_coloring_mode: str) -> "dict | None":
+    """Perform a full basin state reconstruction on engine ranks: PSR + 2x minimize.
+
+    Rank 0 does PSR (IRA point set registration) and position manipulation; all
+    ranks participate in the two LAMMPS minimizations. Expected failures (no PSR
+    match, score above threshold, minima not retrieved) are returned as data, and
+    unexpected exceptions are also converted to an error payload on rank 0 so the
+    session always receives a reply (the engine loop sends no reply for None).
+
+    Returns
+    -------
+    dict or None
+        On rank 0: {"ok": True, "min2_positions": ndarray, "min2_etot": float}
+        or {"ok": False, "error_type": str, "message": str}.
+        None on non-root ranks.
+
+    """
+    try:
+        return _basin_reconstruct_impl(
+            engine, config, from_positions, from_types, cell, pbc,
+            ref_initial_positions, ref_saddle_positions, ref_final_positions,
+            ref_initial_types, sym_matrices, sym_perms, central_atom, sym_idx,
+            neighbor_indices, matching_score_thr, kmax_factor, atom_coloring_mode)
+    except Exception as exc:
+        logger.exception("[Engine Rank %d] basin_reconstruct failed", engine.rank)
+        if engine.rank == 0:
+            return {"ok": False, "error_type": type(exc).__name__, "message": str(exc)}
+        return None
+
+
+def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_positions: np.ndarray,
+                            from_types: "np.ndarray | list[str]", cell: np.ndarray,
+                            pbc: "np.ndarray | None",
+                            ref_initial_positions: np.ndarray, ref_saddle_positions: np.ndarray,
+                            ref_final_positions: np.ndarray, ref_initial_types: "list[str] | None",
+                            sym_matrices: "list[np.ndarray]", sym_perms: "list[np.ndarray]",
+                            central_atom: int, sym_idx: int,
+                            neighbor_indices: "np.ndarray | list[int]", matching_score_thr: float,
+                            kmax_factor: float, atom_coloring_mode: str) -> "dict | None":
+    import ira_mod
+    import ase.geometry
+    from ...utils.geometry import transform_positions, push_towards, compute_delr
+
+    proceed = None  # control signal broadcast to all ranks
+
+    if engine.rank == 0:
+        # --- PSR phase (rank 0 only) ---
+        #Any exception in this rank-0-only block MUST become an error payload:
+        #raising past the bcast below would leave the other engine ranks waiting
+        #in the collective forever (and cross-wire later bcasts).
+        try:
+            coords1 = np.array(from_positions[neighbor_indices], copy=True)
+
+            if atom_coloring_mode == "full":
+                typ1 = list(np.array(from_types)[neighbor_indices])
+                typ2 = list(ref_initial_types) if ref_initial_types is not None else typ1
+            else:
+                typ1 = ["X"] * len(coords1)
+                typ2 = typ1
+
+            # Unwrap coords near cell boundaries
+            pbc_arr = pbc if pbc is not None else np.array([True, True, True])
+            cell_lengths = [cell[d][d] for d in range(3)]
+            central_pos = from_positions[central_atom]
+            for i in range(len(coords1)):
+                for dim in range(3):
+                    if pbc_arr[dim]:
+                        diff = coords1[i][dim] - central_pos[dim]
+                        if abs(diff) > cell_lengths[dim] / 2:
+                            coords1[i][dim] += np.sign(-diff) * cell_lengths[dim]
+
+            coords2 = np.array(ref_initial_positions)
+            nat1 = len(coords1)
+            nat2 = len(coords2)
+
+            ira = ira_mod.IRA()
+            try:
+                rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
+            except Exception:
+                proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
+                           "message": "IRA did not find a match"}
+
+            if proceed is None and dh > matching_score_thr:
+                proceed = {"ok": False,
+                           "error_type": "PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD",
+                           "message": f"PSR matching score {dh} above threshold {matching_score_thr}"}
+
+            if proceed is None:
+                # Apply symmetry + PSR transforms
+                supposed_initial = np.array(ref_initial_positions, copy=True)
+                supposed_final = np.array(ref_final_positions, copy=True)
+                saddle = np.array(ref_saddle_positions, copy=True)
+
+                if sym_idx != 0:
+                    sym_matrix = sym_matrices[sym_idx]
+                    sym_perm = sym_perms[sym_idx]
+                    supposed_initial = transform_positions(supposed_initial, sym_matrix, 0, sym_perm)
+                    saddle = transform_positions(saddle, sym_matrix, 0, sym_perm)
+                    supposed_final = transform_positions(supposed_final, sym_matrix, 0, sym_perm)
+
+                supposed_initial = transform_positions(supposed_initial, rmat, tr, perm)
+                saddle = transform_positions(saddle, rmat, tr, perm)
+                supposed_final = transform_positions(supposed_final, rmat, tr, perm)
+
+                style = config.basin.style if config.basin is not None else "global/reconstruction"
+                if style == "global":
+                    #Skip-reconstruction style: land directly on the PSR-predicted final
+                    #state and minimize once, with no delr gates — the engine-side mirror
+                    #of the host-side 'global' semantics (basin.py system_from_state).
+                    #Mislandings that equal a known state are absorbed by dedup; genuinely
+                    #new mislandings enter the table under a transition they did not take.
+                    new_positions = np.array(from_positions, copy=True)
+                    new_positions[neighbor_indices] = supposed_final
+                    proceed = {"step": "min_global", "positions": new_positions}
+                else:
+                    # Build new system positions with saddle applied
+                    new_positions = np.array(from_positions, copy=True)
+                    new_positions[neighbor_indices] = saddle
+
+                    # Push toward min1
+                    saddle_toward_min1 = push_towards(
+                        new_positions[neighbor_indices], supposed_initial,
+                        fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                    tmp_positions = np.array(new_positions, copy=True)
+                    tmp_positions[neighbor_indices] = saddle_toward_min1
+                    proceed = {"step": "min1", "positions": tmp_positions,
+                               "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                               "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+        except Exception as exc:
+            logger.exception("[Engine Rank 0] basin reconstruction rank-0 PSR phase failed")
+            proceed = {"ok": False, "error_type": type(exc).__name__,
+                       "message": f"rank-0 PSR phase failed: {exc}"}
+
+    # Broadcast control signal to all ranks
+    proceed = engine.engine_comm.bcast(proceed, root=0)
+
+    if proceed is None or (isinstance(proceed, dict) and proceed.get("ok") is False):
+        if engine.rank == 0:
+            return proceed
+        return None
+
+    # --- style='global' short-circuit: one minimize from supposed_final, no gates ---
+    if isinstance(proceed, dict) and proceed.get("step") == "min_global":
+        set_positions(engine=engine, positions=proceed["positions"])
+        av_rmov = _basin_av_rmov(config)
+        if av_rmov is not None:
+            _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
+        else:
+            minimize(engine, config)
+        min2_pos = get_positions(engine)
+        min2_etot = get_total_energy(engine)
+        if engine.rank == 0:
+            return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
+        return None
+
+    # --- Minimize toward min1 (all ranks) ---
+    set_positions(engine=engine, positions=proceed["positions"])
+    av_rmov = _basin_av_rmov(config)
+    if av_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
+    else:
+        minimize(engine, config)
+    min1_pos = get_positions(engine)
+
+    # Validate min1 on rank 0
+    proceed2 = None
+    if engine.rank == 0:
+        #Same rule as the PSR phase: exceptions here must become error payloads,
+        #never raise past the bcast below.
+        try:
+            supposed_initial = proceed["supposed_initial"]
+            supposed_final = proceed["supposed_final"]
+            saddle_positions = proceed["saddle_positions"]
+            nbr_indices = proceed["neighbor_indices"]
+
+            t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
+            delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
+            if delr1 > matching_score_thr:
+                proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
+                            "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
+            else:
+                # Push toward min2
+                saddle_toward_min2 = push_towards(
+                    saddle_positions[nbr_indices], supposed_final,
+                    fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                tmp_positions2 = np.array(saddle_positions, copy=True)
+                tmp_positions2[nbr_indices] = saddle_toward_min2
+                proceed2 = {"step": "min2", "positions": tmp_positions2,
+                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+        except Exception as exc:
+            logger.exception("[Engine Rank 0] basin reconstruction min1 validation failed")
+            proceed2 = {"ok": False, "error_type": type(exc).__name__,
+                        "message": f"rank-0 min1 validation failed: {exc}"}
+
+    proceed2 = engine.engine_comm.bcast(proceed2, root=0)
+
+    if proceed2 is None or (isinstance(proceed2, dict) and proceed2.get("ok") is False):
+        if engine.rank == 0:
+            return proceed2
+        return None
+
+    # --- Minimize toward min2 (all ranks) ---
+    set_positions(engine=engine, positions=proceed2["positions"])
+    if av_rmov is not None:
+        _minimize_freeze_outer_sphere(engine, config, from_positions, central_atom, av_rmov, cell, pbc)
+    else:
+        minimize(engine, config)
+    min2_pos = get_positions(engine)
+    min2_etot = get_total_energy(engine)
+
+    if engine.rank == 0:
+        supposed_final = proceed2["supposed_final"]
+        nbr_indices = proceed2["neighbor_indices"]
+
+        t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
+        delr2 = compute_delr(supposed_final, t2[nbr_indices], cell, pbc=pbc)
+        if delr2 > matching_score_thr:
+            if os.environ.get("PYKMC_BASIN_DEBUG") == "1":
+                try:
+                    diffs = t2[nbr_indices] - supposed_final
+                    diffs_mic, _ = ase.geometry.find_mic(diffs, cell, pbc=pbc)
+                    magnitudes = np.linalg.norm(diffs_mic, axis=1)
+                    order = np.argsort(-magnitudes)
+                    topk = min(10, len(order))
+                    top = [
+                        (int(nbr_indices[i]), float(magnitudes[i]))
+                        for i in order[:topk]
+                    ]
+                    logger.warning(
+                        "[basin_reconstruct] MIN2 FAIL delr2=%.4f top |Δ| per-atom: %s",
+                        delr2, top,
+                    )
+                except Exception as exc:
+                    logger.warning("[basin_reconstruct] diag dump failed: %s", exc)
+            return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
+                    "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
+
+        return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
+
+    return None
+
+
+def basin_explore(engine: "MpiApiEngine", config_dict: dict, reference_table_data: bytes,
+                  state_positions: np.ndarray, state_types: "list[str]",
+                  state_cell: np.ndarray, state_pbc: "np.ndarray | None",
+                  state_index: int, start_index: int) -> "list[dict] | dict | None":
+    """Perform basin exploration on engine rank 0. Other ranks idle.
+
+    Pure table lookups (no LAMMPS), so only rank 0 works. Unexpected exceptions
+    are converted to an {"ok": False, ...} payload so the session always receives
+    a reply.
+
+    Parameters
+    ----------
+    engine : MpiApiEngine
+        Engine whose rank decides whether this rank does the work.
+    config_dict : dict
+        Subset of config fields needed for exploration.
+    reference_table_data : bytes
+        Pickled ReferenceEventTable.table DataFrame.
+    state_positions, state_types, state_cell, state_pbc : array-like
+        State data to reconstruct System + NeighborsList + AtomicEnvironment.
+    state_index : int
+        Index of the state being explored.
+    start_index : int
+        Starting index for new state connections.
+
+    Returns
+    -------
+    list[dict] or dict or None
+        Connectivity rows on rank 0 ({"ok": False, ...} dict on failure), None on
+        other ranks.
+
+    """
+    if engine.rank != 0:
+        return None
+    try:
+        return _basin_explore_impl(engine, config_dict, reference_table_data,
+                                   state_positions, state_types, state_cell, state_pbc,
+                                   state_index, start_index)
+    except Exception as exc:
+        logger.exception("[Engine Rank %d] basin_explore failed", engine.rank)
+        return {"ok": False, "error_type": type(exc).__name__, "message": str(exc)}
+
+
+def _basin_explore_impl(engine: "MpiApiEngine", config_dict: dict, reference_table_data: bytes,
+                        state_positions: np.ndarray, state_types: "list[str]",
+                        state_cell: np.ndarray, state_pbc: "np.ndarray | None",
+                        state_index: int, start_index: int) -> "list[dict] | dict":
+    import pickle
+    from ...system import System
+    from ...neighbors_list import NeighborsList
+    from ...atomic_environment import AtomicEnvironment
+    from ...basins.exploration import BasinGenericEventExplorer
+
+    # Reconstruct the reference table DataFrame
+    ref_table_df = pickle.loads(reference_table_data)
+
+    # Proxy for ReferenceEventTable (the explorer only needs .table and
+    # .has_id_subset_table, which mirrors ReferenceEventTable.has_id_subset_table)
+    class _RefTableProxy:
+        def __init__(self, table_df: "pd.DataFrame") -> None:
+            self.table = table_df
+        def has_id_subset_table(self, ids: "list[str]") -> "pd.DataFrame":
+            return self.table[self.table["event_id"].isin(ids)]
+
+    ref_table = _RefTableProxy(ref_table_df)
+
+    # Reconstruct state
+    system = System(positions=np.array(state_positions), types=list(state_types),
+                    cell=np.array(state_cell), pbc=state_pbc,
+                    index=np.arange(len(state_types)))
+    neighbors_list = NeighborsList(system, config_dict["rnei"], config_dict["rcut"])
+    #Pass the multi-element kwargs only when they carry non-default values: the
+    #coloring-aware AtomicEnvironment signature ships on a separate branch, and the
+    #default call must stay valid against the plain signature.
+    env_kwargs = {}
+    if config_dict.get("atom_coloring_mode", "grey") == "full":
+        env_kwargs["types"] = system.types
+    if config_dict.get("coordination_threshold") is not None:
+        env_kwargs["coordination_threshold"] = config_dict["coordination_threshold"]
+    environment = AtomicEnvironment(
+        config_dict["ae_style"],
+        neighbors_list.neighbors_list["rnei"],
+        neighbors_list.neighbors_list["rcut"],
+        config_dict["neighbors_add"],
+        **env_kwargs)
+
+    # Proxy for StateData (the explorer only reads system/environment/neighbors_list)
+    class _StateProxy:
+        def __init__(self, sys: "System", env: "AtomicEnvironment", nl: "NeighborsList") -> None:
+            self.system = sys
+            self.environment = env
+            self.neighbors_list = nl
+        def ensure_full_state(self, config: "Config") -> None:
+            pass
+
+    state = _StateProxy(system, environment, neighbors_list)
+
+    # Proxy for Config (the explorer only needs config.basin.energy_thr)
+    class _ConfigProxy:
+        def __init__(self, energy_thr: float) -> None:
+            self.basin = type("obj", (object,), {"energy_thr": energy_thr})()
+
+    config_proxy = _ConfigProxy(config_dict["energy_thr"])
+
+    explorer = BasinGenericEventExplorer(config=config_proxy, reference_table=ref_table)
+    explorer.explore(state=state, state_index=state_index, start_index=start_index)
+
+    # Return connectivity rows as list of dicts (row buffer first, then any
+    # already-materialized DataFrame)
+    if explorer.connectivity_table._rows:
+        return explorer.connectivity_table._rows
+    if explorer.connectivity_table._df is not None and not explorer.connectivity_table._df.empty:
+        return explorer.connectivity_table._df.to_dict("records")
+    return []

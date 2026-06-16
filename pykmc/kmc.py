@@ -21,6 +21,7 @@ from .result import (
     Ok
 )
 import numpy as np
+import os
 from ase.io import write
 from ase import Atoms
 from .algorithms import rejection_free
@@ -315,35 +316,19 @@ class KMC:
                     else :
                        self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
                        self.system.update_positions(basin.states[0].system.positions)
-                       self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                       self._apply_original_migration_event(result_reconstruction)
                 else :
                     self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
-                    self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                    self._apply_original_migration_event(result_reconstruction)
                 if basin.connectivity_table is not None :
                     basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
                 #update delta_t, ktot (use basin infos)
-                # Basin super-event spans many atoms; detach the recycler so
-                # prune_for_recycling clears the table (recycling deferred).
-                saved_recycler = self.active_table.recycler
-                self.active_table.recycler = None
-                self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
-                )
-                self.active_table.recycler = saved_recycler
+                # Basin super-event spans many atoms; recycling is deferred (the
+                # prune below runs with the recycler detached).
+                prune_detach_recycler = True
             else :
-                self.system.update_positions(result_reconstruction.ok_value().min2_positions)
-                self.total_energy = result_reconstruction.ok_value().min2_etot
-                # == Event recycling: prune the active table for next step ==
-                self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
-                )
-                if self.config.control.recycle:
-                    self.loggers.info(
-                        "log",
-                        "\t :=> {} events flagged for recycling".format(
-                            len(self.active_table.table)
-                        ),
-                    )
+                self._apply_original_migration_event(result_reconstruction)
+                prune_detach_recycler = False
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions
@@ -389,6 +374,29 @@ class KMC:
                 elapsed_real
             )
 
+            # == Event recycling: prune the active table for the next step ==
+            # Must run AFTER the step log above, which reads the executed event's
+            # row; with no recycler (recycle = False, the default) the prune clears
+            # the whole table and the lookup would raise KeyError.
+            if prune_detach_recycler:
+                saved_recycler = self.active_table.recycler
+                self.active_table.recycler = None
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
+                self.active_table.recycler = saved_recycler
+            else:
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
+                if self.config.control.recycle:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> {} events flagged for recycling".format(
+                            len(self.active_table.table)
+                        ),
+                    )
+
             # == Update variables ==
             self.neighbors_list = NeighborsList(
                 self.system,
@@ -421,6 +429,10 @@ class KMC:
             # == Save Reference Table and List visited environment :
             self._save()
             self._append_snapshot_to_trajectory()
+            # == Periodic restart save: a killed run resumes from the last interval
+            interval = self.config.control.restart_save_interval
+            if interval is not None and step % interval == 0:
+                self._save_restart_file(step, total_time)
             del active_table
             # == Check if only cristalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
@@ -428,7 +440,7 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
-        self._save_restart_file(step, total_time)
+        self._save_restart_file(step, total_time, final=True)
         self._close()
 
     def get_new_environments(self) -> list[str]:
@@ -700,6 +712,11 @@ class KMC:
         new_positions = active_table.table.loc[idx_selected_event].at["final_positions"]
         self.system.update_positions(new_positions)
 
+    def _apply_original_migration_event(self, result_reconstruction: Ok[ReconstructionOutput]) -> None:
+        reconstruction_output = result_reconstruction.ok_value()
+        self.system.update_positions(reconstruction_output.min2_positions)
+        self.total_energy = reconstruction_output.min2_etot
+
     def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
         if self.config.control.restart_file is None:
@@ -818,17 +835,39 @@ class KMC:
 
     def _save(self) -> None:
         """Save the reference event table and the list of visited environments."""
-        self.reference_table.save("reference_table.pickle")
+        self.reference_table.save(self.config.control.reference_table_output or "reference_table.pickle")
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
 
-    def _save_restart_file(self, last_step, last_time) :
+    def _save_restart_file(self, last_step, last_time, final: bool = False) -> None :
+        """Atomically write restart info plus a resume-ready snapshot.
+
+        restart_latest.npz (last_step/last_time) and restart_latest.xyz (current
+        minimized positions) are written via tmp + os.replace so a kill mid-write
+        cannot leave a truncated file. Resume with:
+            restart_file = restart_latest.npz
+            initial_config = restart_latest.xyz
+        With final=True the legacy end-of-run restart_<step>.npz is also written.
         """
-        Save end simulation informations
-        """
-        np.savez("restart_"+str(last_step)+".npz",
-                 last_step = last_step,
-                 last_time = last_time)
+        #Write BOTH tmp files first, then rename xyz before npz: the npz (which
+        #the resume path trusts for step/time) must never point ahead of the
+        #snapshot it describes; a kill between the two renames at worst re-runs
+        #one interval.
+        np.savez("restart_latest.tmp.npz", last_step=last_step, last_time=last_time)
+        atoms = Atoms(
+            self.system.types,
+            positions=self.system.positions,
+            cell=self.system.cell,
+            pbc=self.system.pbc,
+        )
+        write("restart_latest.tmp.xyz", atoms)
+        os.replace("restart_latest.tmp.xyz", "restart_latest.xyz")
+        os.replace("restart_latest.tmp.npz", "restart_latest.npz")
+
+        if final:
+            np.savez("restart_"+str(last_step)+".npz",
+                     last_step = last_step,
+                     last_time = last_time)
 
 
     def _close(self) -> None:

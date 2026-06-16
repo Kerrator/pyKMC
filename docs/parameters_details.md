@@ -32,6 +32,10 @@
   <details><summary>Description</summary>
   File with restart informations.
   </details>
+- **`restart_save_interval`** : `int`, default = `50`
+  <details><summary>Description</summary>
+  Write restart files (restart_latest.npz + restart_latest.xyz, atomic tmp+rename) every N KMC steps so a killed run can resume from the last interval: set restart_file = restart_latest.npz and initial_config = restart_latest.xyz. None disables in-loop saves; the end-of-run restart_<step>.npz is always written.
+  </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.
@@ -428,12 +432,73 @@
 ## `Basin` Section (optional)
 
 <details><summary>Section Overview</summary>
-  Basin parameters
+  Basin parameters.
 </details>
 
+- **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
+  <details><summary>Description</summary>
+  How basin states are generated from reference events, on both the host-side serial path and the engine-side wavefront path. 'global' sets the PSR-predicted final positions and minimizes once (no delr validation gates; mislandings onto known states are absorbed by deduplication). 'global/reconstruction' performs the full reconstruction: transplant the saddle, push toward and minimize both minima, and validate each against the PSR prediction (delr1/delr2 vs psr.matching_score_thr).
+  </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
+  </details>
+- **`strategy`** : `Literal['serial', 'wavefront']`, default = `'serial'`
+  <details><summary>Description</summary>
+  Basin BFS strategy. 'serial' explores one transient state at a time. 'wavefront' batches each BFS frontier so reconstruction, deduplication, and exploration run per level, distributing reconstruction across the MPI session pool. Both strategies honor the 'style' setting for how each state is reconstructed.
+  </details>
+- **`n_workers`** : `int`, default = `4`
+  <details><summary>Description</summary>
+  Number of MPI sessions used for the parallel basin phases when strategy = 'wavefront'.
+  </details>
+- **`max_states`** : `int`, optional
+  <details><summary>Description</summary>
+  Maximum transient states to explore. When reached, the remaining frontier is converted to absorbing states and exploration stops. None = unlimited.
+  </details>
+- **`max_total_states`** : `int`, optional
+  <details><summary>Description</summary>
+  Cap on total distinct states (transient + absorbing, including deferred and failed) discovered in one basin; the initial state counts toward it. On breach the remaining frontier is capped as deferred absorbing states without reconstruction or deduplication. Never fires before the initial state was explored. None = unlimited.
+  </details>
+- **`max_basin_walltime_s`** : `float`, optional
+  <details><summary>Description</summary>
+  Wall-time budget (seconds) for one basin exploration, checked at each loop iteration and between states inside batch deduplication. On breach, remaining work is capped as deferred absorbing states. None = unlimited. Production suggestion: 7200.
+  </details>
+- **`max_frontier_size`** : `int`, optional
+  <details><summary>Description</summary>
+  Wavefront only: maximum states reconstructed and deduplicated per iteration; larger frontiers are processed in chunks (bounds per-level memory and gives the wall-time check chunk granularity). Does not change which states are explored. None = whole frontier at once.
+  </details>
+- **`max_failed_fraction`** : `float`, default = `0.2`
+  <details><summary>Description</summary>
+  Abort the basin (fall back to the plain KMC event) when more than this fraction of attempted state reconstructions failed. Failed states below the budget are kept as non-selectable absorbing states with their exploration barriers.
+  </details>
+- **`fingerprint_mode`** : `Literal['auto', 'com', 'atoms_of_interest', 'off']`, default = `'auto'`
+  <details><summary>Description</summary>
+  Which structural fingerprint the deduplication pre-filter uses. 'auto' (default): atoms-of-interest when fingerprint_coordination_thr is set or the AtomicEnvironment style is coordination-based, else the full COM-distance fingerprint. 'com' forces the COM-distance fingerprint; 'atoms_of_interest' forces the undercoordinated-atoms fingerprint (requires a derivable threshold); 'off' disables the pre-filter entirely so every known state is structurally compared (slowest, useful as a benchmark baseline).
+  </details>
+- **`fingerprint_coordination_thr`** : `int`, optional
+  <details><summary>Description</summary>
+  Atoms-of-interest fingerprint threshold for basin deduplication. Atoms with fewer neighbors (within rnei) than this threshold are 'atoms of interest'. The fingerprint has two components: (1) sorted distances from a periodic-aware (circular mean) defect centre-of-mass to each undercoordinated atom, and (2) the distance from defect COM to bulk COM. The circular mean ensures invariance under any periodic representation. Typical value: 9 for FCC surfaces. If None and the AtomicEnvironment style is 'coordination' or 'coordination/graph', auto-derives as coordination_threshold + 1. Otherwise falls back to the full COM-distance fingerprint.
+  </details>
+- **`fingerprint_tolerance`** : `float`, optional
+  <details><summary>Description</summary>
+  Maximum element-wise (Chebyshev) difference for the atoms-of-interest fingerprint pre-filter. If None, defaults to 0.5. Recommended: 1.0 for the best balance of speed and correctness (0.5 can miss true duplicates).
+  </details>
+- **`solver`** : `Literal['auto', 'bisection', 'qsd']`, default = `'auto'`
+  <details><summary>Description</summary>
+  Exit-time solver for the absorbing Markov chain. 'auto' picks the QSD (quasi-stationary distribution) solver for stiff generators (transient/absorbing rate ratio > 1e6) and the bisection solver otherwise. 'bisection' and 'qsd' force a specific solver.
+  </details>
+
+---
+
+## `Reconstruction` Section (mandatory)
+
+<details><summary>Section Overview</summary>
+  Reconstruction parameters.
+</details>
+
+- **`push_fraction`** : `float`, default = `0.15`
+  <details><summary>Description</summary>
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
 
 ---
