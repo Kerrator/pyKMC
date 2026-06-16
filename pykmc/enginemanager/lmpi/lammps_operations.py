@@ -81,7 +81,7 @@ def initialize_potential(engine, config) :
     engine.command("pair_coeff {}".format(pair_coeff))
 
 
-def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np.ndarray | None", cell: "np.ndarray | None", types: "np.ndarray | list[str] | None") -> None:
+def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np.ndarray | None", cell: "np.ndarray | None", types: "np.ndarray | list[str] | None", force: bool = False) -> None:
     """Restore the full system if an active-volume operation changed the atom count.
 
     Active-volume pARTn operations rebuild the LAMMPS engine with only the
@@ -90,6 +90,13 @@ def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np
     no longer match and LAMMPS operates on a stale subset. This guard compares the
     engine's atom count against the expected full system and reinitializes when
     they differ.
+
+    ``force=True`` skips the atom-count short-circuit and rebuilds unconditionally.
+    Use it after a *caught engine error* (e.g. a lost-atoms minimize): LAMMPS does
+    not decrement ``atom->natoms`` on a lost-atoms error (the error reports
+    "original N current M" — N stays the stored global), so ``get_natoms()`` still
+    reports the full count while the atom map is corrupt. The count check would
+    then wrongly no-op and leave the poisoned engine in the pool.
     """
     from ...system import System
 
@@ -99,13 +106,14 @@ def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np
         )
 
     expected_natoms = len(positions)
-    engine_natoms = int(engine.lmp.get_natoms())
-    if engine_natoms == expected_natoms:
-        return
+    if not force:
+        engine_natoms = int(engine.lmp.get_natoms())
+        if engine_natoms == expected_natoms:
+            return
 
     logger.debug(
-        "[LAMMPS] Restoring full system after active-volume operation (%d -> %d atoms)",
-        engine_natoms,
+        "[LAMMPS] Restoring full system (force=%s) -> %d atoms",
+        force,
         expected_natoms,
     )
     system = System(
@@ -852,6 +860,7 @@ def basin_reconstruct(engine: "MpiApiEngine", config: "Config", from_positions: 
         None on non-root ranks.
 
     """
+    raised = False
     try:
         return _basin_reconstruct_impl(
             engine, config, from_positions, from_types, cell, pbc,
@@ -859,19 +868,23 @@ def basin_reconstruct(engine: "MpiApiEngine", config: "Config", from_positions: 
             ref_initial_types, sym_matrices, sym_perms, central_atom, sym_idx,
             neighbor_indices, matching_score_thr, kmax_factor, atom_coloring_mode)
     except Exception as exc:
+        raised = True
         logger.exception("[Engine Rank %d] basin_reconstruct failed", engine.rank)
         if engine.rank == 0:
             return {"ok": False, "error_type": type(exc).__name__, "message": str(exc)}
         return None
     finally:
-        # Heal the pooled engine before it returns to the session pool: a
-        # reconstruction minimize that loses atoms leaves a reduced atom count,
-        # which would poison every later set_positions on this reused engine
-        # (lammps_scatter_atoms: Atom-IDs must exist). Like the partn AV ops,
-        # restore the full system. Cheap no-op when nothing was lost (the
-        # atom-count check returns early); get_natoms is global so all engine
-        # ranks take the same branch (no collective divergence).
-        _ensure_full_system(engine, config, from_positions, cell, from_types)
+        # Heal the pooled engine before it returns to the session pool. A
+        # reconstruction minimize that loses atoms would poison every later
+        # set_positions on this reused engine (lammps_scatter_atoms: Atom-IDs
+        # must exist). On the SUCCESS path the atom-count check is a reliable
+        # cheap no-op. On the FAILURE path (raised) the engine may be in a
+        # lost-atoms state where get_natoms() still reports the full count
+        # (LAMMPS keeps atom->natoms stale after a lost-atoms error), so the
+        # count check would wrongly no-op — force an unconditional rebuild. The
+        # lost-atoms error is collective (LAMMPS error->all), so every engine
+        # rank takes this branch identically (no collective divergence).
+        _ensure_full_system(engine, config, from_positions, cell, from_types, force=raised)
 
 
 def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_positions: np.ndarray,

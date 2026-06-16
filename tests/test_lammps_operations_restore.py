@@ -665,8 +665,8 @@ def test_basin_reconstruct_restores_full_system_on_success(monkeypatch):
     )
     monkeypatch.setattr(
         ops, "_ensure_full_system",
-        lambda engine, config, positions, cell, types: restore_calls.append(
-            (positions.copy(), cell.copy(), np.array(types, copy=True))
+        lambda engine, config, positions, cell, types, force=False: restore_calls.append(
+            (positions.copy(), cell.copy(), np.array(types, copy=True), force)
         ),
     )
 
@@ -676,6 +676,8 @@ def test_basin_reconstruct_restores_full_system_on_success(monkeypatch):
     assert len(restore_calls) == 1
     assert np.array_equal(restore_calls[0][0], args["from_positions"])
     assert np.array_equal(restore_calls[0][2], args["from_types"])
+    # Success path heals via the cheap count check, not a forced rebuild.
+    assert restore_calls[0][3] is False
 
 
 def test_basin_reconstruct_restores_full_system_on_failure(monkeypatch):
@@ -696,7 +698,9 @@ def test_basin_reconstruct_restores_full_system_on_failure(monkeypatch):
     monkeypatch.setattr(ops, "_basin_reconstruct_impl", boom)
     monkeypatch.setattr(
         ops, "_ensure_full_system",
-        lambda engine, config, positions, cell, types: restore_calls.append(positions.copy()),
+        lambda engine, config, positions, cell, types, force=False: restore_calls.append(
+            (positions.copy(), force)
+        ),
     )
 
     result = ops.basin_reconstruct(engine, config, **args)
@@ -704,6 +708,58 @@ def test_basin_reconstruct_restores_full_system_on_failure(monkeypatch):
     # Failure is reported as an error payload (rank 0) ...
     assert result["ok"] is False
     assert "Lost atoms" in result["message"]
-    # ... and the engine was healed on the way out.
+    # ... and the engine was healed on the way out, with a FORCED rebuild
+    # (get_natoms is unreliable after a lost-atoms error).
     assert len(restore_calls) == 1
-    assert np.array_equal(restore_calls[0], args["from_positions"])
+    assert np.array_equal(restore_calls[0][0], args["from_positions"])
+    assert restore_calls[0][1] is True
+
+
+def test_basin_reconstruct_force_rebuilds_when_natoms_stale_after_error(monkeypatch):
+    """Reproduce-first guard for the real corruption cascade.
+
+    After a LAMMPS "Lost atoms" error, ``atom->natoms`` is NOT decremented (the
+    error message itself reports "original N current M" — N stays the stored
+    global), so ``get_natoms()`` keeps returning the full count while the atom map
+    is corrupt. The count-based short-circuit in ``_ensure_full_system`` is then
+    fooled: it sees ``natoms == expected`` and no-ops, leaving the poisoned engine
+    in the pool where every later ``set_positions`` raises
+    ``scatter_atoms: Atom-IDs must exist`` (observed 21k times in the binary run).
+
+    Unlike the two tests above, this uses the REAL ``_ensure_full_system`` (only
+    the LAMMPS-touching rebuild stages are stubbed) with ``get_natoms()`` pinned to
+    the STALE FULL COUNT — the exact production condition. So it FAILS on the
+    count-only guard and only passes once the failure path forces an unconditional
+    rebuild.
+    """
+    args = _basin_reconstruct_args()
+    n_full = len(args["from_positions"])
+    # Engine reports the stale full count after the simulated lost-atoms error.
+    engine = _FakeEngine(natoms=n_full)
+    config = SimpleNamespace(basin=SimpleNamespace(style="global"))
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("ERROR: Lost atoms: original 2 current 1")
+
+    monkeypatch.setattr(ops, "_basin_reconstruct_impl", boom)
+
+    # Stub ONLY the LAMMPS-touching rebuild stages; exercise the real
+    # _ensure_full_system so the count short-circuit is actually under test.
+    rebuilt = {"params": False, "system": None, "potential": False}
+    monkeypatch.setattr(ops, "initialize_parameters", lambda eng: rebuilt.update(params=True))
+    monkeypatch.setattr(ops, "initialize_system", lambda eng, system: rebuilt.update(system=system))
+    monkeypatch.setattr(ops, "initialize_potential", lambda eng, cfg: rebuilt.update(potential=True))
+
+    result = ops.basin_reconstruct(engine, config, **args)
+
+    assert result["ok"] is False
+    assert "Lost atoms" in result["message"]
+    # Despite get_natoms() == full count, the engine MUST have been rebuilt.
+    assert engine.lmp.commands == ["clear"], (
+        "engine not rebuilt: the count-based guard no-op'd on the stale full "
+        "count after a lost-atoms error — this is the corruption cascade"
+    )
+    assert rebuilt["params"] and rebuilt["potential"]
+    assert rebuilt["system"] is not None
+    assert np.array_equal(rebuilt["system"].positions, args["from_positions"])
+    assert np.array_equal(rebuilt["system"].types, args["from_types"])
