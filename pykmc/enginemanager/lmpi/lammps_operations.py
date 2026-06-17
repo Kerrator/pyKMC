@@ -468,45 +468,19 @@ def minimize_with_results(engine, config, positions=None, types=None) :
     if engine.rank == 0 :
         return new_positions, total_energy
     
-def minimize_freeze_core(engine, central_atom_positions: np.ndarray, rcut: float, maxiter:int = 10) :
+def minimize_freeze_core(engine, core_idx, maxiter:int = 10) :
+    """ 
+    Freeze directly translated atoms and minimize to relax surrounding atoms
     """
-    Minimize with fix atom around central atom up to rcut
 
-    The frozen core is selected with the minimum-image convention from the
-    engine's own positions and box, not with a LAMMPS ``region sphere``:
-    regions are never wrapped across periodic boundaries, so a sphere
-    overlapping a box edge silently drops the wrapped-side neighbors from
-    the frozen group. Assumes an orthogonal box. ``gather_atoms`` returns
-    the same array on every rank, so all ranks build the same group
-    commands and lockstep is preserved.
-    """
-    import ase.geometry
-
-    raw = engine.lmp.gather_atoms("x", 1, 3)
-    positions = np.ctypeslib.as_array(raw).reshape(-1, 3)
-    boxlo, boxhi, _xy, _yz, _xz, periodicity, _change = engine.lmp.extract_box()
-    cell = np.diag(np.asarray(boxhi, dtype=float) - np.asarray(boxlo, dtype=float))
-    pbc = [bool(p) for p in periodicity]
-
-    diffs = positions - np.asarray(central_atom_positions, dtype=float)
-    _, dist = ase.geometry.find_mic(diffs, cell, pbc=pbc)
-    core_ids = np.where(dist <= rcut)[0] + 1  # LAMMPS ids are 1-based
-    if len(core_ids) == 0:
-        return
-
-    try:
-        for i in range(0, len(core_ids), 500):
-            chunk = " ".join(str(int(j)) for j in core_ids[i:i + 500])
-            engine.command(f"group frozen_group id {chunk}")
+    if core_idx is not None:
+        core_ids = [ idx+1 for idx in core_idx ]
+        engine.command(f"group frozen_group id {' '.join(map(str, core_ids))}")
         engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
-        engine.command("min_style cg")
+        engine.command(f"min_style {config.lammps.min_style}")
         engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
-    finally:
-        for cleanup in ("unfix freeze", "group frozen_group delete"):
-            try:
-                engine.command(cleanup)
-            except Exception:
-                pass  # engine may be mid-error; do not strand the group
+        engine.command("unfix freeze")
+        engine.command("group frozen_group delete")
 
 def _make_frozen_group(engine, config, positions, types) -> bool:
     """Resolve frozen atoms and create g_frozen group. Returns True if any atoms are frozen."""
@@ -729,20 +703,20 @@ def _partn_search_impl(engine: "MpiApiEngine", config: "Config", central_atom_id
                 )
             )
 
-def partn_refine(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
+def partn_refine(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outer_atoms: bool = True) :
     """Refine a saddle point; under active volume, always restore the full system.
 
     The restore runs on every exit path (Ok, Err, max-attempt exhaustion, and
     exceptions) so the engine is never left holding only the active-volume subset.
     """
     try:
-        return _partn_refine_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types, saddle_idx=saddle_idx, saddle_positions=saddle_positions, minimize_outter_atoms=minimize_outter_atoms)
+        return _partn_refine_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types, saddle_idx=saddle_idx, saddle_positions=saddle_positions, minimize_outer_atoms=minimize_outer_atoms)
     finally:
         if config.control.active_volume == True:
             _ensure_full_system(engine, config, positions, cell, types)
 
 
-def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outter_atoms: bool = True) :
+def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_idx: int, positions: "np.ndarray | None" = None, cell: "np.ndarray | None" = None, types: "list[str] | None" = None, saddle_idx: "np.ndarray | None" = None, saddle_positions: "np.ndarray | None" = None, minimize_outer_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
@@ -766,8 +740,8 @@ def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_id
         if positions is not None :
             set_positions(engine=engine, positions=positions)
         #small minimization with fix core atoms around central atom
-            if minimize_outter_atoms : 
-                minimize_freeze_core(engine, positions[central_atom_idx], config.atomicenvironment.rcut, maxiter = 10)
+            if minimize_outer_atoms :
+                minimize_freeze_core(engine, saddle_idx, maxiter = 10)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
