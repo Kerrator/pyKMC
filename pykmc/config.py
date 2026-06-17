@@ -113,6 +113,13 @@ class ControlConfig(BaseModel):
         description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).",
     )
 
+    seed: Optional[int] = Field(
+        default=None,
+        description="Seed for Python's `random` module (and numpy). When set, KMC event "
+        "selection, timestep, and site choice become reproducible across runs. Leave unset "
+        "for non-deterministic behavior.",
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
