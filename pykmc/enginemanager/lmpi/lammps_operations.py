@@ -468,7 +468,7 @@ def minimize_with_results(engine, config, positions=None, types=None) :
     if engine.rank == 0 :
         return new_positions, total_energy
     
-def minimize_freeze_core(engine, core_idx, maxiter:int = 10) :
+def minimize_freeze_core(engine, config, core_idx) :
     """ 
     Freeze directly translated atoms and minimize to relax surrounding atoms
     """
@@ -478,7 +478,7 @@ def minimize_freeze_core(engine, core_idx, maxiter:int = 10) :
         engine.command(f"group frozen_group id {' '.join(map(str, core_ids))}")
         engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
         engine.command(f"min_style {config.lammps.min_style}")
-        engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
+        engine.command(f"minimize {config.lammps.frz_min}")
         engine.command("unfix freeze")
         engine.command("group frozen_group delete")
 
@@ -741,7 +741,7 @@ def _partn_refine_impl(engine: "MpiApiEngine", config: "Config", central_atom_id
             set_positions(engine=engine, positions=positions)
         #small minimization with fix core atoms around central atom
             if minimize_outer_atoms :
-                minimize_freeze_core(engine, saddle_idx, maxiter = 10)
+                minimize_freeze_core(engine, config, saddle_idx)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")
