@@ -832,13 +832,21 @@ class ActiveEventTable:
 
         """
         
+        # A basin super-event (and any event whose per-event prefactor is not yet
+        # resolved under htst) arrives with k_prefactor=None: fall back to the k0
+        # placeholder (ps^-1), the same semantic the reference table uses when no
+        # nu0 is available. backfill_refined_prefactors patches the real nu0-based
+        # rate afterwards for refined htst rows.
+        prefactor = event_refinement_output.k_prefactor
+        if prefactor is None:
+            prefactor = self.config.rateconstant.k0
         dfactive = pd.Series(
             {
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
                 "energy_barrier": event_refinement_output.dE_forward,
-                "k": rate_from_prefactor(event_refinement_output.k_prefactor, event_refinement_output.dE_forward, self.config.rateconstant.T),
+                "k": rate_from_prefactor(prefactor, event_refinement_output.dE_forward, self.config.rateconstant.T),
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined
             }

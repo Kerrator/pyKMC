@@ -103,6 +103,42 @@ def setup(
     return config, sys_, nl, neighbors
 
 
+def test_basin_event_none_prefactor_falls_back_to_k0(
+    config_Ni_4000at_monovacancy_sia: Any,
+) -> None:
+    """A basin super-event has no per-event prefactor under htst.
+
+    kmc.py builds the basin's selected exit event as
+    ``EventRefinementOutput(...)`` WITHOUT k_prefactor/nu0 (both default None),
+    then ActiveEventTable.add_events -> build_event_series computes ``k``. With
+    a None prefactor the bare ``rate_from_prefactor(None, ...)`` raised
+    ``TypeError: unsupported operand type(s) for *: 'NoneType' and 'float'``.
+    Under htst a None prefactor must fall back to the k0 placeholder (ps^-1),
+    matching the reference-table semantic (real nu0 is backfilled afterwards).
+    """
+    from pykmc.config import PhysicalConstants
+
+    config = config_Ni_4000at_monovacancy_sia
+    config.rateconstant.style = "htst"
+    table = ActiveEventTable(config)
+
+    ev = EventRefinementOutput(
+        central_atom_index=0,
+        saddle_positions=np.zeros((3, 3)),
+        E_saddle=-1.0,
+        min2_positions=np.zeros((3, 3)),
+        dE_forward=0.5,
+        num_reference_event=0,
+    )  # k_prefactor and nu0 default to None (as the basin path constructs it)
+
+    series = table.build_event_series(ev)  # must not raise
+    expected = config.rateconstant.k0 * math.exp(
+        -0.5 / (PhysicalConstants.kb * config.rateconstant.T)
+    )
+    assert math.isfinite(series["k"]) and series["k"] > 0
+    assert math.isclose(series["k"], expected, rel_tol=1e-9)
+
+
 def test_refined_rows_patched_f_rows_untouched(setup: Any) -> None:
     """refined=T gets site nu0 + recomputed k; refined=F keeps inherited values."""
     config, sys_, nl, neighbors = setup
