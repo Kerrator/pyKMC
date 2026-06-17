@@ -30,6 +30,26 @@ if TYPE_CHECKING:
     from pykmc.config import Config
 
 
+def _normalize_pbc(pbc) -> np.ndarray:
+    """Return per-dimension PBC flags as a length-3 bool array.
+
+    Accepts ``None`` (-> all periodic), a scalar bool (ASE's "all dimensions"
+    shorthand, which the basin passes via ``System(..., pbc=True)``), or any
+    1-D sequence; a length-1 input is broadcast to 3. This keeps ``pbc[dim]``
+    indexing valid regardless of how the caller spelled the flags.
+    """
+    if pbc is None:
+        return np.array([True, True, True])
+    arr = np.atleast_1d(np.asarray(pbc, dtype=bool))
+    if arr.size == 1:
+        return np.repeat(arr, 3)
+    if arr.size != 3:
+        raise ValueError(
+            f"pbc must be a scalar or length-3 sequence; got shape {np.shape(pbc)}"
+        )
+    return arr
+
+
 def circular_mean_position(
     positions: np.ndarray, box: np.ndarray, pbc: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -57,6 +77,7 @@ def circular_mean_position(
         uniform/ill-defined). Non-periodic dimensions get 1.0.
 
     """
+    pbc = _normalize_pbc(pbc)
     com = np.empty(3, dtype=np.float64)
     resultant = np.ones(3, dtype=np.float64)
     for dim in range(3):
@@ -81,6 +102,7 @@ def reference_atom_com(
     ``positions[ref_idx]``, then takes the arithmetic mean. Well-defined when the
     point cloud fits within half the box in each dimension.
     """
+    pbc = _normalize_pbc(pbc)
     ref = positions[ref_idx]
     diffs = positions - ref
     for dim in range(3):
@@ -92,7 +114,7 @@ def reference_atom_com(
 def com_fingerprint(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:
     """Sorted per-atom distances from the centre of mass (general fallback)."""
     box = np.diag(cell).astype(np.float64)
-    pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
+    pbc_array = _normalize_pbc(pbc)
     pos = np.array(positions, dtype=np.float64, copy=True)
     for dim in range(3):
         if pbc_array[dim] and box[dim] > 0:
@@ -137,7 +159,7 @@ def atoms_of_interest_fingerprint(
         Atoms with fewer than ``coord_thr`` neighbours are "atoms of interest".
 
     """
-    pbc_array = np.asarray(pbc, dtype=bool) if pbc is not None else np.array([True, True, True])
+    pbc_array = _normalize_pbc(pbc)
     cell_diag = np.diag(cell).astype(np.float64)
     pos = np.array(positions, dtype=np.float64, copy=True)
 

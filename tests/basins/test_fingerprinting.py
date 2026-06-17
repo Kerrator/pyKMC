@@ -35,6 +35,31 @@ class TestFingerprinting:
         fp2 = fp.atoms_of_interest_fingerprint(shifted, cell, pbc, rnei=1.5, coord_thr=10)
         assert np.allclose(fp1, fp2, atol=1e-10)
 
+    def test_scalar_pbc_matches_array_pbc(self):
+        """A scalar pbc (True), as the basin passes via System(pbc=True), must work.
+
+        Reproduces the IndexError in atoms_of_interest_fingerprint / com_fingerprint:
+        ``np.asarray(True, bool)`` is 0-dimensional, so ``pbc_array[dim]`` raised
+        "too many indices for array: array is 0-dimensional". The basin builds its
+        reconstructed states with System(..., pbc=True), so the fingerprint must
+        accept a scalar pbc and treat it as all-periodic (== np.array([True]*3)).
+        """
+        positions = np.array([[0.5, 0.5, 0.5], [1.5, 0.5, 0.5],
+                              [0.5, 1.5, 0.5], [0.5, 0.5, 1.5]], dtype=float)
+        cell = np.diag([10.0, 10.0, 10.0])
+        pbc_array = np.array([True, True, True])
+
+        # com_fingerprint: scalar True == [True, True, True]
+        assert np.allclose(
+            fp.com_fingerprint(positions, cell, True),
+            fp.com_fingerprint(positions, cell, pbc_array),
+        )
+        # atoms_of_interest_fingerprint: scalar True == [True, True, True]
+        assert np.allclose(
+            fp.atoms_of_interest_fingerprint(positions, cell, True, rnei=1.5, coord_thr=10),
+            fp.atoms_of_interest_fingerprint(positions, cell, pbc_array, rnei=1.5, coord_thr=10),
+        )
+
     def test_circular_mean_localized_cluster(self):
         """Circular mean preserves COM-to-atom distances across boundary wrapping."""
         box = np.array([10.0, 10.0, 10.0])
