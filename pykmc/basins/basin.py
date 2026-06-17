@@ -367,7 +367,7 @@ class BasinsGenericEvents() :
                 else:
                     tmp_system.update_positions(saddle_positions, atom_idx = neighbors)
                     #refine
-                    future2 = self.manager.partn_refine(self.config, row["central_atom"], tmp_system.positions.copy()) #send copy not reference !
+                    future2 = self.manager.partn_refine(self.config, row["central_atom"], tmp_system.positions.copy(), saddle_idx=neighbors.copy()) #send copy not reference !
                 
                 #save future in context : 
                 futures_context[idx] = {
