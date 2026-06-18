@@ -526,10 +526,23 @@ class RateConstantConfig(BaseModel):
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
     free_radius: float = Field(
-        default=6.0,
+        default=3.5,
         gt=0.0,
         description="HTST: radius (Angstrom) around the moving atom defining the free "
-        "(movable) atoms in the partial Hessian.",
+        "(vibrating) atoms in the partial Hessian. Must be smaller than the Hessian "
+        "subsystem (the active volume when active_volume=True, else nu0_zone_radius) so "
+        "the free atoms are surrounded by a frozen boundary.",
+    )
+    nu0_zone_radius: float = Field(
+        default=9.0,
+        gt=0.0,
+        description="HTST: radius (Angstrom) of the local subsystem cropped around the "
+        "moving atom for the partial Hessian when active_volume=False. The Hessian runs "
+        "on this small zone (a serial COMM_SELF LAMMPS) instead of the full cell, which "
+        "is both far faster and avoids the multi-rank dynamical_matrix deadlock. The "
+        "atoms between free_radius and nu0_zone_radius form the frozen boundary; for the "
+        "free atoms' forces to be exact this buffer should be >= the potential cutoff. "
+        "Ignored when active_volume=True (the active volume is used as the zone).",
     )
     fd_step: float = Field(
         default=0.01,
@@ -563,9 +576,16 @@ class RateConstantConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_nu0_window(self) -> "RateConstantConfig":
-        """Ensure the nu0 acceptance window is ordered."""
+        """Ensure the nu0 acceptance window is ordered and the zone holds the free region."""
         if self.nu0_min_THz >= self.nu0_max_THz:
             raise ValueError("nu0_min_THz must be < nu0_max_THz")
+        if self.nu0_zone_radius <= self.free_radius:
+            raise ValueError(
+                "nu0_zone_radius ({}) must be > free_radius ({}): the cropped Hessian "
+                "subsystem has to contain the free region plus a frozen boundary".format(
+                    self.nu0_zone_radius, self.free_radius
+                )
+            )
         return self
 
 

@@ -38,6 +38,11 @@ class _RC:
     style = "htst"
     k0 = 10.0
     free_radius = _FREE_RADIUS
+    # AV-off zone: 12 A covers the whole 130-atom fixture (max ~9.44 A from the
+    # moving atom), so the zone crop == the full system and these tests keep the
+    # original full-Hessian reference physics. The dedicated crop test below uses
+    # a smaller radius to exercise the actual cropping.
+    nu0_zone_radius = 12.0
     fd_step = 0.01
     nu0_min_THz = 1e-6
     nu0_max_THz = 1e6
@@ -207,8 +212,40 @@ def test_active_volume_branch_returns_prefactors() -> None:
     assert isinstance(res, EventPrefactors)
     assert res.n_free >= 1
     assert res.nu0_forward is not None, f"AV nu0 failed: {res.reason}"
-    # the engine must actually hold the CROPPED AV subsystem (per-op redefine)
-    assert int(engine.lmp.get_natoms()) < n
+    # the Hessian runs on the separate serial COMM_SELF engine (the multi-rank
+    # session engine deadlocks on dynamical_matrix); that engine must hold the
+    # CROPPED AV subsystem, not the full system.
+    serial = engine._serial_hessian_engine
+    assert int(serial.lmp.get_natoms()) < n
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="surface-hop fixture unavailable")
+def test_nu0_zone_crop_smaller_than_full() -> None:
+    """AV-off: a small nu0_zone_radius crops the serial subsystem below the full N.
+
+    The deadlock fix runs the Hessian on a serial COMM_SELF engine holding only
+    the ``nu0_zone_radius`` sphere around the moving atom (free_radius..zone shell
+    frozen). A 7 A zone selects ~75 of the 130 fixture atoms, so the serial engine
+    must hold fewer than N and still return a real nu0.
+    """
+    init, sad, fin, move, n = _load_fixture()
+    engine, cell = _engine_for(sad)
+
+    cfg = _Cfg(premin=False, active_volume=False)
+    cfg.rateconstant.nu0_zone_radius = 7.0  # ~75 atoms < 130 (free_radius=4 inside)
+
+    res = ops.compute_event_prefactors(
+        engine, cfg, central_atom_idx=move,
+        min1_positions=init, saddle_positions=sad, min2_positions=fin,
+        types=["Ni"] * n, cell=cell,
+    )
+
+    assert isinstance(res, EventPrefactors)
+    assert res.n_free >= 1
+    assert res.nu0_forward is not None, f"zone nu0 failed: {res.reason}"
+    serial = engine._serial_hessian_engine
+    n_zone = int(serial.lmp.get_natoms())
+    assert n_zone < n, f"zone crop did not shrink the system ({n_zone} == {n})"
 
 
 @pytest.mark.skipif(not _FIXTURE.exists(), reason="surface-hop fixture unavailable")

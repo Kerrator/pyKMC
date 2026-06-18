@@ -6,7 +6,7 @@ from ase.data import atomic_numbers, atomic_masses
 import ctypes
 import pypARTn
 import os
-from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_AV, make_AV, redefine_atoms, reset
+from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_AV, define_zone, make_AV, redefine_atoms, reset
 from ...atomic_environment import AtomicEnvironment
 
 if TYPE_CHECKING:
@@ -247,6 +247,45 @@ def _premin_surroundings(
     return get_positions(engine)
 
 
+class _SerialHessianEngine:
+    """Minimal single-rank engine over a ``MPI_COMM_SELF`` LAMMPS.
+
+    The HTST partial Hessian runs on this instead of the session's multi-rank
+    LAMMPS: ``dynamical_matrix`` deadlocks on a multi-rank session communicator
+    (it was only ever tested with one rank per session). A serial instance makes
+    the collective trivial, so it never hangs, and the small cropped zone keeps it
+    cheap. Exposes exactly the ``.command`` / ``.lmp`` / ``.rank`` / ``.engine_id``
+    surface the LAMMPS ops use, so reset/redefine_atoms/make_AV/minimize_freeze_core
+    /dynamical_matrix_eskm all work unchanged.
+    """
+
+    def __init__(self, engine_id: int) -> None:
+        from lammps import lammps
+        from mpi4py import MPI
+
+        self.lmp = lammps(comm=MPI.COMM_SELF, cmdargs=["-screen", "none", "-log", "none"])
+        self.rank = 0
+        self.engine_id = engine_id
+
+    def command(self, cmd: str) -> None:
+        self.lmp.command(cmd)
+
+    def close(self) -> None:
+        try:
+            self.lmp.close()
+        except Exception:  # noqa: BLE001 - best-effort teardown
+            pass
+
+
+def _get_serial_hessian_engine(engine: object) -> "_SerialHessianEngine":
+    """Lazily build and cache the per-engine serial Hessian LAMMPS (reset per use)."""
+    se = getattr(engine, "_serial_hessian_engine", None)
+    if se is None:
+        se = _SerialHessianEngine(engine_id=getattr(engine, "engine_id", 0))
+        engine._serial_hessian_engine = se
+    return se
+
+
 def compute_event_prefactors(
     engine: object,
     config: object,
@@ -257,67 +296,89 @@ def compute_event_prefactors(
     types: "list[str]",
     cell: np.ndarray,
 ) -> EventPrefactors:
-    """Per-event Vineyard nu0 on one session: binds the eskm Hessian to the orchestrator.
+    """Per-event Vineyard nu0 for one reference event. Never raises.
 
-    Runs entirely on this engine; concurrency comes from one job per event
-    (see Manager.compute_event_prefactors). Never raises — returns an
-    EventPrefactors whose nu0_* are None on any failure.
+    The whole computation runs on the SESSION LEADER only, on a serial
+    ``COMM_SELF`` LAMMPS (``_get_serial_hessian_engine``): LAMMPS
+    ``dynamical_matrix`` deadlocks on a multi-rank session communicator, so the
+    non-leader ranks return immediately and the leader does premin + Hessians
+    serially on a small cropped subsystem. Returns an EventPrefactors whose nu0_*
+    are None on any failure.
 
-    Optional behaviors:
-    - ``config.rateconstant.premin`` (default True): each geometry's
-      surroundings are relaxed (event core within ``atomicenvironment.rcut``
-      frozen) before its Hessian, via ``minimize_freeze_core``.
-    - ``config.control.active_volume``: the engine is re-defined to the cropped
-      AV subsystem around the central atom (buffer frozen, ``partn_search_AV``
-      pattern); geometries/types/indices are remapped to AV-local before the
-      Hessians. Requires ``activevolume.ract >= rateconstant.free_radius``.
+    Crop zone (the subsystem loaded on the serial LAMMPS, buffer frozen via
+    ``make_AV``, geometries/types/indices remapped to zone-local):
+    - ``config.control.active_volume=True``: the active volume
+      (ract/rmov); requires ``activevolume.ract >= rateconstant.free_radius``.
+    - else: the ``rateconstant.nu0_zone_radius`` sphere with the
+      ``free_radius``..``nu0_zone_radius`` shell frozen.
+
+    ``config.rateconstant.premin`` (default True): each geometry's surroundings
+    are relaxed (event core within ``atomicenvironment.rcut`` frozen) before its
+    Hessian, via ``minimize_freeze_core``.
     """
     rc = config.rateconstant
-    min1 = min1_positions
-    sad = saddle_positions
-    min2 = min2_positions
     central = int(central_atom_idx)
     types_used = list(types)
 
+    # Only the session leader computes the Hessian; every other rank of a
+    # multi-rank session returns immediately so the session NEVER enters the
+    # dynamical_matrix collective that deadlocks. engine.rank is the rank within
+    # the (local) session communicator; the leader does all the work serially.
+    if getattr(engine, "rank", 0) != 0:
+        return _prefactors_failure("hessian computed on the session leader (serial)")
+    if cell is None:
+        return _prefactors_failure("cell is None")
+
+    min1 = min1_positions
+    sad = saddle_positions
+    min2 = min2_positions
+
     try:
+        # Crop a local subsystem around the moving atom: the active volume when
+        # active_volume=True, else the configurable nu0 zone. Either way it runs on
+        # a serial COMM_SELF LAMMPS (not the multi-rank session engine), so the
+        # Hessian is both deadlock-free and cheap.
         if getattr(getattr(config, "control", None), "active_volume", False):
-            ract = config.activevolume.ract
-            if ract < rc.free_radius:
+            r_total, r_movable = config.activevolume.ract, config.activevolume.rmov
+            if r_total < rc.free_radius:
                 return _prefactors_failure(
-                    f"active volume ract ({ract}) < free_radius ({rc.free_radius}); "
+                    f"active volume ract ({r_total}) < free_radius ({rc.free_radius}); "
                     "the AV must contain the Hessian free region"
                 )
-            # Mirror partn_search_AV: rebuild the engine as the AV subsystem.
-            reset(engine, config, cell)
-            av_positions, av_idx, buffer_idx = define_AV(config, central, min1, cell)
-            atom_map = np.array(av_idx, dtype=int)
-            map_type = {
-                atom_type: {"ref": i + 1}
-                for i, atom_type in enumerate(sorted(set(types_used)))
-            }
-            int_types = np.array([map_type[t]["ref"] for t in types_used])
-            redefine_atoms(engine, av_positions, int_types[atom_map])
-            make_AV(engine, atom_map, buffer_idx)
-            # Crop geometries and remap indices to the AV-local frame.
-            min1 = min1[atom_map]
-            sad = sad[atom_map]
-            min2 = min2[atom_map]
-            types_used = [types_used[i] for i in atom_map]
-            central = int(np.where(atom_map == int(central_atom_idx))[0][0])
+        else:
+            r_total, r_movable = rc.nu0_zone_radius, rc.free_radius
+
+        serial = _get_serial_hessian_engine(engine)
+        reset(serial, config, cell)
+        av_positions, av_idx, buffer_idx = define_zone(
+            central, min1, cell, r_total=r_total, r_movable=r_movable
+        )
+        atom_map = np.array(av_idx, dtype=int)
+        map_type = {
+            atom_type: i + 1 for i, atom_type in enumerate(sorted(set(types_used)))
+        }
+        int_types = np.array([map_type[t] for t in types_used])
+        redefine_atoms(serial, av_positions, int_types[atom_map])
+        make_AV(serial, atom_map, buffer_idx)
+        # Crop geometries and remap indices to the zone-local frame.
+        min1 = min1[atom_map]
+        sad = sad[atom_map]
+        min2 = min2[atom_map]
+        types_used = [types_used[i] for i in atom_map]
+        central = int(np.where(atom_map == int(central_atom_idx))[0][0])
 
         if getattr(rc, "premin", True):
-            min1 = _premin_surroundings(engine, config, min1, central)
-            sad = _premin_surroundings(engine, config, sad, central)
-            min2 = _premin_surroundings(engine, config, min2, central)
-    except Exception as exc:  # AV setup / pre-min failure -> graceful k0 fallback
+            min1 = _premin_surroundings(serial, config, min1, central)
+            sad = _premin_surroundings(serial, config, sad, central)
+            min2 = _premin_surroundings(serial, config, min2, central)
+    except Exception as exc:  # zone/AV setup or pre-min failure -> graceful k0 fallback
         return _prefactors_failure(f"{type(exc).__name__}: {exc}")
 
     def hessian_fn(positions, free_indices):
-        # Use the configured finite-difference step so the dynamical_matrix
-        # Hessian matches the validated FD path; a too-small step shifts the soft
-        # saddle modes and inflates nu0 (see HTST cross-validation).
+        # Serial eskm Hessian on the cropped zone; the configured fd_step matches
+        # the validated FD path (a too-small step inflates the soft saddle modes).
         return dynamical_matrix_eskm(
-            engine, positions, free_indices=free_indices, dx=rc.fd_step
+            serial, positions, free_indices=free_indices, dx=rc.fd_step
         )
 
     # pyKMC production systems are fully periodic; the free-region selector only

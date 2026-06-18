@@ -421,6 +421,49 @@ class TestLammpsApiMpiEngine :
         assert np.allclose(hessian, hessian.T)  # symmetrized by the op
         manager.close_all()
 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_compute_event_prefactors_multirank_session(self, system: System, config: Config) -> None:
+        """HTST prefactor on a MULTI-RANK session must not deadlock.
+
+        Regression for the multi-rank ``dynamical_matrix`` hang: with >1 engine
+        rank per session the LAMMPS ``dynamical_matrix`` collective deadlocked, so
+        every HTST prefactor job stalled rank 0 on the never-returning future.
+        Single-rank sessions (n_sessions == n_engine_ranks, e.g. n_sessions=7 on
+        ``mpirun -n 8``) were the ONLY tested layout. Here n_sessions=1 forces the
+        whole engine_comm into ONE multi-rank session, the production-hang case.
+
+        Run with a wall guard so the deadlock surfaces as a failure, not a hang:
+            timeout 180 mpirun -n 3 python -m pytest \
+                tests/test_lammps_engine_api_mpi.py -k multirank_session -s
+        """
+        if MPI.COMM_WORLD.Get_size() < 3:
+            pytest.skip("needs mpirun -n >= 3 for a multi-rank session (n_sessions=1)")
+        config.control.n_sessions = 1
+        config.control.engine_use_rank_0 = False
+        config.rateconstant.style = "htst"  # exercise the Vineyard Hessian path
+        factory = ManagerFactory(n_sessions=1, use_rank_0=False)
+        manager = factory.launch()
+        if manager is None:
+            return  # engine ranks block in their service loop
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        manager.use_local()
+        pos = system.positions.copy()
+        payload = {
+            "central_atom_idx": 0,
+            "min1_positions": pos,
+            "saddle_positions": pos,
+            "min2_positions": pos,
+            "types": list(system.types),
+            "cell": system.cell,
+        }
+        futures = manager.compute_event_prefactors(config, [payload])
+        results = [f.result() for f in futures]  # <-- deadlocks here before the fix
+        manager.close_all()
+        assert len(results) == 1
+        # The prefactor must come back (real nu0 or a graceful k0 fallback), never hang.
+        assert hasattr(results[0], "ok_forward")
+
         
 
 
