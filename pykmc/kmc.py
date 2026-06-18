@@ -95,6 +95,9 @@ class KMC:
     def __init__(self, config: Config, rate_constant: RateConstant) -> None:
         self.config = config
         self.rate_constant = rate_constant
+        if self.config.control.seed is not None:
+            random.seed(self.config.control.seed)
+            np.random.seed(self.config.control.seed)
         self.loggers = None
         self.system = None
         self.manager = None
