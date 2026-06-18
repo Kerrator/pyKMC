@@ -1,4 +1,4 @@
-"""Regression test: ``minimize_freeze_core`` must respect periodic boundaries.
+"""Regression test: the HTST frozen-core selection must respect periodic boundaries.
 
 The frozen core is every atom within ``rcut`` of the central atom under the
 minimum-image convention. A LAMMPS ``region ... sphere`` does NOT wrap across
@@ -7,10 +7,14 @@ docs), so a sphere centred near a box corner is clipped at the box edges and
 the wrapped-side neighbours are silently left out of the frozen group — they
 relax when they must stay fixed.
 
-The test builds a small fully periodic LJ fcc crystal, picks the atom at the
-box corner (its ``rcut`` sphere wraps in all three directions), rattles every
-atom so everything carries forces, runs ``minimize_freeze_core`` and asserts
-that no minimum-image core atom moved while the far field relaxed.
+Since PR #87 ``minimize_freeze_core`` freezes an explicit list of atom ids
+rather than a geometric region; the minimum-image selection now lives in
+``_core_indices_within_rcut`` (used by ``_premin_surroundings``). This test
+builds a small fully periodic LJ fcc crystal, picks the atom at the box corner
+(its ``rcut`` sphere wraps in all three directions), rattles every atom so
+everything carries forces, then asserts (1) the selection helper returns the
+minimum-image core that a naive sphere would miss, and (2) freezing that core
+keeps every core atom fixed while the far field relaxes.
 """
 
 from typing import Any
@@ -40,6 +44,19 @@ class _SerialEngine:
     def command(self, cmd: str) -> None:
         """Forward a command to the raw LAMMPS instance."""
         self.lmp.command(cmd)
+
+
+class _Lammps:
+    """LAMMPS minimize-option shim that ``minimize_freeze_core`` reads."""
+
+    min_style = "cg"
+    frz_min = "1e-6 1e-8 20 20"
+
+
+class _Cfg:
+    """Config shim exposing only the minimize options the op needs."""
+
+    lammps = _Lammps()
 
 
 def _build_periodic_fcc_engine() -> _SerialEngine:
@@ -95,7 +112,15 @@ def test_freeze_core_spans_periodic_boundaries() -> None:
         "test geometry does not span a periodic boundary"
     )
 
-    ops.minimize_freeze_core(engine, rattled[central], _RCUT, maxiter=20)
+    # The selection helper must recover exactly the minimum-image core — i.e.
+    # the wrapped-side neighbours the naive sphere drops.
+    core_idx = ops._core_indices_within_rcut(engine, rattled, central, _RCUT)
+    assert set(core_idx.tolist()) == set(np.where(core)[0].tolist()), (
+        "_core_indices_within_rcut did not select the minimum-image core"
+    )
+
+    # Freezing that core and minimizing must hold every core atom fixed.
+    ops.minimize_freeze_core(engine, _Cfg(), core_idx)
     after = ops.get_positions(engine)
 
     # Compare via minimum-image displacement so LAMMPS re-wrapping of

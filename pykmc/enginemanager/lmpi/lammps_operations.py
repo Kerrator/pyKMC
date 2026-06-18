@@ -229,6 +229,28 @@ def _prefactors_failure(reason: str) -> EventPrefactors:
     )
 
 
+def _core_indices_within_rcut(
+    engine: object, positions: np.ndarray, central_atom_idx: int, rcut: float
+) -> np.ndarray:
+    """0-based indices of atoms within ``rcut`` of the central atom (minimum image).
+
+    The frozen core is selected with the minimum-image convention from the
+    engine's box, not with a LAMMPS ``region sphere``: regions are never wrapped
+    across periodic boundaries, so a sphere overlapping a box edge silently drops
+    the wrapped-side neighbours. Assumes an orthogonal box. The central atom is
+    always included (distance 0), so the returned array is never empty.
+    """
+    import ase.geometry
+
+    positions = np.asarray(positions, dtype=float)
+    boxlo, boxhi, _xy, _yz, _xz, periodicity, _change = engine.lmp.extract_box()
+    cell = np.diag(np.asarray(boxhi, dtype=float) - np.asarray(boxlo, dtype=float))
+    pbc = [bool(p) for p in periodicity]
+    diffs = positions - positions[central_atom_idx]
+    _, dist = ase.geometry.find_mic(diffs, cell, pbc=pbc)
+    return np.where(dist <= rcut)[0]
+
+
 def _premin_surroundings(
     engine: object, config: object, positions: np.ndarray, central_atom_idx: int
 ) -> np.ndarray:
@@ -241,9 +263,10 @@ def _premin_surroundings(
     """
     set_positions(engine, positions)
     engine.command("run 0")  # rebuild neighbour lists after the scatter
-    minimize_freeze_core(
-        engine, positions[int(central_atom_idx)], config.atomicenvironment.rcut, maxiter=10
+    core_idx = _core_indices_within_rcut(
+        engine, positions, int(central_atom_idx), config.atomicenvironment.rcut
     )
+    minimize_freeze_core(engine, config, core_idx)
     return get_positions(engine)
 
 
