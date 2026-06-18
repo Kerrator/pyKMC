@@ -244,7 +244,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     errors="coerce",
                 ),
                 "nu0_Hz": nu0,
-                "nu0_THz": nu0 * 1.0e-12,
+                "nu0_THz": hz_to_thz(nu0),
             }
         )
         report.to_csv(args.report, index=False)

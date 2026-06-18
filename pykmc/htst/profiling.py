@@ -24,6 +24,7 @@ from typing import Optional
 import numpy as np
 
 from pykmc.config import PhysicalConstants
+from pykmc.htst.constants import hz_to_thz
 from pykmc.htst.free_region import select_free_indices
 from pykmc.htst.hessian import mass_weighted_partial_hessian
 from pykmc.htst.vineyard import vineyard_prefactor
@@ -310,7 +311,7 @@ def time_event(
     except Exception:
         nu0_hz = None
     t_eigh = perf_counter() - t0
-    nu0_thz = (nu0_hz * 1.0e-12) if nu0_hz is not None else None
+    nu0_thz = hz_to_thz(nu0_hz) if nu0_hz is not None else None
 
     rows: list[Row] = []
     for idx, t in enumerate(timings):
