@@ -11,7 +11,7 @@ get a complete, working install is the one-shot script for your platform.
 |---|---|---|
 | macOS (Apple Silicon) | One-shot script `install_pykmc_mac.sh` | [macOS instructions](pykmc_mac_Compile_Instructions.md) |
 | Linux (Ubuntu/Debian, RHEL/CentOS/Rocky) | One-shot script `install_pykmc_linux.sh` | [Linux instructions](pykmc_linux_Compile_Instructions.md) |
-| DRAC / Alliance HPC cluster | Manual cmake build + module loads | [Linux instructions — cluster section](pykmc_linux_Compile_Instructions.md#8-running-pykmc) |
+| DRAC / Alliance HPC cluster | One-shot script on a login node (auto-detects clusters) or manual cmake + module loads — both validated on Trillium (2026-06) | [Linux instructions — cluster notes](pykmc_linux_Compile_Instructions.md#drac-alliance-hpc-clusters) |
 
 ## Quick install (recommended)
 
@@ -49,6 +49,26 @@ The script prompts **once** for your `sudo` password so it can `apt`/`dnf`
 install missing system packages, then runs unattended. See the
 [Linux instructions](pykmc_linux_Compile_Instructions.md) for the full
 walkthrough.
+
+On **DRAC/Alliance HPC clusters** (Trillium, Narval, …) the script detects the
+cluster automatically and skips the `sudo` stage — load the toolchain modules
+first, run it on a **login node**, and run it from a directory under
+`$SCRATCH`:
+
+```bash
+module load StdEnv/2023 gcc/12.3 openmpi/4.1.5 python/3.12.4 mpi4py/4.1.0 cmake/3.31.0
+cd $SCRATCH
+/path/to/install_pykmc_linux.sh 2>&1 | tee install.log
+```
+
+Both paths are **validated on Trillium (2026-06)**: the manual steps
+end-to-end, and this script run unmodified on a login node (full install +
+verification, then an 8-task `srun` smoke simulation from the generated
+`activate.sh`). On other Alliance clusters, or if the script misbehaves, fall
+back to the
+[manual cluster steps](pykmc_linux_Compile_Instructions.md#drac-alliance-hpc-clusters),
+which also document the ground rules (login vs compute nodes, filesystems,
+sbatch templates).
 
 Both scripts accept `PYTHON_BIN=/path/to/python` to choose a specific
 interpreter (Python ≥ 3.10), and produce an `activate.sh` you can `source`
