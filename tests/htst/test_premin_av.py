@@ -66,10 +66,12 @@ class _AVParams:
 
 
 class _Lammps:
-    """LAMMPS potential section (needed by the AV reset path)."""
+    """LAMMPS section: potential (AV reset path) + frozen-core minimize options."""
 
     pair_style = "eam/alloy"
     pair_coeff = f"* * {_POTENTIAL} Ni"
+    min_style = "cg"
+    frz_min = "1.0e-6 1.0e-8 10 10"
 
 
 class _Cfg:
