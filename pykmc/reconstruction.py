@@ -56,9 +56,22 @@ class Reconstruction:
 
         #Move toward min1 positions
         saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=self.config.reconstruction.push_fraction, cell = cell)
-        tmp_positions[neighbors] = saddle_toward_min1_pos 
+        tmp_positions[neighbors] = saddle_toward_min1_pos
         #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)
+        #A LAMMPS error during the minimize (e.g. an unstable pushed geometry that loses
+        #atoms) must drop this reconstruction, not crash the run. The engine ranks have
+        #already handled the error symmetrically and are back in their service loop, so
+        #the manager stays usable for the next reconstruction.
+        try:
+            min1_pos, _ = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)
+        except RuntimeError as exc:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+                    message="min1 reconstruction minimize failed: {}".format(exc),
+                    variables={},
+                )
+            )
 #        min1_pos, _ = future.result()
 
         #compaire min1_pos with system current positions
@@ -77,7 +90,16 @@ class Reconstruction:
             saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=self.config.reconstruction.push_fraction, cell = cell)
             tmp_positions[neighbors] = saddle_toward_min2_pos
             #future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-            min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)
+            try:
+                min2_pos, min2_etot = self.manager.global_minimize_with_results(self.config, positions=tmp_positions, types=self.types)
+            except RuntimeError as exc:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+                        message="min2 reconstruction minimize failed: {}".format(exc),
+                        variables={},
+                    )
+                )
 #            min2_pos, _ = future.result()
 
             #Compare min2pos with expected final_positions

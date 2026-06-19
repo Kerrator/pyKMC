@@ -447,16 +447,43 @@ def get_types(engine) -> list[str]:
     labels = engine.lmp.get_category_keywords("typelabel")
     return [labels[t - 1] for t in int_types]
     
-def set_positions(engine, positions) : 
+def set_positions(engine, positions) :
     positions = positions.flatten().astype(np.float64)
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
+def _require_finite_positions(positions: "np.ndarray", op_name: str) -> None:
+    """Reject non-finite positions before they reach a collective LAMMPS op.
+
+    A NaN/inf coordinate makes LAMMPS raise a *per-rank* error (``error->one`` --
+    "Non-numeric atom coords") that fires on only the rank(s) owning the bad atom.
+    On a multi-rank engine that desyncs the whole pool: the erroring rank unwinds to
+    the Python finally-barrier in ``_handle_message`` while the surviving ranks stay
+    trapped inside liblammps's own collectives (e.g. an ``MPI_Sendrecv`` inside
+    ``minimize``), and the job hangs for hours (see HANDOFF_recycle_pool_hang.md).
+    The survivor never returns from ``lammps_command``, so no *post-op* resync can
+    recover it -- the error must be caught *before* LAMMPS runs.
+
+    Every engine rank receives the *same* broadcast ``positions``, so this check is
+    collective by construction: either all ranks raise together (a clean symmetric
+    failure that surfaces as a RuntimeError on rank 0 and leaves the pool
+    shut-downable) or none do.
+    """
+    arr = np.asarray(positions, dtype=float)
+    if not np.isfinite(arr).all():
+        n_bad = int((~np.isfinite(arr)).sum())
+        raise ValueError(
+            f"{op_name}: positions contain {n_bad} non-finite value(s) (NaN/inf); "
+            "refusing to feed a poisoned geometry to the multi-rank LAMMPS engine "
+            "(would trigger an asymmetric per-rank error and hang the pool)."
+        )
+
 def minimize_with_results(engine, config, positions=None, types=None) :
     """Minimize and return the minimized positions and the total energy.
     """
     if positions is not None :
+        _require_finite_positions(positions, "minimize_with_results")
         set_positions(engine=engine, positions=positions)
     atoms_frozen = _make_frozen_group(engine, config, positions, types)
     _apply_frozen_fix(engine, "f_frozen_min", atoms_frozen)

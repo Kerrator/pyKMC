@@ -1,7 +1,9 @@
 # Handoff: a recycle reconstruction hangs the whole engine pool
 
-**Status:** open bug, reproduced by a test, **not yet fixed.**
-**Severity:** high — a single recoverable engine error stalls the entire run for
+**Status:** **FIXED** (2026-06-19) for the reproducible + documented triggers; one
+narrow residual gap (an unforeseen mid-op `error->one` from *valid* input) is left
+as a recommended follow-up — see "Residual gap" below.
+**Severity:** high — a single recoverable engine error stalled the entire run for
 hours (until the per-run timeout) instead of failing fast.
 **Found:** 2026-06-18, during the `feature_profile` 12-run benchmark
 (`benchmarks/Ni_fcc_32000at_4vac+4sia/profiling_runs_postfix/04_recycle`).
@@ -11,123 +13,110 @@ hours (until the per-run timeout) instead of failing fast.
 
 ---
 
-## Symptom (observed)
+## Corrected mechanism (after stack-sampling the hung ranks)
 
-`04_recycle` (recycle, AV-off, constant rate, 10 steps) ran steps 0–2 normally,
-then **hung on step 3 for 4.7 h** with no further output. All 19 engine ranks
-pinned at ~100 % CPU (busy-spin), rank 0 idle; had to kill the session manually.
+Stack-sampling the live hung processes (macOS `sample`, no source changes) revised
+the original two-defect model in two important ways:
 
-The engine error captured in `04_recycle/run_stdout.log`:
+1. **The survivor rank is trapped *inside* `lammps_command`, below the Python layer.**
+   When a LAMMPS `error->one` (per-rank error, e.g. "Non-numeric atom coords",
+   `domain.cpp:790`) fires on only the subset of engine ranks owning the bad atom,
+   that rank unwinds to the Python `finally`-barrier in
+   `mpi_api_engine.py:_handle_message`, **while the surviving rank stays blocked in
+   liblammps's own `MPI_Sendrecv` inside the still-running `minimize`**. Rank 0 then
+   blocks in `receive_status`. Confirmed frames: erroring rank in `MPI_Barrier`,
+   survivor in `lammps_command`→`MPI_Sendrecv`, rank 0 in `MPI_Mprobe/recv`.
+   Because the survivor never returns from `lammps_command`, **no *post-op*
+   Python-level resync can recover it** — the error must be caught *before* LAMMPS
+   runs, or the pool torn down *after* the error surfaces.
 
-```
-RuntimeError: Remote minimize_with_results failed on engine rank 1 (RuntimeError):
-  Error executing command 'minimize 1e-10 1e-12 10000 10000':
-  ERROR: Lost atoms: original 32000 current 31992
-  (../thermo.cpp:526)
-```
+2. **A symmetric error (`error->all`, e.g. "Lost atoms" — the production trigger)
+   surfaces cleanly** as a `RuntimeError` on rank 0 (both engine ranks raise in
+   lockstep, hit the `finally` barrier together, send the error reply). The
+   production hang was therefore **not** the surfacing — it was that the propagating
+   `RuntimeError` left `KMC.run()` **before `_close()`**, so `manager.close_all()`
+   was skipped and the (still-looping) engine ranks were stranded busy-spinning in
+   `run_engine_loop`.
 
-So a `minimize` lost 8 atoms, the engine reported the error to rank 0 — and the
-pool then hung instead of failing.
-
----
-
-## Root cause — two distinct defects
-
-**Defect 1 (physics, the trigger).** The recycle path reconstructs min1/min2 from
-a recycled saddle by pushing the saddle's neighbours toward the target minimum,
-then minimizing — `pykmc/reconstruction.py:54-61`:
-
-```python
-tmp_positions = copy.deepcopy(saddle_positions)
-saddle_toward_min1_pos = push_towards(saddle_positions[neighbors],
-                                      supposed_min1_positions,
-                                      fraction=self.config.reconstruction.push_fraction,  # 0.15
-                                      cell=cell)
-tmp_positions[neighbors] = saddle_toward_min1_pos
-min1_pos, _ = self.manager.global_minimize_with_results(self.config,
-                                                        positions=tmp_positions,
-                                                        types=self.types)
-```
-
-When a recycled event is mapped onto a *different* local environment, this pushed
-geometry can be unstable (atoms too close / outside the box), so the global
-`minimize` loses atoms and LAMMPS raises.
-
-**Defect 2 (robustness — the one that turns a recoverable error into a multi-hour
-hang).** The engine-side LAMMPS error *does* surface to rank 0 as a `RuntimeError`
-(`pykmc/enginemanager/lmpi/sessions/mpi_api_sessions.py:170` `_receive_result_or_error`),
-but the **engine ranks are not torn down or re-synced**: they stay in
-`run_engine_loop` (`pykmc/enginemanager/lmpi/engines/mpi_api_engine.py:124`) and
-**busy-spin at ~100 % CPU in a stuck collective** while rank 0 blocks. The pool is
-left desynchronised, so neither the failing op nor a subsequent `close_all()`
-returns — the job hangs until the harness's 16 h per-run timeout.
-
-The engine already has an error-reply path (`mpi_api_engine.py:153-169`, the
-`__handler_error__` marker → tag-1 "error" reply) and barriers around each handler
-(`_handle_message`, lines 196 and 226). The likely failure: for a **global**,
-collective `minimize` across the full `global_engine_comm`, the LAMMPS error does
-not leave every rank in lockstep through those barriers (one rank unwinds the
-exception while another is still inside the collective), so the `engine_comm`
-barrier/bcast deadlocks and the ranks spin. That collective desync — not the
-`RuntimeError` itself — is what needs fixing.
+Note on the original reproducer: on macOS LAMMPS (22 Jul 2025) + the 256-atom FCC
+fixture, the old `atom1 = atom0 + 1e-4 Å` trigger **did not error at all** (the
+minimize converged); its exit-124 was a *false positive* — the assertion failed and
+rank 0 exited before `close_all`, stranding the ranks. The test now uses a NaN
+coordinate, a faithful `error->one` trigger.
 
 ---
 
-## Reproduction
+## The fix (three changes + a faithful test)
 
-**Test:** `tests/test_lammps_engine_api_mpi.py::TestLammpsApiMpiEngine::test_engine_error_during_global_minimize_does_not_hang`
+1. **Pre-op collective validation (the asymmetric trigger).**
+   `pykmc/enginemanager/lmpi/lammps_operations.py` — `_require_finite_positions()`,
+   called at the top of `minimize_with_results`. Every engine rank receives the same
+   broadcast positions, so the check raises **symmetrically** (all ranks together)
+   *before* LAMMPS can raise `error->one` asymmetrically. The failure then travels
+   the symmetric path, which unwinds cleanly.
 
-It drives the same `global_minimize_with_results` path with a deliberately
-degenerate geometry (collapse atom 1 onto atom 0 ~1e-4 Å apart → the EAM repulsion
-blows the minimize up into a LAMMPS error), then asserts the error surfaces as a
-`RuntimeError` on rank 0 **and** the pool stays shut-downable (`close_all()`
-returns). Reaching the end of the test is the regression check.
+2. **Always tear the pool down on failure (the production strand).**
+   `pykmc/kmc.py` — `run()` now wraps the body: `try: self._run_impl() except
+   Exception: self.manager.close_all(); raise`. A surfaced engine error tears the
+   pool down (unstranding the engine ranks) and re-raises so the failure stays
+   visible. The normal `_close()`→`sys.exit()` path raises `SystemExit`
+   (not `Exception`), so the pool is closed exactly once — no double close.
 
-The test is **gated behind `PYKMC_REPRODUCE_RECYCLE_HANG`** so it can't stall the
-normal suite (it hangs while the bug is open). To run it:
+3. **Graceful recycle (Defect 1, the production trigger geometry).**
+   `pykmc/reconstruction.py` — both `global_minimize_with_results` calls in
+   `reconstruct()` now catch `RuntimeError` and return
+   `Err(RECONSTRUCTION_MINIMIZE_FAILED)` (new `ErrorType`). An unstable pushed
+   geometry that errors in LAMMPS now **drops that one reconstruction** and the run
+   continues, instead of crashing. (The engine ranks have already handled the error
+   symmetrically and are back in their service loop, so the manager stays usable.)
 
-```bash
-source pykmc_env/bin/activate
-PYKMC_REPRODUCE_RECYCLE_HANG=1 timeout 130 mpirun \
-    -x PYKMC_REPRODUCE_RECYCLE_HANG -n 3 --oversubscribe python -m pytest \
-    tests/test_lammps_engine_api_mpi.py \
-    -k engine_error_during_global_minimize_does_not_hang -s
-```
-
-**Observed (current, buggy):** the run hangs — the 2 engine ranks spin at ~99 %
-CPU while rank 0 blocks, and the `timeout` wrapper kills it at 130 s. **Exit
-code 124 == bug reproduced** (verified 2026-06-18). After a fix the test should
-pass (exit 0); at that point drop the `PYKMC_REPRODUCE_RECYCLE_HANG` gate so it
-becomes a live regression guard. It uses the same skip-if-`COMM_WORLD < 3` /
-wall-guard pattern as the HTST multi-rank reproducer
-(`test_compute_event_prefactors_multirank_session`).
+4. **Faithful regression test.**
+   `tests/test_lammps_engine_api_mpi.py::test_engine_error_during_global_minimize_does_not_hang`
+   now uses a NaN trigger, puts `close_all()` in a `finally`, and the
+   `PYKMC_REPRODUCE_RECYCLE_HANG` gate is **removed** (it is now a live guard:
+   passes, exit 0, under any `mpirun -n >= 3`; skips with fewer ranks).
 
 ---
 
-## Suggested fix directions (in priority order)
+## Verification
 
-1. **Make an engine error re-sync / tear down the pool (Defect 2 — the important
-   one).** When any rank's handler errors, every rank of the relevant
-   `engine_comm`/`global_engine_comm` must reach the same post-error point (the
-   `__handler_error__` marker + barriers must be hit by *all* ranks, even when the
-   LAMMPS exception fires on a subset), and rank 0 must be able to `close_all()`
-   afterwards without blocking. A clean-shutdown-on-error path makes the failure
-   fast and recoverable regardless of the trigger.
-2. **Harden the reconstruction geometry (Defect 1).** Validate/clamp the pushed
-   `tmp_positions` before `global_minimize_with_results` (reject overlapping atoms;
-   wrap into the box), or catch the minimize error in `reconstruction.py` and
-   return an `Err(...)` so recycle drops that reconstruction instead of crashing.
-3. **Add a per-op wall guard** so a stuck collective fails the run in minutes
-   rather than spinning for the full 16 h timeout.
+- **MPI reproducer** `test_engine_error_during_global_minimize_does_not_hang`:
+  RED before fix = hang (exit 124, all 3 ranks ~98% CPU); GREEN after = `1 passed`,
+  exit 0, with **both** engine ranks raising the validation error symmetrically and
+  both engines closing cleanly (`mpirun -n 3 --oversubscribe`).
+- **`tests/test_kmc.py`** (non-MPI): `run()` closes the pool when the body raises and
+  re-raises; a normal `SystemExit` is not caught (no double close).
+- **`tests/test_reconstruction.py`** (non-MPI): a minimize `RuntimeError` becomes
+  `Err(RECONSTRUCTION_MINIMIZE_FAILED)`; the Ok path still works.
+- ruff/mypy: zero net-new findings in all four changed source files.
 
-## Key files / lines
+---
+
+## Residual gap (recommended follow-up — NOT yet implemented)
+
+A LAMMPS `error->one` arising mid-minimize from an otherwise **finite/valid** geometry
+would still trap the survivor: the finite pre-check can't catch it, and no exception
+surfaces on rank 0 (it blocks in `receive_status`), so the `run()` teardown guard never
+fires. This is rare (the dominant asymmetric trigger, non-finite coords, is now caught)
+but not impossible.
+
+The only generic defense is a **per-op wall guard**: bound rank 0's wait for an engine
+reply/status; on timeout, log and `MPI.COMM_WORLD.Abort()` so the job fails in minutes
+instead of stalling for the full per-run timeout. It is deferred because (a) it needs a
+timeout *policy* (a value generous enough not to abort legitimately slow ops — large
+minimizes, pARTn searches, basins) and (b) it cannot be verified locally without a
+cluster repro of a valid-input `error->one`. Implement + verify on the cluster.
+
+## Key files (post-fix)
 
 | what | location |
 |---|---|
-| recycle reconstruction (trigger) | `pykmc/reconstruction.py:54-61`, `:77-80` |
-| recycle feature | `pykmc/event_recycling.py` |
-| error surfaces to rank 0 | `pykmc/enginemanager/lmpi/sessions/mpi_api_sessions.py:170-185` |
-| engine service loop + barriers + error reply | `pykmc/enginemanager/lmpi/engines/mpi_api_engine.py:124-169`, `:183-226` |
-| global-op dispatch | `pykmc/enginemanager/lmpi/pool/manager.py:223-236` (`global_method`), `:213-220` (`close_all`) |
-| reproducing test | `tests/test_lammps_engine_api_mpi.py` (`test_engine_error_during_global_minimize_does_not_hang`) |
-| killed-run evidence | `benchmarks/Ni_fcc_32000at_4vac+4sia/profiling_runs_postfix/04_recycle/run_stdout.log` |
+| pre-op finite validation | `pykmc/enginemanager/lmpi/lammps_operations.py` (`_require_finite_positions`, called in `minimize_with_results`) |
+| run() teardown guard | `pykmc/kmc.py` (`run` → `_run_impl`) |
+| graceful recycle | `pykmc/reconstruction.py` (`reconstruct`, both minimize calls) |
+| new error type | `pykmc/result.py` (`ErrorType.RECONSTRUCTION_MINIMIZE_FAILED`) |
+| MPI regression test | `tests/test_lammps_engine_api_mpi.py::test_engine_error_during_global_minimize_does_not_hang` |
+| unit tests | `tests/test_kmc.py`, `tests/test_reconstruction.py` |
+| engine service loop + barriers + error reply | `pykmc/enginemanager/lmpi/engines/mpi_api_engine.py` |
+| error surfaces to rank 0 | `pykmc/enginemanager/lmpi/sessions/mpi_api_sessions.py` |
+| killed-run evidence (original) | `benchmarks/Ni_fcc_32000at_4vac+4sia/profiling_runs_postfix/04_recycle/run_stdout.log` |

@@ -466,38 +466,29 @@ class TestLammpsApiMpiEngine :
 
     @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
     def test_engine_error_during_global_minimize_does_not_hang(self, system: System, config: Config) -> None:
-        """An engine-side LAMMPS error during a pool op must fail cleanly, not hang.
+        """An engine-side error during a global pool op must fail cleanly, not hang.
 
         Regression for the recycle-reconstruction pool hang (see the repo-root
-        HANDOFF_recycle_pool_hang.md). In a 10-step recycle benchmark run, a recycle
-        reconstruction fed ``global_minimize_with_results`` an unstable geometry,
-        LAMMPS raised ``Lost atoms``, and although the error surfaced to rank 0 as a
-        RuntimeError, the engine ranks were left busy-spinning in their service loop
-        (~100% CPU) instead of the pool failing/closing cleanly -- the whole job hung
-        for hours until killed.
+        HANDOFF_recycle_pool_hang.md). Root cause, confirmed by stack-sampling the
+        hung ranks: a *per-rank* LAMMPS error (``error->one`` -- e.g. "Non-numeric
+        atom coords" from a poisoned recycle geometry) fires on only a SUBSET of the
+        global engine ranks. The erroring rank unwinds to the Python finally-barrier
+        in ``_handle_message`` while the surviving rank stays trapped inside
+        liblammps's own collective (an ``MPI_Sendrecv`` inside ``minimize``) -- so the
+        two engine ranks deadlock, busy-spin at ~100% CPU, and rank 0 blocks in
+        ``receive_status``. Because the survivor never returns from ``lammps_command``,
+        no *post-op* Python-level resync can recover it.
 
-        This drives the SAME global-minimize path with a deliberately degenerate
-        geometry (two atoms collapsed ~1e-4 A apart, so the EAM repulsion blows the
-        minimize up into a LAMMPS error). The contract: the error must (a) surface as
-        a RuntimeError on rank 0 and (b) leave the pool shut-downable -- reaching the
-        end of this test rather than stalling is the regression check.
+        The fix detects the poisoned geometry COLLECTIVELY before LAMMPS sees it:
+        every engine rank validates the (identically broadcast) positions and raises
+        the SAME error together, so the failure travels the symmetric error path --
+        it surfaces as a RuntimeError on rank 0 and the pool stays shut-downable.
 
-        Gated behind PYKMC_REPRODUCE_RECYCLE_HANG (it hangs while the bug is open).
-        Run with a wall guard so the hang surfaces as a failure, not an infinite stall:
-            PYKMC_REPRODUCE_RECYCLE_HANG=1 timeout 130 mpirun \
-                -x PYKMC_REPRODUCE_RECYCLE_HANG -n 3 --oversubscribe python -m pytest \
-                tests/test_lammps_engine_api_mpi.py \
-                -k engine_error_during_global_minimize_does_not_hang -s
-        Exit 124 (timeout) == bug reproduced; exit 0 == fixed.
+        Contract: (a) the engine error surfaces as a RuntimeError on rank 0, and
+        (b) ``close_all()`` returns. Reaching the end of this test (rather than
+        stalling) is the regression check. Runs under any ``mpirun -n >= 3``; with
+        fewer ranks it skips.
         """
-        # This reproduces an OPEN bug that HANGS the pool, so it must NOT run in the
-        # normal suite (it would stall any `mpirun -n>=3 pytest` run). Gate it behind
-        # an env var until the bug is fixed; then drop this gate so it becomes a live
-        # regression guard. See HANDOFF_recycle_pool_hang.md.
-        if not os.environ.get("PYKMC_REPRODUCE_RECYCLE_HANG"):
-            pytest.skip("open-bug reproducer that hangs the pool; set "
-                        "PYKMC_REPRODUCE_RECYCLE_HANG=1 under `timeout ... mpirun -n>=3` "
-                        "to run it -- see HANDOFF_recycle_pool_hang.md")
         if MPI.COMM_WORLD.Get_size() < 3:
             pytest.skip("needs mpirun -n >= 3 for a multi-rank global engine")
         config.control.n_sessions = 1
@@ -507,28 +498,33 @@ class TestLammpsApiMpiEngine :
         if manager is None:
             return  # engine ranks block in their service loop
         # ------------ SESSION CODE (rank 0) ------------
-        manager.initialize_sessions(config, system)
-        manager.use_global()
-
-        # Degenerate geometry: collapse atom 1 onto atom 0. The EAM repulsion is
-        # enormous, so the global minimize drives atoms out of the box -> LAMMPS
-        # "Lost atoms" -> engine-side RuntimeError (the production trigger).
-        bad = system.positions.copy()
-        bad[1] = bad[0] + 1.0e-4
-
-        raised = False
         try:
-            manager.global_minimize_with_results(
-                config, positions=bad, types=list(system.types)
-            )
-        except RuntimeError:
-            raised = True  # the engine error reached rank 0 -- good
-        assert raised, "engine LAMMPS error must surface as a RuntimeError on rank 0"
+            manager.initialize_sessions(config, system)
+            manager.use_global()
 
-        # The pool must remain shut-downable. Before the fix the engine ranks spin
-        # forever here (or never let this line be reached) -> the run_engine_loop
-        # never sees the close, and the test stalls until the wall guard kills it.
-        manager.close_all()
+            # Poisoned geometry: a non-finite coordinate. Fed to a multi-rank global
+            # minimize this provokes a per-rank LAMMPS error (error->one) that strands
+            # the surviving engine rank inside liblammps -- the documented pool hang.
+            # The collective pre-validation must turn this into a clean symmetric
+            # failure instead.
+            bad = system.positions.copy().astype(float)
+            bad[1] = np.nan
+
+            raised = False
+            try:
+                manager.global_minimize_with_results(
+                    config, positions=bad, types=list(system.types)
+                )
+            except RuntimeError:
+                raised = True  # the engine error reached rank 0 -- good
+            assert raised, (
+                "engine error must surface as a RuntimeError on rank 0, not hang"
+            )
+        finally:
+            # The pool must remain shut-downable. close_all() lives in a finally so a
+            # failed assertion (or any early rank-0 exit) can never strand the engine
+            # ranks busy-spinning in run_engine_loop -- the second defect behind the hang.
+            manager.close_all()
 
         
 
