@@ -464,6 +464,72 @@ class TestLammpsApiMpiEngine :
         # The prefactor must come back (real nu0 or a graceful k0 fallback), never hang.
         assert hasattr(results[0], "ok_forward")
 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_engine_error_during_global_minimize_does_not_hang(self, system: System, config: Config) -> None:
+        """An engine-side LAMMPS error during a pool op must fail cleanly, not hang.
+
+        Regression for the recycle-reconstruction pool hang (see the repo-root
+        HANDOFF_recycle_pool_hang.md). In a 10-step recycle benchmark run, a recycle
+        reconstruction fed ``global_minimize_with_results`` an unstable geometry,
+        LAMMPS raised ``Lost atoms``, and although the error surfaced to rank 0 as a
+        RuntimeError, the engine ranks were left busy-spinning in their service loop
+        (~100% CPU) instead of the pool failing/closing cleanly -- the whole job hung
+        for hours until killed.
+
+        This drives the SAME global-minimize path with a deliberately degenerate
+        geometry (two atoms collapsed ~1e-4 A apart, so the EAM repulsion blows the
+        minimize up into a LAMMPS error). The contract: the error must (a) surface as
+        a RuntimeError on rank 0 and (b) leave the pool shut-downable -- reaching the
+        end of this test rather than stalling is the regression check.
+
+        Gated behind PYKMC_REPRODUCE_RECYCLE_HANG (it hangs while the bug is open).
+        Run with a wall guard so the hang surfaces as a failure, not an infinite stall:
+            PYKMC_REPRODUCE_RECYCLE_HANG=1 timeout 130 mpirun \
+                -x PYKMC_REPRODUCE_RECYCLE_HANG -n 3 --oversubscribe python -m pytest \
+                tests/test_lammps_engine_api_mpi.py \
+                -k engine_error_during_global_minimize_does_not_hang -s
+        Exit 124 (timeout) == bug reproduced; exit 0 == fixed.
+        """
+        # This reproduces an OPEN bug that HANGS the pool, so it must NOT run in the
+        # normal suite (it would stall any `mpirun -n>=3 pytest` run). Gate it behind
+        # an env var until the bug is fixed; then drop this gate so it becomes a live
+        # regression guard. See HANDOFF_recycle_pool_hang.md.
+        if not os.environ.get("PYKMC_REPRODUCE_RECYCLE_HANG"):
+            pytest.skip("open-bug reproducer that hangs the pool; set "
+                        "PYKMC_REPRODUCE_RECYCLE_HANG=1 under `timeout ... mpirun -n>=3` "
+                        "to run it -- see HANDOFF_recycle_pool_hang.md")
+        if MPI.COMM_WORLD.Get_size() < 3:
+            pytest.skip("needs mpirun -n >= 3 for a multi-rank global engine")
+        config.control.n_sessions = 1
+        config.control.engine_use_rank_0 = False
+        factory = ManagerFactory(n_sessions=1, use_rank_0=False)
+        manager = factory.launch()
+        if manager is None:
+            return  # engine ranks block in their service loop
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        manager.use_global()
+
+        # Degenerate geometry: collapse atom 1 onto atom 0. The EAM repulsion is
+        # enormous, so the global minimize drives atoms out of the box -> LAMMPS
+        # "Lost atoms" -> engine-side RuntimeError (the production trigger).
+        bad = system.positions.copy()
+        bad[1] = bad[0] + 1.0e-4
+
+        raised = False
+        try:
+            manager.global_minimize_with_results(
+                config, positions=bad, types=list(system.types)
+            )
+        except RuntimeError:
+            raised = True  # the engine error reached rank 0 -- good
+        assert raised, "engine LAMMPS error must surface as a RuntimeError on rank 0"
+
+        # The pool must remain shut-downable. Before the fix the engine ranks spin
+        # forever here (or never let this line be reached) -> the run_engine_loop
+        # never sees the close, and the test stalls until the wall guard kills it.
+        manager.close_all()
+
         
 
 
