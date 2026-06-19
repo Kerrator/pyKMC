@@ -47,6 +47,13 @@ class Manager:
         """
         Initialize engines with the same system and config
         """
+        # Propagate the opt-in engine-op wall guard to every session on rank 0 so a
+        # desynced pool fails fast instead of stalling (HANDOFF_recycle_pool_hang.md).
+        op_timeout = getattr(config.control, "engine_op_timeout_s", None)
+        for session in self.sessions:
+            session._op_timeout = op_timeout
+        if self.global_session is not None:
+            self.global_session._op_timeout = op_timeout
         print("[Manager] use local")
         self.use_local()
         print("[Manager] Initializing all Lammps engines")

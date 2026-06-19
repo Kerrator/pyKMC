@@ -93,6 +93,16 @@ class ControlConfig(BaseModel):
         description="Deprecated : If use mpi rank 0 or not."
     )
 
+    engine_op_timeout_s: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Opt-in wall guard (seconds) for rank 0's wait on an engine reply. "
+        "None (default) keeps the blocking behaviour. When set, a reply that does not "
+        "arrive within this many seconds is treated as a desynced pool and aborts the "
+        "MPI job (fast fail) instead of stalling for the full per-run timeout. Set it "
+        "well above the slowest legitimate op (large minimize / pARTn search / basin).",
+    )
+
     verbosity: Optional[int] = Field(
         default=1, description="Controls the level of detail in the simulation output."
     )

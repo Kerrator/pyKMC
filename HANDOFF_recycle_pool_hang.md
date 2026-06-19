@@ -92,7 +92,7 @@ coordinate, a faithful `error->one` trigger.
 
 ---
 
-## Residual gap (recommended follow-up — NOT yet implemented)
+## Residual gap — now covered by an opt-in wall guard (abort path: verify on cluster)
 
 A LAMMPS `error->one` arising mid-minimize from an otherwise **finite/valid** geometry
 would still trap the survivor: the finite pre-check can't catch it, and no exception
@@ -100,12 +100,18 @@ surfaces on rank 0 (it blocks in `receive_status`), so the `run()` teardown guar
 fires. This is rare (the dominant asymmetric trigger, non-finite coords, is now caught)
 but not impossible.
 
-The only generic defense is a **per-op wall guard**: bound rank 0's wait for an engine
-reply/status; on timeout, log and `MPI.COMM_WORLD.Abort()` so the job fails in minutes
-instead of stalling for the full per-run timeout. It is deferred because (a) it needs a
-timeout *policy* (a value generous enough not to abort legitimately slow ops — large
-minimizes, pARTn searches, basins) and (b) it cannot be verified locally without a
-cluster repro of a valid-input `error->one`. Implement + verify on the cluster.
+The generic defense — a **per-op wall guard** — is now implemented as **opt-in,
+default off**: `config.control.engine_op_timeout_s` (`None` = previous blocking
+behaviour, byte-identical). When set, rank 0's wait for an engine reply/status polls
+with a deadline (`mpi_api_sessions.py::_recv` → `_await_reply`); on timeout it logs and
+`MPI.COMM_WORLD.Abort(1)`, so the job fails in minutes instead of stalling for the full
+per-run timeout. Set it **well above** the slowest legitimate op (large minimize / pARTn
+search / basin) to avoid false aborts.
+
+The deadline-poll logic is unit-tested (`tests/test_engine_op_timeout.py`). The
+`MPI.COMM_WORLD.Abort` path itself is **pending cluster verification** — it cannot be
+exercised locally without a real valid-input `error->one` desync (the local NaN repro is
+now caught by the finite pre-check before LAMMPS runs).
 
 ## Key files (post-fix)
 
@@ -115,6 +121,7 @@ cluster repro of a valid-input `error->one`. Implement + verify on the cluster.
 | run() teardown guard | `pykmc/kmc.py` (`run` → `_run_impl`) |
 | graceful recycle | `pykmc/reconstruction.py` (`reconstruct`, both minimize calls) |
 | new error type | `pykmc/result.py` (`ErrorType.RECONSTRUCTION_MINIMIZE_FAILED`) |
+| opt-in wall guard | `pykmc/config.py` (`engine_op_timeout_s`); `pykmc/enginemanager/lmpi/sessions/mpi_api_sessions.py` (`_recv`, `_await_reply`); wired in `pool/manager.py::initialize_sessions` |
 | MPI regression test | `tests/test_lammps_engine_api_mpi.py::test_engine_error_during_global_minimize_does_not_hang` |
 | unit tests | `tests/test_kmc.py`, `tests/test_reconstruction.py` |
 | engine service loop + barriers + error reply | `pykmc/enginemanager/lmpi/engines/mpi_api_engine.py` |
