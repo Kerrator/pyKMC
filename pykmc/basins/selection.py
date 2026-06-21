@@ -108,7 +108,8 @@ class FPTASelector():
 
         #Diagonal elements : M_ii = sum_j k_ij
         for i in range(len(set(connectivity_table.df["state"]))): #only diag for transient states
-            self.M_abs[i, i] = -sum([self.M_abs[i, j] for j in range(n_states) if j != i])
+            #since M_ij has kj->i elements :
+            self.M_abs[i, i] = -sum([self.M_abs[j, i] for j in range(n_states) if j != i])
 
 
     def build_reduced_matrix(self, n_transient_states: int) -> None: 
