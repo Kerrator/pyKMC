@@ -719,6 +719,7 @@ class ActiveEventTable:
                 "atom_index": pd.Series(dtype="int64"),
                 "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
+                "neighbors": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
@@ -845,6 +846,7 @@ class ActiveEventTable:
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
+                "neighbors": event_refinement_output.neighbors,
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": rate_from_prefactor(prefactor, event_refinement_output.dE_forward, self.config.rateconstant.T),
                 "num_reference_event": event_refinement_output.num_reference_event,
@@ -890,9 +892,10 @@ class ActiveEventTable:
             return
         backfill: "list[tuple[int, dict[str, object]]]" = []
         for idx, row in refined_rows.iterrows():
-            neighbors = np.asarray(
-                neighbors_list.get_neighbors("rcut", int(row["atom_index"])), dtype=int
-            )
+            # Use the neighbour ordering stored on the row at refinement time:
+            # re-deriving it from the per-step neighbour list yields a different
+            # order for recycled rows and scatters coords onto the wrong atoms.
+            neighbors = np.asarray(row["neighbors"], dtype=int)
             full_saddle = system.positions.copy()
             full_saddle[neighbors] = row["saddle_positions"]
             full_min2 = system.positions.copy()

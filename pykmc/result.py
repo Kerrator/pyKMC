@@ -185,6 +185,10 @@ class EventRefinementOutput:
         used to rebuild the active rate without re-invoking the backend.
     nu0 : Optional[float]
         Raw Vineyard nu0 (Hz) diagnostic carried from the reference event.
+    neighbors : Optional[np.ndarray]
+        Absolute atom indices of the in-rcut neighbour subset, captured at
+        refinement and used as the authoritative ordering for the stored
+        ``saddle_positions``/``min2_positions`` during reconstruction.
     """
 
     central_atom_index: int
@@ -196,6 +200,7 @@ class EventRefinementOutput:
     k_prefactor: Optional[float] = None
     nu0: Optional[float] = None
     refined: Optional[str] = None
+    neighbors: Optional[np.ndarray] = None
 
 
 @dataclass

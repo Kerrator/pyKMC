@@ -311,8 +311,8 @@ class KMC:
                                                       E_saddle=-1,
                                                       min2_positions=result_basin.ok_value().final_positions,
                                                       dE_forward=result_basin.ok_value().energy_barrier,
-                                                      num_reference_event=result_basin.ok_value().num_reference_event)
-                    neighbors = result_basin.ok_value().neighbors
+                                                      num_reference_event=result_basin.ok_value().num_reference_event,
+                                                      neighbors=result_basin.ok_value().neighbors)
                     tmp_active_table.add_events(tmp_event)
                 #reconstruct event
                     self.manager.use_global()
@@ -698,9 +698,47 @@ class KMC:
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
-        neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
+        stored_neighbors = active_table.table.loc[idx_selected_event].at["neighbors"]
         saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
         supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
+
+        # Fail fast: the stored neighbour ordering is authoritative for the
+        # saddle/final coordinate rows. A missing column (None) or a length
+        # mismatch would scatter coords onto the wrong absolute atoms.
+        if (
+            stored_neighbors is None
+            or saddle_positions is None
+            or supposed_final_positions is None
+        ):
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+                    message="Active event row is missing required reconstruction "
+                    "columns (neighbors/saddle_positions/final_positions).",
+                    variables={
+                        "idx_selected_event": int(idx_selected_event),
+                        "central_atom": int(central_atom),
+                    },
+                )
+            )
+        neighbors = np.asarray(stored_neighbors, dtype=int)
+        if not (
+            len(neighbors) == len(saddle_positions) == len(supposed_final_positions)
+        ):
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+                    message="Active event row has an inconsistent 'neighbors' column.",
+                    variables={
+                        "idx_selected_event": int(idx_selected_event),
+                        "central_atom": int(central_atom),
+                        "n_neighbors": int(len(neighbors)),
+                        "n_saddle": int(len(saddle_positions)),
+                        "n_final": int(len(supposed_final_positions)),
+                    },
+                )
+            )
+
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
 
