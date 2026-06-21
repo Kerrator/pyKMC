@@ -10,6 +10,9 @@ from pykmc.result import ErrorType
 def _config() -> Mock:
     config = Mock()
     config.reconstruction.push_fraction = 0.15
+    config.reconstruction.n_movers = 3
+    config.reconstruction.containment_margin = 1.0
+    config.atomicenvironment.rcut = 6.5
     config.psr.matching_score_thr = 0.1
     return config
 
@@ -54,3 +57,70 @@ def test_reconstruct_ok_path_still_works():
 
     assert result.is_ok()
     assert result.ok_value().min2_etot == -5.0
+
+
+# Three-atom event: atom 1 is the mover (min1 [1,0,0] -> min2 [2,0,0]); atoms 0
+# and 2 are static. atom 2 sits far out so a small reconstruction error on it must
+# NOT veto the match once the acceptance focuses on the movers.
+_MIN1_3 = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+_MIN2_3 = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+_SADDLE_3 = np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [3.0, 0.0, 0.0]])
+
+
+def test_peripheral_atom_offset_does_not_veto_when_movers_match():
+    """A peripheral (non-event) atom reconstructed past the threshold must NOT
+    reject an otherwise-correct reconstruction; only the top-n event movers gate
+    acceptance. This is the delr=0.416 near-miss the layer-2 check fixes."""
+    # atom 2 lands 0.5 A off (>> matching_score_thr=0.1), the mover atom 1 is exact.
+    min1_ret = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.5, 0.0, 0.0]])
+    min2_ret = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.5, 0.0, 0.0]])
+    manager = Mock()
+    manager.global_minimize_with_results.side_effect = [
+        (min1_ret, 0.0),
+        (min2_ret, -5.0),
+    ]
+    recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
+
+    result = recon.reconstruct(
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
+    )
+
+    assert result.is_ok()
+
+
+def test_mover_offset_rejects_reconstruction():
+    """If a top event mover is reconstructed past the threshold, reject (INVALID_MIN1)."""
+    # mover atom 1 lands 0.5 A off in min1.
+    min1_ret = np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [3.0, 0.0, 0.0]])
+    manager = Mock()
+    manager.global_minimize_with_results.side_effect = [(min1_ret, 0.0)]
+    recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
+
+    result = recon.reconstruct(
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
+    )
+
+    assert not result.is_ok()
+    assert result.err_value().type == ErrorType.RECONSTRUCTION_INVALID_MIN1
+
+
+def test_event_not_contained_in_rcut_rejects_before_minimize():
+    """If a top mover sits in the outer rcut shell, the event is not contained and
+    reconstruction is rejected before the (expensive) minimize ever runs."""
+    config = _config()
+    config.atomicenvironment.rcut = 3.0  # limit = rcut - margin = 2.0
+    # central atom 0 at origin; mover atom 1 at radius 2.5 (> 2.0) and it moves.
+    min1 = np.array([[0.0, 0.0, 0.0], [2.5, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    min2 = np.array([[0.0, 0.0, 0.0], [3.5, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    saddle = np.array([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    manager = Mock()
+    recon = Reconstruction(config, manager, types=["Ni", "Ni", "Ni"])
+
+    result = recon.reconstruct(
+        min1, min2, saddle, _CELL, delr_thr=0.1,
+        neighbors=np.array([0, 1, 2]), central_atom=0,
+    )
+
+    assert not result.is_ok()
+    assert result.err_value().type == ErrorType.RECONSTRUCTION_EVENT_NOT_CONTAINED
+    manager.global_minimize_with_results.assert_not_called()

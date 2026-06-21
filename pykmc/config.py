@@ -663,6 +663,14 @@ class ReconstructionConfig(BaseModel):
         default=0.15,
         description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
     )
+    n_movers: int = Field(
+        default=3,
+        description="Number of most-displaced event atoms (min1->min2) whose reconstructed position must match within psr.matching_score_thr. Peripheral atoms that did not move during the event do not veto the match.",
+    )
+    containment_margin: float = Field(
+        default=1.0,
+        description="Radius margin (Angstrom): the n_movers most-displaced atoms must sit within (atomicenvironment.rcut - containment_margin) of the central atom, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained.",
+    )
 
 class BasinConfig(BaseModel):
     """Basin parameters."""

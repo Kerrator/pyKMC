@@ -56,6 +56,9 @@ def _config() -> Mock:
     cfg = Mock()
     cfg.control.recycle = False
     cfg.reconstruction.push_fraction = 0.15
+    cfg.reconstruction.n_movers = 3
+    cfg.reconstruction.containment_margin = 1.0
+    cfg.atomicenvironment.rcut = 6.5
     cfg.psr.matching_score_thr = 0.1
     return cfg
 
