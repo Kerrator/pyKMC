@@ -298,7 +298,7 @@ class TestMaterializeExitState:
         # state 2: deferred, physically identical to state 1
         basin._deferred_states.add(2)
         basin._deferred_systems[2] = _make_system(pos + 3.0)
-        basin.absorbing_saddle_positions[2] = np.array([[0.5, 0.5, 0.5]])
+        basin.absorbing_saddle_positions[(0, 2)] = np.array([[0.5, 0.5, 0.5]])
         basin.connectivity_table.add_connectivity(
             state=0, state_connexion=2, event_connexion=12,
             central_atom=0, sym=0, transient=False,
@@ -311,7 +311,7 @@ class TestMaterializeExitState:
         assert 2 not in basin._deferred_systems
         df = basin.connectivity_table.df
         assert (df["state_connexion"] == 1).any() and not (df["state_connexion"] == 2).any()
-        assert 1 in basin.absorbing_saddle_positions
+        assert (0, 1) in basin.absorbing_saddle_positions
 
     def test_deferred_system_new_state_is_added(self):
         """A genuinely new deferred system is added to states as absorbing."""
@@ -418,7 +418,7 @@ class TestSkipRefinement:
         n = basin._skip_refinement(idx_without, None, "PSR failed", n)
 
         assert n == 2
-        assert np.allclose(basin.absorbing_saddle_positions[1], saddle)
+        assert np.allclose(basin.absorbing_saddle_positions[(0, 1)], saddle)
         assert 1 not in basin._exit_excluded_states
         assert basin._exit_excluded_states == {2}
 
