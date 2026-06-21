@@ -59,7 +59,7 @@ class BasinsGenericEvents() :
         self.states: dict[int, StateData] = {}  #Dictionnary of StateDate
         self._state_fingerprints: dict[int, np.ndarray] = {}  # Fast dedup rejection cache
         self.known_environments = known_environments
-        self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
+        self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
         self._next_state_index = 1  # Monotonic counter for state indices (0 is the initial state)
         self._use_session_pool = False  # Set True only for parallel strategies that call use_local()
         self._was_capped = False
@@ -143,7 +143,7 @@ class BasinsGenericEvents() :
         neighbors = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
         return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions, 
                               central_atom=central_atom, 
-                              saddle_positions=self.absorbing_saddle_positions[exit_state], 
+                              saddle_positions=self.absorbing_saddle_positions[(from_state, exit_state)],
                               final_positions=self.states[exit_state].system.positions[neighbors], 
                               neighbors=neighbors,
                               energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"], 
@@ -551,9 +551,10 @@ class BasinsGenericEvents() :
 
             #also save saddle positions refined 
             idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
+            from_state_for_saddle = self.connectivity_table.df.loc[idx].at["state"]
             central_atom = self.connectivity_table.df.loc[idx].at["central_atom"]
             #self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
-            self.absorbing_saddle_positions[idx_state] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
+            self.absorbing_saddle_positions[(from_state_for_saddle, idx_state)] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
             self.connectivity_table.df.loc[idx, "k_forward"] = k
