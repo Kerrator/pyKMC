@@ -8,6 +8,7 @@ import pytest
 from pytest_lazy_fixtures import lf
 import os
 import time
+import threading
 import numpy as np
 
 class TestLammpsApiMpiEngine : 
@@ -525,6 +526,97 @@ class TestLammpsApiMpiEngine :
             # failed assertion (or any early rank-0 exit) can never strand the engine
             # ranks busy-spinning in run_engine_loop -- the second defect behind the hang.
             manager.close_all()
+
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    @pytest.mark.parametrize("chunk_kind", ["single_rank", "multi_rank"])
+    def test_close_all_after_error_with_multiple_sessions_does_not_hang(
+        self, chunk_kind: str, system: System, config: Config
+    ) -> None:
+        """``close_all()`` must return for a MULTI-session pool torn down in global mode.
+
+        Successor to ``test_engine_error_during_global_minimize_does_not_hang`` (see
+        the repo-root HANDOFF_close_all_teardown_hang.md). The per-op recycle hang is
+        already fixed: a global-minimize error is handled gracefully and the engines
+        return to their service loop. But the *teardown itself* still hangs whenever
+        the pool is closed while in GLOBAL mode -- which is exactly the recycle
+        "All event reconstructions failed" path (``kmc.py``: ``use_global()`` ->
+        reconstruction fails -> ``_close()`` -> ``close_all()``).
+
+        Mechanism: the global ``engine_comm`` spans EVERY engine rank, so
+        ``global_session.close()`` broadcasts a shutdown to all engines and exits
+        their run loops at once. In global mode only the global *master* rank emits a
+        status (consumed by the first local session's close); the next local session
+        then blocks in ``receive_status()`` forever, waiting on an engine that has
+        already gone. The single-session reproducer cannot catch this -- it needs
+        ``n_sessions >= 2`` so there is a second local session to strand.
+
+        Both chunk topologies are exercised: ``single_rank`` (one engine rank per
+        session, the ``mpirun -n 3`` minimal case) and ``multi_rank`` (>=2 ranks per
+        session, the production benchmark shape -- needs ``mpirun -n >= 5``) so the
+        fix's per-session bcast/barrier teardown is covered for multi-rank engines
+        too.
+
+        A thread wall-guard turns the hang into a clean assertion failure (RED)
+        instead of stalling the whole MPI job; after the fix ``close_all()`` returns
+        (GREEN).
+
+            timeout 180 mpirun -n 5 python -m pytest \
+                tests/test_lammps_engine_api_mpi.py -k close_all_after_error -s
+        """
+        n_engine_ranks = MPI.COMM_WORLD.Get_size() - 1  # engines on ranks 1..size-1
+        if chunk_kind == "single_rank":
+            # One rank per session; need >=2 engine ranks so there are >=2 sessions.
+            if n_engine_ranks < 2:
+                pytest.skip("needs mpirun -n >= 3 for >=2 single-rank sessions")
+            n_sessions = n_engine_ranks
+        else:  # multi_rank: >=2 sessions, each owning >=2 engine ranks.
+            if n_engine_ranks < 4:
+                pytest.skip("needs mpirun -n >= 5 for >=2 multi-rank sessions")
+            n_sessions = 2
+        config.control.n_sessions = n_sessions
+        config.control.engine_use_rank_0 = False
+        factory = ManagerFactory(n_sessions=n_sessions, use_rank_0=False)
+        manager = factory.launch()
+        if manager is None:
+            return  # engine ranks block in their service loop
+        # ------------ SESSION CODE (rank 0) ------------
+        manager.initialize_sessions(config, system)
+        # Mirror the recycle reconstruction path: switch to the global pool, take a
+        # handled engine error, and STAY in global mode for teardown.
+        manager.use_global()
+        bad = system.positions.copy().astype(float)
+        bad[1] = np.nan
+        with pytest.raises(RuntimeError):
+            manager.global_minimize_with_results(
+                config, positions=bad, types=list(system.types)
+            )
+
+        # close_all() under a wall guard: a hang here is the bug under test. Running
+        # it in a daemon thread converts the stall into a deterministic assertion
+        # failure instead of blocking the whole MPI job until the outer timeout.
+        outcome: dict = {}
+
+        def _teardown() -> None:
+            try:
+                manager.close_all()
+                outcome["ok"] = True
+            except BaseException as exc:  # surface, never swallow
+                outcome["error"] = exc
+
+        guard_s = 60.0
+        worker = threading.Thread(target=_teardown, daemon=True)
+        worker.start()
+        worker.join(timeout=guard_s)
+        # Branch on the thread's liveness, not on ``outcome`` alone: a thread that has
+        # terminated has fully written ``outcome`` (happens-before), so this is free of
+        # the join-deadline read race.
+        assert not worker.is_alive(), (
+            f"close_all() did not return within {guard_s}s -- the multi-session "
+            f"teardown hang ({chunk_kind} chunks; HANDOFF_close_all_teardown_hang.md)"
+        )
+        if "error" in outcome:
+            raise outcome["error"]
+        assert outcome.get("ok")
 
         
 
