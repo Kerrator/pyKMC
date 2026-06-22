@@ -532,7 +532,9 @@ def partn_search(
                 return extrapolation_error
 
         err = artn.get_error()
-        if err[0] == 0:
+        has_extract = artn.extract("has_sad") and artn.extract("has_min1") and artn.extract("has_min2")
+
+        if err[0] == 0 and has_extract:
             # Results
             E_sad = artn.extract("etot_sad")
             E_min1 = artn.extract("etot_min1")
@@ -765,7 +767,9 @@ def partn_refine(
                         result = extrapolation_error
                 if not exit_flag:
                     err = artn.get_error()
-                    if err[0] == 0:  # No error
+                    has_extract = artn.extract("has_sad")
+
+                    if err[0] == 0 and has_extract:  # No error
                         # Check if went back to minimum
                         delr_sad = artn.extract("delr_sad")
                         if delr_sad < config.partn.r_delr_sad_thr:  # Success
