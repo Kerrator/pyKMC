@@ -38,8 +38,9 @@ class StateData:
         if self.system is not None : 
             if self.neighbors_list is None : 
                 self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)  
-            if self.environment is None : 
-                self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add)
+            if self.environment is None :
+                types = self.system.types if config.atomicenvironment.atom_coloring_mode == "full" else None
+                self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add, types=types)
 
 
 class BasinsGenericEvents() : 
@@ -429,8 +430,9 @@ class BasinsGenericEvents() :
         atomic_environment = []
 
         if full == True : 
-            neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)  
-            atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list['rnei'], neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add)
+            neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)
+            types = system.types if self.config.atomicenvironment.atom_coloring_mode == "full" else None
+            atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list['rnei'], neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add, types=types)
         else : 
             neighbors_list = None 
             atomic_environment = None 

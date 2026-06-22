@@ -69,6 +69,7 @@ class ReferenceEventTable:
                     dE_forward=ev.dE_forward,
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
+                    types=ev.types,
                 )
             results_is_valid_events.append(res)
             if res.is_ok() : 
@@ -95,6 +96,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -185,6 +187,7 @@ class ReferenceEventTable:
                 dE_forward=dE_forward,
                 dE_backward=dE_backward,
                 cell=cell,
+                types=types,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -275,14 +278,27 @@ class ReferenceEventTable:
         #if all same, check PSR  saddle_initial
         event_saddle = dfevent['saddle_positions']
         nat_event = len(event_saddle)
-        #TODO I guess we should save atoms types in reference table
-        typ_event = nat_event*['X']
+        if (
+            self.config.atomicenvironment.atom_coloring_mode == "full"
+            and "initial_types" in dfevent.index
+            and dfevent["initial_types"] is not None
+        ):
+            typ_event = list(dfevent["initial_types"])
+        else:
+            typ_event = nat_event * ['X']
 
         for _, ev in subset.iterrows() :
 
             ref_saddle = ev['saddle_positions']
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event
+            if (
+                self.config.atomicenvironment.atom_coloring_mode == "full"
+                and "initial_types" in ev.index
+                and ev["initial_types"] is not None
+            ):
+                typ_ref = list(ev["initial_types"])
+            else:
+                typ_ref = nat_ref * ['X']
             result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
             if not result.is_ok() : #no match
@@ -360,6 +376,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -379,6 +396,10 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str], optional
+            Element type of each atom. When provided and the configured coloring
+            mode is 'full', types are used in graph hashing/symmetry detection and
+            the per-event local types are stored in the ``initial_types`` column.
 
         Returns
         -------
@@ -388,6 +409,10 @@ class ReferenceEventTable:
             - a pd.Series of the backward reaction.
 
         """
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        # Only use element types for graph/symmetry computation in full coloring mode
+        graph_types = types if full else None
+
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
         min1system = System()
         min1system.positions = min1_positions
@@ -422,26 +447,48 @@ class ReferenceEventTable:
             min1neighbors_list.neighbors_list["rnei"],
             min1neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_saddle = graph(
             saddleneighbors_list.neighbors_list["rnei"],
             saddleneighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_min2 = graph(
             min2neighbors_list.neighbors_list["rnei"],
             min2neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
 
-        neighbor_list_forwward = min1neighbors_list.neighbors_list["rcut"][index_move]
-        neighbor_list_backward = min2neighbors_list.neighbors_list["rcut"][index_move]
+        # query_ball_point can hand back Python lists; coerce to arrays so the
+        # element-wise comparisons (np.where) and type indexing below behave.
+        neighbor_list_forwward = np.asarray(
+            min1neighbors_list.neighbors_list["rcut"][index_move]
+        )
+        neighbor_list_backward = np.asarray(
+            min2neighbors_list.neighbors_list["rcut"][index_move]
+        )
+
+        # Element types of each neighbor (only stored/used in full coloring mode)
+        local_types_forward = (
+            list(np.array(types)[neighbor_list_forwward])
+            if (full and types is not None)
+            else None
+        )
+        local_types_backward = (
+            list(np.array(types)[neighbor_list_backward])
+            if (full and types is not None)
+            else None
+        )
 
         # Symmetries :
         sym_matrix, sym_perm = unique_symmetries(
             min1_positions[neighbor_list_forwward],
             min2_positions[neighbor_list_forwward],
             self.config.ira.sym_thr,
+            types=local_types_forward,
         )
 
         #dr :
@@ -457,6 +504,7 @@ class ReferenceEventTable:
                 "initial_positions": min1_positions[neighbor_list_forwward],
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
                 "final_positions": min2_positions[neighbor_list_forwward],
+                "initial_types": local_types_forward,
                 "energy_barrier": dE_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "id_saddle": id_saddle,
@@ -473,6 +521,7 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_backward],
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
+            types=local_types_backward,
         )
         dfevent_backward = pd.Series(
             {
@@ -481,6 +530,7 @@ class ReferenceEventTable:
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
+                "initial_types": local_types_backward,
                 "energy_barrier": dE_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "id_saddle": id_saddle,
@@ -516,6 +566,7 @@ class ReferenceEventTable:
                     "initial_positions": pd.Series(dtype="object"),
                      "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
+                    "initial_types": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
                     "k": pd.Series(dtype="float64"), 
                     "id_saddle": pd.Series(dtype="str"),

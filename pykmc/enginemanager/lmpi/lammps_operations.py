@@ -322,6 +322,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                             saddle_positions=saddlepositions,
                             min2_positions=min2positions,
                             move_atom_index=index_move,
+                            types=types,
                         )
                     )
                 else:
@@ -334,6 +335,7 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
                             saddle_positions=saddlepositions,
                             min2_positions=min1positions,
                             move_atom_index=index_move,
+                            types=types,
                         )
                     )
             else:

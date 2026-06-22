@@ -84,13 +84,18 @@ class PointSetRegistration:
         coords1 = self.system.positions[neighbor_list]
 
 
-        #GREY ALLOY
-        typ1 = ['X']*len(coords1)
-        typ2 = typ1 
-
-        #typ1 = np.array(self.system.types)[neighbor_list]
-
-        #typ2 = typ1  # If they have same topology id should be always true ?
+        if self.config.atomicenvironment.atom_coloring_mode == "full":
+            typ1 = list(np.array(self.system.types)[neighbor_list])
+            typ2 = (
+                list(self.dfevent.at["initial_types"])
+                if "initial_types" in self.dfevent.index
+                and self.dfevent.at["initial_types"] is not None
+                else typ1
+            )
+        else:
+            # Grey alloy: all atoms treated as identical
+            typ1 = ['X'] * len(coords1)
+            typ2 = typ1
 
         # unwrap if close to cell limits :
         alat = self.system.cell[0][0]
