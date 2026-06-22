@@ -6,12 +6,12 @@ from contextlib import contextmanager
 import queue
 import threading
 
-#TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
+#TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are
 #initiated in kmc, after the initialization of manager ...))
 
-@dataclass 
-class Job: 
-    operation_name: str 
+@dataclass
+class Job:
+    operation_name: str
     params: dict
     future: Future
 
@@ -27,7 +27,6 @@ class Manager:
         self.global_session = global_session
         self.using_global = True
         self.job_queue: queue.Queue[Job] = queue.Queue()
-        self.otf_enabled = False
         #Thread that dispatch job to workers
         #self.dispatcher_thread = threading.Thread(target=self._dispatcher, daemon=True)
         #self.dispatcher_thread.start()
@@ -47,15 +46,14 @@ class Manager:
         for session in self.sessions:
             session.command(cmd)
 
-    def initialize_sessions(self, config, system) : 
-        """ 
+    def initialize_sessions(self, config, system) :
+        """
         Initialize engines with the same system and config
         """
-        self.otf_enabled = bool(config.control.otfml and config.otfml)
         print("[Manager] use local")
         self.use_local()
         print("[Manager] Initializing all Lammps engines")
-        for session in self.sessions : 
+        for session in self.sessions :
             session.initialize_parameters()
             session.initialize_system(system, config)
             session.initialize_potential(config)
@@ -84,6 +82,7 @@ class Manager:
             for session in self.sessions :
                 session.use_global()
             self.using_global = True
+            
     def _worker_loop(self, session: MpiApiSession):
         """Boucle infinie tournant dans un thread dédié à 'session'."""
         while True:
@@ -94,9 +93,6 @@ class Manager:
 
             try:
                 method = getattr(session, job.operation_name)
-                if self.otf_enabled and job.operation_name in {"partn_search", "partn_refine"}:
-                    session.reset_otf_flags()
-
                 if job.params is None:
                     result = method()
                 else:
@@ -162,9 +158,9 @@ class Manager:
             for session in reversed(slept_sessions):
                 session.wake()
 
-    def set_all_positions(self, positions) : 
+    def set_all_positions(self, positions) :
         #print("[Manager] Setting positions to all sessions.")
-        for session in self.sessions : 
+        for session in self.sessions :
             session.set_positions(positions=positions)
 
     def reload_all_potentials(self, config) -> None:
@@ -190,14 +186,14 @@ class Manager:
 
     # API
 
-    def minimize(self, config ) : 
+    def minimize(self, config ) :
         future = self.submit_job("minimize", {"config" : config})
         return future
-    
+
     def minimize_with_results(self, config, positions=None, types=None) :
         future = self.submit_job("minimize_with_results", {"config": config, "positions": positions, "types": types})
         return future
-    
+
     def get_potential_energy(self, positions=None) :
         future = self.submit_job("get_potential_energy", {"positions": positions})
         return future

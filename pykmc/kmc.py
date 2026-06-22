@@ -12,6 +12,7 @@ from pykmc import (
 )
 import random
 
+from pykmc.enginemanager.lmpi.pool import Manager
 from pykmc.event_table import ReferenceEventTable
 from .result import (
     EventSearchOutput,
@@ -96,7 +97,7 @@ class KMC:
         self.config = config
         self.loggers = None
         self.system = None
-        self.manager = None
+        self.manager: Manager = None
         self.engine = None
         self.neighbors_list: NeighborsList = None
         self.atomic_environment: AtomicEnvironment = None

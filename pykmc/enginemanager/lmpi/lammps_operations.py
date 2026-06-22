@@ -171,21 +171,26 @@ def _setup_otf_latch(engine, gamma_tol: float, gamma_max: float) -> None:
 def reload_potential(engine, config):
     """Reload an updated potential without rebuilding the LAMMPS system."""
     engine.command("pair_style {}".format(config.lammps.pair_style))
-    engine.command("run 0")
+    if config.control.otfml:
+        reset_otf_flags(engine)
 
 
 def reset_otf_flags(engine) -> None:
-    """Reset the latched OTF extrapolation flags on the current engine."""
-    engine.command(f"log {otf_thermo_path(engine).as_posix()}")
-    if not hasattr(engine.lmp, "set_internal_variable"):
-        raise RuntimeError(
-            "LAMMPS Python module does not expose set_internal_variable(), "
-            "which is required for OTFML flag handling."
-        )
-    if engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0) != 0:
-        raise RuntimeError(f"Failed to reset OTFML variable '{OTFML_TOL_FLAG}'.")
-    if engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0) != 0:
-        raise RuntimeError(f"Failed to reset OTFML variable '{OTFML_MAX_FLAG}'.")
+    """Clear the OTF latch and force a fresh grade evaluation at current positions.
+
+    Uses two run 0 calls at different timesteps so that at least one always
+    fires fix pair regardless of what lasttime was (fix pair skips when
+    ntimestep == lasttime; after any prior reset lasttime may already be 0).
+    """
+    engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0)
+    engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0)
+    engine.command("reset_timestep 0")
+    engine.command("run 0")
+    engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0)
+    engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0)
+    engine.command("reset_timestep 1")
+    engine.command("run 0")
+    engine.command("reset_timestep 0")
 
 
 def get_thermo_otf_flags(engine) -> OTFExtrapolationFlags:
@@ -424,6 +429,9 @@ def partn_search(
             central_lammps_id = [central_atom_idx + 1]
             if positions is not None:
                 set_positions(engine=engine, positions=positions)
+
+        if config.control.otfml:
+            reset_otf_flags(engine)
 
         # INITILIZE ARTN on all ranks
         artn = pypARTn.artn(engine="lammps")
@@ -673,6 +681,9 @@ def partn_refine(
                         config.atomicenvironment.rcut,
                         maxiter=10,
                     )
+
+        if config.control.otfml:
+            reset_otf_flags(engine)
 
         # INITILIZE ARTN
         artn = pypARTn.artn(engine="lammps")

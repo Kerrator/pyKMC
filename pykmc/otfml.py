@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import subprocess
 from typing import TYPE_CHECKING, Callable
@@ -107,7 +106,8 @@ class OTFMLController:
                     cycle + 1, len(retry_task_ids), phase
                 ),
             )
-            self._retrain_reload_and_minimize()
+            self._retrain_and_reload()
+            self.kmc._minimize_system_once()
             retry_fn(retry_task_ids)
             cycle += 1
 
@@ -129,7 +129,7 @@ class OTFMLController:
                     " above gamma_max" if flags.extreme_extrapolated else ""
                 ),
             )
-            self._retrain_reload_and_minimize()
+            self._retrain_and_reload()
             flags = self._coerce_flags(minimize_once())
 
     def _collect_extrapolation_retry_ids(self, results) -> list:
@@ -164,11 +164,9 @@ class OTFMLController:
         parts.append(f"--extrapolative_dumps {dumps_glob}")
         return " ".join(parts)
 
-    def _retrain_reload_and_minimize(self) -> None:
-        """Retrain the potential, reload it in all sessions, and minimize."""
+    def _retrain_and_reload(self) -> None:
         full_command = self._build_retrain_command()
         self._log("log", "\t :=> OTFML retraining command: {}".format(full_command))
-
         # does nothing for now
         # clean_env = {k: v for k, v in os.environ.items() if not any(k.startswith(p) for p in self._MPI_PREFIXES)}
 
@@ -185,7 +183,6 @@ class OTFMLController:
 
         was_global = self.kmc.manager.using_global
         self.kmc.manager.reload_all(self.kmc.config)
-        self.kmc._minimize_system_once()
         self.kmc.manager.use_local()
         self.kmc.manager.set_all_positions(self.kmc.system.positions)
         if was_global:
