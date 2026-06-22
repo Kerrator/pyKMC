@@ -164,7 +164,14 @@ class Refinement:
             concurrent.futures.as_completed(future_to_prepared)
         ):
             prepared = future_to_prepared[future]
-            res = future.result()
+            try:
+                res = future.result()
+            except Exception as exc:
+                self.loggers.error(
+                    "log",
+                    f"\n\t task {prepared.task.task_id:5d} | atom {prepared.task.central_atom_index:6d} | {'RAISE':<5} type={type(exc).__name__}",
+                )
+                raise
             self.loggers.progress_bar("progress", i + 1, len(tasks))
             run_results[prepared.task.task_id] = self._finalize_result(
                 res, prepared
