@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from .environments import cna, graph, identify_diamond, region
+from .environments import cna, coordination, graph, identify_diamond, region
 from .config import RegionConfig
 
 
@@ -40,11 +40,13 @@ class AtomicEnvironment:
         region: RegionConfig | None = None,
         positions: np.ndarray | None = None,
         atom_types: list[str] | None = None,
+        coordination_threshold: int | None = None,
     ) -> None:
         self.style = style
         self.neighbors_list = neighbors_list
         self.environment_list = environment_list
         self.neighbors_add = neighbors_add
+        self.coordination_threshold = coordination_threshold
 
         # Compute the atomic environment ID and store it in self.atomic_environment_list
         match self.style:
@@ -56,6 +58,12 @@ class AtomicEnvironment:
                 )
             case "cna/graph":
                 self.atomic_environment_list = self.compute_cnagraph(
+                    neighbors_list, environment_list
+                )
+            case "coordination":
+                self.atomic_environment_list = self.compute_coordination()
+            case "coordination/graph":
+                self.atomic_environment_list = self.compute_coordinationgraph(
                     neighbors_list, environment_list
                 )
             case "diamond/graph" : 
@@ -147,7 +155,54 @@ class AtomicEnvironment:
             list_hash[idx] = list_graphs_hash[i]
 
         return list_hash
-    
+
+    def compute_coordination(self) -> list[str]:
+        """See :py:func:`.environments.coordination` for the coordination-number classifier."""
+        # The config validator guarantees a threshold for coordination styles.
+        assert self.coordination_threshold is not None, "coordination_threshold must be set"
+        return coordination(self.neighbors_list, self.coordination_threshold)
+
+    def compute_coordinationgraph(
+        self, neighbors_list: list[list[int]], environment_list: list[list[int]]
+    ) -> list[str]:
+        """Classify by coordination, then compute Graph Topology IDs for the non-crystal atoms.
+
+        Parameters
+        ----------
+        neighbors_list : list[list[int]]
+            first neighbors lists
+        environment_list : list[list[int]]
+            lists of atoms in environments (used for the graph computation)
+
+        Returns
+        -------
+        list[str]
+            atomic environment ID for each atom
+
+        """
+        # Coordination-number classification (validator guarantees a threshold for these styles)
+        assert self.coordination_threshold is not None, "coordination_threshold must be set"
+        list_hash = coordination(neighbors_list, self.coordination_threshold)
+        non_crystal_idx = (
+            np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
+        )
+
+        # Optionally extend to the N-th neighbour shell of each non-crystal atom
+        if self.neighbors_add > 0:
+            tmp = []
+            for _i in range(self.neighbors_add):  # Do it recursively
+                for idx in non_crystal_idx:
+                    tmp += neighbors_list[idx]
+            non_crystal_idx += tmp
+            non_crystal_idx = list(set(non_crystal_idx))
+
+        # Compute graph topology only for the non-crystalline atoms (uncolored graph())
+        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        for i, idx in enumerate(non_crystal_idx):
+            list_hash[idx] = list_graphs_hash[i]
+
+        return list_hash
+
     def compute_diamondgraph(self, neighbors_list, environment_list) : 
         #Compute identify diamant ID 
         list_hash = identify_diamond(neighbors_list)
