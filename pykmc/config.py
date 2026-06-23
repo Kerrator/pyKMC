@@ -113,9 +113,11 @@ class ControlConfig(BaseModel):
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
-    style: Literal["cna", "graph", "cna/graph", "diamond/graph"] = Field(
+    style: Literal["cna", "graph", "cna/graph", "diamond/graph", "coordination", "coordination/graph"] = Field(
         ...,
-        description="Method used to characterize and assign an ID to an atom's local atomic environment",
+        description="Method used to characterize and assign an ID to an atom's local atomic environment. "
+        "'coordination' classifies atoms based on nearest-neighbor count against a threshold. "
+        "'coordination/graph' first filters by coordination, then computes graph IDs for non-crystal atoms.",
     )
 
     rnei: float = Field(
@@ -132,6 +134,23 @@ class AtomicEnvironmentConfig(BaseModel):
         default=0,
         description="When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.",
     )
+
+    coordination_threshold: Optional[int] = Field(
+        default=None,
+        description="When style is 'coordination' or 'coordination/graph', atoms with fewer neighbors "
+        "(within rnei) than this value are classified as 'noncrystal'. Atoms with this many or more "
+        "neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.",
+    )
+
+    @model_validator(mode="after")
+    def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":
+        """Ensure coordination_threshold is set when the style requires it."""
+        if self.style in ("coordination", "coordination/graph") and self.coordination_threshold is None:
+            raise ValueError(
+                "coordination_threshold is required when style is '{}'. "
+                "Set it in the [AtomicEnvironment] section of your INI file.".format(self.style)
+            )
+        return self
 
 
 class EventSearchConfig(BaseModel):
