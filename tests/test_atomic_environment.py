@@ -57,29 +57,42 @@ class TestAtomicEnvironment :
 class TestAtomColoringMode :
 
     def test_grey_mode_ignores_types(self, system_binary_fcc, config_system_single_type) :
-        """In grey mode, Ni and Fe atoms with same geometry get the same environment ID."""
+        """Passing real types in grey mode must NOT colour: Ni/Fe with identical geometry share an ID."""
         config = config_system_single_type
         nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
 
-        # Grey mode: types=None
-        ae_grey = AtomicEnvironment('cna/graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'], types=None)
+        # Types are now always threaded; grey mode must still ignore them for hashing.
+        ae_grey = AtomicEnvironment('cna/graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
+                                    types=list(system_binary_fcc.types), coloring_mode='grey')
 
         # All atoms in perfect FCC are crystal regardless of type
         assert all(e == "crystal" for e in ae_grey.atomic_environment_list)
 
     def test_full_mode_graph_distinguishes_types(self, system_binary_fcc, config_system_single_type) :
-        """Graph mode with types produces more distinct IDs than without."""
+        """Full colouring yields more distinct IDs than grey; grey equals the uncoloured baseline."""
         config = config_system_single_type
         nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+        types = list(system_binary_fcc.types)
 
-        # Grey mode graph
-        ae_grey = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'], types=None)
-        grey_ids = set(ae_grey.atomic_environment_list)
+        # Grey mode WITH real types passed (must be ignored for hashing).
+        ae_grey = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
+                                    types=types, coloring_mode='grey')
+        grey_ids = ae_grey.atomic_environment_list
 
-        # Full mode graph
+        # Uncoloured baseline = develop behaviour (no types at all, empty vertex_coloring).
+        ae_uncoloured = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
+                                          types=None)
+        uncoloured_ids = ae_uncoloured.atomic_environment_list
+
+        # Full mode.
         ae_full = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
-                                    types=list(system_binary_fcc.types))
-        full_ids = set(ae_full.atomic_environment_list)
+                                    types=types, coloring_mode='full')
+        full_ids = ae_full.atomic_environment_list
 
-        # Full mode should produce more distinct IDs than grey mode
-        assert len(full_ids) > len(grey_ids)
+        # Grey-with-types forwards None to graph() exactly like the uncoloured path,
+        # so the two are byte-identical per-atom. This equals the develop result
+        # because pynauty treats an empty ``vertex_coloring`` identically to omitting
+        # it (locked decision: certificate(no-coloring) == certificate(vertex_coloring=[])).
+        assert grey_ids == uncoloured_ids
+        # Full mode produces more distinct IDs than grey mode.
+        assert len(set(full_ids)) > len(set(grey_ids))

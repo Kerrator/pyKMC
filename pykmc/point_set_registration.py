@@ -87,9 +87,9 @@ class PointSetRegistration:
         if self.config.atomicenvironment.atom_coloring_mode == "full":
             typ1 = list(np.array(self.system.types)[neighbor_list])
             typ2 = (
-                list(self.dfevent.at["initial_types"])
-                if "initial_types" in self.dfevent.index
-                and self.dfevent.at["initial_types"] is not None
+                list(self.dfevent.at["types"])
+                if "types" in self.dfevent.index
+                and self.dfevent.at["types"] is not None
                 else typ1
             )
         else:

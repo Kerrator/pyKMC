@@ -123,9 +123,8 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
-                types=self.system.types
-                if self.config.atomicenvironment.atom_coloring_mode == "full"
-                else None,
+                types=self.system.types,
+                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
         self.inactive_ae = (
             AtomicEnvironment(
@@ -404,9 +403,8 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
-                types=self.system.types
-                if self.config.atomicenvironment.atom_coloring_mode == "full"
-                else None,
+                types=self.system.types,
+                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
             self.inactive_ae = (
                 AtomicEnvironment(
