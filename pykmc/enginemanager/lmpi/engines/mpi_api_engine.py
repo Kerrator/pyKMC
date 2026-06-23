@@ -1,16 +1,16 @@
 from lammps import lammps
-import threading 
-from mpi4py import MPI 
-import queue 
+import threading
+from mpi4py import MPI
+import queue
 import traceback
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, reload_potential, reset_otf_flags, get_otf_flags, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, setup_otf_cycle, reset_otf_flags, get_otf_flags, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy
 from ...messenger import QueueMessenger, MpiMessenger
 
 
-class MpiApiEngine() : 
-    """ 
+class MpiApiEngine() :
     """
-    
+    """
+
     def __init__(
         self,
         local_messenger, local_engine_comm: MPI.Comm, local_engine_id: int,
@@ -36,11 +36,11 @@ class MpiApiEngine() :
 
         self.use_global()   #Start with active properties mapped to global Lammps
 
-        self._is_alive = False 
-        self._is_busy = False 
+        self._is_alive = False
+        self._is_busy = False
         self._last_error = None
-        self.message_reader_thread = None 
-        self.message_queue = queue.Queue() #Queue to hold messages from the session 
+        self.message_reader_thread = None
+        self.message_queue = queue.Queue() #Queue to hold messages from the session
 
         # Dispatch map of possible lammps operation
         self._operations_map = {
@@ -53,24 +53,24 @@ class MpiApiEngine() :
             "initialize_parameters": initialize_parameters,
             "initialize_system" : initialize_system,
             "initialize_potential": initialize_potential,
-            "reload_potential": reload_potential,
+            "reload_potential": setup_otf_cycle,
             "reset_otf_flags": reset_otf_flags,
             "get_otf_flags": get_otf_flags,
-            "minimize" : minimize, 
-            "get_total_energy" : get_total_energy, 
-            "get_positions": get_positions, 
-            "set_positions": set_positions, 
-            "partn_search": partn_search, 
-            "partn_refine" : partn_refine, 
-            "minimize_with_results" : minimize_with_results, 
+            "minimize" : minimize,
+            "get_total_energy" : get_total_energy,
+            "get_positions": get_positions,
+            "set_positions": set_positions,
+            "partn_search": partn_search,
+            "partn_refine" : partn_refine,
+            "minimize_with_results" : minimize_with_results,
             "get_potential_energy" : get_potential_energy
         }
 
 
 
-    def start(self) -> None : 
+    def start(self) -> None :
         """Start Lammps"""
-        self.start_engine() 
+        self.start_engine()
         if self.rank == 0 and isinstance(self.messenger, QueueMessenger):
             # TODO: this only with engine_use_rank_0=True so can probably cut without that option
             t = threading.Thread(target=self.run_engine_loop, daemon=True)
@@ -136,7 +136,7 @@ class MpiApiEngine() :
             msg = self.engine_comm.bcast(msg, root=0)
             if msg is None:
                 continue
-            
+
             self._last_error = None
             result = self._handle_message(msg)
 
@@ -152,10 +152,10 @@ class MpiApiEngine() :
             if result is not None:
                 if entry_global_mode:
                     if self.global_rank == 0 :
-                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1)
                 else:
                     if self.local_rank == 0 :
-                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1)
 
     def _send_status(self, messenger) :
         """Send the status of the engine to the session."""
@@ -179,19 +179,19 @@ class MpiApiEngine() :
         if operation_handler is None:
             raise ValueError(f"Unknown message type: {msg_type}")
 
-        else : 
+        else :
             #Call method of function (and so check if self needs to be provided or not)
             value = msg.get("value", None)
             entry_engine_comm = self.engine_comm    # needed for when msg is use_global
             entry_engine_comm.barrier()
             try :
-                if value is None : 
-                    args = () 
+                if value is None :
+                    args = ()
                     kwargs = {}
-                elif isinstance(value, dict) : 
+                elif isinstance(value, dict) :
                     args = ()
                     kwargs = value
-                else : 
+                else :
                     args = (value,)
                     kwargs = {}
 
@@ -210,7 +210,7 @@ class MpiApiEngine() :
                     "operation": msg_type,
                 }
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
-            finally : 
+            finally :
                 entry_engine_comm.barrier()
 
 
@@ -272,7 +272,7 @@ class MpiApiEngine() :
         self.rank = self.local_rank
         self.lmp = self.local_lmp
 
-    def close(self) -> None:    
+    def close(self) -> None:
         """Close the LAMMPS engine."""
         print(f"[Engine Rank {self.rank}] Closing LAMMPS engine.")
         if self.local_lmp is not None:
@@ -291,8 +291,8 @@ class MpiApiEngine() :
 
     def is_alive(self) -> bool:
         """Check if the LAMMPS engine is alive."""
-        return self._is_alive       
-    
+        return self._is_alive
+
     def is_busy(self) -> bool:
         """Check if the LAMMPS engine is busy."""
         return self._is_busy

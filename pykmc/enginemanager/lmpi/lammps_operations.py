@@ -168,29 +168,33 @@ def _setup_otf_latch(engine, gamma_tol: float, gamma_max: float) -> None:
     engine.command(f"variable {OTFML_LATCH} python _latch_otf_flags")
 
 
-def reload_potential(engine, config):
-    """Reload an updated potential without rebuilding the LAMMPS system."""
+def setup_otf_cycle(engine, config):
+    """Load a new pair_style and reset OTFML state for the next retrain cycle.
+
+    reset_timestep 0 ensures ntimestep(0) != lasttime(>=1) so FixPair's guard
+    passes at the next minimize setup, forcing fresh grade computation with the
+    new potential. lasttime >= 1 is guaranteed after any minimize: min_cg
+    increments ntimestep unconditionally at the top of the loop before any
+    convergence check.
+
+    undump/redump is required because reset_timestep fails with active dumps.
+    """
+    if config.control.otfml:
+        engine.command("undump extrapolative_structures_dump")
     engine.command("pair_style {}".format(config.lammps.pair_style))
     if config.control.otfml:
+        engine.command("reset_timestep 0")
+        dump_path = session_dump_path(engine.engine_id).as_posix()
+        engine.command(f"dump extrapolative_structures_dump all custom 1 {dump_path} id type x y z f_extrapolation_grade")
+        engine.command(f"dump_modify extrapolative_structures_dump append yes")
+        engine.command(f"dump_modify extrapolative_structures_dump skip v_dump_skip")
         reset_otf_flags(engine)
 
 
 def reset_otf_flags(engine) -> None:
-    """Clear the OTF latch and force a fresh grade evaluation at current positions.
-
-    Uses two run 0 calls at different timesteps so that at least one always
-    fires fix pair regardless of what lasttime was (fix pair skips when
-    ntimestep == lasttime; after any prior reset lasttime may already be 0).
-    """
+    """Clear the latched OTF extrapolation flags."""
     engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0)
     engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0)
-    engine.command("reset_timestep 0")
-    engine.command("run 0")
-    engine.lmp.set_internal_variable(OTFML_TOL_FLAG, 0.0)
-    engine.lmp.set_internal_variable(OTFML_MAX_FLAG, 0.0)
-    engine.command("reset_timestep 1")
-    engine.command("run 0")
-    engine.command("reset_timestep 0")
 
 
 def get_thermo_otf_flags(engine) -> OTFExtrapolationFlags:
