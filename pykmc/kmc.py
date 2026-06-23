@@ -123,6 +123,7 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
         self.inactive_ae = (
             AtomicEnvironment(
@@ -401,6 +402,7 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
             self.inactive_ae = (
                 AtomicEnvironment(
