@@ -116,6 +116,8 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str]
+            Event's atom types.
 
         Returns
         -------
@@ -278,27 +280,14 @@ class ReferenceEventTable:
         #if all same, check PSR  saddle_initial
         event_saddle = dfevent['saddle_positions']
         nat_event = len(event_saddle)
-        if (
-            self.config.atomicenvironment.atom_coloring_mode == "full"
-            and "types" in dfevent.index
-            and dfevent["types"] is not None
-        ):
-            typ_event = list(dfevent["types"])
-        else:
-            typ_event = nat_event * ['X']
-
+        typ_event = list(dfevent["types"])
+    
         for _, ev in subset.iterrows() :
 
             ref_saddle = ev['saddle_positions']
             nat_ref = len(ref_saddle)
-            if (
-                self.config.atomicenvironment.atom_coloring_mode == "full"
-                and "types" in ev.index
-                and ev["types"] is not None
-            ):
-                typ_ref = list(ev["types"])
-            else:
-                typ_ref = nat_ref * ['X']
+            typ_ref = list(ev["types"])
+
             result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
             if not result.is_ok() : #no match
@@ -465,7 +454,7 @@ class ReferenceEventTable:
 
         # query_ball_point can hand back Python lists; coerce to arrays so the
         # element-wise comparisons (np.where) and type indexing below behave.
-        neighbor_list_forwward = np.asarray(
+        neighbor_list_forward = np.asarray(
             min1neighbors_list.neighbors_list["rcut"][index_move]
         )
         neighbor_list_backward = np.asarray(
@@ -476,7 +465,7 @@ class ReferenceEventTable:
         # the reference-table schema is mode-independent; colouring is only *applied*
         # in matching/symmetry, which is gated below.
         local_types_forward = (
-            list(np.array(types)[neighbor_list_forwward]) if types is not None else None
+            list(np.array(types)[neighbor_list_forward]) if types is not None else None
         )
         local_types_backward = (
             list(np.array(types)[neighbor_list_backward]) if types is not None else None
@@ -488,15 +477,15 @@ class ReferenceEventTable:
 
         # Symmetries :
         sym_matrix, sym_perm = unique_symmetries(
-            min1_positions[neighbor_list_forwward],
-            min2_positions[neighbor_list_forwward],
+            min1_positions[neighbor_list_forward],
+            min2_positions[neighbor_list_forward],
             self.config.ira.sym_thr,
             types=sym_types_forward,
         )
 
         #dr :
-        move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
-        dra_forward = np.linalg.norm(min1_positions[neighbor_list_forwward][move_atom_idx_forward]-saddle_positions[neighbor_list_forwward][move_atom_idx_forward])
+        move_atom_idx_forward = np.where(neighbor_list_forward == index_move)[0][0]
+        dra_forward = np.linalg.norm(min1_positions[neighbor_list_forward][move_atom_idx_forward]-saddle_positions[neighbor_list_forward][move_atom_idx_forward])
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
         dra_backward = np.linalg.norm(min1_positions[neighbor_list_backward][move_atom_idx_backward]-saddle_positions[neighbor_list_backward][move_atom_idx_backward])
 
@@ -504,15 +493,15 @@ class ReferenceEventTable:
             {
                "idx_ref": -1, #unknown yet
                 "event_id": id_min1,
-                "initial_positions": min1_positions[neighbor_list_forwward],
-                "saddle_positions": saddle_positions[neighbor_list_forwward],
-                "final_positions": min2_positions[neighbor_list_forwward],
+                "initial_positions": min1_positions[neighbor_list_forward],
+                "saddle_positions": saddle_positions[neighbor_list_forward],
+                "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
-                "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
+                "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
                 "idx_backward" : -1, #unknown yet,

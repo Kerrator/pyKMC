@@ -83,18 +83,11 @@ class PointSetRegistration:
 
         coords1 = self.system.positions[neighbor_list]
 
-
+        typ1 = list(np.array(self.system.types)[neighbor_list])
         if self.config.atomicenvironment.atom_coloring_mode == "full":
-            typ1 = list(np.array(self.system.types)[neighbor_list])
-            typ2 = (
-                list(self.dfevent.at["types"])
-                if "types" in self.dfevent.index
-                and self.dfevent.at["types"] is not None
-                else typ1
-            )
+            typ2 = list(self.dfevent.at["types"])
         else:
             # Grey alloy: all atoms treated as identical
-            typ1 = ['X'] * len(coords1)
             typ2 = typ1
 
         # unwrap if close to cell limits :

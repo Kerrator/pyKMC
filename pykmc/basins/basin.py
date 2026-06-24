@@ -39,7 +39,7 @@ class StateData:
             if self.neighbors_list is None : 
                 self.neighbors_list = NeighborsList(self.system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)  
             if self.environment is None :
-                self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add, types=self.system.types, coloring_mode=config.atomicenvironment.atom_coloring_mode)
+                self.environment = AtomicEnvironment(config.atomicenvironment.style, self.neighbors_list.neighbors_list['rnei'], self.neighbors_list.neighbors_list['rcut'], config.atomicenvironment.neighbors_add, types=self.system.types)
 
 
 class BasinsGenericEvents() : 
@@ -399,13 +399,14 @@ class BasinsGenericEvents() :
         #Loop over all other system in self.states to see if system is already known
 
         for state_index, state_data in self.states.items():
-            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell, types1=system.types, types2=state_data.system.types)
+            are_equivalent = self.are_structures_equivalent(system.positions, system.types, 
+                            state_data.system.positions, state_data.system.types, cell = system.cell)
             if are_equivalent :
                 return state_index
         return -1
 
 
-    def are_structures_equivalent(self, pos1, pos2, cell, types1=None, types2=None, tol=0.3):
+    def are_structures_equivalent(self, pos1, typ1, pos2, typ2, cell, tol=0.3):
 
         if len(pos1) != len(pos2):
             return False
@@ -414,7 +415,7 @@ class BasinsGenericEvents() :
         # species arrangement (e.g. an Fe/Ni swap) are distinct; in grey mode they merge.
         if (
             self.config.atomicenvironment.atom_coloring_mode == "full"
-            and not np.array_equal(types1, types2)
+            and not np.array_equal(typ1, typ2)
         ):
             return False
 
@@ -438,7 +439,7 @@ class BasinsGenericEvents() :
 
         if full == True : 
             neighbors_list = NeighborsList(system, self.config.atomicenvironment.rnei, self.config.atomicenvironment.rcut)
-            atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list['rnei'], neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add, types=system.types, coloring_mode=self.config.atomicenvironment.atom_coloring_mode)
+            atomic_environment = AtomicEnvironment(self.config.atomicenvironment.style, neighbors_list.neighbors_list['rnei'], neighbors_list.neighbors_list['rcut'], self.config.atomicenvironment.neighbors_add, types=system.types)
         else : 
             neighbors_list = None 
             atomic_environment = None 
