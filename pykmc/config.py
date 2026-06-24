@@ -536,6 +536,10 @@ class LammpsConfig(BaseModel):
         default="1.0e-6 1.0e-8 1000 1000",
         description="Lammps minimize command",
     )
+    frz_min: Optional[str] = Field(
+        default="1.0e-6 1.0e-8 10 10",
+        description="Lammps minimize command with frozen core",
+    )
 
     @field_validator("setup_commands", "reload_commands", mode="before")
     @classmethod

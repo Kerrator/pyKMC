@@ -368,6 +368,7 @@ class KMC:
                         self.loggers.events_basin_info_line("events", idx_exit_event)
                         self.loggers.events_write("events", basin_info)
 
+
                     else:
                         self.loggers.info(
                             "log",
@@ -393,31 +394,15 @@ class KMC:
                     basin.connectivity_table.save(
                         "basin_connectivity_" + str(step) + ".pickle"
                     )
-                # update delta_t, ktot (use basin infos)
-                # Basin super-event spans many atoms; detach the recycler so
-                # prune_for_recycling clears the table (recycling deferred).
-                saved_recycler = self.active_table.recycler
-                self.active_table.recycler = None
-                self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
-                )
-                self.active_table.recycler = saved_recycler
+                # Basin super-event spans many atoms; recycling is deferred (the
+                # prune below runs with the recycler detached).
+                prune_detach_recycler = True
             else:
                 self.system.update_positions(
                     result_reconstruction.ok_value().min2_positions
                 )
                 self.total_energy = result_reconstruction.ok_value().min2_etot
-                # == Event recycling: prune the active table for next step ==
-                self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
-                )
-                if self.config.control.recycle:
-                    self.loggers.info(
-                        "log",
-                        "\t :=> {} events flagged for recycling".format(
-                            len(self.active_table.table)
-                        ),
-                    )
+                prune_detach_recycler = False
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions
@@ -468,6 +453,29 @@ class KMC:
                 elapsed_cpu,
                 elapsed_real,
             )
+
+            # == Event recycling: prune the active table for the next step ==
+            # Must run AFTER the step log above, which reads the executed event's
+            # row; with no recycler (recycle = False, the default) the prune clears
+            # the whole table and the lookup would raise KeyError.
+            if prune_detach_recycler:
+                saved_recycler = self.active_table.recycler
+                self.active_table.recycler = None
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
+                self.active_table.recycler = saved_recycler
+            else:
+                self.active_table.prune_for_recycling(
+                    idx_selected_event, self.system, self._pre_exec_positions,
+                )
+                if self.config.control.recycle:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> {} events flagged for recycling".format(
+                            len(self.active_table.table)
+                        ),
+                    )
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
