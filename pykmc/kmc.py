@@ -125,6 +125,7 @@ class KMC:
                 self.config.atomicenvironment.neighbors_add,
                 types=self.system.types,
                 coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
         self.inactive_ae = (
             AtomicEnvironment(
@@ -405,6 +406,7 @@ class KMC:
                 self.config.atomicenvironment.neighbors_add,
                 types=self.system.types,
                 coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
             self.inactive_ae = (
                 AtomicEnvironment(

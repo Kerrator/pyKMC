@@ -92,6 +92,7 @@ class Initializer:
             self.kmc.config.atomicenvironment.neighbors_add,
             types=self.kmc.system.types,
             coloring_mode=self.kmc.config.atomicenvironment.atom_coloring_mode,
+            coordination_threshold=self.kmc.config.atomicenvironment.coordination_threshold,
         )
 
     def initialize_reference_table(self) -> None:
