@@ -25,7 +25,7 @@ this ``scripts/`` folder)::
 Confirm the resolved checkout first::
 
     PYTHONPATH=. python -c "import pykmc; print(pykmc.__file__)"
-    # must contain 'gifted-bardeen-8ba8f3'
+    # must resolve to your worktree checkout, not the venv's editable install
 
 Parameters
 ----------
