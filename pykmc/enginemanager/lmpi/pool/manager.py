@@ -82,7 +82,7 @@ class Manager:
             for session in self.sessions :
                 session.use_global()
             self.using_global = True
-            
+
     def _worker_loop(self, session: MpiApiSession):
         """Boucle infinie tournant dans un thread dédié à 'session'."""
         while True:
@@ -163,18 +163,19 @@ class Manager:
         for session in self.sessions :
             session.set_positions(positions=positions)
 
-    def reload_all_potentials(self, config) -> None:
-        """Reload the potential in all local sessions."""
-        for session in self.sessions:
-            session.reload_potential(config)
+    def sync_otf_dumps(self, config) -> None:
+        """Refresh OTF dumps on the sessions that just produced extrapolation."""
+        for session in self._active_sessions():
+            session.sync_otf_dump(config)
 
-    def reload_all(self, config) -> None:
+    def setup_otf_cycle(self, config) -> None:
         """Reload potentials in all sessions. Ends in global mode, ready for minimize."""
         self.use_local()
-        self.reload_all_potentials(config)
+        for session in self.sessions:
+            session.setup_otf_cycle(config)
         if self.global_session is not None:
             self.use_global()
-            self.global_session.reload_potential(config)
+            self.global_session.setup_otf_cycle(config)
 
     def submit_job(self, method_name: str, params: dict = None) -> Future:
 

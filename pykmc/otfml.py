@@ -165,6 +165,7 @@ class OTFMLController:
         return " ".join(parts)
 
     def _retrain_and_reload(self) -> None:
+        self.kmc.manager.sync_otf_dumps(self.kmc.config)
         full_command = self._build_retrain_command()
         self._log("log", "\t :=> OTFML retraining command: {}".format(full_command))
         # does nothing for now
@@ -182,7 +183,7 @@ class OTFMLController:
             self._consecutive_failed_retrain_exit = 0
 
         was_global = self.kmc.manager.using_global
-        self.kmc.manager.reload_all(self.kmc.config)
+        self.kmc.manager.setup_otf_cycle(self.kmc.config)
         self.kmc.manager.use_local()
         self.kmc.manager.set_all_positions(self.kmc.system.positions)
         if was_global:

@@ -238,6 +238,19 @@ def get_otf_flags(engine) -> OTFExtrapolationFlags:
     # return get_thermo_otf_flags(engine)
 
 
+def sync_otf_dump(engine, config) -> None:
+    """Append one current-coordinate, freshly graded frame to the OTF dump."""
+    dump_path = session_dump_path(engine.engine_id).as_posix()
+    next_step = int(engine.lmp.get_thermo("step")) + 1
+    engine.command("undump extrapolative_structures_dump")
+    engine.command(f"reset_timestep {next_step}")
+    engine.command("run 0")
+    engine.command(f"write_dump all custom {dump_path} id type x y z f_extrapolation_grade modify append yes")
+    engine.command(f"dump extrapolative_structures_dump all custom 1 {dump_path} id type x y z f_extrapolation_grade")
+    engine.command("dump_modify extrapolative_structures_dump append yes")
+    engine.command("dump_modify extrapolative_structures_dump skip v_dump_skip")
+
+
 def _build_extrapolation_error(
     flags: OTFExtrapolationFlags,
     *,
