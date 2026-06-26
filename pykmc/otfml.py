@@ -165,7 +165,6 @@ class OTFMLController:
         return " ".join(parts)
 
     def _retrain_and_reload(self) -> None:
-        self.kmc.manager.sync_otf_dumps(self.kmc.config)
         full_command = self._build_retrain_command()
         self._log("log", "\t :=> OTFML retraining command: {}".format(full_command))
         # does nothing for now

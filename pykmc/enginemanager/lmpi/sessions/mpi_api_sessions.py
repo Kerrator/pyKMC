@@ -156,10 +156,6 @@ class MpiApiSession :
         """Reload an updated LAMMPS potential in-place."""
         self.send_message({"type": "setup_otf_cycle", "value": config})
 
-    def sync_otf_dump(self, config) -> None:
-        """Append one freshly graded current frame to the OTF dump."""
-        self.send_message({"type": "sync_otf_dump", "value": config})
-
     def reset_otf_flags(self) -> None:
         """Reset latched OTF extrapolation flags on the engine."""
         self.send_message({"type": "reset_otf_flags"})

@@ -163,11 +163,6 @@ class Manager:
         for session in self.sessions :
             session.set_positions(positions=positions)
 
-    def sync_otf_dumps(self, config) -> None:
-        """Refresh OTF dumps on the sessions that just produced extrapolation."""
-        for session in self._active_sessions():
-            session.sync_otf_dump(config)
-
     def setup_otf_cycle(self, config) -> None:
         """Reload potentials in all sessions. Ends in global mode, ready for minimize."""
         self.use_local()

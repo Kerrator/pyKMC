@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from pykmc.config import Config
-from pykmc.enginemanager.lmpi.lammps_operations import reload_potential
+from pykmc.enginemanager.lmpi.lammps_operations import setup_otf_cycle
 from pykmc.enginemanager.lmpi.pool import Manager
 from pykmc.eventsearch import EventSearch
 from pykmc.kmc import KMC
@@ -148,9 +148,9 @@ rmov = 4.0
         Config.from_ini_file(str(ini_path))
 
 
-def test_reload_potential_runs_reload_then_setup_commands():
+def test_setup_otf_cycle_runs_reload_then_setup_commands():
     commands = []
-    engine = SimpleNamespace(command=commands.append)
+    engine = SimpleNamespace(engine_id=7, command=commands.append, lmp=SimpleNamespace(set_internal_variable=lambda *_: None))
     config = SimpleNamespace(
         lammps=SimpleNamespace(
             pair_style="pair_style_cmd",
@@ -160,23 +160,31 @@ def test_reload_potential_runs_reload_then_setup_commands():
         )
     )
 
-    reload_potential(engine, config)
+    setup_otf_cycle(engine, config)
 
     assert commands == [
+        "undump extrapolative_structures_dump",
+        "uncompute max_grade",
+        "unfix extrapolation_grade",
         "pair_style pair_style_cmd",
-        "run 0",
+        "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1",
+        "compute max_grade all reduce max f_extrapolation_grade",
+        "reset_timestep 0",
+        "dump extrapolative_structures_dump all custom 1 extrapolative_dumps/extrapolating_dump.7.lammps id type x y z f_extrapolation_grade",
+        "dump_modify extrapolative_structures_dump append yes",
+        "dump_modify extrapolative_structures_dump skip v_dump_skip",
     ]
 
 
-def test_manager_reload_all_potentials_calls_each_session():
+def test_manager_setup_otf_cycle_calls_each_session():
     sessions = [Mock(), Mock()]
     manager = Manager(sessions=sessions, global_session=Mock())
     config = Mock()
 
-    manager.reload_all_potentials(config)
+    manager.setup_otf_cycle(config)
 
     for session in sessions:
-        session.reload_potential.assert_called_once_with(config)
+        session.setup_otf_cycle.assert_called_once_with(config)
 
 
 def test_event_search_retries_only_extrapolating_jobs(tmp_path):
@@ -288,7 +296,7 @@ def test_refinement_retry_replaces_only_matching_job(monkeypatch, tmp_path):
     dfevent2 = pd.Series({"idx_ref": 2, "k": 2.0})
     execute_calls = []
 
-    def fake_build_tasks(_df, _total_energy):
+    def fake_build_tasks(_df, _total_energy, existing_pairs=None):
         return [
             RefinementTask(0, 10, 1, 0, dfevent1, 0.0, 0.0),
             RefinementTask(1, 11, 2, 0, dfevent2, 0.0, 0.0),
@@ -385,8 +393,7 @@ def test_otfml_controller_retrains_reloads_and_retries_search(monkeypatch):
         using_global=False,
         sleeping_workers=Mock(return_value=nullcontext()),
         sessions=[session0, session1],
-        reload_all_potentials=Mock(),
-        global_reload_potential=Mock(),
+        setup_otf_cycle=Mock(),
         global_session=global_session,
         use_global=Mock(),
         use_local=Mock(),
@@ -424,21 +431,10 @@ def test_otfml_controller_retrains_reloads_and_retries_search(monkeypatch):
 
     retried_task_ids = event_search.retry.call_args.args[0]
     assert retried_task_ids == [0]
-    session0.command.assert_any_call("undump extrapolative_structures_dump")
-    session0.command.assert_any_call(
-        "dump extrapolative_structures_dump all custom 1 extrapolative_dumps/extrapolating_dump.1.lammps id type x y z f_extrapolation_grade"
-    )
-    session1.command.assert_any_call(
-        "dump extrapolative_structures_dump all custom 1 extrapolative_dumps/extrapolating_dump.2.lammps id type x y z f_extrapolation_grade"
-    )
-    global_session.command.assert_any_call(
-        "dump extrapolative_structures_dump all custom 1 extrapolative_dumps/extrapolating_dump.0.lammps id type x y z f_extrapolation_grade"
-    )
-    manager.reload_all_potentials.assert_called_once()
-    manager.global_reload_potential.assert_called_once()
+    manager.setup_otf_cycle.assert_called_once_with(config)
     minimize_mock.assert_called_once()
-    assert manager.use_local.call_count == 5
-    assert manager.use_global.call_count == 2
+    assert manager.use_local.call_count == 1
+    assert manager.use_global.call_count == 0
     manager.set_all_positions.assert_called_once_with(kmc.system.positions)
 
 
