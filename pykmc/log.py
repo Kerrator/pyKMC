@@ -533,7 +533,7 @@ class LogKMC(LogManager):
         )
         self.info(
             logger_name,
-            "\t #dra_i: displacement between the final positions and the saddle positions.",
+            "\t #dra_f: displacement between the final positions and the saddle positions.",
         )
         self.info(logger_name, "\t #Refined: - T : The event has been refined.")
         self.info(logger_name, "\t #         - F : The event has not been refined.")

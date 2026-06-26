@@ -479,7 +479,7 @@ class ReferenceEventTable:
         )
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
         dra_backward = np.linalg.norm(
-            min1_positions[neighbor_list_backward][move_atom_idx_backward]
+            min2_positions[neighbor_list_backward][move_atom_idx_backward]
             - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
         )
 
