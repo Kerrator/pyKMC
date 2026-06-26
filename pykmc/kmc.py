@@ -456,12 +456,16 @@ class KMC:
                 saved_recycler = self.active_table.recycler
                 self.active_table.recycler = None
                 self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
+                    idx_selected_event,
+                    self.system,
+                    self._pre_exec_positions,
                 )
                 self.active_table.recycler = saved_recycler
             else:
                 self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
+                    idx_selected_event,
+                    self.system,
+                    self._pre_exec_positions,
                 )
                 if self.config.control.recycle:
                     self.loggers.info(
