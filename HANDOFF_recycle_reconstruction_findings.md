@@ -1,5 +1,23 @@
 # Handoff: recycle reconstruction non-viability — investigation findings (2026-06-22)
 
+> ## ✅ RESOLVED (2026-06-24) — corrected diagnosis; this doc's framing is superseded
+>
+> This file's mechanism (a full-cell minimize seam instability) and its two candidate fixes
+> (freeze-outer / adaptive `push_fraction`) were **not** the root cause. The actual cause is a
+> **neighbour-ORDERING scatter**: the stored saddle shell is presented in refinement-neighbour
+> order against a *live* re-derived order, so `push_towards` pairs row *i* with the wrong atom →
+> overlap → `Lost atoms` in the min1 minimize. Fixed by `ba0841d` (persist neighbour ordering) +
+> `582060b` (acceptance redesign) on this branch — see the RESOLVED banner in
+> [`HANDOFF_recycle_reconstruction_nonviable.md`](HANDOFF_recycle_reconstruction_nonviable.md)
+> for the full write-up, the 16/16-configs-@-0-Lost-atoms validation, and why
+> `freeze_outer_op.patch` is a dead end.
+>
+> The empirical observations below remain accurate **as data** — the gentle σ-perturbation does
+> surface a mis-land (not Lost atoms), and freeze-outer does *not* fix that mis-land. Only their
+> **interpretation** as "full-cell fragility" was wrong: both are explained by the ordering
+> scatter (the σ probe is just too gentle to overlap hard, exactly like a vacancy hop). New
+> decisive probe: [`recycle_diagnostics/recon_order.py`](recycle_diagnostics/recon_order.py).
+
 **Companion to** [`HANDOFF_recycle_reconstruction_nonviable.md`](HANDOFF_recycle_reconstruction_nonviable.md)
 (the original problem statement). This file records a verified root-cause re-read of the
 code **plus an empirical local investigation** that (a) confirms the bug needs 32k scale,

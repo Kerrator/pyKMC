@@ -1,6 +1,37 @@
 # Handoff: recycle event reconstruction is non-viable at 32k scale
 
-**Status:** open issue (recycle physics/robustness), **NOT a hang.** The two recycle
+> ## ✅ RESOLVED (2026-06-24) — read this first; the analysis below is superseded
+>
+> **Real root cause = neighbour-ORDERING scatter, NOT full-cell minimize fragility.**
+> A refined event stores `saddle_positions`/`final_positions` in the neighbour order at
+> *refinement* time, then discards it; `kmc.py::_reconstruction_active_event` re-derives
+> `neighbors` *live*, and `cKDTree.query_ball_point` (single-point → unsorted) returns the
+> same atoms in a different order after the per-step neighbour-list rebuild. So
+> `push_towards` pairs row *i* of the stored saddle (atom a) with row *i* of the live min1
+> (atom b≠a) → atoms scatter onto the wrong sites → overlap → `Lost atoms` in the **min1**
+> minimize. It triggers **only for recycled events** (fresh/baseline reconstruct fine at the
+> same 32k scale: `00_baseline`/`01_av` = 0 Lost atoms); violent events surface it as
+> `Lost atoms`, gentle ones as a `RECONSTRUCTION_INVALID_MIN1` mis-land.
+>
+> **Fix (committed on this branch):** `ba0841d` persist per-event neighbour ordering +
+> `582060b` acceptance redesign (top-`n_movers` match + rcut containment guard). Upstream
+> equivalents already pushed: `142837f`+`7e1ef41` on `kerrator/bug_recycling_pool_hang`.
+>
+> **Validated at 32k (fixed code, `mpirun -n 20`):** isolated `04_recycle`/`07_av+recycle`
+> = 10/10 steps, 0 Lost atoms, 0 fails (were 1–2 steps / 140 & 96 fails); the **full
+> 16-config matrix = 16/16 at Step 10, 0 Lost atoms in every config**, all 8 recycle-involving
+> configs with 0 reconstruction fails. Runs in
+> `benchmarks/Ni_fcc_32000at_4vac+4sia/profiling_runs_neighfix_{validate,full}/`.
+>
+> **Decisive local repro:** [`recycle_diagnostics/recon_order.py`](recycle_diagnostics/recon_order.py)
+> — identity neighbour order = `Ok`, every permutation = `FAIL`, at all sizes incl. 32000 atoms.
+> **Dead end:** [`recycle_diagnostics/freeze_outer_op.patch`](recycle_diagnostics/freeze_outer_op.patch)
+> targeted the wrong (full-cell-fragility) diagnosis; freezing the *outer* field cannot fix a
+> *within-shell* scatter. Do not pursue it.
+>
+> The original full-cell-fragility analysis below is preserved only as the investigation record.
+
+**Original status (SUPERSEDED):** open issue (recycle physics/robustness), **NOT a hang.** The two recycle
 *hangs* are already fixed — this is the remaining recycle limitation that those
 fixes exposed.
 **Severity:** medium — recycle runs no longer crash/hang, but they cannot sustain a
