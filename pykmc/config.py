@@ -665,6 +665,7 @@ class ReconstructionConfig(BaseModel):
     )
     n_movers: int = Field(
         default=3,
+        gt=0,
         description="Number of most-displaced event atoms (min1->min2) whose reconstructed position must match within psr.matching_score_thr. Peripheral atoms that did not move during the event do not veto the match.",
     )
     containment_margin: float = Field(

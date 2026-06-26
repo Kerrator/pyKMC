@@ -868,8 +868,11 @@ class ActiveEventTable:
         ``refined == "T"`` participate -- refinement's ``e_thr`` already gates
         these to the probable events; ``"F"``/``"B"`` rows keep the values
         inherited from the reference table. Full event geometry is rebuilt from
-        the current system minimum plus the row's neighbor-cropped arrays (the
-        same ``get_neighbors("rcut", atom)`` crop refinement applied), one
+        the current system minimum plus the row's neighbor-cropped arrays, using
+        the per-event neighbour ordering **stored on the row** (the ``neighbors``
+        column persisted at refinement time) -- NOT a fresh
+        ``get_neighbors("rcut", atom)`` re-derivation, which yields a different
+        order for recycled rows and scatters coords onto the wrong atoms. One
         batch is fanned out through the backend, and each row's ``nu0``/``k``
         are patched in place; a None nu0 keeps the inherited values (logged).
 
@@ -878,7 +881,9 @@ class ActiveEventTable:
         system : System
             The current system (its positions are the min1 of every active event).
         neighbors_list : NeighborsList
-            The step's neighbor list (the one refinement cropped with).
+            Unused. Retained for call-signature stability only; the neighbour
+            ordering now comes from each row's stored ``neighbors`` column, not
+            from this per-step list (see the body comment).
 
         """
         if not self._htst_active:

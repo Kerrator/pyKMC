@@ -87,6 +87,7 @@ def _refined_event(
     out.k_prefactor = nu0_inherited
     out.nu0 = nu0_inherited
     out.dE_forward = de
+    out.neighbors = neighbors  # persisted ordering backfill now reads from the row
     return out
 
 
