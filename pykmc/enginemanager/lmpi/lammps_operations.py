@@ -140,30 +140,19 @@ def minimize_with_results(engine, config, positions=None, types=None):
         return new_positions, total_energy
 
 
-def minimize_freeze_core(
-    engine, central_atom_positions: np.ndarray, rcut: float, maxiter: int = 10
-):
+def minimize_freeze_core(engine, config, core_idx):
     """
-    Minimize with fix atom around central atom up to rcut
+    Freeze directly translated atoms and minimize to relax surrounding atoms
     """
 
-    # define core region and group
-    engine.command(
-        f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}"
-    )
-    engine.command("group frozen_group region sphere_region")
-
-    # freeze core region
-    engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
-
-    # minimization
-    engine.command(f"min_style cg")
-    engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
-
-    # unfreeze/delte
-    engine.command("unfix freeze")
-    engine.command("group frozen_group delete")
-    engine.command("region sphere_region delete")
+    if core_idx is not None:
+        core_ids = [idx + 1 for idx in core_idx]
+        engine.command(f"group frozen_group id {' '.join(map(str, core_ids))}")
+        engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+        engine.command(f"min_style {config.lammps.min_style}")
+        engine.command(f"minimize {config.lammps.frz_min}")
+        engine.command("unfix freeze")
+        engine.command("group frozen_group delete")
 
 
 def _make_frozen_group(engine, config, positions, types) -> bool:
@@ -380,7 +369,6 @@ def partn_search(
                 )
             )
 
-
 def partn_refine(
     engine,
     config,
@@ -390,7 +378,7 @@ def partn_refine(
     types=None,
     saddle_idx=None,
     saddle_positions=None,
-    minimize_outter_atoms: bool = True,
+    minimize_outer_atoms: bool = True,
 ):
 
     # Set positions
@@ -412,13 +400,8 @@ def partn_refine(
         if positions is not None:
             set_positions(engine=engine, positions=positions)
             # small minimization with fix core atoms around central atom
-            if minimize_outter_atoms:
-                minimize_freeze_core(
-                    engine,
-                    positions[central_atom_idx],
-                    config.atomicenvironment.rcut,
-                    maxiter=10,
-                )
+            if minimize_outer_atoms:
+                minimize_freeze_core(engine, config, saddle_idx)
 
     # INITILIZE ARTN
     artn = pypARTn.artn(engine="lmp")

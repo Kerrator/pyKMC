@@ -287,6 +287,7 @@ class Refinement:
                             at_idx,
                             self.system.positions.copy(),
                             types=self.system.types.copy(),
+                            saddle_idx=neighbors.copy(),
                         )  # send copy not reference !
                 futures.append(f)
 

@@ -77,7 +77,7 @@ class BasinsGenericEvents:
         self.explored_states = None  # List of state that we already explored
         self.states: dict[int, StateData] = {}  # Dictionnary of StateDate
         self.known_environments = known_environments
-        self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
+        self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -122,7 +122,9 @@ class BasinsGenericEvents:
             BasinOutput(
                 initial_system_positions=self.states[from_state].system.positions,
                 central_atom=central_atom,
-                saddle_positions=self.absorbing_saddle_positions[exit_state],
+                saddle_positions=self.absorbing_saddle_positions[
+                    (from_state, exit_state)
+                ],
                 final_positions=self.states[exit_state].system.positions[neighbors],
                 neighbors=neighbors,
                 energy_barrier=self.connectivity_table.df[
@@ -499,7 +501,10 @@ class BasinsGenericEvents:
                     tmp_system.update_positions(saddle_positions, atom_idx=neighbors)
                     # refine
                     future2 = self.manager.partn_refine(
-                        self.config, row["central_atom"], tmp_system.positions.copy()
+                        self.config,
+                        row["central_atom"],
+                        tmp_system.positions.copy(),
+                        saddle_idx=neighbors.copy(),
                     )  # send copy not reference !
 
                 # save future in context :
@@ -527,9 +532,8 @@ class BasinsGenericEvents:
 
             # also save saddle positions refined
             idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
-            central_atom = self.connectivity_table.df.loc[idx].at["central_atom"]
-            # self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
-            self.absorbing_saddle_positions[idx_state] = (
+            from_state_for_saddle = self.connectivity_table.df.loc[idx].at["state"]
+            self.absorbing_saddle_positions[(from_state_for_saddle, idx_state)] = (
                 result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             )
             # update connectivity table row

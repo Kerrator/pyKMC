@@ -198,7 +198,7 @@ def partn_refine_AV(
     engine.command(f"group core id {' '.join(map(str, core_ids))}")
     engine.command("fix f_core core setforce 0.0 0.0 0.0")
     engine.command("min_style {}".format(config.lammps.min_style))
-    engine.command("minimize 1.0e-6 1.0e-8 10 10")
+    engine.command("minimize {}".format(config.lammps.frz_min))
     engine.command("unfix f_core")
 
     return E_init, atom_map, (np.where(atom_map == central_atom_idx)[0] + 1)
