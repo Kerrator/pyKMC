@@ -163,16 +163,8 @@ def test_setup_otf_cycle_runs_reload_then_setup_commands():
     setup_otf_cycle(engine, config)
 
     assert commands == [
-        "undump extrapolative_structures_dump",
-        "uncompute max_grade",
-        "unfix extrapolation_grade",
         "pair_style pair_style_cmd",
         "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1",
-        "compute max_grade all reduce max f_extrapolation_grade",
-        "reset_timestep 0",
-        "dump extrapolative_structures_dump all custom 1 extrapolative_dumps/extrapolating_dump.7.lammps id type x y z f_extrapolation_grade",
-        "dump_modify extrapolative_structures_dump append yes",
-        "dump_modify extrapolative_structures_dump skip v_dump_skip",
     ]
 
 

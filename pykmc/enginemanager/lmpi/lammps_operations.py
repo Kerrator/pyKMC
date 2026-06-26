@@ -132,7 +132,7 @@ def initialize_potential(engine, config):
         engine.command(f"dump_modify extrapolative_structures_dump append yes")
         engine.command(f"dump_modify extrapolative_structures_dump skip v_dump_skip")
         engine.command(
-            f"fix extreme_extrapolation all halt 1 v_max_grade > {gamma_max:.4f} error continue"
+            f"fix extreme_extrapolation all halt 5 v_max_grade > {gamma_max:.4f} error continue"
         )
         _setup_otf_latch(engine, gamma_tol, gamma_max)
         engine.command(f"log {otf_thermo_path(engine).as_posix()}")
@@ -171,25 +171,12 @@ def _setup_otf_latch(engine, gamma_tol: float, gamma_max: float) -> None:
 def setup_otf_cycle(engine, config):
     """Load a new pair_style and reset OTFML state for the next retrain cycle.
 
-    Recreating fix pair is required because LAMMPS FixPair stores the
-    extrapolation_flag pointer from the pair object. Reloading pair_style creates
-    a new pair object, so the old fix would keep triggering the stale object.
-    reset_timestep 0 then ensures ntimestep(0) != lasttime(>=1) so FixPair's
-    guard passes at the next minimize setup.
-
-    undump/redump is required because reset_timestep fails with active dumps.
+    Reissuing fix pair with the same ID/style replaces the old FixPair instance,
+    resetting its lasttime state and rebinding it to the current pair style while
+    preserving active dump/compute references by ID.
     """
-    engine.command("undump extrapolative_structures_dump")
-    engine.command("uncompute max_grade")
-    engine.command("unfix extrapolation_grade")
-    engine.command("pair_style {}".format(config.lammps.pair_style))
+    engine.command(f"pair_style {config.lammps.pair_style}")
     engine.command("fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1")
-    engine.command("compute max_grade all reduce max f_extrapolation_grade")
-    engine.command("reset_timestep 0")
-    dump_path = session_dump_path(engine.engine_id).as_posix()
-    engine.command(f"dump extrapolative_structures_dump all custom 1 {dump_path} id type x y z f_extrapolation_grade")
-    engine.command(f"dump_modify extrapolative_structures_dump append yes")
-    engine.command(f"dump_modify extrapolative_structures_dump skip v_dump_skip")
     reset_otf_flags(engine)
 
 
