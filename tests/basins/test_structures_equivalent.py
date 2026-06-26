@@ -64,7 +64,7 @@ class TestStructuresEquivalentColoring:
 
         basin = _make_basin(config)
         assert basin.are_structures_equivalent(
-            pos, pos, cell, types1=types, types2=types
+            pos, typ1=types, pos, typ2=types, cell
         )
 
 
