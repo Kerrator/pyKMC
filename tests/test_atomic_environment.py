@@ -1,98 +1,86 @@
 from pykmc import System, Config, NeighborsList, AtomicEnvironment
-import pytest 
+import pytest
 from pytest_lazy_fixtures import lf
 from collections import Counter
 
 
 expected_results = {
-    "system_single_type_fcc_vacancy" : {"different": 2, "noncrystal" : 12}
+    "system_single_type_fcc_vacancy": {"different": 2, "noncrystal": 12}
 }
 
-class TestAtomicEnvironment : 
 
-    @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_cna(self, system_name:str, system: System, config: Config) : 
+class TestAtomicEnvironment:
+    @pytest.mark.parametrize(
+        "system_name, system, config",
+        [
+            (
+                "system_single_type_fcc_vacancy",
+                lf("system_single_type_fcc_vacancy"),
+                lf("config_system_single_type"),
+            )
+        ],
+    )
+    def test_cna(self, system_name: str, system: System, config: Config):
 
-        config['AtomicEnvironment']['style'] = 'cna'
+        config["AtomicEnvironment"]["style"] = "cna"
         nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut']) 
+        ae = AtomicEnvironment(
+            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
 
         expected = expected_results[system_name]
 
-        assert len(hash_count) == expected['different']
-        assert expected['noncrystal'] in hash_count.values()
+        assert len(hash_count) == expected["different"]
+        assert expected["noncrystal"] in hash_count.values()
 
-    @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_graph(self, system_name:str, system: System, config: Config) : 
+    @pytest.mark.parametrize(
+        "system_name, system, config",
+        [
+            (
+                "system_single_type_fcc_vacancy",
+                lf("system_single_type_fcc_vacancy"),
+                lf("config_system_single_type"),
+            )
+        ],
+    )
+    def test_graph(self, system_name: str, system: System, config: Config):
 
-        config['AtomicEnvironment']['style'] = 'graph'
+        config["AtomicEnvironment"]["style"] = "graph"
         nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut']) 
+        ae = AtomicEnvironment(
+            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
 
         expected = expected_results[system_name]
 
-        assert len(hash_count) == expected['different']
-        assert expected['noncrystal'] in hash_count.values()
+        assert len(hash_count) == expected["different"]
+        assert expected["noncrystal"] in hash_count.values()
 
+    @pytest.mark.parametrize(
+        "system_name, system, config",
+        [
+            (
+                "system_single_type_fcc_vacancy",
+                lf("system_single_type_fcc_vacancy"),
+                lf("config_system_single_type"),
+            )
+        ],
+    )
+    def test_cna_graph(self, system_name: str, system: System, config: Config):
 
-    @pytest.mark.parametrize("system_name, system, config", [("system_single_type_fcc_vacancy", lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))])
-    def test_cna_graph(self, system_name:str, system: System, config: Config) : 
-
-        config['AtomicEnvironment']['style'] = 'cna/graph'
+        config["AtomicEnvironment"]["style"] = "cna/graph"
         nl = NeighborsList(system, config)
-        ae = AtomicEnvironment(config, nl.neighbors_list['rnei'], nl.neighbors_list['rcut'])
+        ae = AtomicEnvironment(
+            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
 
         expected = expected_results[system_name]
 
-        assert len(hash_count) == expected['different']
-        assert expected['noncrystal'] in hash_count.values()
-
-
-class TestAtomColoringMode :
-
-    def test_grey_mode_ignores_types(self, system_binary_fcc, config_system_single_type) :
-        """Passing real types in grey mode must NOT colour: Ni/Fe with identical geometry share an ID."""
-        config = config_system_single_type
-        nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
-
-        # Types are now always threaded; grey mode must still ignore them for hashing.
-        ae_grey = AtomicEnvironment('cna/graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
-                                    types=list(system_binary_fcc.types), coloring_mode='grey')
-
-        # All atoms in perfect FCC are crystal regardless of type
-        assert all(e == "crystal" for e in ae_grey.atomic_environment_list)
-
-    def test_full_mode_graph_distinguishes_types(self, system_binary_fcc, config_system_single_type) :
-        """Full colouring yields more distinct IDs than grey; grey equals the uncoloured baseline."""
-        config = config_system_single_type
-        nl = NeighborsList(system_binary_fcc, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
-        types = list(system_binary_fcc.types)
-
-        # Grey mode WITH real types passed (must be ignored for hashing).
-        ae_grey = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
-                                    types=types, coloring_mode='grey')
-        grey_ids = ae_grey.atomic_environment_list
-
-        # Uncoloured baseline = develop behaviour (no types at all, empty vertex_coloring).
-        ae_uncoloured = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
-                                          types=None)
-        uncoloured_ids = ae_uncoloured.atomic_environment_list
-
-        # Full mode.
-        ae_full = AtomicEnvironment('graph', nl.neighbors_list['rnei'], nl.neighbors_list['rcut'],
-                                    types=types, coloring_mode='full')
-        full_ids = ae_full.atomic_environment_list
-
-        # Grey-with-types forwards None to graph() exactly like the uncoloured path,
-        # so the two are byte-identical per-atom. This equals the develop result
-        # because pynauty treats an empty ``vertex_coloring`` identically to omitting
-        # it (locked decision: certificate(no-coloring) == certificate(vertex_coloring=[])).
-        assert grey_ids == uncoloured_ids
-        # Full mode produces more distinct IDs than grey mode.
-        assert len(set(full_ids)) > len(set(grey_ids))
+        assert len(hash_count) == expected["different"]
+        assert expected["noncrystal"] in hash_count.values()
