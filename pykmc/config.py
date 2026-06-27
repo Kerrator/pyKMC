@@ -672,6 +672,11 @@ class ReconstructionConfig(BaseModel):
         default=1.0,
         description="Radius margin (Angstrom): the n_movers most-displaced atoms must sit within (atomicenvironment.rcut - containment_margin) of the central atom, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained.",
     )
+    shell_tolerance: float = Field(
+        default=1.0,
+        gt=0,
+        description="Looser whole-rcut-shell acceptance bound (Angstrom). On top of the tight n_movers check, EVERY atom in the rcut shell must land within shell_tolerance of its expected min1/min2 position. This catches a peripheral (non-mover) atom that relaxed into a distinct site (a large displacement) while tolerating the small wiggle of atoms that merely settled around the event; the movers-only check alone would accept such a wrong overall state. Set well above the expected peripheral relaxation (~tenths of an Angstrom) but below a nearest-neighbour site change.",
+    )
 
 class BasinConfig(BaseModel):
     """Basin parameters."""

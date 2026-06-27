@@ -8,6 +8,8 @@ from pykmc.utils.geometry import (
     push_towards,
     per_atom_displacement,
     minimum_image_distance,
+    event_movers,
+    reconstruction_matches,
 )
 import ase.geometry
 
@@ -63,11 +65,8 @@ class Reconstruction:
         #correct reconstruction, so the acceptance check is restricted to these
         #top-n movers rather than the maximum over the whole rcut neighbourhood.
         event_disp = per_atom_displacement(supposed_min1_positions, supposed_min2_positions, cell)
-        significant = np.where(event_disp > matching_thr)[0]
-        if len(significant) == 0 : #degenerate event: fall back to the single largest mover
-            significant = np.array([int(np.argmax(event_disp))])
-        order = significant[np.argsort(event_disp[significant])[::-1]]
-        movers = order[: self.config.reconstruction.n_movers]
+        movers = event_movers(event_disp, self.config.reconstruction.n_movers, matching_thr)
+        shell_thr = self.config.reconstruction.shell_tolerance
 
         #Radius-containment guard: if a top mover sits in the outer rcut shell,
         #the event reaches the edge of the stored neighbourhood and the frozen
@@ -114,13 +113,13 @@ class Reconstruction:
         #compare min1_pos with system current positions, restricted to the movers
         t1 = ase.geometry.wrap_positions(positions = min1_pos, cell = cell, pbc = True)
         disc1 = per_atom_displacement(supposed_min1_positions, t1[neighbors], cell)
-        delr1 = float(disc1[movers].max())
-        if delr1 > matching_thr :
+        ok1, delr1, shell1 = reconstruction_matches(disc1, movers, matching_thr, shell_thr)
+        if not ok1 :
             return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN1,
-                        message="did not retreive initial minimum : delr1 = {}".format(delr1),
-                        variables={"delr1": delr1},
+                        message="did not retreive initial minimum : delr1 = {} shell = {} (shell_thr {})".format(delr1, shell1, shell_thr),
+                        variables={"delr1": delr1, "delr_shell1": shell1},
                     )
                 )
         else :
@@ -141,13 +140,13 @@ class Reconstruction:
             #compare min2_pos with expected final positions, restricted to the movers
             t2 = ase.geometry.wrap_positions(positions = min2_pos, cell = cell, pbc = True)
             disc2 = per_atom_displacement(supposed_min2_positions, t2[neighbors], cell)
-            delr2 = float(disc2[movers].max())
-            if delr2 > matching_thr :
+            ok2, delr2, shell2 = reconstruction_matches(disc2, movers, matching_thr, shell_thr)
+            if not ok2 :
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_MIN2,
-                        message="did not retreive expected final minimum : delr2 = {}".format(delr2),
-                        variables={"delr2": delr2},
+                        message="did not retreive expected final minimum : delr2 = {} shell = {} (shell_thr {})".format(delr2, shell2, shell_thr),
+                        variables={"delr2": delr2, "delr_shell2": shell2},
                     )
                 )
 

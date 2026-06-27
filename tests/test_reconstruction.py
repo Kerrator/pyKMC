@@ -12,6 +12,7 @@ def _config() -> Mock:
     config.reconstruction.push_fraction = 0.15
     config.reconstruction.n_movers = 3
     config.reconstruction.containment_margin = 1.0
+    config.reconstruction.shell_tolerance = 1.0
     config.atomicenvironment.rcut = 6.5
     config.psr.matching_score_thr = 0.1
     return config
@@ -86,6 +87,26 @@ def test_peripheral_atom_offset_does_not_veto_when_movers_match():
     )
 
     assert result.is_ok()
+
+
+def test_peripheral_gross_misland_rejected_by_shell_bound():
+    """A peripheral (non-mover) atom that relaxes into a DISTINCT site (a large
+    displacement, > shell_tolerance) must reject the reconstruction even though the
+    event movers match -- the whole-shell loose bound catches a wrong overall state
+    that the movers-only check would have accepted (review finding #1)."""
+    # mover atom 1 exact; peripheral atom 2 lands 1.5 A off (>> shell_tolerance=1.0).
+    min1_ret = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [4.5, 0.0, 0.0]])
+    manager = Mock()
+    manager.global_minimize_with_results.side_effect = [(min1_ret, 0.0)]
+    recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
+
+    result = recon.reconstruct(
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
+    )
+
+    assert not result.is_ok()
+    assert result.err_value().type == ErrorType.RECONSTRUCTION_INVALID_MIN1
+    assert result.err_value().variables["delr_shell1"] > 1.0
 
 
 def test_mover_offset_rejects_reconstruction():

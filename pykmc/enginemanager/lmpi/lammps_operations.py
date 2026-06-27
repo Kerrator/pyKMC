@@ -986,7 +986,14 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                             kmax_factor: float, atom_coloring_mode: str) -> "dict | None":
     import ira_mod
     import ase.geometry
-    from ...utils.geometry import transform_positions, push_towards, compute_delr
+    from ...utils.geometry import (
+        transform_positions,
+        push_towards,
+        per_atom_displacement,
+        minimum_image_distance,
+        event_movers,
+        reconstruction_matches,
+    )
 
     proceed = None  # control signal broadcast to all ranks
 
@@ -1064,15 +1071,38 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                     new_positions = np.array(from_positions, copy=True)
                     new_positions[neighbor_indices] = saddle
 
-                    # Push toward min1
-                    saddle_toward_min1 = push_towards(
-                        new_positions[neighbor_indices], supposed_initial,
-                        fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
-                    tmp_positions = np.array(new_positions, copy=True)
-                    tmp_positions[neighbor_indices] = saddle_toward_min1
-                    proceed = {"step": "min1", "positions": tmp_positions,
-                               "supposed_initial": supposed_initial, "supposed_final": supposed_final,
-                               "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+                    # Acceptance movers + radius-containment guard: mirror of the
+                    # host-side Reconstruction.reconstruct so serial and wavefront
+                    # basin reconstruction accept/reject identically.
+                    event_disp = per_atom_displacement(supposed_initial, supposed_final, cell)
+                    movers = event_movers(
+                        event_disp, config.reconstruction.n_movers, matching_score_thr)
+                    central_rows = np.where(np.asarray(neighbor_indices) == central_atom)[0]
+                    if len(central_rows) > 0:
+                        central_shell_pos = supposed_initial[central_rows[0]]
+                        max_mover_r = max(
+                            minimum_image_distance(central_shell_pos, supposed_initial[m], cell)
+                            for m in movers
+                        )
+                        rcut_limit = (config.atomicenvironment.rcut
+                                      - config.reconstruction.containment_margin)
+                        if max_mover_r > rcut_limit:
+                            proceed = {"ok": False,
+                                       "error_type": "RECONSTRUCTION_EVENT_NOT_CONTAINED",
+                                       "message": f"event not contained in rcut: max mover "
+                                                  f"radius {max_mover_r} > {rcut_limit}"}
+
+                    if proceed is None:
+                        # Push toward min1
+                        saddle_toward_min1 = push_towards(
+                            new_positions[neighbor_indices], supposed_initial,
+                            fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                        tmp_positions = np.array(new_positions, copy=True)
+                        tmp_positions[neighbor_indices] = saddle_toward_min1
+                        proceed = {"step": "min1", "positions": tmp_positions,
+                                   "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                                   "saddle_positions": new_positions, "neighbor_indices": neighbor_indices,
+                                   "movers": movers}
         except Exception as exc:
             logger.exception("[Engine Rank 0] basin reconstruction rank-0 PSR phase failed")
             proceed = {"ok": False, "error_type": type(exc).__name__,
@@ -1120,11 +1150,14 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
             saddle_positions = proceed["saddle_positions"]
             nbr_indices = proceed["neighbor_indices"]
 
+            movers = proceed["movers"]
             t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
-            delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
-            if delr1 > matching_score_thr:
+            disc1 = per_atom_displacement(supposed_initial, t1[nbr_indices], cell)
+            ok1, delr1, shell1 = reconstruction_matches(
+                disc1, movers, matching_score_thr, config.reconstruction.shell_tolerance)
+            if not ok1:
                 proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
-                            "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
+                            "message": f"did not retrieve initial minimum: delr1 = {delr1} shell = {shell1}"}
             else:
                 # Push toward min2
                 saddle_toward_min2 = push_towards(
@@ -1133,7 +1166,8 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 tmp_positions2 = np.array(saddle_positions, copy=True)
                 tmp_positions2[nbr_indices] = saddle_toward_min2
                 proceed2 = {"step": "min2", "positions": tmp_positions2,
-                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices,
+                            "movers": movers}
         except Exception as exc:
             logger.exception("[Engine Rank 0] basin reconstruction min1 validation failed")
             proceed2 = {"ok": False, "error_type": type(exc).__name__,
@@ -1158,10 +1192,13 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     if engine.rank == 0:
         supposed_final = proceed2["supposed_final"]
         nbr_indices = proceed2["neighbor_indices"]
+        movers = proceed2["movers"]
 
         t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
-        delr2 = compute_delr(supposed_final, t2[nbr_indices], cell, pbc=pbc)
-        if delr2 > matching_score_thr:
+        disc2 = per_atom_displacement(supposed_final, t2[nbr_indices], cell)
+        ok2, delr2, shell2 = reconstruction_matches(
+            disc2, movers, matching_score_thr, config.reconstruction.shell_tolerance)
+        if not ok2:
             if os.environ.get("PYKMC_BASIN_DEBUG") == "1":
                 try:
                     diffs = t2[nbr_indices] - supposed_final
@@ -1180,7 +1217,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 except Exception as exc:
                     logger.warning("[basin_reconstruct] diag dump failed: %s", exc)
             return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
-                    "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
+                    "message": f"did not retrieve expected final minimum: delr2 = {delr2} shell = {shell2}"}
 
         return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
 
