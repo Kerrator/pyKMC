@@ -101,7 +101,7 @@ def main():
             if sigma > 0:
                 sad[nbrs] = sad[nbrs] + rng.normal(0.0, sigma, (len(nbrs), 3))
             # full-cell (current)
-            r_full = Reconstruction(config, manager, types=s.types).reconstruct(m1, m2, sad, s.cell, thr, nbrs)
+            r_full = Reconstruction(config, manager, types=s.types).reconstruct(m1, m2, sad, s.cell, nbrs)
             if r_full.is_ok():
                 full = "OK"
             else:

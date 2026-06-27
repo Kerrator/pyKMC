@@ -23,7 +23,7 @@ class Reconstruction:
         self.manager = manager #Manager objet that can perform minimization and return minimized positions
         self.types = types
 
-    def reconstruct(self, supposed_min1_positions, supposed_min2_positions, saddle_positions, cell, delr_thr, neighbors = None, central_atom = None) :
+    def reconstruct(self, supposed_min1_positions, supposed_min2_positions, saddle_positions, cell, neighbors = None, central_atom = None) :
         """From a saddle point, try to reconstruct the event to see if it matches the 
         supposed min1 and min2 positions, and that the to minima are connected.
 

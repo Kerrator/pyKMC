@@ -88,7 +88,7 @@ def main():
             if sigma > 0:
                 sad[neighbors] = sad[neighbors] + rng.normal(0.0, sigma, (len(neighbors), 3))
             recon = Reconstruction(config, manager, types=system.types)
-            res = recon.reconstruct(supposed_min1, supposed_min2, sad, system.cell, thr, neighbors)
+            res = recon.reconstruct(supposed_min1, supposed_min2, sad, system.cell, neighbors)
             if res.is_ok():
                 print(f"  sigma={sigma:.2f}  OK", flush=True)
             else:

@@ -35,8 +35,7 @@ def test_reconstruct_returns_err_when_engine_minimize_raises():
     recon = Reconstruction(_config(), manager, types=["Ni", "Ni"])
 
     result = recon.reconstruct(
-        _MIN1.copy(), _MIN2.copy(), _SADDLE.copy(), _CELL, delr_thr=0.1
-    )
+        _MIN1.copy(), _MIN2.copy(), _SADDLE.copy(), _CELL    )
 
     assert not result.is_ok()
     assert result.err_value().type == ErrorType.RECONSTRUCTION_MINIMIZE_FAILED
@@ -53,8 +52,7 @@ def test_reconstruct_ok_path_still_works():
     recon = Reconstruction(_config(), manager, types=["Ni", "Ni"])
 
     result = recon.reconstruct(
-        _MIN1.copy(), _MIN2.copy(), _SADDLE.copy(), _CELL, delr_thr=0.1
-    )
+        _MIN1.copy(), _MIN2.copy(), _SADDLE.copy(), _CELL    )
 
     assert result.is_ok()
     assert result.ok_value().min2_etot == -5.0
@@ -83,8 +81,7 @@ def test_peripheral_atom_offset_does_not_veto_when_movers_match():
     recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
 
     result = recon.reconstruct(
-        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
-    )
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL    )
 
     assert result.is_ok()
 
@@ -101,8 +98,7 @@ def test_peripheral_gross_misland_rejected_by_shell_bound():
     recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
 
     result = recon.reconstruct(
-        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
-    )
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL    )
 
     assert not result.is_ok()
     assert result.err_value().type == ErrorType.RECONSTRUCTION_INVALID_MIN1
@@ -118,8 +114,7 @@ def test_mover_offset_rejects_reconstruction():
     recon = Reconstruction(_config(), manager, types=["Ni", "Ni", "Ni"])
 
     result = recon.reconstruct(
-        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL, delr_thr=0.1
-    )
+        _MIN1_3.copy(), _MIN2_3.copy(), _SADDLE_3.copy(), _CELL    )
 
     assert not result.is_ok()
     assert result.err_value().type == ErrorType.RECONSTRUCTION_INVALID_MIN1
@@ -138,7 +133,7 @@ def test_event_not_contained_in_rcut_rejects_before_minimize():
     recon = Reconstruction(config, manager, types=["Ni", "Ni", "Ni"])
 
     result = recon.reconstruct(
-        min1, min2, saddle, _CELL, delr_thr=0.1,
+        min1, min2, saddle, _CELL,
         neighbors=np.array([0, 1, 2]), central_atom=0,
     )
 

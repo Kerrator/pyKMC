@@ -748,7 +748,7 @@ class KMC:
         self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
 
         #try to reconstruct
-        result = Reconstruction(self.config, self.manager, types=self.system.types).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors, central_atom=central_atom)
+        result = Reconstruction(self.config, self.manager, types=self.system.types).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, neighbors, central_atom=central_atom)
         #result with min1, saddle, min2 pos
 
         #Back to original positions, in case reconstruction fails

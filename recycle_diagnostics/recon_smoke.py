@@ -98,7 +98,7 @@ def main():
 
         recon = Reconstruction(config, manager, types=system.types)
         result = recon.reconstruct(
-            supposed_min1, supposed_min2, saddle_full, system.cell, thr, neighbors
+            supposed_min1, supposed_min2, saddle_full, system.cell, neighbors
         )
         print(f"[repeat={repeat} natoms={len(system.positions)} nbrs={len(neighbors)} "
               f"e1={e1:.4f} e2={e2:.4f}] reconstruct ok={result.is_ok()}", flush=True)

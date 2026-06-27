@@ -58,7 +58,7 @@ def main():
                 config.reconstruction.push_fraction = pf
             except Exception:
                 config = config.model_copy(update={"reconstruction": config.reconstruction.model_copy(update={"push_fraction": pf})})
-            r = Reconstruction(config, mgr, types=s.types).reconstruct(m1, m2, sad, s.cell, thr, nbrs)
+            r = Reconstruction(config, mgr, types=s.types).reconstruct(m1, m2, sad, s.cell, nbrs)
             if r.is_ok():
                 print(f"  push_fraction={pf:.2f}  OK", flush=True)
             else:

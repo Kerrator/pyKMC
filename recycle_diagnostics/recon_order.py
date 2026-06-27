@@ -114,7 +114,7 @@ def main():
             # min pairwise distance among pushed shell atoms (overlap detector)
             from scipy.spatial.distance import pdist
             dmin = float(pdist(pushed).min()) if n > 1 else np.nan
-            r = Reconstruction(config, mgr, types=s.types).reconstruct(m1, m2, saddle_scr, s.cell, thr, nbrs)
+            r = Reconstruction(config, mgr, types=s.types).reconstruct(m1, m2, saddle_scr, s.cell, nbrs)
             if r.is_ok():
                 tag = "OK"
             else:
