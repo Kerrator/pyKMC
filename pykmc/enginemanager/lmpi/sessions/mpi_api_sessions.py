@@ -3,7 +3,41 @@ import numpy as np
 from ...messenger import MpiMessenger
 from threading import RLock  
 from functools import wraps
-#TODO more general way to deal with operations 
+from collections.abc import Callable
+import time
+
+_POLL_INTERVAL_S = 0.05
+
+
+class EngineOpTimeout(Exception):
+    """Rank 0 waited past the engine-op deadline for a reply -- the pool is desynced."""
+
+
+def _await_reply(
+    poll: "Callable[[], tuple[bool, object]]",
+    timeout_s: float,
+    *,
+    monotonic: "Callable[[], float]" = time.monotonic,
+    sleep: "Callable[[float], object]" = time.sleep,
+) -> object:
+    """Poll ``poll() -> (done, value)`` until done; raise EngineOpTimeout past the deadline.
+
+    Backs the opt-in engine-op wall guard: a bounded wait so a desynced pool (an engine
+    rank stuck below the Python layer that will never reply -- see
+    HANDOFF_recycle_pool_hang.md) fails fast instead of stalling for the full per-run
+    timeout. ``monotonic``/``sleep`` are injectable for deterministic testing.
+    """
+    deadline = monotonic() + timeout_s
+    while True:
+        done, value = poll()
+        if done:
+            return value
+        if monotonic() >= deadline:
+            raise EngineOpTimeout(f"no engine reply within {timeout_s}s")
+        sleep(_POLL_INTERVAL_S)
+
+
+#TODO more general way to deal with operations
 #TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
 #initiated in kmc, after the initialization of manager ...))
 
@@ -33,6 +67,9 @@ class MpiApiSession :
         self._is_alive = False
         self._is_busy = False
         self._lock = RLock()
+        # Opt-in engine-op wall guard (seconds); None -> plain blocking recv.
+        # Set by Manager.initialize_sessions from config.control.engine_op_timeout_s.
+        self._op_timeout = None
 
         if MPI.COMM_WORLD.Get_rank() != 0:
             raise RuntimeError("MpiApiSession must be used from rank 0.")
@@ -47,10 +84,36 @@ class MpiApiSession :
         if expect_status:
             self.receive_status()
 
+    def _recv(self, source: int, tag: int) -> object:
+        """Receive a message, optionally bounded by the engine-op wall guard.
+
+        With ``self._op_timeout`` unset (default) this is a plain blocking recv --
+        byte-identical to the previous behaviour. When a timeout is configured (and the
+        transport is MPI), rank 0 polls for the reply and, on the deadline, aborts the
+        whole MPI job: a desynced pool cannot be recovered (an engine rank is stuck
+        below the Python layer and will never reply), so failing fast beats a multi-hour
+        stall. See HANDOFF_recycle_pool_hang.md.
+        """
+        if self._op_timeout is None or not isinstance(self.messenger, MpiMessenger):
+            return self.messenger.recv(source=source, tag=tag)
+        request = self.messenger.comm.irecv(source=source, tag=tag)
+        try:
+            return _await_reply(request.test, self._op_timeout)
+        except EngineOpTimeout:
+            try:
+                request.Cancel()
+            except Exception:
+                pass
+            print(
+                f"[Session] No engine reply within {self._op_timeout}s "
+                f"(source={source}, tag={tag}); the pool is desynced -- aborting the MPI job."
+            )
+            MPI.COMM_WORLD.Abort(1)
+
     def receive_status(self) -> None:
         """Receive the status of the engine.
         """
-        msg = self.messenger.recv(source=self.engine_master_rank, tag = 0)
+        msg = self._recv(source=self.engine_master_rank, tag=0)
         if msg.get("type") == "status":
             value = msg.get("value", {})
             self._is_alive = value.get("alive", False)
@@ -169,7 +232,7 @@ class MpiApiSession :
 
     def _receive_result_or_error(self) -> object:
         """Receive a tag-1 reply, raising on explicit remote failures."""
-        msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
+        msg = self._recv(source=self.engine_master_rank, tag=1)
         msg_type = msg.get("type")
         if msg_type == "result":
             return msg.get("value")

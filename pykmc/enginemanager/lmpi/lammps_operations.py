@@ -470,16 +470,43 @@ def get_types(engine) -> list[str]:
     labels = engine.lmp.get_category_keywords("typelabel")
     return [labels[t - 1] for t in int_types]
     
-def set_positions(engine, positions) : 
+def set_positions(engine, positions) :
     positions = positions.flatten().astype(np.float64)
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
 
+def _require_finite_positions(positions: "np.ndarray", op_name: str) -> None:
+    """Reject non-finite positions before they reach a collective LAMMPS op.
+
+    A NaN/inf coordinate makes LAMMPS raise a *per-rank* error (``error->one`` --
+    "Non-numeric atom coords") that fires on only the rank(s) owning the bad atom.
+    On a multi-rank engine that desyncs the whole pool: the erroring rank unwinds to
+    the Python finally-barrier in ``_handle_message`` while the surviving ranks stay
+    trapped inside liblammps's own collectives (e.g. an ``MPI_Sendrecv`` inside
+    ``minimize``), and the job hangs for hours (see HANDOFF_recycle_pool_hang.md).
+    The survivor never returns from ``lammps_command``, so no *post-op* resync can
+    recover it -- the error must be caught *before* LAMMPS runs.
+
+    Every engine rank receives the *same* broadcast ``positions``, so this check is
+    collective by construction: either all ranks raise together (a clean symmetric
+    failure that surfaces as a RuntimeError on rank 0 and leaves the pool
+    shut-downable) or none do.
+    """
+    arr = np.asarray(positions, dtype=float)
+    if not np.isfinite(arr).all():
+        n_bad = int((~np.isfinite(arr)).sum())
+        raise ValueError(
+            f"{op_name}: positions contain {n_bad} non-finite value(s) (NaN/inf); "
+            "refusing to feed a poisoned geometry to the multi-rank LAMMPS engine "
+            "(would trigger an asymmetric per-rank error and hang the pool)."
+        )
+
 def minimize_with_results(engine, config, positions=None, types=None) :
     """Minimize and return the minimized positions and the total energy.
     """
     if positions is not None :
+        _require_finite_positions(positions, "minimize_with_results")
         set_positions(engine=engine, positions=positions)
     atoms_frozen = _make_frozen_group(engine, config, positions, types)
     _apply_frozen_fix(engine, "f_frozen_min", atoms_frozen)
@@ -956,7 +983,14 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                             kmax_factor: float, atom_coloring_mode: str) -> "dict | None":
     import ira_mod
     import ase.geometry
-    from ...utils.geometry import transform_positions, push_towards, compute_delr
+    from ...utils.geometry import (
+        transform_positions,
+        push_towards,
+        per_atom_displacement,
+        minimum_image_distance,
+        event_movers,
+        reconstruction_matches,
+    )
 
     proceed = None  # control signal broadcast to all ranks
 
@@ -1034,15 +1068,38 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                     new_positions = np.array(from_positions, copy=True)
                     new_positions[neighbor_indices] = saddle
 
-                    # Push toward min1
-                    saddle_toward_min1 = push_towards(
-                        new_positions[neighbor_indices], supposed_initial,
-                        fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
-                    tmp_positions = np.array(new_positions, copy=True)
-                    tmp_positions[neighbor_indices] = saddle_toward_min1
-                    proceed = {"step": "min1", "positions": tmp_positions,
-                               "supposed_initial": supposed_initial, "supposed_final": supposed_final,
-                               "saddle_positions": new_positions, "neighbor_indices": neighbor_indices}
+                    # Acceptance movers + radius-containment guard: mirror of the
+                    # host-side Reconstruction.reconstruct so serial and wavefront
+                    # basin reconstruction accept/reject identically.
+                    event_disp = per_atom_displacement(supposed_initial, supposed_final, cell)
+                    movers = event_movers(
+                        event_disp, config.reconstruction.n_movers, matching_score_thr)
+                    central_rows = np.where(np.asarray(neighbor_indices) == central_atom)[0]
+                    if len(central_rows) > 0:
+                        central_shell_pos = supposed_initial[central_rows[0]]
+                        max_mover_r = max(
+                            minimum_image_distance(central_shell_pos, supposed_initial[m], cell)
+                            for m in movers
+                        )
+                        rcut_limit = (config.atomicenvironment.rcut
+                                      - config.reconstruction.containment_margin)
+                        if max_mover_r > rcut_limit:
+                            proceed = {"ok": False,
+                                       "error_type": "RECONSTRUCTION_EVENT_NOT_CONTAINED",
+                                       "message": f"event not contained in rcut: max mover "
+                                                  f"radius {max_mover_r} > {rcut_limit}"}
+
+                    if proceed is None:
+                        # Push toward min1
+                        saddle_toward_min1 = push_towards(
+                            new_positions[neighbor_indices], supposed_initial,
+                            fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                        tmp_positions = np.array(new_positions, copy=True)
+                        tmp_positions[neighbor_indices] = saddle_toward_min1
+                        proceed = {"step": "min1", "positions": tmp_positions,
+                                   "supposed_initial": supposed_initial, "supposed_final": supposed_final,
+                                   "saddle_positions": new_positions, "neighbor_indices": neighbor_indices,
+                                   "movers": movers}
         except Exception as exc:
             logger.exception("[Engine Rank 0] basin reconstruction rank-0 PSR phase failed")
             proceed = {"ok": False, "error_type": type(exc).__name__,
@@ -1090,11 +1147,14 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
             saddle_positions = proceed["saddle_positions"]
             nbr_indices = proceed["neighbor_indices"]
 
+            movers = proceed["movers"]
             t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
-            delr1 = compute_delr(supposed_initial, t1[nbr_indices], cell, pbc=pbc)
-            if delr1 > matching_score_thr:
+            disc1 = per_atom_displacement(supposed_initial, t1[nbr_indices], cell)
+            ok1, delr1, shell1 = reconstruction_matches(
+                disc1, movers, matching_score_thr, config.reconstruction.shell_tolerance)
+            if not ok1:
                 proceed2 = {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN1",
-                            "message": f"did not retrieve initial minimum: delr1 = {delr1}"}
+                            "message": f"did not retrieve initial minimum: delr1 = {delr1} shell = {shell1}"}
             else:
                 # Push toward min2
                 saddle_toward_min2 = push_towards(
@@ -1103,7 +1163,8 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 tmp_positions2 = np.array(saddle_positions, copy=True)
                 tmp_positions2[nbr_indices] = saddle_toward_min2
                 proceed2 = {"step": "min2", "positions": tmp_positions2,
-                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices}
+                            "supposed_final": supposed_final, "neighbor_indices": nbr_indices,
+                            "movers": movers}
         except Exception as exc:
             logger.exception("[Engine Rank 0] basin reconstruction min1 validation failed")
             proceed2 = {"ok": False, "error_type": type(exc).__name__,
@@ -1128,10 +1189,13 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     if engine.rank == 0:
         supposed_final = proceed2["supposed_final"]
         nbr_indices = proceed2["neighbor_indices"]
+        movers = proceed2["movers"]
 
         t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
-        delr2 = compute_delr(supposed_final, t2[nbr_indices], cell, pbc=pbc)
-        if delr2 > matching_score_thr:
+        disc2 = per_atom_displacement(supposed_final, t2[nbr_indices], cell)
+        ok2, delr2, shell2 = reconstruction_matches(
+            disc2, movers, matching_score_thr, config.reconstruction.shell_tolerance)
+        if not ok2:
             if os.environ.get("PYKMC_BASIN_DEBUG") == "1":
                 try:
                     diffs = t2[nbr_indices] - supposed_final
@@ -1150,7 +1214,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 except Exception as exc:
                     logger.warning("[basin_reconstruct] diag dump failed: %s", exc)
             return {"ok": False, "error_type": "RECONSTRUCTION_INVALID_MIN2",
-                    "message": f"did not retrieve expected final minimum: delr2 = {delr2}"}
+                    "message": f"did not retrieve expected final minimum: delr2 = {delr2} shell = {shell2}"}
 
         return {"ok": True, "min2_positions": min2_pos, "min2_etot": min2_etot}
 

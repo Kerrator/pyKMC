@@ -114,6 +114,8 @@ class ErrorType(Enum):
     REFINEMENT_INVALID_MINIMA = 32
     RECONSTRUCTION_INVALID_MIN1 = 41
     RECONSTRUCTION_INVALID_MIN2 = 42
+    RECONSTRUCTION_MINIMIZE_FAILED = 43
+    RECONSTRUCTION_EVENT_NOT_CONTAINED = 44
     BASIN_TEXIT_NOT_FOUND = 51
     BASIN_TOO_MANY_FAILED_STATES = 52
     BASIN_NO_VIABLE_EXIT = 53
@@ -184,6 +186,10 @@ class EventRefinementOutput:
         used to rebuild the active rate without re-invoking the backend.
     nu0 : Optional[float]
         Raw Vineyard nu0 (Hz) diagnostic carried from the reference event.
+    neighbors : Optional[np.ndarray]
+        Absolute atom indices of the in-rcut neighbour subset, captured at
+        refinement and used as the authoritative ordering for the stored
+        ``saddle_positions``/``min2_positions`` during reconstruction.
     """
 
     central_atom_index: int
@@ -195,6 +201,7 @@ class EventRefinementOutput:
     k_prefactor: Optional[float] = None
     nu0: Optional[float] = None
     refined: Optional[str] = None
+    neighbors: Optional[np.ndarray] = None
 
 
 @dataclass

@@ -719,6 +719,7 @@ class ActiveEventTable:
                 "atom_index": pd.Series(dtype="int64"),
                 "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
+                "neighbors": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
@@ -845,6 +846,7 @@ class ActiveEventTable:
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
+                "neighbors": event_refinement_output.neighbors,
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": rate_from_prefactor(prefactor, event_refinement_output.dE_forward, self.config.rateconstant.T),
                 "num_reference_event": event_refinement_output.num_reference_event,
@@ -866,8 +868,11 @@ class ActiveEventTable:
         ``refined == "T"`` participate -- refinement's ``e_thr`` already gates
         these to the probable events; ``"F"``/``"B"`` rows keep the values
         inherited from the reference table. Full event geometry is rebuilt from
-        the current system minimum plus the row's neighbor-cropped arrays (the
-        same ``get_neighbors("rcut", atom)`` crop refinement applied), one
+        the current system minimum plus the row's neighbor-cropped arrays, using
+        the per-event neighbour ordering **stored on the row** (the ``neighbors``
+        column persisted at refinement time) -- NOT a fresh
+        ``get_neighbors("rcut", atom)`` re-derivation, which yields a different
+        order for recycled rows and scatters coords onto the wrong atoms. One
         batch is fanned out through the backend, and each row's ``nu0``/``k``
         are patched in place; a None nu0 keeps the inherited values (logged).
 
@@ -876,7 +881,9 @@ class ActiveEventTable:
         system : System
             The current system (its positions are the min1 of every active event).
         neighbors_list : NeighborsList
-            The step's neighbor list (the one refinement cropped with).
+            Unused. Retained for call-signature stability only; the neighbour
+            ordering now comes from each row's stored ``neighbors`` column, not
+            from this per-step list (see the body comment).
 
         """
         if not self._htst_active:
@@ -890,9 +897,10 @@ class ActiveEventTable:
             return
         backfill: "list[tuple[int, dict[str, object]]]" = []
         for idx, row in refined_rows.iterrows():
-            neighbors = np.asarray(
-                neighbors_list.get_neighbors("rcut", int(row["atom_index"])), dtype=int
-            )
+            # Use the neighbour ordering stored on the row at refinement time:
+            # re-deriving it from the per-step neighbour list yields a different
+            # order for recycled rows and scatters coords onto the wrong atoms.
+            neighbors = np.asarray(row["neighbors"], dtype=int)
             full_saddle = system.positions.copy()
             full_saddle[neighbors] = row["saddle_positions"]
             full_min2 = system.positions.copy()

@@ -464,6 +464,68 @@ class TestLammpsApiMpiEngine :
         # The prefactor must come back (real nu0 or a graceful k0 fallback), never hang.
         assert hasattr(results[0], "ok_forward")
 
+    @pytest.mark.parametrize("system, config", [(lf("system_single_type_fcc"), lf("config_system_single_type"))])
+    def test_engine_error_during_global_minimize_does_not_hang(self, system: System, config: Config) -> None:
+        """An engine-side error during a global pool op must fail cleanly, not hang.
+
+        Regression for the recycle-reconstruction pool hang (see the repo-root
+        HANDOFF_recycle_pool_hang.md). Root cause, confirmed by stack-sampling the
+        hung ranks: a *per-rank* LAMMPS error (``error->one`` -- e.g. "Non-numeric
+        atom coords" from a poisoned recycle geometry) fires on only a SUBSET of the
+        global engine ranks. The erroring rank unwinds to the Python finally-barrier
+        in ``_handle_message`` while the surviving rank stays trapped inside
+        liblammps's own collective (an ``MPI_Sendrecv`` inside ``minimize``) -- so the
+        two engine ranks deadlock, busy-spin at ~100% CPU, and rank 0 blocks in
+        ``receive_status``. Because the survivor never returns from ``lammps_command``,
+        no *post-op* Python-level resync can recover it.
+
+        The fix detects the poisoned geometry COLLECTIVELY before LAMMPS sees it:
+        every engine rank validates the (identically broadcast) positions and raises
+        the SAME error together, so the failure travels the symmetric error path --
+        it surfaces as a RuntimeError on rank 0 and the pool stays shut-downable.
+
+        Contract: (a) the engine error surfaces as a RuntimeError on rank 0, and
+        (b) ``close_all()`` returns. Reaching the end of this test (rather than
+        stalling) is the regression check. Runs under any ``mpirun -n >= 3``; with
+        fewer ranks it skips.
+        """
+        if MPI.COMM_WORLD.Get_size() < 3:
+            pytest.skip("needs mpirun -n >= 3 for a multi-rank global engine")
+        config.control.n_sessions = 1
+        config.control.engine_use_rank_0 = False
+        factory = ManagerFactory(n_sessions=1, use_rank_0=False)
+        manager = factory.launch()
+        if manager is None:
+            return  # engine ranks block in their service loop
+        # ------------ SESSION CODE (rank 0) ------------
+        try:
+            manager.initialize_sessions(config, system)
+            manager.use_global()
+
+            # Poisoned geometry: a non-finite coordinate. Fed to a multi-rank global
+            # minimize this provokes a per-rank LAMMPS error (error->one) that strands
+            # the surviving engine rank inside liblammps -- the documented pool hang.
+            # The collective pre-validation must turn this into a clean symmetric
+            # failure instead.
+            bad = system.positions.copy().astype(float)
+            bad[1] = np.nan
+
+            raised = False
+            try:
+                manager.global_minimize_with_results(
+                    config, positions=bad, types=list(system.types)
+                )
+            except RuntimeError:
+                raised = True  # the engine error reached rank 0 -- good
+            assert raised, (
+                "engine error must surface as a RuntimeError on rank 0, not hang"
+            )
+        finally:
+            # The pool must remain shut-downable. close_all() lives in a finally so a
+            # failed assertion (or any early rank-0 exit) can never strand the engine
+            # ranks busy-spinning in run_engine_loop -- the second defect behind the hang.
+            manager.close_all()
+
         
 
 
