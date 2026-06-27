@@ -176,6 +176,7 @@ def setup_otf_cycle(engine, config):
     preserving active dump/compute references by ID.
     """
     engine.command(f"pair_style {config.lammps.pair_style}")
+    engine.command(f"pair_coeff {config.lammps.pair_coeff}")
     engine.command("fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1")
     reset_otf_flags(engine)
 

@@ -164,6 +164,7 @@ def test_setup_otf_cycle_runs_reload_then_setup_commands():
 
     assert commands == [
         "pair_style pair_style_cmd",
+        "pair_coeff pair_coeff_cmd",
         "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1",
     ]
 
