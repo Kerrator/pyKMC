@@ -58,6 +58,8 @@ class StateData:
                     self.neighbors_list.neighbors_list["rnei"],
                     self.neighbors_list.neighbors_list["rcut"],
                     config.atomicenvironment.neighbors_add,
+                    types=self.system.types,
+                    coloring_mode=config.atomicenvironment.atom_coloring_mode,
                 )
 
 
@@ -546,7 +548,11 @@ class BasinsGenericEvents:
 
         for state_index, state_data in self.states.items():
             are_equivalent = self.are_structures_equivalent(
-                system.positions, state_data.system.positions, cell=system.cell
+                system.positions,
+                system.types,
+                state_data.system.positions,
+                state_data.system.types,
+                cell=system.cell,
             )
             if are_equivalent:
                 return state_index
@@ -607,6 +613,8 @@ class BasinsGenericEvents:
                 neighbors_list.neighbors_list["rnei"],
                 neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                types=system.types,
+                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
         else:
             neighbors_list = None

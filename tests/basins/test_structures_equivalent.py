@@ -46,12 +46,12 @@ class TestStructuresEquivalentColoring:
 
         config.atomicenvironment.atom_coloring_mode = "grey"
         assert basin.are_structures_equivalent(
-            pos, typ1=types_a, pos, typ2=types_b, cell
+            pos, types_a, pos, types_b, cell
         )
 
         config.atomicenvironment.atom_coloring_mode = "full"
         assert not basin.are_structures_equivalent(
-            pos, typ1=types_a, pos, typ2=types_b, cell
+            pos, types_a, pos, types_b, cell
         )
 
     def test_identical_types_equivalent_in_full(self, config_system_single_type):
@@ -64,7 +64,7 @@ class TestStructuresEquivalentColoring:
 
         basin = _make_basin(config)
         assert basin.are_structures_equivalent(
-            pos, typ1=types, pos, typ2=types, cell
+            pos, types, pos, types, cell
         )
 
 

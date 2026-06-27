@@ -38,7 +38,7 @@ class AtomicEnvironment:
         environment_list: list[list[int]] | None = None,
         neighbors_add: int = 0,
         types: list[str] | None = None,
-        coloring_mode: str = "grey",
+        coloring_mode: str = "full",
         region: RegionConfig | None = None,
         positions: np.ndarray | None = None,
         atom_types: list[str] | None = None,

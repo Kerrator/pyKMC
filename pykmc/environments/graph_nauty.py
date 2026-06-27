@@ -43,7 +43,7 @@ def graph(
     # else:
     #    split = np.array_split(atom_idx, nprocs)  # when using cna/graph
     # local_index = split[rank]
-    list_g = make_graph(local_index, neighbors_list, environment_list)
+    list_g = make_graph(local_index, neighbors_list, environment_list, types)
 
     list_hash = []
 
@@ -58,7 +58,9 @@ def graph(
 
 
 def make_graph(
-    atoms_idx: int, neighbors_list: list[list[int]], environment_list: list[list[int]],
+    atoms_idx: int,
+    neighbors_list: list[list[int]],
+    environment_list: list[list[int]],
     types: list[str] = None,
 ) -> list[pynauty.Graph]:
     """Create graphs.

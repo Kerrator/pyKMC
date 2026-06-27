@@ -69,6 +69,7 @@ class ReferenceEventTable:
                 dE_forward=ev.dE_forward,
                 dE_backward=ev.dE_backward,
                 cell=ev.cell,
+                types=ev.types,
             )
             results_is_valid_events.append(res)
             if res.is_ok():
@@ -299,13 +300,25 @@ class ReferenceEventTable:
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        # TODO I guess we should save atoms types in reference table
-        typ_event = nat_event * ["X"]
+        # NOTE: this de-dup path intentionally feeds the REAL element types to IRA in
+        # BOTH "grey" and "full" coloring modes -- it is NOT mode-gated like the PSR /
+        # classification paths. Grey-gating here is a deliberate, documented deferred
+        # limitation (see the atom_coloring_mode field description in config.py), so the
+        # type comparison stays species-aware even when the rest of the pipeline is grey.
+        # The `... or nat * ['X']` fallbacks only guard a None "types" cell (where
+        # list(None) would raise TypeError); they substitute a neutral dummy label list
+        # sized to the structure -- they do NOT switch on coloring mode.
+        typ_event = (
+            list(dfevent["types"])
+            if dfevent["types"] is not None
+            else nat_event * ["X"]
+        )
 
         for _, ev in subset.iterrows():
             ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event
+            typ_ref = list(ev["types"]) if ev["types"] is not None else nat_ref * ["X"]
+
             result = simple_ira(
                 nat_event,
                 typ_event,
@@ -510,10 +523,10 @@ class ReferenceEventTable:
         )
 
         # dr :
-        move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
+        move_atom_idx_forward = np.where(neighbor_list_forward == index_move)[0][0]
         dra_forward = np.linalg.norm(
-            min1_positions[neighbor_list_forwward][move_atom_idx_forward]
-            - saddle_positions[neighbor_list_forwward][move_atom_idx_forward]
+            min1_positions[neighbor_list_forward][move_atom_idx_forward]
+            - saddle_positions[neighbor_list_forward][move_atom_idx_forward]
         )
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
         dra_backward = np.linalg.norm(
