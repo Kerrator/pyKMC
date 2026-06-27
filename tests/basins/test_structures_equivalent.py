@@ -45,14 +45,10 @@ class TestStructuresEquivalentColoring:
         basin = _make_basin(config)
 
         config.atomicenvironment.atom_coloring_mode = "grey"
-        assert basin.are_structures_equivalent(
-            pos, types_a, pos, types_b, cell
-        )
+        assert basin.are_structures_equivalent(pos, types_a, pos, types_b, cell)
 
         config.atomicenvironment.atom_coloring_mode = "full"
-        assert not basin.are_structures_equivalent(
-            pos, types_a, pos, types_b, cell
-        )
+        assert not basin.are_structures_equivalent(pos, types_a, pos, types_b, cell)
 
     def test_identical_types_equivalent_in_full(self, config_system_single_type):
         """In full mode, identical geometry *and* identical species still merge."""
@@ -63,9 +59,7 @@ class TestStructuresEquivalentColoring:
         types = np.array(["Ni", "Fe"])
 
         basin = _make_basin(config)
-        assert basin.are_structures_equivalent(
-            pos, types, pos, types, cell
-        )
+        assert basin.are_structures_equivalent(pos, types, pos, types, cell)
 
 
 class TestIsNewStateColoring:

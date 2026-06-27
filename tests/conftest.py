@@ -62,12 +62,17 @@ def system_binary_fcc() -> System:
     a = 3.52
     repeat = 4
 
-    basis = np.array([
-        [0.0, 0.0, 0.0],
-        [0.5, 0.5, 0.0],
-        [0.5, 0.0, 0.5],
-        [0.0, 0.5, 0.5],
-    ]) * a
+    basis = (
+        np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.5, 0.5, 0.0],
+                [0.5, 0.0, 0.5],
+                [0.0, 0.5, 0.5],
+            ]
+        )
+        * a
+    )
 
     positions = []
     types = []
@@ -78,19 +83,18 @@ def system_binary_fcc() -> System:
                 for b, atom in enumerate(basis):
                     positions.append(atom + shift)
                     # Alternate types: basis sites 0,1 = Ni, 2,3 = Fe
-                    types.append('Ni' if b < 2 else 'Fe')
+                    types.append("Ni" if b < 2 else "Fe")
 
     system.positions = np.array(positions)
     system.types = np.array(types)
-    system.cell = np.array([
-        [repeat * a, 0.0, 0.0],
-        [0.0, repeat * a, 0.0],
-        [0.0, 0.0, repeat * a]
-    ])
+    system.cell = np.array(
+        [[repeat * a, 0.0, 0.0], [0.0, repeat * a, 0.0], [0.0, 0.0, repeat * a]]
+    )
     system.pbc = np.array([True, True, True])
     system.index = np.arange(len(system.positions))
 
     return system
+
 
 @pytest.fixture
 def system_single_type_fcc() -> System:

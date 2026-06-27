@@ -5,7 +5,9 @@ import numpy as np
 
 
 def unique_symmetries(
-    initial_positions: np.ndarray, final_positions: np.ndarray, sym_thr: float,
+    initial_positions: np.ndarray,
+    final_positions: np.ndarray,
+    sym_thr: float,
     types: list = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Identify the unique symmetry operations of an event based on atomic displacements.
