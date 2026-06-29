@@ -91,6 +91,7 @@ class ReferenceEventTable:
                     dE_forward=ev.dE_forward,
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
+                    types=types,
                 )
             results_is_valid_events.append(res)
             if res.is_ok():
@@ -171,6 +172,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: "list[str] | None" = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -190,6 +192,9 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str] | None
+            Per-atom element symbols used for full-colour graph hashing and
+            per-event ``initial_types`` storage. None in grey-alloy mode.
 
         Returns
         -------
@@ -261,6 +266,7 @@ class ReferenceEventTable:
                 dE_forward=dE_forward,
                 dE_backward=dE_backward,
                 cell=cell,
+                types=types,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -436,6 +442,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: "list[str] | None" = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series (k0-placeholder rates).
 
@@ -455,6 +462,10 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str] | None
+            Per-atom element symbols of the full system. In full-colour mode
+            they colour the graph topology hashes and are stored per-event as
+            ``initial_types``; None in grey-alloy mode (uncoloured, the default).
 
         Returns
         -------
@@ -498,26 +509,46 @@ class ReferenceEventTable:
             self.config.atomicenvironment.rcut,
         )
 
+        # Full colour: include element types in the graph topology hashes so the
+        # event_id / id_saddle / id_final distinguish chemically-distinct
+        # environments (grey -> None == uncoloured, the previous behaviour).
+        graph_types = (
+            types if self.config.atomicenvironment.atom_coloring_mode == "full" else None
+        )
+
         # TODO need to see how to deal with different style for atomic environment ID
         # Compute all needed topology ID :
         id_min1 = graph(
             min1neighbors_list.neighbors_list["rnei"],
             min1neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_saddle = graph(
             saddleneighbors_list.neighbors_list["rnei"],
             saddleneighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_min2 = graph(
             min2neighbors_list.neighbors_list["rnei"],
             min2neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
 
         neighbor_list_forwward = min1neighbors_list.neighbors_list["rcut"][index_move]
         neighbor_list_backward = min2neighbors_list.neighbors_list["rcut"][index_move]
+
+        # Per-event neighbour-local element types (stored for colour-aware PSR/IRA
+        # matching). None in grey mode / when unavailable.
+        if types is not None:
+            types_arr = np.array(types)
+            initial_types_forward = list(types_arr[neighbor_list_forwward])
+            initial_types_backward = list(types_arr[neighbor_list_backward])
+        else:
+            initial_types_forward = None
+            initial_types_backward = None
 
         # Symmetries :
         sym_matrix, sym_perm = unique_symmetries(
@@ -537,6 +568,7 @@ class ReferenceEventTable:
                "idx_ref": -1, #unknown yet
                 "event_id": id_min1,
                 "initial_positions": min1_positions[neighbor_list_forwward],
+                "initial_types": initial_types_forward,
                 "saddle_positions": saddle_positions[neighbor_list_forwward],
                 "final_positions": min2_positions[neighbor_list_forwward],
                 "energy_barrier": dE_forward,
@@ -562,6 +594,7 @@ class ReferenceEventTable:
                 "idx_ref": -1, #unknown yet
                 "event_id": id_min2,
                 "initial_positions": min2_positions[neighbor_list_backward],
+                "initial_types": initial_types_backward,
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
                 "energy_barrier": dE_backward,
@@ -603,6 +636,7 @@ class ReferenceEventTable:
                     "idx_ref": pd.Series(dtype="int64"),
                     "event_id": pd.Series(dtype="str"),
                     "initial_positions": pd.Series(dtype="object"),
+                    "initial_types": pd.Series(dtype="object"),
                      "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
