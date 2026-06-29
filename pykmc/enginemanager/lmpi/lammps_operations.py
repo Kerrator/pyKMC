@@ -570,6 +570,19 @@ def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
 
 
 def partn_search(engine, config, central_atom_idx: int, positions = None, cell = None, types=None) :
+    """Run a pARTn event search; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, and exceptions) so the engine is
+    never left holding only the active-volume subset of atoms.
+    """
+    try:
+        return _partn_search_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_search_impl(engine, config, central_atom_idx: int, positions = None, cell = None, types=None) :
     original_stdout_fd = os.dup(1)
     devnull = os.open(os.devnull, os.O_WRONLY)
     # Redirect stdout (fd 1) to /dev/null, only way to deal with pARTn error write
@@ -738,10 +751,35 @@ def partn_search(engine, config, central_atom_idx: int, positions = None, cell =
             )
 
 def partn_refine(engine, config, central_atom_idx:int , positions = None, cell = None, types=None, saddle_idx = None, saddle_positions = None, minimize_outer_atoms: bool = True) :
+    """Refine a saddle point; under active volume, always restore the full system.
+
+    The restore runs on every exit path (Ok, Err, max-attempt exhaustion, and
+    exceptions) so the engine is never left holding only the active-volume subset.
+    """
+    try:
+        return _partn_refine_impl(engine, config, central_atom_idx, positions=positions, cell=cell, types=types, saddle_idx=saddle_idx, saddle_positions=saddle_positions, minimize_outer_atoms=minimize_outer_atoms)
+    finally:
+        if config.control.active_volume == True:
+            _ensure_full_system(engine, config, positions, cell, types)
+
+
+def _partn_refine_impl(engine, config, central_atom_idx:int , positions = None, cell = None, types=None, saddle_idx = None, saddle_positions = None, minimize_outer_atoms: bool = True) :
 
     #Set positions
     if config.control.active_volume==True:
-        E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        try:
+            E_init, atom_map, central_lammps_id = partn_refine_AV(engine, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions)
+        except ValueError as exc:
+            #Invalid saddle geometry for the active volume (atom outside the
+            #active radius or missing from the AV map): report instead of crash.
+            if engine.rank == 0:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                        message=str(exc),
+                    )
+                )
+            return None
     else:
         central_lammps_id=[central_atom_idx+1]
         E_init=0
