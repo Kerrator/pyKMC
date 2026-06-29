@@ -109,6 +109,37 @@ def test_failure_path_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.reason  # carries the exception text
 
 
+def test_none_cell_never_raises() -> None:
+    """cell=None must degrade gracefully, not crash with 'NoneType' not subscriptable.
+
+    Reproduces the production HTST hang: the non-basin reference backfill fed a
+    None cell into the engine prefactor op, so select_free_indices (cell[0, 0])
+    raised *outside* the try/except, escaping the documented 'Never raises'
+    contract. On the engine that surfaced as
+    'Error in handler compute_event_prefactors: NoneType object is not
+    subscriptable' and stalled rank 0 on the failed future.
+    """
+    res = compute_event_prefactors(
+        forces_fn=_harmonic(2.0, _EQ2),
+        min1=_EQ2,
+        saddle=_EQ2,
+        min2=_EQ2,
+        types=["Ni", "Ni"],
+        central_index=0,
+        free_radius=3.0,
+        fd_step=1e-3,
+        cell=None,  # the production trigger
+        pbc=_PBC,
+        nu0_min_hz=0.0,
+        nu0_max_hz=1e30,
+        require_one_negative_mode=False,
+    )
+    assert isinstance(res, EventPrefactors)
+    assert res.nu0_forward is None and res.nu0_backward is None
+    assert not res.ok_forward and not res.ok_backward
+    assert res.reason  # carries the exception text
+
+
 def test_masses_from_types_and_free_region() -> None:
     """Two Fe atoms 1.5 Å apart with radius 3.0 -> both atoms are free (n_free==2)."""
     # Two Fe atoms 1.5 Angstrom apart, radius 3.0 -> both free.

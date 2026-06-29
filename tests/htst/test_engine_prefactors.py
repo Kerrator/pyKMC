@@ -1,10 +1,16 @@
-"""Serial-LAMMPS smoke tests for the HTST engine ops (no MPI, no potential file).
+"""Serial-LAMMPS smoke tests for the HTST engine ops (no MPI).
+
+``compute_event_prefactors`` runs the partial Hessian on a private serial
+``COMM_SELF`` LAMMPS it builds from ``config.lammps`` (the multi-rank session
+engine deadlocks on ``dynamical_matrix``), cropping to the AV or ``nu0_zone``
+subsystem. These tests exercise that path on a real EAM engine.
 
 Tests
 -----
 - test_get_forces_shape: gather_atoms("f") returns a finite (N,3) array.
-- test_compute_event_prefactors_runs_on_engine: end-to-end call on a real
-  LAMMPS engine returns an EventPrefactors dataclass without raising.
+- test_compute_event_prefactors_runs_on_engine: end-to-end call returns an
+  EventPrefactors dataclass without raising (identical geometries -> graceful
+  fallback, n_free still reported).
 """
 
 from __future__ import annotations
@@ -19,8 +25,13 @@ pytest.importorskip("lammps")
 from lammps import lammps  # noqa: E402
 
 from pykmc.enginemanager.lmpi import lammps_operations as ops  # noqa: E402
+from pykmc.htst import profiling  # noqa: E402
 from pykmc.rate_constant.prefactor import EventPrefactors  # noqa: E402
 from pykmc.htst.constants import hz_to_thz  # noqa: E402
+
+# Tracked Ni EAM potential + surface-hop fixture (shared with test_premin_av).
+_TRACKED_POT = Path(__file__).resolve().parents[1] / "data" / "Ni_v6_2.0_LKBeland2016.eam"
+_HOP_FIXTURE = Path(__file__).resolve().parents[1] / "data" / "htst_ni100_surface_hop.npz"
 
 
 class _SerialEngine:
@@ -60,8 +71,11 @@ def _build_lj_ni() -> _SerialEngine:
 
 
 class _RC:
+    """Rate-constant shim (htst style); AV-off zone covers the whole fixture."""
+
     style = "htst"
-    free_radius = 5.0
+    free_radius = 4.0
+    nu0_zone_radius = 12.0  # >= fixture extent (~9.44 A) -> zone == full system
     fd_step = 0.01
     nu0_min_THz = 1e-6
     nu0_max_THz = 1e6
@@ -69,8 +83,34 @@ class _RC:
     premin = False  # pin the original path; premin behavior is owned by test_premin_av
 
 
+class _Control:
+    active_volume = False
+
+
+class _AE:
+    rcut = 3.0
+
+
+class _Lammps:
+    pair_style = "eam/alloy"
+    pair_coeff = f"* * {_TRACKED_POT} Ni"
+
+
+class _AVParams:
+    ract = 6.0
+    rmov = 4.0
+    AV_debug = False
+
+
 class _Cfg:
-    rateconstant = _RC()
+    """Full-config shim: the op builds its own serial engine from config.lammps."""
+
+    def __init__(self) -> None:
+        self.rateconstant = _RC()
+        self.control = _Control()
+        self.atomicenvironment = _AE()
+        self.lammps = _Lammps()
+        self.activevolume = _AVParams()
 
 
 def test_get_forces_shape() -> None:
@@ -82,24 +122,31 @@ def test_get_forces_shape() -> None:
     assert np.isfinite(f).all()
 
 
+@pytest.mark.skipif(not _TRACKED_POT.exists(), reason="tracked Ni EAM unavailable")
+@pytest.mark.skipif(not _HOP_FIXTURE.exists(), reason="surface-hop fixture unavailable")
 def test_compute_event_prefactors_runs_on_engine() -> None:
     """compute_event_prefactors runs end-to-end and returns an EventPrefactors.
 
     min1==saddle==min2 (all identical) so there is no real saddle — the
-    orchestrator falls back gracefully, but must not raise and must return
-    the correct dataclass with n_free >= 1.
+    orchestrator falls back gracefully, but must not raise and must return the
+    dataclass with n_free >= 1. Runs on a real serial EAM engine the op builds
+    itself from ``config.lammps`` (no pre-loaded system needed).
     """
-    eng = _build_lj_ni()
-    pos = ops.get_positions(eng)
-    cell = np.diag([12.0, 12.0, 12.0])
+    data = np.load(_HOP_FIXTURE)
+    pos = data["saddle_positions"]
+    move = int(data["move_atom_idx"])
+    n = int(data["n_atoms"])
+    eng, cell = profiling.build_serial_engine(
+        pos, potential=str(_TRACKED_POT), pair_style="eam/alloy", element="Ni"
+    )
     res = ops.compute_event_prefactors(
         eng,
         _Cfg(),
-        central_atom_idx=0,
+        central_atom_idx=move,
         min1_positions=pos,
         saddle_positions=pos,
         min2_positions=pos,
-        types=["Ni"] * pos.shape[0],
+        types=["Ni"] * n,
         cell=cell,
     )
     # min1==saddle==min2 (all minima) -> no real saddle -> graceful fallback,
@@ -118,6 +165,7 @@ class _RCXval:
 
     style = "htst"
     free_radius = 4.0  # keep free atoms inside the 130-atom subset (EAM cutoff ~5.65 A)
+    nu0_zone_radius = 12.0  # >= fixture extent -> zone == full system (canon ~12.6 THz)
     fd_step = 0.01
     nu0_min_THz = 1e-6
     nu0_max_THz = 1e6
@@ -125,10 +173,33 @@ class _RCXval:
     premin = False  # pin the canonical ~12.6 THz path; premin owned by test_premin_av
 
 
+class _ControlXval:
+    active_volume = False
+
+
+class _AEXval:
+    rcut = 3.0
+
+
+class _LammpsXval:
+    pair_style = "eam/alloy"
+    pair_coeff = f"* * {_POTENTIAL} Ni"
+
+
+class _AVParamsXval:
+    ract = 6.0
+    rmov = 4.0
+    AV_debug = False
+
+
 class _CfgXval:
-    """Config shim exposing only rateconstant."""
+    """Full-config shim; the op builds its serial engine from config.lammps."""
 
     rateconstant = _RCXval()
+    control = _ControlXval()
+    atomicenvironment = _AEXval()
+    lammps = _LammpsXval()
+    activevolume = _AVParamsXval()
 
 
 def _build_eam_engine(positions: np.ndarray) -> tuple[_SerialEngine, np.ndarray]:
