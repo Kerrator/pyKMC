@@ -1,6 +1,7 @@
 """Module implementing Classes to manage reference events and active events."""
 
 import logging
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from .rate_constant import create_rate_constant
@@ -24,6 +25,9 @@ from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .event_recycling import Recycling
 
 
 class ReferenceEventTable:
@@ -653,6 +657,10 @@ class ActiveEventTable:
         The atomic simulations configuration.
     event_dataframe : pd.DataFrame, optional
         An table with active event use to initialize the table. by default 'None'.
+    recycler : Recycling, optional
+        Event recycling plugin. When attached, ``prune_for_recycling`` keeps the
+        rows it selects between KMC steps; when ``None`` the table is cleared at
+        the end of each step (the prior behaviour). By default ``None``.
 
     """
 
@@ -660,9 +668,14 @@ class ActiveEventTable:
         self,
         config: Config,
         event_dataframe: pd.DataFrame = None,
+        recycler: "Recycling | None" = None,
         manager: object = None,
     ):
         self.config = config
+        # Optional recycling plugin. If attached, `prune_for_recycling` keeps
+        # the rows the recycler selects between KMC steps. If None, the table
+        # is cleared at the end of each step (matching prior behavior).
+        self.recycler = recycler
         self.manager = manager
         self._htst_active = config.rateconstant.style in ("htst", "rpa")
         self.rate_constant = create_rate_constant(
@@ -691,6 +704,58 @@ class ActiveEventTable:
                 columns["nu0"] = pd.Series(dtype="float64")
                 columns["nu0_refined"] = pd.Series(dtype="bool")
             self.table = pd.DataFrame(columns)
+
+    def prune_for_recycling(
+        self,
+        executed_idx: int,
+        system: System,
+        positions_pre: np.ndarray,
+    ) -> None:
+        """Replace ``self.table`` with the rows that survive the recycler's filter.
+
+        If no recycler is attached, clear the table (matches the prior
+        end-of-step ``del active_table`` behavior).
+
+        Parameters
+        ----------
+        executed_idx : int
+            Row index in ``self.table`` of the event executed this step.
+        system : System
+            The atomic system, positions already advanced to post-execution.
+        positions_pre : np.ndarray
+            Snapshot of ``system.positions`` taken just before the event was
+            applied (same atom ordering as ``system.positions``).
+
+        """
+        if self.recycler is None:
+            self.table = self.table.iloc[0:0].reset_index(drop=True)
+        else:
+            self.table = self.recycler.select_recyclable(
+                self, executed_idx, system, positions_pre,
+            )
+
+    def existing_pairs(self) -> set[tuple[int, int]]:
+        """Return ``(atom_index, num_reference_event)`` tuples already in the table.
+
+        Used by ``Refinement.execute`` to skip pairs that survived the last step
+        and don't need to be refined again.
+
+        Returns
+        -------
+        set[tuple[int, int]]
+            The set of ``(atom_index, num_reference_event)`` pairs currently
+            present in the table. Empty when the table is empty.
+
+        """
+        if len(self.table) == 0:
+            return set()
+        return set(
+            zip(
+                self.table["atom_index"].astype(int).tolist(),
+                self.table["num_reference_event"].astype(int).tolist(),
+                strict=True,
+            )
+        )
 
     def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
         """Add active events to the table.
