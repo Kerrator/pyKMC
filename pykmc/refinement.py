@@ -10,6 +10,7 @@ from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .enginemanager.lmpi.pool import Manager
 import ase.geometry
+import numpy as np
 import pandas as pd
 import concurrent.futures
 
@@ -100,6 +101,7 @@ class Refinement:
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
                 res.ok_value().k_prefactor = ctx["k_prefactor"]
                 res.ok_value().nu0 = ctx["nu0"]
+                res.ok_value().neighbors = np.asarray(ctx["neighbors"], dtype=int)
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[ctx["neighbors"]]
                 #Now check if energy barrier consistent with generic one
                 #TODO partn should not return different things depending on AV or not. We get the total energy at the saddle point or dE, but not both.
