@@ -207,12 +207,25 @@ class Manager:
         )
 
     def close_all(self):
-        """
-        Close all sessions and their underlying engines.
+        """Close all sessions and their underlying engines.
+
+        Teardown must run with every engine listening on its OWN local engine
+        communicator. The global ``engine_comm`` spans every engine rank, so closing
+        the global session broadcasts a shutdown to all engines at once and exits
+        their run loops together; only the global master rank then emits a status, so
+        the first local ``close(wait_status=True)`` consumes it and the next one
+        blocks in ``receive_status()`` forever -- the multi-session teardown hang seen
+        when a global-mode op path closes the pool after a failure.
+
+        Switching the pool to local mode first makes every engine listen on its own
+        comm, so each local ``close`` is handled and acknowledged by exactly one
+        engine. ``MpiApiEngine.close()`` shuts down BOTH that rank's local and global
+        LAMMPS instance, so closing every local session tears the whole pool down --
+        the separate global-session close is redundant as well as unsafe.
         """
         #print("[PoolManager] Closing all sessions.")
         if self.global_session is not None :
-            self.global_session.close(wait_status=False)
+            self.use_local()
         for session in self.sessions:
             session.close(wait_status=True)
 

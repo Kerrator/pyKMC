@@ -95,6 +95,22 @@ class KMC:
         self.bias: Bias | None = None
 
     def run(self) -> None:
+        """Run the simulation, guaranteeing the engine pool is torn down on failure.
+
+        If anything in the body raises before the normal shutdown, the engine ranks
+        would otherwise stay busy-spinning in ``run_engine_loop`` waiting for a
+        command that never comes. Closing the pool here unstrands them; the original
+        error is re-raised so the failure stays visible. A normal finish goes through
+        ``_close()`` -> ``sys.exit()`` (``SystemExit``), which is deliberately not
+        caught here, so the pool is closed exactly once.
+        """
+        try:
+            self._run_impl()
+        except Exception:
+            self.manager.close_all()
+            raise
+
+    def _run_impl(self) -> None:
         """Run the simulation."""
         # Initialize the simulation, KMC attributes and minimize the system
         #self._initialize()
