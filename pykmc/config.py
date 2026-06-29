@@ -113,6 +113,16 @@ class ControlConfig(BaseModel):
         description="Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.",
     )
 
+    engine_op_timeout_s: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Opt-in wall guard (seconds) for rank 0's wait on an engine reply. "
+        "None (default) keeps the blocking behaviour. When set, a reply that does not "
+        "arrive within this many seconds is treated as a desynced pool and aborts the "
+        "MPI job (fast fail) instead of stalling for the full per-run timeout. Set it "
+        "well above the slowest legitimate op (large minimize / pARTn search / basin).",
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
