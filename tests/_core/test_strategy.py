@@ -5,27 +5,38 @@ from abc import abstractmethod
 from pykmc._core import Strategy
 
 
-# Definition of compute strategies : 
+# Definition of compute strategies :
+
 
 ## Abstract base Strategy
 class BaseOperationStrategy(Strategy, root=True):
     @abstractmethod
     def compute(self, a: float, b: float) -> float: ...
 
+
 ## Addition Strategy
 class Addition(BaseOperationStrategy):
     name = "addition"
-    def compute(self, a, b): return a + b
+
+    def compute(self, a, b):
+        return a + b
+
 
 ## Multiplication Strategy
 class Multiplication(BaseOperationStrategy):
     name = "multiplication"
-    def compute(self, a, b): return a * b
+
+    def compute(self, a, b):
+        return a * b
+
 
 ## Division Strategy
 class Division(BaseOperationStrategy):
     name = "division"
-    def compute(self, a, b): return a / b
+
+    def compute(self, a, b):
+        return a / b
+
 
 ## Facade class using defined strategy to compute operation
 class ComputeOperation:
@@ -34,38 +45,52 @@ class ComputeOperation:
 
     def compute(self, a: float, b: float) -> float:
         return self._strategy.compute(a, b)
-    
-    @classmethod 
-    def create(cls, strategy_name: str) -> "ComputeOperation" : 
+
+    @classmethod
+    def create(cls, strategy_name: str) -> "ComputeOperation":
         return cls(strategy_name=strategy_name)
 
 
 # Test Registration strategies
 class TestRegistration:
     def test_all_strategies_are_registered(self):
-        assert set(BaseOperationStrategy._registry) == {"addition", "multiplication", "division"}
+        assert set(BaseOperationStrategy._registry) == {
+            "addition",
+            "multiplication",
+            "division",
+        }
 
     def test_create_returns_correct_type(self):
         assert isinstance(BaseOperationStrategy.create("addition"), Addition)
-        assert isinstance(BaseOperationStrategy.create("multiplication"), Multiplication)
+        assert isinstance(
+            BaseOperationStrategy.create("multiplication"), Multiplication
+        )
         assert isinstance(BaseOperationStrategy.create("division"), Division)
 
     def test_missing_name_raises_type_error(self):
         with pytest.raises(TypeError, match="non-empty 'name'"):
+
             class NoName(BaseOperationStrategy):
-                def compute(self, a, b): return a
+                def compute(self, a, b):
+                    return a
 
     def test_empty_name_raises_type_error(self):
         with pytest.raises(TypeError, match="non-empty 'name'"):
+
             class EmptyName(BaseOperationStrategy):
                 name = ""
-                def compute(self, a, b): return a
+
+                def compute(self, a, b):
+                    return a
 
     def test_name_collision_raises_runtime_error(self):
         with pytest.raises(RuntimeError, match="Name collision"):
+
             class Duplicate(BaseOperationStrategy):
                 name = "addition"
-                def compute(self, a, b): return a + b
+
+                def compute(self, a, b):
+                    return a + b
 
     def test_unknown_name_raises_value_error(self):
         with pytest.raises(ValueError, match="unknown"):
@@ -85,7 +110,9 @@ class TestRegistration:
 
         class Power(IntermediateOp):
             name = "power"
-            def compute(self, a, b): return a ** b
+
+            def compute(self, a, b):
+                return a**b
 
         assert "power" in BaseOperationStrategy._registry
         assert BaseOperationStrategy._registry["power"] is Power
@@ -97,8 +124,10 @@ class TestRegistration:
             def run(self): ...
 
         class OtherImpl(OtherStrategy):
-            name = "addition"            
-            def run(self): return 42
+            name = "addition"
+
+            def run(self):
+                return 42
 
         assert OtherStrategy._registry is not BaseOperationStrategy._registry
         assert OtherStrategy._registry["addition"] is OtherImpl

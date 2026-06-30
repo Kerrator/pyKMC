@@ -1,7 +1,7 @@
 """Shared plumbing for the pluggable strategy pattern.
 
 This module provides :class:`Strategy`, the domain-free base class that powers
-strategy registration and lookup across pyKMC. 
+strategy registration and lookup across pyKMC.
 
 Concrete strategies live in their respective modules. See the
 architecture documentation [url] for the overall design and
@@ -13,6 +13,7 @@ from __future__ import annotations
 import inspect
 from abc import ABC
 from typing import ClassVar
+
 
 class Strategy(ABC):
     """Abstract base for the pluggable strategy mechanism shared by all modules.
@@ -97,8 +98,7 @@ class Strategy(ABC):
         registry = cls._root._registry
         if name in registry:
             raise RuntimeError(
-                f"Name collision '{name}': "
-                f"{registry[name].__name__} vs {cls.__name__}"
+                f"Name collision '{name}': {registry[name].__name__} vs {cls.__name__}"
             )
         registry[name] = cls
 
