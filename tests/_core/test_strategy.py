@@ -34,6 +34,10 @@ class ComputeOperation:
 
     def compute(self, a: float, b: float) -> float:
         return self._strategy.compute(a, b)
+    
+    @classmethod 
+    def create(cls, strategy_name: str) -> "ComputeOperation" : 
+        return cls(strategy_name=strategy_name)
 
 
 # Test Registration strategies
@@ -104,10 +108,10 @@ class TestRegistration:
 # Test Compute Operations
 class TestComputeOperation:
     def test_addition(self):
-        assert ComputeOperation("addition").compute(3, 2) == 5
+        assert ComputeOperation.create("addition").compute(3, 2) == 5
 
     def test_multiplication(self):
-        assert ComputeOperation("multiplication").compute(3, 2) == 6
+        assert ComputeOperation.create("multiplication").compute(3, 2) == 6
 
     def test_division(self):
-        assert ComputeOperation("division").compute(6, 2) == 3.0
+        assert ComputeOperation.create("division").compute(6, 2) == 3.0
