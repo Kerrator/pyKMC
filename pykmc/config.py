@@ -132,11 +132,7 @@ class AtomicEnvironmentConfig(BaseModel):
         description="Controls whether element types are used in environment matching. "
         "Defaults to 'full' (species-resolved). "
         "'grey': all atoms treated identically (grey alloy approximation). "
-        "'full': element types used in graph hashing, PSR matching, and symmetry detection. "
-        "Known limitation: in 'grey' mode the catalogue de-duplication check "
-        "(ReferenceEventTable.is_new_event) still compares real element types, so "
-        "geometrically-identical species-swapped saddles are not merged; "
-        "'full' mode is unaffected.",
+        "'full': element types used in graph hashing, PSR matching, and symmetry detection.",
     )
 
 

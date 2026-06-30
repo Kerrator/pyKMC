@@ -300,24 +300,26 @@ class ReferenceEventTable:
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        # NOTE: this de-dup path intentionally feeds the REAL element types to IRA in
-        # BOTH "grey" and "full" coloring modes -- it is NOT mode-gated like the PSR /
-        # classification paths. Grey-gating here is a deliberate, documented deferred
-        # limitation (see the atom_coloring_mode field description in config.py), so the
-        # type comparison stays species-aware even when the rest of the pipeline is grey.
-        # The `... or nat * ['X']` fallbacks only guard a None "types" cell (where
-        # list(None) would raise TypeError); they substitute a neutral dummy label list
-        # sized to the structure -- they do NOT switch on coloring mode.
+        # Mirror the PSR / classification paths: only feed real element types to IRA
+        # in "full" coloring mode. In "grey" mode every atom is greyed to a single
+        # dummy label ('X'), so geometrically-identical species-swapped saddles
+        # de-duplicate as one event (grey-alloy approximation). The None-"types"
+        # fallback keeps list(None) from raising when a row stores no types.
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
         typ_event = (
             list(dfevent["types"])
-            if dfevent["types"] is not None
+            if full and dfevent["types"] is not None
             else nat_event * ["X"]
         )
 
         for _, ev in subset.iterrows():
             ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = list(ev["types"]) if ev["types"] is not None else nat_ref * ["X"]
+            typ_ref = (
+                list(ev["types"])
+                if full and ev["types"] is not None
+                else nat_ref * ["X"]
+            )
 
             result = simple_ira(
                 nat_event,
