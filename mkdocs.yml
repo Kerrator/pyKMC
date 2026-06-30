@@ -32,7 +32,9 @@ nav:
       - User Guide: user_guide.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
-  - Developer Guide: developer_guide.md
+  - Developer Guide: 
+      - Strategy pattern : dev_strategy_pattern.md
+      - Code formatting : dev_code_formatting.md
   - API Reference: 
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
