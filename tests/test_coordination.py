@@ -45,3 +45,24 @@ class TestCoordination:
         non_crystal = [e for e in ids if e != "crystal"]
         assert len(non_crystal) == 12
         assert all(e != "noncrystal" for e in non_crystal)  # replaced by graph hashes, not left as "noncrystal"
+
+    @pytest.mark.parametrize(
+        "system, config", [(lf("system_single_type_fcc_vacancy"), lf("config_system_single_type"))]
+    )
+    def test_coordination_threshold_threaded_from_config(self, system, config):
+        """Honour coordination_threshold when args are built from the config object.
+
+        Mirrors the run-site construction path, unlike test_coordination_vacancy.
+        """
+        config.atomicenvironment.style = "coordination"
+        config.atomicenvironment.coordination_threshold = 12
+        nl = NeighborsList(system, config.atomicenvironment.rnei, config.atomicenvironment.rcut)
+        ae = AtomicEnvironment(
+            config.atomicenvironment.style,
+            nl.neighbors_list["rnei"],
+            nl.neighbors_list["rcut"],
+            config.atomicenvironment.neighbors_add,
+            coordination_threshold=config.atomicenvironment.coordination_threshold,
+        )
+        assert ae.coordination_threshold == 12
+        assert sum(e == "noncrystal" for e in ae.atomic_environment_list) == 12
