@@ -66,8 +66,10 @@ class AtomicEnvironment:
                 self.atomic_environment_list = self.compute_coordinationgraph(
                     neighbors_list, environment_list
                 )
-            case "diamond/graph" : 
-                self.atomic_environment_list = self.compute_diamondgraph(neighbors_list, environment_list)
+            case "diamond/graph":
+                self.atomic_environment_list = self.compute_diamondgraph(
+                    neighbors_list, environment_list
+                )
             case "region":
                 self.atomic_environment_list = self.compute_region(
                     region, positions, atom_types
@@ -75,14 +77,12 @@ class AtomicEnvironment:
             case _:
                 raise Exception("Atomic environment style unknown")
 
-
-
-    def get_atoms_with_id(self, id: str) -> list[int] : 
+    def get_atoms_with_id(self, id: str) -> list[int]:
         """Return list of atom indices whose environment matches the given ID.
 
         Parameters
         ----------
-        id : str 
+        id : str
             The match ID.
         Returns
         -------
@@ -90,12 +90,12 @@ class AtomicEnvironment:
             List of atom indices
         """
         return [i for i, e in enumerate(self.atomic_environment_list) if e == id]
-    
-    def get_new_environments(self, visited_environments: set[str]) -> list[str] : 
-        """ 
+
+    def get_new_environments(self, visited_environments: set[str]) -> list[str]:
+        """
         Return list of atomic environment ID that are in the current self.environment_list but not in visited_environments
         """
-        #return list([]) #Set if you want to only test refinements
+        # return list([]) #Set if you want to only test refinements
         return list(set(self.atomic_environment_list).difference(visited_environments))
 
     def compute_region(
@@ -159,7 +159,9 @@ class AtomicEnvironment:
     def compute_coordination(self) -> list[str]:
         """See :py:func:`.environments.coordination` for the coordination-number classifier."""
         # The config validator guarantees a threshold for coordination styles.
-        assert self.coordination_threshold is not None, "coordination_threshold must be set"
+        assert self.coordination_threshold is not None, (
+            "coordination_threshold must be set"
+        )
         return coordination(self.neighbors_list, self.coordination_threshold)
 
     def compute_coordinationgraph(
@@ -181,7 +183,9 @@ class AtomicEnvironment:
 
         """
         # Coordination-number classification (validator guarantees a threshold for these styles)
-        assert self.coordination_threshold is not None, "coordination_threshold must be set"
+        assert self.coordination_threshold is not None, (
+            "coordination_threshold must be set"
+        )
         list_hash = coordination(neighbors_list, self.coordination_threshold)
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
@@ -203,8 +207,8 @@ class AtomicEnvironment:
 
         return list_hash
 
-    def compute_diamondgraph(self, neighbors_list, environment_list) : 
-        #Compute identify diamant ID 
+    def compute_diamondgraph(self, neighbors_list, environment_list):
+        # Compute identify diamant ID
         list_hash = identify_diamond(neighbors_list)
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
@@ -222,5 +226,5 @@ class AtomicEnvironment:
         list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
-        
+
         return list_hash

@@ -1,36 +1,41 @@
-# Examples : 
-# Ignore everything in examples by default
-examples/**
-# Whitelist
-!examples/*/
-!examples/README.md
-!examples/**/input.in.template
-!examples/**/initial_config.xyz
-!examples/**/Ni_v6_2.0_LKBeland2016.eam
-!examples/**/Cu01.eam.alloy
-!examples/**/FeC-Becquart2013.eam
-!examples/**/Si.sw
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
 
-
-# Utils : 
-utils/analyse/*.xyz
-
-# Benchmarks 
-benchmarks/** 
-!benchmarks/**/*.py
-
-*__pycache__/
-*.pyc
-*=5
-*initial_config_minimization.lmp
+# Tests — whitelist everything, then re-ignore generated files
 *test*
 !tests/
 !tests/**/*
-__pycache__/
-*.py[cod]
+tests/**/__pycache__/
+tests/**/*.py[cod]
+
+# Examples — ignore everything except source files
+examples/**
+!examples/**/*.in
+!examples/**/initial_config.xyz
+
+# Benchmarks — keep only scripts
+benchmarks/**
+!benchmarks/*/
+!benchmarks/**/*.py
+!benchmarks/**/*.sh
+
+# Utils
+utils/analyse/*.xyz
+
+# LAMMPS / simulation outputs
 *core
-*pykmc.egg-info/*
-*PKG-INFO 
-*SOURCES.txt 
-*requires.txt
-*__pycache__
+log.lammps
+pykmc.*
+
+# IDE
+.vscode/**
+.idea/**
+.claude/**
+
+# OS
+.DS_Store
