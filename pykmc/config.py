@@ -107,7 +107,14 @@ class ControlConfig(BaseModel):
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
-    style: Literal["cna", "graph", "cna/graph", "diamond/graph", "coordination", "coordination/graph"] = Field(
+    style: Literal[
+        "cna",
+        "graph",
+        "cna/graph",
+        "diamond/graph",
+        "coordination",
+        "coordination/graph",
+    ] = Field(
         ...,
         description="Method used to characterize and assign an ID to an atom's local atomic environment. "
         "'coordination' classifies atoms based on nearest-neighbor count against a threshold. "
@@ -139,10 +146,15 @@ class AtomicEnvironmentConfig(BaseModel):
     @model_validator(mode="after")
     def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":
         """Ensure coordination_threshold is set when the style requires it."""
-        if self.style in ("coordination", "coordination/graph") and self.coordination_threshold is None:
+        if (
+            self.style in ("coordination", "coordination/graph")
+            and self.coordination_threshold is None
+        ):
             raise ValueError(
                 "coordination_threshold is required when style is '{}'. "
-                "Set it in the [AtomicEnvironment] section of your INI file.".format(self.style)
+                "Set it in the [AtomicEnvironment] section of your INI file.".format(
+                    self.style
+                )
             )
         return self
 
