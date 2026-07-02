@@ -338,6 +338,7 @@ def partn_search(
                             saddle_positions=saddlepositions,
                             min2_positions=min2positions,
                             move_atom_index=index_move,
+                            types=types,
                         )
                     )
                 else:
@@ -350,6 +351,7 @@ def partn_search(
                             saddle_positions=saddlepositions,
                             min2_positions=min1positions,
                             move_atom_index=index_move,
+                            types=types,
                         )
                     )
             else:

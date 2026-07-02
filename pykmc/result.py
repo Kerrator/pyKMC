@@ -154,6 +154,7 @@ class EventSearchOutput:
     move_atom_index: int
     # map: np.ndarray
     cell: Optional[np.ndarray] = None
+    types: Optional[list] = None
 
 
 @dataclass
