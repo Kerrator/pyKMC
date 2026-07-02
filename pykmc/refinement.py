@@ -95,7 +95,9 @@ class Refinement:
             are skipped during refinement.
 
         """
-        tasks = self.build_tasks(df_reference_events, total_energy, existing_pairs=existing_pairs)
+        tasks = self.build_tasks(
+            df_reference_events, total_energy, existing_pairs=existing_pairs
+        )
         self.loggers.info("log", "\t :=> Refining {} events".format(len(tasks)))
         self.tasks = tasks
         self.results = [None] * len(tasks)
@@ -103,7 +105,10 @@ class Refinement:
             self.results[task_id] = result
 
     def build_tasks(
-        self, df_reference_events: pd.DataFrame, total_energy: float, existing_pairs: set | None = None
+        self,
+        df_reference_events: pd.DataFrame,
+        total_energy: float,
+        existing_pairs: set | None = None,
     ) -> list[RefinementTask]:
         """Build refinement tasks with stable ids and rerun context."""
         existing_pairs = existing_pairs or set()
@@ -136,9 +141,7 @@ class Refinement:
             for task_id, at_idx, dfevent, symmetry_index in raw_tasks
         ]
 
-    def retry(
-        self, retry_task_ids: list[int]
-    ) -> None:
+    def retry(self, retry_task_ids: list[int]) -> None:
         """Rerun only the requested refinement jobs."""
         if not retry_task_ids:
             return
@@ -160,9 +163,7 @@ class Refinement:
             future_to_prepared[future] = prepared
 
         run_results = {}
-        for i, future in enumerate(
-            concurrent.futures.as_completed(future_to_prepared)
-        ):
+        for i, future in enumerate(concurrent.futures.as_completed(future_to_prepared)):
             prepared = future_to_prepared[future]
             try:
                 res = future.result()
@@ -173,9 +174,7 @@ class Refinement:
                 )
                 raise
             self.loggers.progress_bar("progress", i + 1, len(tasks))
-            run_results[prepared.task.task_id] = self._finalize_result(
-                res, prepared
-            )
+            run_results[prepared.task.task_id] = self._finalize_result(res, prepared)
         return run_results
 
     def _prepare_task(
@@ -323,15 +322,10 @@ class Refinement:
             if self.config.control.active_volume == True:
                 res.ok_value().dE_forward = res.ok_value().E_saddle
             else:
-                res.ok_value().dE_forward = (
-                    res.ok_value().E_saddle - task.total_energy
-                )
+                res.ok_value().dE_forward = res.ok_value().E_saddle - task.total_energy
             return self.check_refinement_energy(
                 res,
-                abs(
-                    res.ok_value().dE_forward
-                    - prepared.reference_energy_barrier
-                ),
+                abs(res.ok_value().dE_forward - prepared.reference_energy_barrier),
                 self.config.eventsearch.refined_energy_thr,
             )
 
@@ -387,9 +381,7 @@ class Refinement:
         mask = df_reference_events["k"] < k_thr
         if mask.any():
             e_value = (
-                df_reference_events.loc[mask]
-                .sort_values("k")
-                .iloc[-1]["dE_forward"]
+                df_reference_events.loc[mask].sort_values("k").iloc[-1]["dE_forward"]
             )
         else:  # refine no event
             e_value = 0.0

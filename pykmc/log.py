@@ -347,17 +347,17 @@ class LogKMC(LogManager):
     )
 
     EVENTS_TABLE_COLUMNS: ClassVar[tuple[tuple[int, str, str], ...]] = (
-        (5,  "d",   "#"),
-        (7,  "s",   "Types"),
-        (13, "d",   "CentralAtom"),
-        (10, "d",   "RefEvent"),
+        (5, "d", "#"),
+        (7, "s", "Types"),
+        (13, "d", "CentralAtom"),
+        (10, "d", "RefEvent"),
         (14, ".6f", "dE_forward"),
         (14, ".6f", "dE_backward"),
         (14, ".6f", "dE_asym"),
         (14, ".6e", "k"),
         (14, ".6f", "dra_i"),
         (14, ".6f", "dra_f"),
-        (9,  "s",   "Refined"),
+        (9, "s", "Refined"),
         (DISPLAYED_HASH_LENGTH + 4, "s", "event_id"),
         (DISPLAYED_HASH_LENGTH + 4, "s", "id_initial"),
         (DISPLAYED_HASH_LENGTH + 4, "s", "id_saddle"),
@@ -365,7 +365,7 @@ class LogKMC(LogManager):
     )
 
     REFERENCE_TABLE_COLUMNS: ClassVar[tuple[tuple[int, str, str], ...]] = (
-        (10, "d",   "idx_ref"),
+        (10, "d", "idx_ref"),
         (14, ".6f", "dE_forward"),
         (14, ".6f", "dE_backward"),
         (14, ".6e", "k"),
@@ -373,8 +373,8 @@ class LogKMC(LogManager):
         (DISPLAYED_HASH_LENGTH + 4, "s", "id_initial"),
         (DISPLAYED_HASH_LENGTH + 4, "s", "id_saddle"),
         (DISPLAYED_HASH_LENGTH + 4, "s", "id_final"),
-        (14, "d",   "move_atom_idx"),
-        (14, "d",   "idx_backward"),
+        (14, "d", "move_atom_idx"),
+        (14, "d", "idx_backward"),
         (14, ".6f", "dra"),
     )
 
@@ -493,11 +493,21 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t# Step          : Simulation step number.")
         self.info(logger_name, "\t# E(eV)         : Energy of the system.")
         self.info(logger_name, "\t# Ea(eV)        : Event activation energy barrier.")
-        self.info(logger_name, "\t# dT(s)         : Time elapsed for this specific step.")
-        self.info(logger_name, "\t# k_evt(ps-1)   : Rate constant of the selected event.")
+        self.info(
+            logger_name, "\t# dT(s)         : Time elapsed for this specific step."
+        )
+        self.info(
+            logger_name, "\t# k_evt(ps-1)   : Rate constant of the selected event."
+        )
         self.info(logger_name, "\t# T(s)          : Total time since simulation start.")
-        self.info(logger_name, "\t# k_tot(ps-1)   : Total rate constant of all possible events at this step.")
-        self.info(logger_name, "\t# Ref event     : Index in the reference table of the selected event.")
+        self.info(
+            logger_name,
+            "\t# k_tot(ps-1)   : Total rate constant of all possible events at this step.",
+        )
+        self.info(
+            logger_name,
+            "\t# Ref event     : Index in the reference table of the selected event.",
+        )
         self.info(
             logger_name,
             f"\t# event_id      : First {DISPLAYED_HASH_LENGTH} characters of the selected event's combined topology ID.",
@@ -631,14 +641,37 @@ class LogKMC(LogManager):
         self.info(logger_name, "\t #idx_ref      : Index of the reference event.")
         self.info(logger_name, "\t #dE_forward   : Forward energy barrier (eV).")
         self.info(logger_name, "\t #dE_backward  : Backward energy barrier (eV).")
-        self.info(logger_name, "\t #k            : Rate constant of the forward reaction (ps-1).")
-        self.info(logger_name, f"\t #event_id     : First {DISPLAYED_HASH_LENGTH} characters of the combined topology ID (ini+sad+fin).")
-        self.info(logger_name, f"\t #id_initial   : First {DISPLAYED_HASH_LENGTH} characters of the initial topology ID.")
-        self.info(logger_name, f"\t #id_saddle    : First {DISPLAYED_HASH_LENGTH} characters of the saddle topology ID.")
-        self.info(logger_name, f"\t #id_final     : First {DISPLAYED_HASH_LENGTH} characters of the final topology ID.")
-        self.info(logger_name, "\t #move_atom_idx: Index of the moving atom in the environment.")
-        self.info(logger_name, "\t #idx_backward : Index of the corresponding backward event.")
-        self.info(logger_name, "\t #dra          : Displacement between initial and saddle positions.")
+        self.info(
+            logger_name,
+            "\t #k            : Rate constant of the forward reaction (ps-1).",
+        )
+        self.info(
+            logger_name,
+            f"\t #event_id     : First {DISPLAYED_HASH_LENGTH} characters of the combined topology ID (ini+sad+fin).",
+        )
+        self.info(
+            logger_name,
+            f"\t #id_initial   : First {DISPLAYED_HASH_LENGTH} characters of the initial topology ID.",
+        )
+        self.info(
+            logger_name,
+            f"\t #id_saddle    : First {DISPLAYED_HASH_LENGTH} characters of the saddle topology ID.",
+        )
+        self.info(
+            logger_name,
+            f"\t #id_final     : First {DISPLAYED_HASH_LENGTH} characters of the final topology ID.",
+        )
+        self.info(
+            logger_name,
+            "\t #move_atom_idx: Index of the moving atom in the environment.",
+        )
+        self.info(
+            logger_name, "\t #idx_backward : Index of the corresponding backward event."
+        )
+        self.info(
+            logger_name,
+            "\t #dra          : Displacement between initial and saddle positions.",
+        )
         self.new_line(logger_name)
         self.info(logger_name, self._format_reference_table_header())
         self.info(logger_name, "-" * len(self._format_reference_table_header()))
@@ -653,43 +686,51 @@ class LogKMC(LogManager):
                 break
         tbl = reference_table.table
         self.reference_table_file_header(logger_name)
-        self.info(logger_name, "========== Reference Events ({}) ==========".format(len(tbl)))
+        self.info(
+            logger_name, "========== Reference Events ({}) ==========".format(len(tbl))
+        )
         for i in range(len(tbl)):
             row = tbl.iloc[i]
-            self.info(logger_name, self._format_reference_table_row(
-                int(row["idx_ref"]),
-                float(row["dE_forward"]),
-                float(row["dE_backward"]),
-                float(row["k"]),
-                fmt_hash(row["event_id"]),
-                fmt_hash(row["id_initial"]),
-                fmt_hash(row["id_saddle"]),
-                fmt_hash(row["id_final"]),
-                int(row["move_atom_idx"]),
-                int(row["idx_backward"]),
-                float(row["dra"]),
-            ))
+            self.info(
+                logger_name,
+                self._format_reference_table_row(
+                    int(row["idx_ref"]),
+                    float(row["dE_forward"]),
+                    float(row["dE_backward"]),
+                    float(row["k"]),
+                    fmt_hash(row["event_id"]),
+                    fmt_hash(row["id_initial"]),
+                    fmt_hash(row["id_saddle"]),
+                    fmt_hash(row["id_final"]),
+                    int(row["move_atom_idx"]),
+                    int(row["idx_backward"]),
+                    float(row["dra"]),
+                ),
+            )
 
     def events_write(self, logger_name: str, events_info) -> None:
         """Write formatted event rows to the events file."""
         for i in range(len(events_info.types)):
-            self.info(logger_name, self._format_events_table_row(
-                i,
-                str(events_info.types[i]),
-                int(events_info.central_atom[i]),
-                int(events_info.reference_events[i]),
-                float(events_info.dE_forward[i]),
-                float(events_info.dE_backward[i]),
-                float(events_info.dE_asym[i]),
-                float(events_info.k[i]),
-                float(events_info.dra_i[i]),
-                float(events_info.dra_f[i]),
-                str(events_info.refined[i]),
-                fmt_hash(events_info.event_id[i]),
-                fmt_hash(events_info.id_initial[i]),
-                fmt_hash(events_info.id_saddle[i]),
-                fmt_hash(events_info.id_final[i]),
-            ))
+            self.info(
+                logger_name,
+                self._format_events_table_row(
+                    i,
+                    str(events_info.types[i]),
+                    int(events_info.central_atom[i]),
+                    int(events_info.reference_events[i]),
+                    float(events_info.dE_forward[i]),
+                    float(events_info.dE_backward[i]),
+                    float(events_info.dE_asym[i]),
+                    float(events_info.k[i]),
+                    float(events_info.dra_i[i]),
+                    float(events_info.dra_f[i]),
+                    str(events_info.refined[i]),
+                    fmt_hash(events_info.event_id[i]),
+                    fmt_hash(events_info.id_initial[i]),
+                    fmt_hash(events_info.id_saddle[i]),
+                    fmt_hash(events_info.id_final[i]),
+                ),
+            )
 
     def events_file_step_first_line(self, logger_name: str, step: int) -> None:
         """Write the first line with step informations

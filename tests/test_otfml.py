@@ -150,7 +150,11 @@ rmov = 4.0
 
 def test_setup_otf_cycle_runs_reload_then_setup_commands():
     commands = []
-    engine = SimpleNamespace(engine_id=7, command=commands.append, lmp=SimpleNamespace(set_internal_variable=lambda *_: None))
+    engine = SimpleNamespace(
+        engine_id=7,
+        command=commands.append,
+        lmp=SimpleNamespace(set_internal_variable=lambda *_: None),
+    )
     config = SimpleNamespace(
         lammps=SimpleNamespace(
             pair_style="pair_style_cmd",

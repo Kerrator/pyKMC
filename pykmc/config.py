@@ -40,26 +40,26 @@ class ControlConfig(BaseModel):
 
     visited_environments_output: Optional[str] = Field(
         default="./visited_environments.pickle",
-        description="File path where the list of atomic environments that have been explored will be sore in pickle format."
+        description="File path where the list of atomic environments that have been explored will be sore in pickle format.",
     )
 
     reference_table: Optional[str] = Field(
         default=None,
-        description="Path to a reference table generated from a previous simulation."
+        description="Path to a reference table generated from a previous simulation.",
     )
 
     visited_environments: Optional[str] = Field(
         default=None,
-        description="Path to a list of visited environment generated from a previous simulation."
+        description="Path to a list of visited environment generated from a previous simulation.",
     )
 
     restart_file: Optional[str] = Field(
-        default = None,
-        description="File with restart informations."
+        default=None, description="File with restart informations."
     )
 
     reconstruction: Optional[bool] = Field(
-        default=True, description="If at each KMC step we reconstruct generic events.\n NOT WORKING"
+        default=True,
+        description="If at each KMC step we reconstruct generic events.\n NOT WORKING",
     )
 
     n_steps: int = Field(
@@ -71,14 +71,10 @@ class ControlConfig(BaseModel):
         description="Which E/F Engine to use. Note : Only lammps is implemented.",
     )
 
-    n_sessions: Optional[int] = Field(
-        default=1,
-        description="Number of Sessions"
-    )
+    n_sessions: Optional[int] = Field(default=1, description="Number of Sessions")
 
     engine_use_rank_0: Optional[bool] = Field(
-        default=False,
-        description="Deprecated : If use mpi rank 0 or not."
+        default=False, description="Deprecated : If use mpi rank 0 or not."
     )
 
     verbosity: Optional[int] = Field(
@@ -87,17 +83,14 @@ class ControlConfig(BaseModel):
 
     refine_thr: Optional[float] = Field(
         default=0.9999,
-        description="Event constributing to this percent of ktot are refined."
+        description="Event constributing to this percent of ktot are refined.",
     )
 
-    basin: Optional[bool] = Field(
-        default=False,
-        description="Basin mode"
-    )
+    basin: Optional[bool] = Field(default=False, description="Basin mode")
 
     active_volume: Optional[bool] = Field(
         default=False,
-        description="Incorporate AV's into simulations, recommended for large systems"
+        description="Incorporate AV's into simulations, recommended for large systems",
     )
 
     recycle: Optional[bool] = Field(
@@ -107,13 +100,14 @@ class ControlConfig(BaseModel):
 
     bias: Optional[bool] = Field(
         default=False,
-        description="Enable event selection bias. Requires a [Bias] section."
+        description="Enable event selection bias. Requires a [Bias] section.",
     )
 
     otfml: Optional[bool] = Field(
         default=False,
         description="Enable on-the-fly ML retraining. Requires an [OTFML] section with retrain_command.",
     )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
@@ -162,11 +156,11 @@ class EventSearchConfig(BaseModel):
     energy_asymmetry: int = Field(
         default=5,
         description="Prevent highly asymmetric event to be added to the reference table."
-                    "The con"
+        "The con",
     )
     refined_minimum_delr_thr: float = Field(
-        default = 0.1,
-        description="Refinement is accepted only if the central atom moves less than this distance between the current position and the refined minimum."
+        default=0.1,
+        description="Refinement is accepted only if the central atom moves less than this distance between the current position and the refined minimum.",
     )
     refined_energy_thr: float = Field(
         default=0.05,
@@ -179,26 +173,24 @@ class EventSearchConfig(BaseModel):
     )
 
 
-
-
 class PartnConfig(BaseModel):
     """pARTn parameters."""
 
-    #Control
+    # Control
     verbosity: int = Field(default=2, description="pARTn verbosity")
 
     delr_thr: float = Field(
         default=0.1,
-        description="Threshold at which an atom is considered to have moved. This threshold affects the npart parameter in the artn.out output."
+        description="Threshold at which an atom is considered to have moved. This threshold affects the npart parameter in the artn.out output.",
     )
 
-    #Exploration
+    # Exploration
     zseed: int = Field(
         default=0,
-        description="The value of zseed is used to seed the random number generator. If the value equals 0, a new radom seed gets geenrated. The exact zseed value of each research is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs."
+        description="The value of zseed is used to seed the random number generator. If the value equals 0, a new radom seed gets geenrated. The exact zseed value of each research is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs.",
     )
 
-    #Initial push
+    # Initial push
     push_mode: Literal["list", "rad"] = Field(
         default="rad",
         description="Determines how the initial atomic displacement (push) is generated around the central atom "
@@ -224,15 +216,14 @@ class PartnConfig(BaseModel):
         description="Specify the minimal number of pushes with the initial push vector.",
     )
 
-    #Lanczos
+    # Lanczos
     lanczos_min_size: int = Field(
         default=10,
-        description="Enforce Lanczos to always do at least this number of iterations."
+        description="Enforce Lanczos to always do at least this number of iterations.",
     )
 
     lanczos_max_size: int = Field(
-        default=20,
-        description="Maximum number of Lanczos iterations."
+        default=20, description="Maximum number of Lanczos iterations."
     )
 
     lanczos_disp: float = Field(
@@ -242,13 +233,13 @@ class PartnConfig(BaseModel):
 
     lanczos_eval_conv_thr: float = Field(
         default=0.001,
-        description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits."
+        description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits.",
     )
 
-    #Eigenvector push
+    # Eigenvector push
     eigval_thr: float = Field(
         default=-0.01,
-        description="Threshold for eigenvalue, which determines when to start following the eigenvector"
+        description="Threshold for eigenvalue, which determines when to start following the eigenvector",
     )
 
     eigen_step_size: float = Field(
@@ -263,28 +254,30 @@ class PartnConfig(BaseModel):
 
     neigen: int = Field(
         default=1,
-        description="Number of pushes along the eignevector before starting a perpendicular relax."
+        description="Number of pushes along the eignevector before starting a perpendicular relax.",
     )
 
     alpha_mix_cr: float = Field(
         default=0.2,
         description="This is the mixing coefficient used to create the push vector when the system enters into a convex region, i.e. when the negative curvature is lost. ",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
 
     nnewchance: int = Field(
         default=0,
-        description="Number of times a research is allowed to cross a convex region (without counting the starting convex region)."
+        description="Number of times a research is allowed to cross a convex region (without counting the starting convex region).",
     )
 
-    #Perpendicular relaxation
-    nperp: Optional[int] = Field(default=3, description="Control the perpendicular relaxation.")
-    nperp_limitation: Optional[list[int]] = Field(
-        default=[ 4, 8, 12, 16, -1 ],
-        description="Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL."
+    # Perpendicular relaxation
+    nperp: Optional[int] = Field(
+        default=3, description="Control the perpendicular relaxation."
     )
-    #Convergence
+    nperp_limitation: Optional[list[int]] = Field(
+        default=[4, 8, 12, 16, -1],
+        description="Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL.",
+    )
+    # Convergence
     forc_thr: float = Field(
         default=0.001,
         description="The configuration has converged to either a saddle point, or a minimum, when the sum of the parallel and perpendicular components of the atomic forces is lower than this value.",
@@ -292,15 +285,15 @@ class PartnConfig(BaseModel):
 
     convergence_property: Literal["maxval", "norm"] = Field(
         default="maxval",
-        description="Specify how to test convergence of the forces. 'maxval': the convergence will be tested by MAXVAL( ABS( force ) ); 'norm' the convergence will be tested by NORM2( force )."
+        description="Specify how to test convergence of the forces. 'maxval': the convergence will be tested by MAXVAL( ABS( force ) ); 'norm' the convergence will be tested by NORM2( force ).",
     )
 
     nevalf_max: int = Field(
         default=9999,
-        description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max"
+        description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max",
     )
 
-    #Final push
+    # Final push
 
     push_over: float = Field(
         default=1.0,
@@ -310,34 +303,34 @@ class PartnConfig(BaseModel):
         "\n",
     )
 
-    #Lammps
+    # Lammps
     dmax: float = Field(
         default=6.0,
         description="dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
     )
 
-#################
-#Refinement part#
-#################
+    #################
+    # Refinement part#
+    #################
 
     r_nevalf_max: int = Field(
         default=300,
-        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max."
+        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max.",
     )
 
-    #Max single refinement attempt
+    # Max single refinement attempt
     r_max_attempts: int = Field(
         default=5,
         description="When adjusting the saddle energy and positions, in some rare cases partn has trouble finding the saddle point and goes back to the minium."
-        "In that case, we do another attempt with a different seed."
+        "In that case, we do another attempt with a different seed.",
     )
 
     r_delr_sad_thr: float = Field(
-        default = 0.4,
-        description="When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt."
+        default=0.4,
+        description="When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt.",
     )
 
-    #Initial_push
+    # Initial_push
     r_push_mode: Literal["list", "rad"] = Field(
         default="list",
         description="Determines how the initial atomic displacement (push) is generated around the central atom "
@@ -363,15 +356,14 @@ class PartnConfig(BaseModel):
         description="Refinement: Specify the minimal number of pushes with the initial push vector.",
     )
 
-    #Lanczos
+    # Lanczos
     r_lanczos_min_size: int = Field(
         default=20,
-        description="Refinement: Enforce Lanczos to always do at least this number of iterations."
+        description="Refinement: Enforce Lanczos to always do at least this number of iterations.",
     )
 
     r_lanczos_max_size: int = Field(
-        default=50,
-        description="Refinement: Maximum number of Lanczos iterations."
+        default=50, description="Refinement: Maximum number of Lanczos iterations."
     )
 
     r_lanczos_disp: float = Field(
@@ -381,13 +373,13 @@ class PartnConfig(BaseModel):
 
     r_lanczos_eval_conv_thr: float = Field(
         default=0.001,
-        description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits."
+        description="Threshold for convergence of eigenvalue in Lanczos. Once convergence is reached, the Lanczos scheme exits.",
     )
 
-    #Eigenvector push
+    # Eigenvector push
     r_eigval_thr: float = Field(
         default=-0.01,
-        description="Refinement: threshold for eigenvalue, which determines when to start following the eigenvector"
+        description="Refinement: threshold for eigenvalue, which determines when to start following the eigenvector",
     )
 
     r_eigen_step_size: float = Field(
@@ -402,44 +394,43 @@ class PartnConfig(BaseModel):
 
     r_neigen: int = Field(
         default=1,
-        description="Refinement: Number of pushes along the eignevector before starting a perpendicular relax."
+        description="Refinement: Number of pushes along the eignevector before starting a perpendicular relax.",
     )
 
     r_alpha_mix_cr: float = Field(
         default=0.2,
         description="Refinement: This is the mixing coefficient used to create the push vector when the system enters into a convex region, i.e. when the negative curvature is lost. ",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
 
     r_nnewchance: int = Field(
         default=0,
-        description="Refinement: Number of times a research is allowed to cross a convex region (without counting the starting convex region)."
+        description="Refinement: Number of times a research is allowed to cross a convex region (without counting the starting convex region).",
     )
 
-
-    #Perpendicular relaxation
-    r_nperp: Optional[int] = Field(default=3, description="Refinement: Control the perpendicular relaxation.")
+    # Perpendicular relaxation
+    r_nperp: Optional[int] = Field(
+        default=3, description="Refinement: Control the perpendicular relaxation."
+    )
     r_nperp_limitation: Optional[list[int]] = Field(
         default=[100],
-        description="Refinement: Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL."
+        description="Refinement: Limit of perpendicular relaxation steps for each ARTn step. More ARTn goes far from the basin more perpendicular relaxation are needed. This option allows the user to customize the number of perp relax. The value -1 means no limitation and -2 represent NULL.",
     )
 
-
-    #Convergence
+    # Convergence
     r_forc_thr: float = Field(
         default=0.001,
         description="Refinement: The configuration has converged to either a saddle point, or a minimum, when the sum of the parallel and perpendicular components of the atomic forces is lower than this value.",
     )
 
-    #Lammps
+    # Lammps
     r_dmax: float = Field(
         default=1.0,
         description="Refinement: dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
     )
 
-
-    #To deal with nperp None if only using nperp_limitation :
+    # To deal with nperp None if only using nperp_limitation :
     @field_validator("nperp", "r_nperp", mode="before")
     @classmethod
     def parse_optional_int(cls, v):
@@ -447,7 +438,7 @@ class PartnConfig(BaseModel):
             return None
         return v
 
-    #To deal with list
+    # To deal with list
     @field_validator("nperp_limitation", "r_nperp_limitation", mode="before")
     @classmethod
     def parse_list_of_ints(cls, v):
@@ -460,6 +451,7 @@ class PartnConfig(BaseModel):
             except ValueError:
                 raise ValueError(f"Invalid list of integers: {v}")
         return v
+
 
 class RateConstantConfig(BaseModel):
     """Rate constant computation parameters."""
@@ -494,23 +486,23 @@ class PSRConfig(BaseModel):
         description="Maximum value of the matching score of the algorithm used.",
     )
 
+
 class ActiveVolume(BaseModel):
-    """ Active Volume Parameters"""
+    """Active Volume Parameters"""
 
     ract: float = Field(
-        default=6.0,
-        description="Radius of entire active volume, spherical"
+        default=6.0, description="Radius of entire active volume, spherical"
     )
 
     rmov: float = Field(
-        default=4.0,
-        description="Radius of movable atoms in active volume, spherical"
+        default=4.0, description="Radius of movable atoms in active volume, spherical"
     )
 
     AV_debug: bool = Field(
         default=False,
         description="Debug flag for active volume size checks",
     )
+
 
 class LammpsConfig(BaseModel):
     """Lammps parameters."""
@@ -600,12 +592,16 @@ class OTFMLConfig(BaseModel):
         if self.launcher == "slurm" and self.batch_args is None:
             raise ValueError("batch_args is required when launcher is 'slurm'")
         if self.launcher in {"nested", "fork"} and self.batch_args is not None:
-            raise ValueError(f"batch_args is only valid when launcher is 'slurm', got '{self.launcher}'")
+            raise ValueError(
+                f"batch_args is only valid when launcher is 'slurm', got '{self.launcher}'"
+            )
         if self.launcher == "fork" and self.runner_args is not None:
             raise ValueError("runner_args is not valid when launcher is 'fork'")
         return self
 
-    @field_validator("launcher", "batch_args", "runner_args", "extra_args", mode="before")
+    @field_validator(
+        "launcher", "batch_args", "runner_args", "extra_args", mode="before"
+    )
     @classmethod
     def parse_optional_cli_string(cls, v):
         if isinstance(v, str) and v.strip().lower() in {"", "none"}:
@@ -630,6 +626,7 @@ class IraConfig(BaseModel):
         description="Threshold in terms of the Hausdorff distance. If an operation returns a distance value beyond sym_thr, then SOFI will not consider that operation as a symmetry operation.",
     )
 
+
 class ReconstructionConfig(BaseModel):
     """Reconstruction parameters."""
 
@@ -638,14 +635,15 @@ class ReconstructionConfig(BaseModel):
         description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
     )
 
+
 class BasinConfig(BaseModel):
     """Basin parameters"""
-    style: Literal["global", "global/reconstruction"] = Field(default="global", description="Basin style used.")
 
-    energy_thr: float = Field(
-    default = 0.0,
-    description="Energy threshold"
+    style: Literal["global", "global/reconstruction"] = Field(
+        default="global", description="Basin style used."
     )
+
+    energy_thr: float = Field(default=0.0, description="Energy threshold")
 
 
 class EventRecyclingConfig(BaseModel):
@@ -730,7 +728,7 @@ class RegionConfig(BaseModel):
             return data
         result = {k: v for k, v in data.items() if not k.startswith("region_")}
         for k, v in region_keys.items():
-            field_name = k if k == "region_type" else k[len("region_"):]
+            field_name = k if k == "region_type" else k[len("region_") :]
             result[field_name] = v
         return result
 
@@ -806,7 +804,7 @@ class BiasConfig(BaseModel):
 
     style: Literal["direction", "point", "topo"] = Field(
         default=...,
-        description="Bias style: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias)."
+        description="Bias style: 'direction' (DirectionBias), 'point' (PointBias), or 'topo' (TopoBias).",
     )
     mode: Literal["filter", "boost"] = Field(
         default="filter",
@@ -814,14 +812,14 @@ class BiasConfig(BaseModel):
             "Selection mode. 'filter': rejection-loop removes non-accepted events. "
             "'boost': multiplies desired event rates by a dynamic factor so they fire "
             "with probability bias_weight, without blocking other events."
-        )
+        ),
     )
     bias_weight: float = Field(
         default=0.5,
         description=(
             "Target probability in (0, 1) that a desired event is selected at each step. "
             "Only used in boost mode."
-        )
+        ),
     )
     pass_unlisted: bool = Field(
         default=False,
@@ -829,7 +827,7 @@ class BiasConfig(BaseModel):
             "Whether atoms not in atom_indices pass through the bias predicate unchanged. "
             "False (default): non-listed atoms are rejected/undesired. "
             "True: non-listed atoms always pass; only valid in filter mode."
-        )
+        ),
     )
     require_central: bool = Field(
         default=False,
@@ -839,23 +837,20 @@ class BiasConfig(BaseModel):
             "is in atom_indices and satisfies the condition; otherwise pass_unlisted is returned. "
             "When False (default), the condition is satisfied if any atom in atom_indices "
             "that appears in the event neighbourhood satisfies it."
-        )
+        ),
     )
     direction: Optional[list[float]] = Field(
-        default=None,
-        description="Direction vector [x, y, z] for 'direction' bias."
+        default=None, description="Direction vector [x, y, z] for 'direction' bias."
     )
     target_point: Optional[list[float]] = Field(
-        default=None,
-        description="Target point [x, y, z] for 'point' bias."
+        default=None, description="Target point [x, y, z] for 'point' bias."
     )
     atom_indices: Optional[list[int]] = Field(
-        default=None,
-        description="Global atom indices to bias. None means all atoms."
+        default=None, description="Global atom indices to bias. None means all atoms."
     )
     threshold: float = Field(
         default=0.0,
-        description="Minimum projection onto the bias direction for acceptance."
+        description="Minimum projection onto the bias direction for acceptance.",
     )
     step_interval: Optional[int] = Field(
         default=None,
@@ -863,14 +858,14 @@ class BiasConfig(BaseModel):
         description=(
             "Apply the bias only every Nth KMC step. None or 1 means the bias is "
             "active at every step."
-        )
+        ),
     )
     atom_source_idx: Optional[int] = Field(
         default=None,
         description=(
             "Atom index for 'topo' bias. The topology ID of this atom at initialisation "
             "is used as the source topology for the remainder of the simulation."
-        )
+        ),
     )
     atom_target_idx: Optional[int] = Field(
         default=None,
@@ -878,7 +873,7 @@ class BiasConfig(BaseModel):
             "Atom index for 'topo' bias (two-index mode). The topology ID of this atom "
             "at initialisation is used as the target topology. When absent, direction mode "
             "is active and a direction vector must be provided."
-        )
+        ),
     )
 
     @field_validator("direction", "target_point", mode="before")
@@ -959,9 +954,13 @@ class Config(BaseModel):
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
 
-    reconstruction: ReconstructionConfig = Field(default_factory=ReconstructionConfig, description="Reconstruction parameters")
+    reconstruction: ReconstructionConfig = Field(
+        default_factory=ReconstructionConfig, description="Reconstruction parameters"
+    )
 
-    activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
+    activevolume: Optional[ActiveVolume] = Field(
+        default=None, description="Active volume parameters"
+    )
 
     eventrecycling: Optional[EventRecyclingConfig] = Field(
         default=None,
@@ -981,7 +980,9 @@ class Config(BaseModel):
         "Implemented via 'fix setforce 0.0 0.0 0.0' in LAMMPS wrapping fix artn.",
     )
 
-    bias: Optional[BiasConfig] = Field(default=None, description="Event selection bias parameters.")
+    bias: Optional[BiasConfig] = Field(
+        default=None, description="Event selection bias parameters."
+    )
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
@@ -1040,9 +1041,6 @@ class Config(BaseModel):
                 f"Error while reading configuration file :\n{user_msg}"
             ) from None
 
-
-
-
     @model_validator(mode="after")
     def validate_dependencies(self) -> Config:
         """Validate conditional dependencies between configuration sections or fields.
@@ -1072,10 +1070,10 @@ class Config(BaseModel):
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
-            ("control.basin", True) : ["basin"],
-            ("control.active_volume", True) : ["activevolume"],
-            ("control.recycle", True) : ["eventrecycling"],
-            ("control.bias", True) : ["bias"],
+            ("control.basin", True): ["basin"],
+            ("control.active_volume", True): ["activevolume"],
+            ("control.recycle", True): ["eventrecycling"],
+            ("control.bias", True): ["bias"],
             ("control.otfml", True): ["otfml"],
         }
 
@@ -1096,9 +1094,7 @@ class Config(BaseModel):
             raise ValueError("OTFML does not support active_volume=True in v1.")
         if self.control.otfml and self.lammps is not None:
             if not self.lammps.pair_style.strip().startswith("mtp/extrapolation"):
-                raise ValueError(
-                    "OTFML requires `pair_style mtp/extrapolation`."
-                )
+                raise ValueError("OTFML requires `pair_style mtp/extrapolation`.")
         return self
 
 

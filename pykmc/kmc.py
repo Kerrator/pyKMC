@@ -257,7 +257,9 @@ class KMC:
             self.add_active_events(refinement.get_successes_results())
             active_table = self.active_table
 
-            active_table.remove_duplicates(self.system.cell, self.neighbors_list)  # To be sure
+            active_table.remove_duplicates(
+                self.system.cell, self.neighbors_list
+            )  # To be sure
             self.loggers.info(
                 "log",
                 "\t :=> {} active events after removing duplicates.".format(
@@ -368,7 +370,6 @@ class KMC:
                         self.loggers.events_basin_info_line("events", idx_exit_event)
                         self.loggers.events_write("events", basin_info)
 
-
                     else:
                         self.loggers.info(
                             "log",
@@ -433,7 +434,9 @@ class KMC:
             elapsed_real = time.time() - start_real
             elapsed_cpu = time.process_time() - start_cpu
 
-            num_ref_selected = active_table.table.loc[idx_selected_event].at["num_reference_event"]
+            num_ref_selected = active_table.table.loc[idx_selected_event].at[
+                "num_reference_event"
+            ]
             event_id_selected = fmt_hash(
                 self.reference_table.table[
                     self.reference_table.table["idx_ref"] == num_ref_selected
@@ -462,12 +465,16 @@ class KMC:
                 saved_recycler = self.active_table.recycler
                 self.active_table.recycler = None
                 self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
+                    idx_selected_event,
+                    self.system,
+                    self._pre_exec_positions,
                 )
                 self.active_table.recycler = saved_recycler
             else:
                 self.active_table.prune_for_recycling(
-                    idx_selected_event, self.system, self._pre_exec_positions,
+                    idx_selected_event,
+                    self.system,
+                    self._pre_exec_positions,
                 )
                 if self.config.control.recycle:
                     self.loggers.info(
@@ -665,7 +672,9 @@ class KMC:
             self.atomic_environment,
             self.manager,
         )
-        refinement.execute(df_reference_events, self.total_energy, existing_pairs=existing_pairs)
+        refinement.execute(
+            df_reference_events, self.total_energy, existing_pairs=existing_pairs
+        )
         self.otfml.retry_extrapolating("refine", refinement)
         return refinement
 

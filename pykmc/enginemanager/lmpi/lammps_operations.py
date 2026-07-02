@@ -177,7 +177,9 @@ def setup_otf_cycle(engine, config):
     """
     engine.command(f"pair_style {config.lammps.pair_style}")
     engine.command(f"pair_coeff {config.lammps.pair_coeff}")
-    engine.command("fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1")
+    engine.command(
+        "fix extrapolation_grade all pair 1 mtp/extrapolation extrapolation 1"
+    )
     reset_otf_flags(engine)
 
 
@@ -515,7 +517,11 @@ def partn_search(
                 return extrapolation_error
 
         err = artn.get_error()
-        has_extract = artn.extract("has_sad") and artn.extract("has_min1") and artn.extract("has_min2")
+        has_extract = (
+            artn.extract("has_sad")
+            and artn.extract("has_min1")
+            and artn.extract("has_min2")
+        )
 
         if err[0] == 0 and has_extract:
             # Results

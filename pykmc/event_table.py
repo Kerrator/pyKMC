@@ -647,7 +647,9 @@ class ActiveEventTable:
             }
             self.table = pd.DataFrame(columns)
 
-    def prune_for_recycling(self, executed_idx: int, system: System, positions_pre: np.ndarray) -> None:
+    def prune_for_recycling(
+        self, executed_idx: int, system: System, positions_pre: np.ndarray
+    ) -> None:
         """Replace `self.table` with the rows that survive the recycler's filter.
 
         If no recycler is attached, clear the table (matches the prior
@@ -656,15 +658,24 @@ class ActiveEventTable:
         if self.recycler is None:
             self.table = self.table.iloc[0:0].reset_index(drop=True)
         else:
-            self.table = self.recycler.select_recyclable(self, executed_idx, system, positions_pre)
+            self.table = self.recycler.select_recyclable(
+                self, executed_idx, system, positions_pre
+            )
 
     def existing_pairs(self) -> set[tuple[int, int]]:
         """Return `(atom_index, num_reference_event)` tuples already in the table."""
         if len(self.table) == 0:
             return set()
-        return set(zip(self.table["atom_index"].astype(int).tolist(), self.table["num_reference_event"].astype(int).tolist()))
+        return set(
+            zip(
+                self.table["atom_index"].astype(int).tolist(),
+                self.table["num_reference_event"].astype(int).tolist(),
+            )
+        )
 
-    def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
+    def add_events(
+        self, events: EventRefinementOutput | list[EventRefinementOutput]
+    ) -> None:
         """Add active events to the table.
 
         Parameters

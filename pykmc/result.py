@@ -157,7 +157,7 @@ class EventSearchOutput:
     dE_forward: float
     dE_backward: float
     move_atom_index: int
-    #map: np.ndarray
+    # map: np.ndarray
     cell: Optional[np.ndarray] = None
 
 
@@ -238,28 +238,36 @@ class PSROutput:
     permutation_matrix: np.ndarray
     matching_score: float
 
+
 @dataclass
-class ReconstructionOutput :
+class ReconstructionOutput:
     """Store the result of a reconstruction"""
+
     min1_positions: np.ndarray
     saddle_positions: np.ndarray
     min2_positions: np.ndarray
     min2_etot: float
 
+
 @dataclass
-class BasinSelectorOutput :
-    """"Store the result of the selector"""
+class BasinSelectorOutput:
+    """ "Store the result of the selector"""
+
     t_exit: float
     exit_state: int
 
-@dataclass
-class BasinExitTimeSolverOutput :
-    """Sotre the results of exit time solver"""
-    t_exit: float
 
 @dataclass
-class BasinOutput :
+class BasinExitTimeSolverOutput:
+    """Sotre the results of exit time solver"""
+
+    t_exit: float
+
+
+@dataclass
+class BasinOutput:
     """Store the results of the basin."""
+
     initial_system_positions: np.ndarray
     central_atom: int
     saddle_positions: np.ndarray
@@ -271,6 +279,7 @@ class BasinOutput :
     exit_state: int
     from_state: int
     num_reference_event: int
+
 
 @dataclass
 class AtomicEnvironmentInfo:
@@ -351,6 +360,7 @@ class RefinementsInfo:
     n_sucesses: int
     n_fails: dict[str, int]
 
+
 @dataclass
 class EventsInfo:
     """Active events informations."""
@@ -370,6 +380,7 @@ class EventsInfo:
     id_initial: list[str]
     id_saddle: list[str]
     id_final: list[str]
+
 
 @dataclass
 class KMCLoopInfo:
@@ -451,7 +462,7 @@ def represent_list_preserve_flow(
         YAML node representing the sequence.
 
     """
-    if all(isinstance(i, int|float) for i in data):
+    if all(isinstance(i, int | float) for i in data):
         return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
     return dumper.represent_sequence("tag:yaml.org,2002:seq", data)
 

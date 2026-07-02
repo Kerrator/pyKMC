@@ -54,9 +54,7 @@ def read_otf_thermo(engine):
         )
 
     if not runs:
-        raise RuntimeError(
-            f"No runs found in LAMMPS log file at {log_path}"
-        )
+        raise RuntimeError(f"No runs found in LAMMPS log file at {log_path}")
 
     return runs[-1]
 
@@ -154,9 +152,9 @@ class OTFMLController:
         if c.launcher:
             parts.append(f"--launcher {c.launcher}")
         if c.batch_args:
-            parts.append(f"--batch-args=\"{c.batch_args}\"")
+            parts.append(f'--batch-args="{c.batch_args}"')
         if c.runner_args:
-            parts.append(f"--runner-args=\"{c.runner_args}\"")
+            parts.append(f'--runner-args="{c.runner_args}"')
         if c.sequential_eval:
             parts.append("--sequential-eval")
         if c.extra_args:
@@ -174,9 +172,15 @@ class OTFMLController:
             result = subprocess.run(full_command, shell=True)
         if result.returncode == 67:
             self._consecutive_failed_retrain_exit += 1
-            self._log("log", f"\t :=> Retraining exited with code 67 ({self._consecutive_failed_retrain_exit}/5 consecutive)")
+            self._log(
+                "log",
+                f"\t :=> Retraining exited with code 67 ({self._consecutive_failed_retrain_exit}/5 consecutive)",
+            )
             if self._consecutive_failed_retrain_exit > 5:
-                self._log("log", "Retraining returned exit code 67 more than 5 times in a row; aborting.")
+                self._log(
+                    "log",
+                    "Retraining returned exit code 67 more than 5 times in a row; aborting.",
+                )
                 self.kmc._close()
         else:
             self._consecutive_failed_retrain_exit = 0
@@ -188,7 +192,14 @@ class OTFMLController:
         if was_global:
             self.kmc.manager.use_global()
 
-    _MPI_PREFIXES = ("OMPI_0000", "PMI_0000", "I_MPI_0000", "MPI_0000", "HYDRA_0000", "MPIEXEC_0000")
+    _MPI_PREFIXES = (
+        "OMPI_0000",
+        "PMI_0000",
+        "I_MPI_0000",
+        "MPI_0000",
+        "HYDRA_0000",
+        "MPIEXEC_0000",
+    )
 
     def _coerce_flags(self, value) -> OTFExtrapolationFlags:
         if isinstance(value, OTFExtrapolationFlags):

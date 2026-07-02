@@ -1,6 +1,5 @@
 """Module implementing the EventSearch class that deals with the event search procedure."""
 
-
 import concurrent.futures
 import logging
 from .result import ErrorInfo, EventSearchOutput, Result, SearchTask

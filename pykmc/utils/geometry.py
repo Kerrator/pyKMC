@@ -92,7 +92,6 @@ def push_towards(current_positions, target_positions, fraction=0.1, cell=None):
     return new_positions
 
 
-
 def compute_distances(positions_1, positions_2, cell=None) -> np.ndarray:
     """Return per-atom distances between two configurations."""
     displacements = positions_2 - positions_1
@@ -124,7 +123,9 @@ def compute_delr_l2(positions_1, positions_2, cell=None):
     return float(np.linalg.norm(distances))
 
 
-def per_atom_displacement(positions_pre: np.ndarray, positions_post: np.ndarray, cell: np.ndarray) -> np.ndarray:
+def per_atom_displacement(
+    positions_pre: np.ndarray, positions_post: np.ndarray, cell: np.ndarray
+) -> np.ndarray:
     """Per-atom PBC-aware displacement magnitude (orthorhombic minimum-image)."""
     disp = positions_post - positions_pre
     cell_lengths = np.linalg.norm(cell, axis=1)
@@ -133,7 +134,9 @@ def per_atom_displacement(positions_pre: np.ndarray, positions_post: np.ndarray,
     return np.linalg.norm(disp, axis=1)
 
 
-def minimum_image_distance(position_a: np.ndarray, position_b: np.ndarray, cell: np.ndarray) -> float:
+def minimum_image_distance(
+    position_a: np.ndarray, position_b: np.ndarray, cell: np.ndarray
+) -> float:
     """PBC minimum-image Euclidean distance between two positions (orthorhombic)."""
     dvec = position_b - position_a
     cell_lengths = np.linalg.norm(cell, axis=1)
