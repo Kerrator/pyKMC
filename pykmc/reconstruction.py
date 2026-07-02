@@ -7,9 +7,9 @@ import copy
 from pykmc.utils.geometry import (
     push_towards,
     per_atom_displacement,
-    minimum_image_distance,
     event_movers,
     reconstruction_matches,
+    event_contained,
 )
 import ase.geometry
 
@@ -106,26 +106,45 @@ class Reconstruction:
         movers = event_movers(event_disp, self.config.reconstruction.n_movers, matching_thr)
         shell_thr = self.config.reconstruction.shell_tolerance
 
-        #Radius-containment guard: if a top mover sits in the outer rcut shell,
-        #the event reaches the edge of the stored neighbourhood and the frozen
-        #far field would truncate it, so reject before the expensive minimize.
-        if central_atom is not None :
-            central_rows = np.where(np.asarray(neighbors) == central_atom)[0]
-            if len(central_rows) > 0 :
-                central_pos = supposed_min1_positions[central_rows[0]]
-                max_mover_r = max(
-                    minimum_image_distance(central_pos, supposed_min1_positions[m], cell)
-                    for m in movers
+        #Degenerate/empty event (no rcut shell, no movers): reject gracefully
+        #rather than crash on the max()/argmax over an empty array. The serial
+        #caller does not wrap reconstruct() in a try/except, so this MUST be an
+        #Err, not a raise.
+        if len(movers) == 0 :
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+                    message="degenerate event: no movers to reconstruct (empty shell/displacement)",
+                    variables={},
                 )
-                rcut_limit = self.config.atomicenvironment.rcut - self.config.reconstruction.containment_margin
-                if max_mover_r > rcut_limit :
-                    return Err(
-                        ErrorInfo(
-                            type=ErrorType.RECONSTRUCTION_EVENT_NOT_CONTAINED,
-                            message="event not contained in rcut : max mover radius {} > {}".format(max_mover_r, rcut_limit),
-                            variables={"max_mover_r": float(max_mover_r), "rcut_limit": float(rcut_limit)},
-                        )
-                    )
+            )
+
+        #Radius-containment guard: if a mover sits in the outer rcut shell at
+        #ANY point of the path (min1, saddle, or min2) the event reaches the edge
+        #of the stored neighbourhood and the frozen far field would truncate it,
+        #so reject before the expensive minimize. An outward event that is inside
+        #at min1 but crosses rcut at the saddle/min2 must also be caught. The
+        #saddle rows are the mover-shell subset of the full-system saddle
+        #(saddle_positions[neighbors]); an absent central row fails closed.
+        contained, max_mover_r, rcut_limit = event_contained(
+            central_atom,
+            neighbors,
+            movers,
+            supposed_min1_positions,
+            saddle_positions[neighbors],
+            supposed_min2_positions,
+            cell,
+            self.config.atomicenvironment.rcut,
+            self.config.reconstruction.containment_margin,
+        )
+        if not contained :
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_EVENT_NOT_CONTAINED,
+                    message="event not contained in rcut : max mover radius {} > {}".format(max_mover_r, rcut_limit),
+                    variables={"max_mover_r": float(max_mover_r), "rcut_limit": float(rcut_limit)},
+                )
+            )
 
         #Saddle positions
         tmp_positions = copy.deepcopy(saddle_positions)
