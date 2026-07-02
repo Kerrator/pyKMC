@@ -108,6 +108,7 @@ class ControlConfig(BaseModel):
         description="Enable on-the-fly ML retraining. Requires an [OTFML] section with retrain_command.",
     )
 
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 

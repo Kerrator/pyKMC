@@ -159,6 +159,7 @@ class Manager:
         finally:
             for session in reversed(slept_sessions):
                 session.wake()
+
     def set_all_positions(self, positions):
         # print("[Manager] Setting positions to all sessions.")
         for session in self.sessions:

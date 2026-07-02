@@ -373,7 +373,9 @@ class Refinement:
         # get energy corresponding to the first k value just under k_thr
         mask = df_reference_events["k"] < k_thr
         if mask.any():
-            e_value = df_reference_events.loc[mask].sort_values("k").iloc[-1]["dE_forward"]
+            e_value = (
+                df_reference_events.loc[mask].sort_values("k").iloc[-1]["dE_forward"]
+            )
         else:  # refine no event
             e_value = 0.0
         e_value += 0.1  # to be sure want using condition

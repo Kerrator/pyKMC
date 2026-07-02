@@ -400,6 +400,7 @@ class EventsInfo:
         ).reset_index(drop=True)
         return df.to_string(index=True)
 
+
 @dataclass
 class KMCLoopInfo:
     """Store summary information for a full KMC step.

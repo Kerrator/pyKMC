@@ -53,6 +53,7 @@ def config_system_single_type():
     config = Config.from_ini_file("./tests/data/input.in")
     return config
 
+
 @pytest.fixture
 def system_binary_fcc() -> System:
     """4x4x4 FCC with alternating Ni/Fe types (L1_0-like ordering)."""

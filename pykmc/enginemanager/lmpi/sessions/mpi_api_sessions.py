@@ -106,6 +106,7 @@ class MpiApiSession:
         """Wake the engine and receive the delayed sleep status."""
         self.messenger.send({"type": "wake"}, dest=self.engine_master_rank, tag=2)
         self.receive_status()
+
     def close(self, wait_status: bool = False) -> None:
         """
         Instruct the engine to shut down.
@@ -179,6 +180,7 @@ class MpiApiSession:
             raise RuntimeError(f"Unexpected message type: {msg}")
         finally:
             self._is_busy = False
+
     # @session_locked
     def minimize(self, config, positions=None) -> None:
         """

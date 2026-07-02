@@ -409,7 +409,9 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1, pass_unlisted=True)
+        bias = make_topo_bias(
+            ae, atom_source_idx=0, atom_target_idx=1, pass_unlisted=True
+        )
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is True
@@ -462,7 +464,9 @@ class TestTopoBias:
         )
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = MagicMock()
-        ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]})
+        ref.table = pd.DataFrame(
+            {"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]}
+        )
         bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         # event 0: moves source away from target (rejected)
         # event 1: moves source toward target (accepted)
@@ -520,7 +524,9 @@ def _two_event_setup():
     """System with 2 events: idx=0 moves +x (desired), idx=1 moves -x (undesired)."""
     system = make_system([[0.0, 0.0, 0.0]])
     ref = MagicMock()
-    ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]})
+    ref.table = pd.DataFrame(
+        {"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]}
+    )
     events = [
         make_event(atom_index=0, final_positions=[[1.0, 0.0, 0.0]], k=1.0),
         make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=9.0),
@@ -608,7 +614,11 @@ class TestBoostMode:
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         with pytest.raises(ValueError, match="pass_unlisted=True"):
             make_topo_bias(
-                ae, atom_source_idx=0, atom_target_idx=1, mode="boost", pass_unlisted=True
+                ae,
+                atom_source_idx=0,
+                atom_target_idx=1,
+                mode="boost",
+                pass_unlisted=True,
             )
 
     def test_pass_unlisted_false_with_atom_indices_is_valid(self):
@@ -667,7 +677,9 @@ class TestPassUnlisted:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1, mode="filter", pass_unlisted=True)
+        bias = make_topo_bias(
+            ae, atom_source_idx=0, atom_target_idx=1, mode="filter", pass_unlisted=True
+        )
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is True

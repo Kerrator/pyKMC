@@ -305,7 +305,9 @@ class Bias(ABC):
         """Return displacement of atom_idx in this event via neighbourhood lookup."""
         if neighbors_list is None:
             final_positions = np.asarray(event["final_positions"], dtype=float)
-            target_position = final_positions if final_positions.ndim == 1 else final_positions[0]
+            target_position = (
+                final_positions if final_positions.ndim == 1 else final_positions[0]
+            )
             return target_position - system.positions[atom_idx]
         neighborhood = np.asarray(
             neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
@@ -324,7 +326,9 @@ class Bias(ABC):
             atom_idx = int(event["atom_index"])
             if atom_idx in self._atom_set:
                 final_positions = np.asarray(event["final_positions"], dtype=float)
-                target_position = final_positions if final_positions.ndim == 1 else final_positions[0]
+                target_position = (
+                    final_positions if final_positions.ndim == 1 else final_positions[0]
+                )
                 yield atom_idx, target_position - system.positions[atom_idx]
             return
         neighborhood = np.asarray(

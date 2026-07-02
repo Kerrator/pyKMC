@@ -154,6 +154,7 @@ class MpiApiEngine:
         if isinstance(self.messenger, QueueMessenger):
             return self.messenger.recv(tag=2)
         raise RuntimeError("Unsupported messenger type")
+
     # RUN ON ALL RANKS
     def run_engine_loop(self):
         """All ranks run this while lammps is alive, when a message is broadcaster from the master rank, execute the command."""

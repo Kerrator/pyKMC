@@ -253,6 +253,8 @@ def _build_extrapolation_error(
             )
         )
     return None
+
+
 def minimize(engine, config, positions=None):
     if positions is not None:
         set_positions(engine=engine, positions=positions)
@@ -289,7 +291,6 @@ def get_positions(engine) -> np.ndarray:
     else:
         result = None
     return engine.engine_comm.bcast(result, root=0)
-
 
 
 def get_types(engine) -> list[str]:
@@ -481,7 +482,11 @@ def partn_search(
                 return extrapolation_error
 
         err = artn.get_error()
-        has_extract = artn.extract("has_sad") and artn.extract("has_min1") and artn.extract("has_min2")
+        has_extract = (
+            artn.extract("has_sad")
+            and artn.extract("has_min1")
+            and artn.extract("has_min2")
+        )
         if err[0] == 0 and has_extract:
             E_sad = artn.extract("etot_sad")
             E_min1 = artn.extract("etot_min1")

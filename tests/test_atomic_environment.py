@@ -27,7 +27,9 @@ class TestAtomicEnvironment:
         nl = NeighborsList(
             system, config.atomicenvironment.rnei, config.atomicenvironment.rcut
         )
-        ae = AtomicEnvironment("cna", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"])
+        ae = AtomicEnvironment(
+            "cna", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
         expected = expected_results[system_name]
@@ -50,7 +52,9 @@ class TestAtomicEnvironment:
         nl = NeighborsList(
             system, config.atomicenvironment.rnei, config.atomicenvironment.rcut
         )
-        ae = AtomicEnvironment("graph", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"])
+        ae = AtomicEnvironment(
+            "graph", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
         assert len(hash_count) == expected_graph_counts[system_name]
@@ -71,7 +75,9 @@ class TestAtomicEnvironment:
         nl = NeighborsList(
             system, config.atomicenvironment.rnei, config.atomicenvironment.rcut
         )
-        ae = AtomicEnvironment("cna/graph", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"])
+        ae = AtomicEnvironment(
+            "cna/graph", nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+        )
 
         hash_count = Counter(ae.atomic_environment_list)
 
