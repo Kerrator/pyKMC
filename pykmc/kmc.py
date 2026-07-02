@@ -629,7 +629,9 @@ class KMC:
             List of event dataframe that has been added to the reference event table.
 
         """
-        results_is_valid_events = self.reference_table.add_events(events)
+        results_is_valid_events = self.reference_table.add_events(
+            events, pbc=self.system.pbc
+        )
         self.loggers.info(
             "log",
             "\t :=> Adding {} events to the reference table".format(
@@ -807,6 +809,7 @@ class KMC:
             self.system.cell,
             self.config.psr.matching_score_thr,
             neighbors,
+            pbc=self.system.pbc,
         )
         # result with min1, saddle, min2 pos
 
