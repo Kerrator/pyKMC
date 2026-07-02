@@ -252,3 +252,44 @@ class TestGreyDedupSpeciesGating:
 
         # Sanity control: the byte-identical event IS recognised as a duplicate.
         assert table.is_new_event(fwd) is False
+
+
+def test_build_event_series_threads_pbc_to_temp_systems(
+    monkeypatch, config_system_single_type, system_single_type_fcc
+):
+    """Thread pbc from the source system into the temporary Systems.
+
+    ``_build_event_series`` must carry the source system's pbc into its temp
+    Systems, otherwise NeighborsList assumes full periodicity and surface
+    systems get graph IDs computed with wrong boundary conditions.
+    """
+    import pykmc.event_table as et
+
+    seen_pbc = []
+
+    class _SpyNeighborsList:
+        def __init__(self, system, rnei, rcut):
+            seen_pbc.append(system.pbc)
+            raise RuntimeError("stop after recording pbc")
+
+    monkeypatch.setattr(et, "NeighborsList", _SpyNeighborsList)
+
+    table = ReferenceEventTable(config_system_single_type)
+    pos = system_single_type_fcc.positions
+    pbc = np.array([True, True, False])
+    try:
+        table._build_event_series(
+            min1_positions=pos,
+            saddle_positions=pos,
+            min2_positions=pos,
+            index_move=0,
+            dE_forward=0.5,
+            dE_backward=0.5,
+            cell=system_single_type_fcc.cell,
+            pbc=pbc,
+        )
+    except RuntimeError:
+        pass  # the spy aborts after the first NeighborsList construction
+
+    assert len(seen_pbc) == 1
+    assert np.array_equal(seen_pbc[0], pbc)

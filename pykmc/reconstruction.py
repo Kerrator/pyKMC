@@ -26,6 +26,7 @@ class Reconstruction:
         cell,
         delr_thr,
         neighbors=None,
+        pbc=None,
     ):
         """From a saddle point, try to reconstruct the event to see if it matches the
         supposed min1 and min2 positions, and that the to minima are connected.
@@ -60,6 +61,9 @@ class Reconstruction:
         if neighbors is None:  # len min1 == len min2 == len saddle pos
             neighbors = np.arange(len(saddle_positions))
 
+        if pbc is None:  # default: fully periodic, as a per-dimension vector
+            pbc = np.array([True, True, True])
+
         # Saddle positions
         tmp_positions = copy.deepcopy(saddle_positions)
 
@@ -69,6 +73,7 @@ class Reconstruction:
             supposed_min1_positions,
             fraction=self.config.reconstruction.push_fraction,
             cell=cell,
+            pbc=pbc,
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
         # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
@@ -78,9 +83,9 @@ class Reconstruction:
         #        min1_pos, _ = future.result()
 
         # compaire min1_pos with system current positions
-        t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=True)
+        t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
         delr1 = compute_delr(
-            supposed_min1_positions, t1[neighbors], cell
+            supposed_min1_positions, t1[neighbors], cell, pbc=pbc
         )  # I guess we need to be carefull here, if atom_modify sort 0 it's ok
         if delr1 > self.config.psr.matching_score_thr:
             return Err(
@@ -99,6 +104,7 @@ class Reconstruction:
                 supposed_min2_positions,
                 fraction=self.config.reconstruction.push_fraction,
                 cell=cell,
+                pbc=pbc,
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
             # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
@@ -108,9 +114,9 @@ class Reconstruction:
             #            min2_pos, _ = future.result()
 
             # Compare min2pos with expected final_positions
-            t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=True)
+            t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
             # delr2 = compute_delr(supposed_min2_positions, min2_pos[neighbors], cell)
-            delr2 = compute_delr(supposed_min2_positions, t2[neighbors], cell)
+            delr2 = compute_delr(supposed_min2_positions, t2[neighbors], cell, pbc=pbc)
             if delr2 > self.config.psr.matching_score_thr:
                 return Err(
                     ErrorInfo(

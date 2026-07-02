@@ -97,48 +97,22 @@ class PointSetRegistration:
             typ1 = ["X"] * len(coords1)
             typ2 = ["X"] * nat2
 
-        # unwrap if close to cell limits :
-        alat = self.system.cell[0][0]
+        # unwrap if close to cell limits (only in periodic directions):
+        pbc = (
+            self.system.pbc
+            if self.system.pbc is not None
+            else np.array([True, True, True])
+        )
+        cell_lengths = [self.system.cell[d][d] for d in range(3)]
         for i in range(len(coords1)):
-            if (
-                np.linalg.norm(
-                    coords1[i][0] - self.system.positions[central_atom_index][0]
-                )
-                > alat / 2
-            ):
-                coords1[i][0] = (
-                    coords1[i][0]
-                    + np.sign(
-                        self.system.positions[central_atom_index][0] - coords1[i][0]
+            for dim in range(3):
+                if pbc[dim]:
+                    diff = (
+                        coords1[i][dim]
+                        - self.system.positions[central_atom_index][dim]
                     )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][1] - self.system.positions[central_atom_index][1]
-                )
-                > alat / 2
-            ):
-                coords1[i][1] = (
-                    coords1[i][1]
-                    + np.sign(
-                        self.system.positions[central_atom_index][1] - coords1[i][1]
-                    )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][2] - self.system.positions[central_atom_index][2]
-                )
-                > alat / 2
-            ):
-                coords1[i][2] = (
-                    coords1[i][2]
-                    + np.sign(
-                        self.system.positions[central_atom_index][2] - coords1[i][2]
-                    )
-                    * alat
-                )
+                    if abs(diff) > cell_lengths[dim] / 2:
+                        coords1[i][dim] += np.sign(-diff) * cell_lengths[dim]
         nat1 = len(coords1)
         kmax_factor = self.config.ira.kmax_factor
 
