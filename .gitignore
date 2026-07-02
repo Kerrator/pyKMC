@@ -30,6 +30,7 @@ utils/analyse/*.xyz
 # LAMMPS / simulation outputs
 *core
 log.lammps
+lammps.log.*
 pykmc.*
 
 # IDE
