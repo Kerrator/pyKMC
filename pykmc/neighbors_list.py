@@ -35,20 +35,65 @@ class NeighborsList:
         self._build_neighbors_list()
 
     def _build_neighbors_list(self) -> None:
-        """Build and populates the `neighbors_list`."""
-        # Construct the kdTree
-        positions = self.system.positions
-        box = [self.system.cell[0][0], self.system.cell[1][1], self.system.cell[2][2]]
-        tree = cKDTree(positions, boxsize=box)
+        """Build and populates the `neighbors_list`.
 
-        # Find first neighbors and atoms in environments
-        for i in range(len(positions)):
-            neighbors = tree.query_ball_point(positions[i], self.rnei)
-            neighbors.remove(i)  # don't have self as neighbor
-            self.neighbors_list["rnei"].append(neighbors)
-            if self.rcut is not None:
-                neighbors = tree.query_ball_point(positions[i], self.rcut)
-                self.neighbors_list["rcut"].append(neighbors)
+        Fully periodic systems use the fast ``boxsize`` cKDTree path. Systems
+        with one or more non-periodic directions (surfaces/slabs) cannot use
+        ``boxsize`` for those directions, so ghost images are created only in
+        the periodic directions and results are mapped back to real atoms.
+        """
+        positions = self.system.positions
+        cell_diag = np.array(
+            [self.system.cell[0][0], self.system.cell[1][1], self.system.cell[2][2]]
+        )
+        pbc = (
+            self.system.pbc
+            if self.system.pbc is not None
+            else np.array([True, True, True])
+        )
+
+        if np.all(pbc):
+            # Fully periodic: use boxsize (existing fast path).
+            tree = cKDTree(positions, boxsize=cell_diag.tolist())
+            for i in range(len(positions)):
+                neighbors = tree.query_ball_point(positions[i], self.rnei)
+                neighbors.remove(i)  # don't have self as neighbor
+                self.neighbors_list["rnei"].append(neighbors)
+                if self.rcut is not None:
+                    neighbors = tree.query_ball_point(positions[i], self.rcut)
+                    self.neighbors_list["rcut"].append(neighbors)
+        else:
+            # Mixed PBC: create ghost images in the periodic directions only.
+            shifts = [[-1, 0, 1] if pbc[d] else [0] for d in range(3)]
+            all_positions = []
+            index_map: list[int] = []
+            for sx in shifts[0]:
+                for sy in shifts[1]:
+                    for sz in shifts[2]:
+                        shift_vec = np.array(
+                            [
+                                sx * cell_diag[0],
+                                sy * cell_diag[1],
+                                sz * cell_diag[2],
+                            ]
+                        )
+                        all_positions.append(positions + shift_vec)
+                        index_map.extend(range(len(positions)))
+            all_positions = np.vstack(all_positions)
+            index_map = np.array(index_map)
+            tree = cKDTree(all_positions)
+
+            for i in range(len(positions)):
+                raw = tree.query_ball_point(positions[i], self.rnei)
+                mapped = sorted(set(index_map[j] for j in raw) - {i})
+                self.neighbors_list["rnei"].append(mapped)
+                if self.rcut is not None:
+                    raw = tree.query_ball_point(positions[i], self.rcut)
+                    # Keep the central atom, matching the fully periodic branch:
+                    # downstream event building locates the moving atom inside
+                    # its own rcut environment.
+                    mapped = sorted(set(index_map[j] for j in raw))
+                    self.neighbors_list["rcut"].append(mapped)
 
     def get_neighbors(self, cutoff_type: float, idx: int) -> list[int]:
         """Retrieve the neighbor list for a specific atom and cutoff.

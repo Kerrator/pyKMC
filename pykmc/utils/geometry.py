@@ -67,12 +67,24 @@ def translate(
     return positions
 
 
-def push_towards(current_positions, target_positions, fraction=0.1, cell=None):
+def push_towards(current_positions, target_positions, fraction=0.1, cell=None, pbc=None):
     displacement = target_positions - current_positions
 
     if cell is not None:
+        if pbc is None:  # default: fully periodic
+            pbc = np.array([True, True, True])
         box = np.diag(cell)
-        displacement -= np.round(displacement / box) * box
+        pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
+        if np.all(pbc_arr):
+            displacement -= np.round(displacement / box) * box
+        else:
+            for dim in range(3):
+                if pbc_arr[dim]:
+                    displacement[:, dim] -= (
+                        np.round(displacement[:, dim] / box[dim]) * box[dim]
+                    )
         # unwrap target
         target_positions_unwrapped = current_positions + displacement
     else:
@@ -84,23 +96,30 @@ def push_towards(current_positions, target_positions, fraction=0.1, cell=None):
 
     if cell is not None:
         new_positions = ase.geometry.wrap_positions(
-            positions=new_positions, cell=cell, pbc=[True, True, True]
+            positions=new_positions,
+            cell=cell,
+            pbc=pbc if pbc is not None else [True, True, True],
         )
     return new_positions
 
 
-def compute_delr(positions_1, positions_2, cell=None):
+def compute_delr(positions_1, positions_2, cell=None, pbc=None):
     displacements = positions_2 - positions_1
 
     if cell is not None:
+        if pbc is None:  # default: fully periodic
+            pbc = np.array([True, True, True])
         cell_lengths = np.linalg.norm(cell, axis=1)
+        pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
 
-        # apply pbc
-
+        # apply pbc only in periodic dimensions
         for i in range(3):
-            displacements[:, i] -= cell_lengths[i] * np.round(
-                displacements[:, i] / cell_lengths[i]
-            )
+            if pbc_arr[i]:
+                displacements[:, i] -= cell_lengths[i] * np.round(
+                    displacements[:, i] / cell_lengths[i]
+                )
 
     # Calcul des normes des déplacements
     distances = np.linalg.norm(displacements, axis=1)
