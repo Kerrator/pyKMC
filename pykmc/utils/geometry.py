@@ -9,6 +9,7 @@ __all__ = [
     "minimum_image_distance",
     "event_movers",
     "reconstruction_matches",
+    "event_contained",
 ]
 import ase.geometry
 import numpy as np
@@ -197,34 +198,60 @@ def event_movers(
     n_movers: int,
     matching_thr: float,
 ) -> np.ndarray:
-    """Row indices of the ``n_movers`` atoms that move most during an event.
+    """Row indices of the atoms that genuinely participate in an event.
 
     The reconstruction acceptance check is restricted to the atoms that actually
     participate in the event (largest min1->min2 displacement); peripheral atoms
-    that barely move must not veto an otherwise correct reconstruction. Falls
-    back to the single largest mover when no atom exceeds ``matching_thr`` (a
-    degenerate, sub-threshold event).
+    that barely move must not veto an otherwise correct reconstruction. Every
+    such participant must be tight-checked, otherwise a genuine 4th+ mover of a
+    collective event could land on a *distinct* nearby site (0.1-1.0 A off) yet
+    be accepted only against the loose whole-shell bound -- a wrong state (and a
+    wrong barrier on the KMC clock).
+
+    The returned set is the **union** of
+
+    * **every** atom whose ``event_displacement`` exceeds ``matching_thr`` (a real
+      participant, regardless of rank -- this is what the old top-``n_movers``
+      *cap* used to truncate), and
+    * a top-``n_movers`` *floor* that only bites when **no** atom exceeds
+      ``matching_thr`` (a degenerate, sub-threshold event), so a peripheral atom
+      that barely moved is never dragged into the tight check as long as at least
+      one genuine participant exists.
+
+    This is a strict superset of the historical set (which was the top
+    ``min(n_movers, #participants)`` participants): when participants exist the
+    new rule keeps *all* of them; when none do it keeps the top-``n_movers`` as a
+    floor. Returned indices are ordered by descending displacement. Returns an
+    empty array when ``event_displacement`` is empty so callers can convert it to
+    a graceful reject instead of crashing on ``np.argmax`` of an empty sequence.
 
     Parameters
     ----------
     event_displacement : np.ndarray
         Shape (N,) per-atom min1->min2 displacement magnitudes over the rcut shell.
     n_movers : int
-        Number of top movers to keep (``ReconstructionConfig.n_movers``).
+        Floor on the number of top movers kept when no atom exceeds
+        ``matching_thr`` (``ReconstructionConfig.n_movers``); NOT a cap -- all
+        participants above ``matching_thr`` are kept even when they exceed
+        ``n_movers``.
     matching_thr : float
         Displacement (Angstrom) above which an atom counts as a participant.
 
     Returns
     -------
     np.ndarray
-        Row indices (into the rcut shell) of the top movers, descending.
+        Row indices (into the rcut shell) of the movers, descending by
+        displacement. Empty when ``event_displacement`` is empty.
 
     """
-    significant = np.where(event_displacement > matching_thr)[0]
-    if len(significant) == 0:  # degenerate event: keep the single largest mover
-        significant = np.array([int(np.argmax(event_displacement))])
-    order = significant[np.argsort(event_displacement[significant])[::-1]]
-    return order[: n_movers]
+    disp = np.asarray(event_displacement, dtype=float)
+    if disp.size == 0:  # degenerate/empty event: caller must reject gracefully
+        return np.empty(0, dtype=int)
+    order = np.argsort(disp)[::-1]  # all rows, descending displacement
+    n_participants = int((disp > matching_thr).sum())
+    if n_participants == 0:  # sub-threshold event: keep the top-n_movers floor
+        return order[: max(1, min(n_movers, disp.size))]
+    return order[:n_participants]  # tight-check every genuine participant
 
 
 def reconstruction_matches(
@@ -261,12 +288,106 @@ def reconstruction_matches(
     -------
     tuple of (bool, float, float)
         ``(ok, delr_movers, delr_shell)`` -- acceptance flag and the two maxima.
+        An empty ``discrepancy`` or empty ``movers`` yields a graceful
+        non-match ``(False, inf, inf)`` so the caller rejects the reconstruction
+        rather than crashing on ``max()`` of an empty sequence.
 
     """
-    delr_movers = float(discrepancy[movers].max())
-    delr_shell = float(discrepancy.max())
+    disc = np.asarray(discrepancy, dtype=float)
+    mv = np.asarray(movers, dtype=int)
+    if disc.size == 0 or mv.size == 0:  # degenerate: reject, never crash
+        return False, float("inf"), float("inf")
+    delr_movers = float(disc[mv].max())
+    delr_shell = float(disc.max())
     ok = delr_movers <= matching_thr and delr_shell <= shell_thr
     return ok, delr_movers, delr_shell
+
+
+def event_contained(
+    central_atom: "int | None",
+    neighbors: "np.ndarray | list[int]",
+    movers: np.ndarray,
+    min1_positions: np.ndarray,
+    saddle_positions: np.ndarray,
+    min2_positions: np.ndarray,
+    cell: np.ndarray,
+    rcut: float,
+    containment_margin: float,
+) -> "tuple[bool, float, float]":
+    """Whether the event stays inside the stored ``rcut`` neighbourhood.
+
+    Shared by the serial (host) :meth:`Reconstruction.reconstruct` and the engine
+    (basin wavefront) ``_basin_reconstruct_impl`` so the two paths accept/reject
+    identically -- the containment math must not drift between them, which is why
+    it lives here rather than being duplicated inline in both.
+
+    If a genuine event mover reaches the outer ``rcut`` shell the stored
+    neighbourhood is too small: the frozen far field would truncate the relaxation
+    and produce a spurious invalid-minimum rejection. The extent is measured over
+    the **whole** transition -- ``min1``, the saddle, and ``min2`` -- because an
+    *outward* event can sit safely inside ``rcut`` at ``min1`` yet reach or cross
+    the shell edge at the saddle or ``min2`` (measuring ``min1`` alone would let it
+    pass and then be truncated during the ``min2`` minimize).
+
+    The reference point is the central atom's ``min1`` position, located by its
+    absolute id in ``neighbors``. An **absent** central row is treated as
+    *not contained* (a reject), not silently skipped: the guard is the only
+    geometric sanity check on the reconstruction, and a corrupted/permuted
+    ``neighbors`` column that dropped the central id must fail closed rather than
+    bypass the check.
+
+    Parameters
+    ----------
+    central_atom : int or None
+        Absolute id of the event's central atom. ``None`` disables the guard
+        (returns contained), mirroring the historical ``central_atom is None``
+        callers that never had a centre to measure from.
+    neighbors : np.ndarray or list[int]
+        Absolute atom ids for the shell rows; ``central_atom`` is located here.
+    movers : np.ndarray
+        Row indices (into the shell) of the event movers.
+    min1_positions : np.ndarray
+        Shape (N, 3) supposed min1 positions over the shell.
+    saddle_positions : np.ndarray
+        Shape (N, 3) saddle positions over the shell (the mover rows).
+    min2_positions : np.ndarray
+        Shape (N, 3) supposed min2 positions over the shell.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic).
+    rcut : float
+        Neighbourhood cutoff radius (``atomicenvironment.rcut``).
+    containment_margin : float
+        Margin (Angstrom) subtracted from ``rcut`` to form the limit.
+
+    Returns
+    -------
+    tuple of (bool, float, float)
+        ``(contained, max_mover_r, rcut_limit)``. ``contained`` is ``True`` when
+        every mover stays within ``rcut - containment_margin`` of the central
+        atom over the whole path. When ``central_atom`` is ``None`` the guard is
+        disabled and returns ``(True, 0.0, 0.0)`` without touching ``rcut`` (which
+        may be ``None`` for the disabled guard). An absent central row or empty
+        ``movers`` returns ``(False, inf, rcut_limit)``.
+
+    """
+    if central_atom is None:  # no centre to measure from: historical no-op
+        return True, 0.0, 0.0
+    rcut_limit = float(rcut) - float(containment_margin)
+    mv = np.asarray(movers, dtype=int)
+    central_rows = np.where(np.asarray(neighbors) == central_atom)[0]
+    #Fail closed: an absent central row means the stored ordering lost the
+    #central atom (corruption/permutation). Skipping would bypass the only
+    #geometric sanity check, so treat it as not-contained instead.
+    if central_rows.size == 0 or mv.size == 0:
+        return False, float("inf"), rcut_limit
+    central_pos = min1_positions[central_rows[0]]
+    max_mover_r = 0.0
+    for state in (min1_positions, saddle_positions, min2_positions):
+        for m in mv:
+            r = minimum_image_distance(central_pos, state[m], cell)
+            if r > max_mover_r:
+                max_mover_r = r
+    return max_mover_r <= rcut_limit, float(max_mover_r), rcut_limit
 
 
 def align_positions_by_neighbors(

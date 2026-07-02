@@ -1029,9 +1029,9 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
         transform_positions,
         push_towards,
         per_atom_displacement,
-        minimum_image_distance,
         event_movers,
         reconstruction_matches,
+        event_contained,
     )
 
     proceed = None  # control signal broadcast to all ranks
@@ -1118,16 +1118,22 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                     event_disp = per_atom_displacement(supposed_initial, supposed_final, cell)
                     movers = event_movers(
                         event_disp, config.reconstruction.n_movers, matching_score_thr)
-                    central_rows = np.where(np.asarray(neighbor_indices) == central_atom)[0]
-                    if len(central_rows) > 0:
-                        central_shell_pos = supposed_initial[central_rows[0]]
-                        max_mover_r = max(
-                            minimum_image_distance(central_shell_pos, supposed_initial[m], cell)
-                            for m in movers
-                        )
-                        rcut_limit = (config.atomicenvironment.rcut
-                                      - config.reconstruction.containment_margin)
-                        if max_mover_r > rcut_limit:
+                    if len(movers) == 0:
+                        #Degenerate/empty event: reject gracefully (mirror of the
+                        #host-side guard), never crash the rank-0 phase.
+                        proceed = {"ok": False,
+                                   "error_type": "RECONSTRUCTION_MINIMIZE_FAILED",
+                                   "message": "degenerate event: no movers to reconstruct"}
+                    else:
+                        #Radius-containment guard over the WHOLE path (min1, saddle,
+                        #min2); shared helper keeps host/engine acceptance identical.
+                        #`saddle` is already the shell-ordered transformed saddle.
+                        contained, max_mover_r, rcut_limit = event_contained(
+                            central_atom, neighbor_indices, movers,
+                            supposed_initial, saddle, supposed_final,
+                            cell, config.atomicenvironment.rcut,
+                            config.reconstruction.containment_margin)
+                        if not contained:
                             proceed = {"ok": False,
                                        "error_type": "RECONSTRUCTION_EVENT_NOT_CONTAINED",
                                        "message": f"event not contained in rcut: max mover "

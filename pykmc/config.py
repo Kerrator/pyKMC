@@ -797,11 +797,12 @@ class ReconstructionConfig(BaseModel):
     n_movers: int = Field(
         default=3,
         gt=0,
-        description="Number of most-displaced event atoms (min1->min2) whose reconstructed position must match within psr.matching_score_thr. Peripheral atoms that did not move during the event do not veto the match.",
+        description="Minimum number of most-displaced event atoms (min1->min2) whose reconstructed position must match within psr.matching_score_thr. This is a FLOOR, not a cap: EVERY atom whose event displacement exceeds psr.matching_score_thr is also tight-checked, so a genuine 4th+ participant of a collective event cannot be accepted onto a nearby-but-distinct site under the loose whole-shell bound alone. Peripheral atoms that did not move during the event do not veto the match.",
     )
     containment_margin: float = Field(
         default=1.0,
-        description="Radius margin (Angstrom): the n_movers most-displaced atoms must sit within (atomicenvironment.rcut - containment_margin) of the central atom, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained.",
+        gt=0,
+        description="Radius margin (Angstrom): the event movers must sit within (atomicenvironment.rcut - containment_margin) of the central atom at min1, the saddle, AND min2, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained. Must be > 0 and < atomicenvironment.rcut.",
     )
     shell_tolerance: float = Field(
         default=1.0,
@@ -1190,6 +1191,43 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        return self
+
+    @model_validator(mode="after")
+    def validate_containment_margin(self) -> Config:
+        """Ensure the reconstruction containment margin fits inside ``rcut``.
+
+        ``reconstruction.containment_margin`` is subtracted from
+        ``atomicenvironment.rcut`` to form the mover-containment limit
+        (``rcut - containment_margin``). A margin that meets or exceeds ``rcut``
+        drives that limit to <= 0, so every event with a nonzero-radius mover is
+        rejected as not contained and the run silently purges its whole catalogue.
+        The field-level ``gt=0`` already forbids the zero/negative margin that
+        would disable the guard; this cross-field check forbids the too-large one.
+
+        ``rcut`` is optional; when it is unset the containment guard is inert and
+        no ordering can be imposed, so the check is skipped.
+
+        Returns
+        -------
+        Config
+            The validated ``Config`` instance.
+
+        Raises
+        ------
+        ValueError
+            If ``containment_margin >= atomicenvironment.rcut``.
+
+        """
+        rcut = self.atomicenvironment.rcut
+        margin = self.reconstruction.containment_margin
+        if rcut is not None and margin >= rcut:
+            raise ValueError(
+                "reconstruction.containment_margin ({}) must be < "
+                "atomicenvironment.rcut ({}); otherwise the containment limit "
+                "(rcut - containment_margin) is <= 0 and every event is rejected "
+                "as not contained.".format(margin, rcut)
+            )
         return self
 
 
