@@ -2,7 +2,7 @@ from lammps import lammps
 import threading 
 from mpi4py import MPI 
 import queue 
-from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, compute_event_prefactors, get_forces, dynamical_matrix_eskm
+from ..lammps_operations import initialize_parameters, initialize_system, initialize_potential, minimize, get_total_energy, get_positions, set_positions, partn_search, partn_refine, minimize_with_results, get_potential_energy, compute_event_prefactors, get_forces, dynamical_matrix_eskm, basin_reconstruct, basin_explore
 from ...messenger import QueueMessenger, MpiMessenger
 
 class MpiApiEngine() : 
@@ -39,6 +39,18 @@ class MpiApiEngine() :
         self.message_reader_thread = None 
         self.message_queue = queue.Queue() #Queue to hold messages from the session 
 
+        # Operations whose session-side caller waits for a tag-1 reply. Error
+        # replies must be sent ONLY for these: sending one for a fire-and-forget
+        # operation (set_positions, command, ...) leaves an unconsumed message in
+        # the reply stream, and every later reply is then off by one — silently
+        # cross-wiring results between operations.
+        self.REPLY_OPS = {
+            "get_total_energy", "get_positions", "get_potential_energy",
+            "minimize_with_results", "partn_search", "partn_refine",
+            "basin_reconstruct", "basin_explore",
+            "compute_event_prefactors", "get_forces", "dynamical_matrix_eskm",
+        }
+
         # Dispatch map of possible lammps operation
         self._operations_map = {
             "use_global": self.use_global,
@@ -59,6 +71,8 @@ class MpiApiEngine() :
             "compute_event_prefactors": compute_event_prefactors,
             "get_forces": get_forces,
             "dynamical_matrix_eskm": dynamical_matrix_eskm,
+            "basin_reconstruct" : basin_reconstruct,
+            "basin_explore" : basin_explore,
         }
 
 
@@ -137,12 +151,22 @@ class MpiApiEngine() :
                 break
 
             if result is not None:
+                if isinstance(result, dict) and "__handler_error__" in result:
+                    if msg.get("type") not in self.REPLY_OPS:
+                        # Fire-and-forget operation: nobody is waiting for a reply,
+                        # and sending one would desync the tag-1 reply stream.
+                        print(f"[Engine Rank {self.rank}] handler error in fire-and-forget "
+                              f"op {msg.get('type')}: {result['__handler_error__'].get('message')}")
+                        continue
+                    reply = {"type": "error", "value": result["__handler_error__"]}
+                else:
+                    reply = {"type": "result", "value": result}
                 if entry_global_mode:
                     if self.global_rank == 0 :
-                        self.global_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.global_messenger.send(reply, dest=0, tag=1)
                 else:
                     if self.local_rank == 0 :
-                        self.local_messenger.send({"type": "result", "value": result}, dest=0, tag=1) 
+                        self.local_messenger.send(reply, dest=0, tag=1)
 
     def _send_status(self, messenger) :
         """Send the status of the engine to the session."""
@@ -190,7 +214,15 @@ class MpiApiEngine() :
                 return result
             except Exception as e:
                 print(f"[Engine Rank {self.rank}] Error in handler {msg_type}: {e}")
-            finally : 
+                #Return an error marker so run_engine_loop sends an error reply.
+                #Without it the handler result is None, no reply is sent, and the
+                #session blocks forever in recv waiting for one.
+                return {"__handler_error__": {
+                    "operation": msg_type,
+                    "error_type": type(e).__name__,
+                    "message": str(e),
+                }}
+            finally :
                 entry_engine_comm.barrier()
 
 
