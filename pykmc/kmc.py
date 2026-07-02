@@ -49,6 +49,20 @@ from .bias import Bias
 from .event_recycling import DistanceRecycling, Recycling
 
 
+# Reconstruction failures that are specific to *this active row* (a per-site IRA
+# mapping mismatch or a transient engine hiccup), not evidence that the generic
+# reference event is defective. These drop the active row only; they must NOT
+# purge the globally-valid reference event (which would silently delete a good
+# event -- see findings #2/#9). A wrong-minimum outcome (INVALID_MIN1/MIN2), by
+# contrast, means the event does not reconnect and the reference is purged.
+_PER_ROW_RECONSTRUCTION_ERRORS = frozenset(
+    {
+        ErrorType.RECONSTRUCTION_MINIMIZE_FAILED,
+        ErrorType.RECONSTRUCTION_EVENT_NOT_CONTAINED,
+    }
+)
+
+
 # NOTE can maybe reimplment tries if empty catalog
 #TODO: Add reconstruction info
 
@@ -270,9 +284,12 @@ class KMC:
             self.manager.use_global()
             result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae = self.reconstruction(active_table)
             events_info = info_active_events(self.system.types, self.reference_table, active_table)
+            # Refs purged this step; the orphan eviction is DEFERRED until after the
+            # prune block below (see the drop_orphans call there for the rationale).
+            removed_refs: set[int] = set()
             if len(err_reference) != 0 :
                 self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
-                self.reference_table.remove(list(set(err_reference)))
+                removed_refs = self.reference_table.remove(list(set(err_reference)))
                 self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
                 self.visited_environments = self.visited_environments.difference(set(err_ae))
             events_info = events_info.output_msg()
@@ -414,6 +431,23 @@ class KMC:
                             len(self.active_table.table)
                         ),
                     )
+
+            # == Evict active rows orphaned by this step's reference purge ==
+            # Deferred to here (not the purge block above) on purpose: the purge
+            # runs before every positional consumer of the POSITIONAL
+            # idx_selected_event -- the step log (num_reference_event/energy_barrier/k),
+            # detector.detect, and prune_for_recycling's recycling anchor. Evicting
+            # + reset_index there would shift labels under idx_selected_event, and
+            # if the executed row shares its num_reference_event (or backward
+            # sibling) with an earlier row that failed with INVALID_MIN1/MIN2 in the
+            # same reconstruction() loop -- routine, since one generic ref maps onto
+            # many sites -- the executed row itself would be evicted, turning the
+            # .loc[idx_selected_event] lookups into a KeyError on a successful step.
+            # Running it after the prune leaves those consumers intact and drops the
+            # orphans from the pruned next-step table.
+            n_evicted = self.active_table.drop_orphans(removed_refs)
+            if n_evicted :
+                self.loggers.info("log", "\t :=> Evicted {} orphaned active event(s) after reference purge.".format(n_evicted))
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
@@ -679,10 +713,23 @@ class KMC:
                     break
                 else :
                     num_ref_event = active_table.table.loc[idx_selected_event].at['num_reference_event']
+                    err_type = result_reconstruction.err_value().type
                     self.loggers.info("log", "\t :=> Reconstruction fails (reference event {}) :  {}".format(num_ref_event, result_reconstruction.err_value().message))
-                    ae_topo = self.reference_table.table[self.reference_table.table['idx_ref'] == num_ref_event]['event_id'].values[0]
-                    err_reference.append(num_ref_event)
-                    err_ae.append(ae_topo)
+                    if err_type in _PER_ROW_RECONSTRUCTION_ERRORS :
+                        # Per-row / transient miss: keep the (globally-valid)
+                        # reference event, drop only this active row.
+                        self.loggers.info("log", "\t :=> Per-row/transient failure; keeping reference event, dropping active event only.")
+                    else :
+                        # Genuine reconstruction defect: schedule the reference
+                        # event (and its topology) for purge. Guard the lookup:
+                        # an orphaned recycled row may point at an already-purged
+                        # ref, in which case there is nothing left to remove.
+                        event_ids = self.reference_table.table[self.reference_table.table['idx_ref'] == num_ref_event]['event_id'].values
+                        if len(event_ids) > 0 :
+                            err_reference.append(num_ref_event)
+                            err_ae.append(event_ids[0])
+                        else :
+                            self.loggers.info("log", "\t :=> Reference event {} already purged; dropping orphaned active event.".format(num_ref_event))
 
                     self.loggers.info("log", "\t :=> Removing active event.")
                     active_table.remove(idx_selected_event)
