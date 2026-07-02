@@ -58,6 +58,7 @@ class StateData:
                     self.neighbors_list.neighbors_list["rnei"],
                     self.neighbors_list.neighbors_list["rcut"],
                     config.atomicenvironment.neighbors_add,
+                    coordination_threshold=config.atomicenvironment.coordination_threshold,
                     types=self.system.types,
                     coloring_mode=config.atomicenvironment.atom_coloring_mode,
                 )
@@ -613,6 +614,7 @@ class BasinsGenericEvents:
                 neighbors_list.neighbors_list["rnei"],
                 neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
                 types=system.types,
                 coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
