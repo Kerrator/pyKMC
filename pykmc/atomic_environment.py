@@ -142,7 +142,11 @@ class AtomicEnvironment:
         return cna(self.neighbors_list)
 
     def compute_coordination(self) -> list[str]:
-        """See :py:func:`.environments.coordination` for details on coordination classification."""
+        """See :py:func:`.environments.coordination` for the coordination-number classifier."""
+        # The config validator guarantees a threshold for coordination styles.
+        assert self.coordination_threshold is not None, (
+            "coordination_threshold must be set"
+        )
         return coordination(self.neighbors_list, self.coordination_threshold)
 
     def compute_graph(
@@ -210,7 +214,10 @@ class AtomicEnvironment:
             atomic environment ID for each atom
 
         """
-        # Compute coordination-based classification
+        # Coordination-number classification (validator guarantees a threshold for these styles)
+        assert self.coordination_threshold is not None, (
+            "coordination_threshold must be set"
+        )
         list_hash = coordination(neighbors_list, self.coordination_threshold)
         non_crystal_idx = (
             np.where(np.array(list_hash) == "noncrystal")[0].astype(int).tolist()
@@ -225,10 +232,8 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
 
-        # Compute graph topo for all non-crystal atoms
-        list_graphs_hash = graph(
-            neighbors_list, environment_list, non_crystal_idx, types=self.types
-        )
+        # Compute graph topology only for the non-crystalline atoms (uncolored graph())
+        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 

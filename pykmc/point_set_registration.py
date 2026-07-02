@@ -94,9 +94,10 @@ class PointSetRegistration:
                 else typ1
             )
         else:
-            # GREY ALLOY: all atoms treated as identical
-            typ1 = ['X']*len(coords1)
-            typ2 = typ1
+            # Grey alloy: all atoms treated identically -> species-blind IRA
+            # matching (a single shared dummy label, sized per structure).
+            typ1 = ["X"] * len(coords1)
+            typ2 = ["X"] * nat2
 
         # unwrap if close to cell limits :
         alat = self.system.cell[0][0]

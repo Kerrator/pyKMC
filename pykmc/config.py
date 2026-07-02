@@ -162,37 +162,28 @@ class AtomicEnvironmentConfig(BaseModel):
         "neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.",
     )
 
+    @model_validator(mode="after")
+    def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":
+        """Ensure coordination_threshold is set when the style requires it."""
+        if (
+            self.style in ("coordination", "coordination/graph")
+            and self.coordination_threshold is None
+        ):
+            raise ValueError(
+                "coordination_threshold is required when style is '{}'. "
+                "Set it in the [AtomicEnvironment] section of your INI file.".format(
+                    self.style
+                )
+            )
+        return self
+
     atom_coloring_mode: Literal["grey", "full"] = Field(
-        default="grey",
+        default="full",
         description="Controls whether element types are used in environment matching. "
+        "Defaults to 'full' (species-resolved). "
         "'grey': all atoms treated identically (grey alloy approximation). "
         "'full': element types used in graph hashing, PSR matching, and symmetry detection.",
     )
-
-    @model_validator(mode="after")
-    def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":
-        """Ensure coordination_threshold is set when style requires it.
-
-        Returns
-        -------
-        AtomicEnvironmentConfig
-            The validated configuration instance.
-
-        Raises
-        ------
-        ValueError
-            If style is a coordination variant but coordination_threshold is None.
-
-        """
-        if self.style in ("coordination", "coordination/graph"):
-            if self.coordination_threshold is None:
-                raise ValueError(
-                    "coordination_threshold is required when style is '{}'. "
-                    "Set it in the [AtomicEnvironment] section of your INI file.".format(
-                        self.style
-                    )
-                )
-        return self
 
 
 class EventSearchConfig(BaseModel):

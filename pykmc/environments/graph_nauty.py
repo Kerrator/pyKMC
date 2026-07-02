@@ -31,34 +31,33 @@ def graph(
         List of graph ID
 
     """
-    #from mpi4py import MPI
+    # from mpi4py import MPI
 
     ## MPI
-    #comm = MPI.COMM_WORLD
-    #rank = comm.Get_rank()
-    #nprocs = comm.Get_size()
+    # comm = MPI.COMM_WORLD
+    # rank = comm.Get_rank()
+    # nprocs = comm.Get_size()
 
     ## Split index atoms in approximatively even number sublist
     if atom_idx is None:  # graph for all atoms in system
-
         local_index = np.arange(len(neighbors_list))
-    else : 
+    else:
         local_index = atom_idx
     #    split = np.array_split(range(len(neighbors_list)), nprocs)
-    #else:
+    # else:
     #    split = np.array_split(atom_idx, nprocs)  # when using cna/graph
-    #local_index = split[rank]
+    # local_index = split[rank]
     list_g = make_graph(local_index, neighbors_list, environment_list, types)
 
     list_hash = []
 
     for g in list_g:
         list_hash.append(pynauty.certificate(g).hex())
-    #list_hash = comm.gather(list_hash, root=0)
-    #if rank == 0:
-#    list_hash = [gcertificate for e in list_hash for gcertificate in e]
+    # list_hash = comm.gather(list_hash, root=0)
+    # if rank == 0:
+    #    list_hash = [gcertificate for e in list_hash for gcertificate in e]
     return list_hash
-    #else:
+    # else:
     #    return None
 
 
@@ -104,8 +103,7 @@ def make_graph(
             for neighbor in neighbors_list[at]:
                 if neighbor in environment_list[idx]:
                     adjacency_dict[i].append(global_to_local[neighbor])
-        # Build vertex coloring from element types if provided (full colour mode).
-        # An empty list (types is None) is pynauty's default == uncoloured (grey).
+        # Build vertex coloring from element types if provided
         vertex_coloring = []
         if types is not None:
             local_types = [types[global_idx] for global_idx in environment_list[idx]]
@@ -115,13 +113,13 @@ def make_graph(
                     {i for i, t in enumerate(local_types) if t == element}
                 )
 
-        graph = pynauty.Graph(
+        g = pynauty.Graph(
             number_of_vertices=len(environment_list[idx]),
             adjacency_dict=adjacency_dict,
             directed=False,
             vertex_coloring=vertex_coloring,
         )
 
-        list_g.append(graph)
+        list_g.append(g)
 
     return list_g

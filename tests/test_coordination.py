@@ -47,7 +47,7 @@ class TestCoordination:
 
     def test_coordination_requires_threshold(self):
         """coordination() without a threshold fails loudly rather than silently."""
-        with pytest.raises(ValueError):
+        with pytest.raises(AssertionError):
             AtomicEnvironment("coordination", [[1], [0]], coordination_threshold=None)
 
 
@@ -81,9 +81,9 @@ class TestColourGraph:
 
 
 class TestAtomColoringConfig:
-    def test_default_is_grey(self):
+    def test_default_is_full(self):
         cfg = AtomicEnvironmentConfig(style="cna/graph", rnei=3.0, rcut=6.5)
-        assert cfg.atom_coloring_mode == "grey"
+        assert cfg.atom_coloring_mode == "full"
         assert cfg.coordination_threshold is None
 
     def test_accepts_full_colour(self):

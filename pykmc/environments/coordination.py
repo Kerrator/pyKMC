@@ -17,12 +17,6 @@ def coordination(neighbors_list: list[list[int]], threshold: int) -> list[str]:
         'crystal' or 'noncrystal' classification for each atom.
 
     """
-    if threshold is None:
-        raise ValueError(
-            "coordination() requires a non-None threshold; set "
-            "[AtomicEnvironment] coordination_threshold for style "
-            "'coordination' / 'coordination/graph'."
-        )
     result: list[str] = []
     for neighbors_i in neighbors_list:
         if len(neighbors_i) >= threshold:
