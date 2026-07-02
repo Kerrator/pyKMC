@@ -268,3 +268,71 @@ def reconstruction_matches(
     ok = delr_movers <= matching_thr and delr_shell <= shell_thr
     return ok, delr_movers, delr_shell
 
+
+def align_positions_by_neighbors(
+    neighbors_1: "np.ndarray | None",
+    positions_1: np.ndarray,
+    neighbors_2: "np.ndarray | None",
+    positions_2: np.ndarray,
+) -> "tuple[np.ndarray, np.ndarray, bool] | None":
+    """Align two per-event position arrays onto their common atoms by atom id.
+
+    Each active-event row stores its geometry (``saddle_positions`` /
+    ``final_positions``) ordered positionally by the row's own ``neighbors``
+    integer-id array: position row ``k`` belongs to absolute atom
+    ``neighbors[k]``. Two rows may carry the same atoms in a **different order**
+    (a recycled row keeps its event-time neighbour ordering while a fresh row is
+    built from the current :class:`NeighborsList`) or may even span **different
+    atom sets** (the system moved between the two events). A positional
+    element-wise comparison of the two arrays therefore compares
+    non-corresponding atoms. This helper builds the id->row maps and returns the
+    two position subarrays restricted to the shared atoms, in a common atom-id
+    order, so a caller can compare only corresponding atoms with
+    :func:`compute_delr`.
+
+    Parameters
+    ----------
+    neighbors_1 : np.ndarray or None
+        Absolute atom ids for ``positions_1`` rows (the row's ``neighbors``
+        column). ``None`` for a row whose neighbour ids were never stored.
+    positions_1 : np.ndarray
+        Shape (N1, 3) positions, row ``k`` belonging to atom ``neighbors_1[k]``.
+    neighbors_2 : np.ndarray or None
+        Absolute atom ids for ``positions_2`` rows.
+    positions_2 : np.ndarray
+        Shape (N2, 3) positions, row ``k`` belonging to atom ``neighbors_2[k]``.
+
+    Returns
+    -------
+    tuple of (np.ndarray, np.ndarray, bool) or None
+        ``(aligned_1, aligned_2, sets_equal)`` where ``aligned_1`` and
+        ``aligned_2`` hold the positions of the shared atoms in the same
+        atom-id order (shape (M, 3), M = number of shared atoms), and
+        ``sets_equal`` is ``True`` iff the two neighbour sets are identical.
+        Returns ``None`` (not comparable) when either ``neighbors`` array is
+        ``None``, a ``neighbors`` length does not match its positions, or the
+        two rows share no atom -- in every such case the caller must keep both
+        rows.
+
+    """
+    if neighbors_1 is None or neighbors_2 is None:
+        return None
+    nb1 = np.asarray(neighbors_1, dtype=int)
+    nb2 = np.asarray(neighbors_2, dtype=int)
+    pos1 = np.asarray(positions_1)
+    pos2 = np.asarray(positions_2)
+    # A length mismatch means the stored ordering cannot be trusted to index the
+    # positions; treat as not-comparable rather than risk a scrambled alignment.
+    if nb1.shape[0] != pos1.shape[0] or nb2.shape[0] != pos2.shape[0]:
+        return None
+
+    map1 = {int(a): k for k, a in enumerate(nb1)}
+    map2 = {int(a): k for k, a in enumerate(nb2)}
+    common = [a for a in map1 if a in map2]  # deterministic: nb1 order
+    if not common:
+        return None
+    idx1 = [map1[a] for a in common]
+    idx2 = [map2[a] for a in common]
+    sets_equal = set(map1) == set(map2)
+    return pos1[idx1], pos2[idx2], sets_equal
+
