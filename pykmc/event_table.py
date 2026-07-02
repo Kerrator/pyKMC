@@ -69,6 +69,7 @@ class ReferenceEventTable:
                 dE_forward=ev.dE_forward,
                 dE_backward=ev.dE_backward,
                 cell=ev.cell,
+                types=ev.types,
             )
             results_is_valid_events.append(res)
             if res.is_ok():
@@ -91,6 +92,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -110,6 +112,8 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str]
+            Event's atom types.
 
         Returns
         -------
@@ -181,6 +185,7 @@ class ReferenceEventTable:
                 dE_forward=dE_forward,
                 dE_backward=dE_backward,
                 cell=cell,
+                types=types,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -295,13 +300,27 @@ class ReferenceEventTable:
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        # TODO I guess we should save atoms types in reference table
-        typ_event = nat_event * ["X"]
+        # Mirror the PSR / classification paths: only feed real element types to IRA
+        # in "full" coloring mode. In "grey" mode every atom is greyed to a single
+        # dummy label ('X'), so geometrically-identical species-swapped saddles
+        # de-duplicate as one event (grey-alloy approximation). The None-"types"
+        # fallback keeps list(None) from raising when a row stores no types.
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        typ_event = (
+            list(dfevent["types"])
+            if full and dfevent["types"] is not None
+            else nat_event * ["X"]
+        )
 
         for _, ev in subset.iterrows():
             ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event
+            typ_ref = (
+                list(ev["types"])
+                if full and ev["types"] is not None
+                else nat_ref * ["X"]
+            )
+
             result = simple_ira(
                 nat_event,
                 typ_event,
@@ -387,6 +406,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -406,6 +426,11 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str], optional
+            Element type of each atom. When provided, the per-event local types are
+            always stored in the ``types`` column (both coloring modes, so the schema
+            is mode-independent). Colouring is only *applied* to graph
+            hashing/symmetry detection when the configured coloring mode is 'full'.
 
         Returns
         -------
@@ -415,6 +440,10 @@ class ReferenceEventTable:
             - a pd.Series of the backward reaction.
 
         """
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        # Only use element types for graph/symmetry computation in full coloring mode
+        graph_types = types if full else None
+
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
         min1system = System()
         min1system.positions = min1_positions
@@ -449,33 +478,57 @@ class ReferenceEventTable:
             min1neighbors_list.neighbors_list["rnei"],
             min1neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_saddle = graph(
             saddleneighbors_list.neighbors_list["rnei"],
             saddleneighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_min2 = graph(
             min2neighbors_list.neighbors_list["rnei"],
             min2neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
 
-        neighbor_list_forwward = min1neighbors_list.neighbors_list["rcut"][index_move]
-        neighbor_list_backward = min2neighbors_list.neighbors_list["rcut"][index_move]
+        # query_ball_point can hand back Python lists; coerce to arrays so the
+        # element-wise comparisons (np.where) and type indexing below behave.
+        neighbor_list_forward = np.asarray(
+            min1neighbors_list.neighbors_list["rcut"][index_move]
+        )
+        neighbor_list_backward = np.asarray(
+            min2neighbors_list.neighbors_list["rcut"][index_move]
+        )
+
+        # Element types of each neighbor. These are ALWAYS stored (both modes) so
+        # the reference-table schema is mode-independent; colouring is only *applied*
+        # in matching/symmetry, which is gated below.
+        local_types_forward = (
+            list(np.array(types)[neighbor_list_forward]) if types is not None else None
+        )
+        local_types_backward = (
+            list(np.array(types)[neighbor_list_backward]) if types is not None else None
+        )
+
+        # Colour symmetry detection only in full coloring mode (usage gate).
+        sym_types_forward = local_types_forward if full else None
+        sym_types_backward = local_types_backward if full else None
 
         # Symmetries :
         sym_matrix, sym_perm = unique_symmetries(
-            min1_positions[neighbor_list_forwward],
-            min2_positions[neighbor_list_forwward],
+            min1_positions[neighbor_list_forward],
+            min2_positions[neighbor_list_forward],
             self.config.ira.sym_thr,
+            types=sym_types_forward,
         )
 
         # dr :
-        move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
+        move_atom_idx_forward = np.where(neighbor_list_forward == index_move)[0][0]
         dra_forward = np.linalg.norm(
-            min1_positions[neighbor_list_forwward][move_atom_idx_forward]
-            - saddle_positions[neighbor_list_forwward][move_atom_idx_forward]
+            min1_positions[neighbor_list_forward][move_atom_idx_forward]
+            - saddle_positions[neighbor_list_forward][move_atom_idx_forward]
         )
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
         dra_backward = np.linalg.norm(
@@ -487,14 +540,15 @@ class ReferenceEventTable:
             {
                 "idx_ref": -1,  # unknown yet
                 "event_id": id_min1,
-                "initial_positions": min1_positions[neighbor_list_forwward],
-                "saddle_positions": saddle_positions[neighbor_list_forwward],
-                "final_positions": min2_positions[neighbor_list_forwward],
+                "initial_positions": min1_positions[neighbor_list_forward],
+                "saddle_positions": saddle_positions[neighbor_list_forward],
+                "final_positions": min2_positions[neighbor_list_forward],
+                "types": local_types_forward,
                 "energy_barrier": dE_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
-                "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
+                "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
                 "idx_backward": -1,  # unknown yet,
@@ -506,6 +560,7 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_backward],
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
+            types=sym_types_backward,
         )
         dfevent_backward = pd.Series(
             {
@@ -514,6 +569,7 @@ class ReferenceEventTable:
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
+                "types": local_types_backward,
                 "energy_barrier": dE_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "id_saddle": id_saddle,
@@ -550,6 +606,7 @@ class ReferenceEventTable:
                     "initial_positions": pd.Series(dtype="object"),
                     "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
+                    "types": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
                     "k": pd.Series(dtype="float64"),
                     "id_saddle": pd.Series(dtype="str"),

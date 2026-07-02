@@ -92,6 +92,8 @@ class Initializer:
             self.kmc.neighbors_list.neighbors_list["rnei"],
             self.kmc.neighbors_list.neighbors_list["rcut"],
             self.kmc.config.atomicenvironment.neighbors_add,
+            types=self.kmc.system.types,
+            coloring_mode=self.kmc.config.atomicenvironment.atom_coloring_mode,
         )
 
     def initialize_reference_table(self) -> None:

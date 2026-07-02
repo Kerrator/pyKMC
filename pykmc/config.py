@@ -127,6 +127,14 @@ class AtomicEnvironmentConfig(BaseModel):
         description="When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.",
     )
 
+    atom_coloring_mode: Literal["grey", "full"] = Field(
+        default="full",
+        description="Controls whether element types are used in environment matching. "
+        "Defaults to 'full' (species-resolved). "
+        "'grey': all atoms treated identically (grey alloy approximation). "
+        "'full': element types used in graph hashing, PSR matching, and symmetry detection.",
+    )
+
 
 class EventSearchConfig(BaseModel):
     """Event search parameters."""

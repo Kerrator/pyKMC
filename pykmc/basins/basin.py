@@ -58,6 +58,8 @@ class StateData:
                     self.neighbors_list.neighbors_list["rnei"],
                     self.neighbors_list.neighbors_list["rcut"],
                     config.atomicenvironment.neighbors_add,
+                    types=self.system.types,
+                    coloring_mode=config.atomicenvironment.atom_coloring_mode,
                 )
 
 
@@ -546,15 +548,27 @@ class BasinsGenericEvents:
 
         for state_index, state_data in self.states.items():
             are_equivalent = self.are_structures_equivalent(
-                system.positions, state_data.system.positions, cell=system.cell
+                system.positions,
+                system.types,
+                state_data.system.positions,
+                state_data.system.types,
+                cell=system.cell,
             )
             if are_equivalent:
                 return state_index
         return -1
 
-    def are_structures_equivalent(self, pos1, pos2, cell, tol=0.3):
+    def are_structures_equivalent(self, pos1, typ1, pos2, typ2, cell, tol=0.3):
 
         if len(pos1) != len(pos2):
+            return False
+
+        # In full coloring mode, two states with the same geometry but a different
+        # species arrangement (e.g. an Fe/Ni swap) are distinct; in grey mode they merge.
+        if (
+            self.config.atomicenvironment.atom_coloring_mode == "full"
+            and not np.array_equal(typ1, typ2)
+        ):
             return False
 
         box = np.diag(cell).tolist()
@@ -599,6 +613,8 @@ class BasinsGenericEvents:
                 neighbors_list.neighbors_list["rnei"],
                 neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                types=system.types,
+                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
         else:
             neighbors_list = None

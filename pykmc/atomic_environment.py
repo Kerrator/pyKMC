@@ -37,6 +37,8 @@ class AtomicEnvironment:
         neighbors_list: list[list[int]] | None = None,
         environment_list: list[list[int]] | None = None,
         neighbors_add: int = 0,
+        types: list[str] | None = None,
+        coloring_mode: str = "full",
         region: RegionConfig | None = None,
         positions: np.ndarray | None = None,
         atom_types: list[str] | None = None,
@@ -45,6 +47,8 @@ class AtomicEnvironment:
         self.neighbors_list = neighbors_list
         self.environment_list = environment_list
         self.neighbors_add = neighbors_add
+        self.types = types
+        self.coloring_mode = coloring_mode
 
         # Compute the atomic environment ID and store it in self.atomic_environment_list
         match self.style:
@@ -107,7 +111,11 @@ class AtomicEnvironment:
         self, neighbors_list: list[list[int]], environment_list: list[list[int]]
     ) -> list[str]:
         """See :py:func:`.environment.graph` for detail on Graph Topology computation."""
-        return graph(neighbors_list, environment_list)
+        return graph(
+            neighbors_list,
+            environment_list,
+            types=self.types if self.coloring_mode == "full" else None,
+        )
 
     def compute_cnagraph(
         self, neighbors_list: list[list[int]], environment_list: list[list[int]]
@@ -142,7 +150,12 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
         # Compute graph topo for all non cristalline atoms
-        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        list_graphs_hash = graph(
+            neighbors_list,
+            environment_list,
+            non_crystal_idx,
+            types=self.types if self.coloring_mode == "full" else None,
+        )
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 
@@ -164,7 +177,12 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
         # Compute graph topo for all non cristalline atoms
-        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        list_graphs_hash = graph(
+            neighbors_list,
+            environment_list,
+            non_crystal_idx,
+            types=self.types if self.coloring_mode == "full" else None,
+        )
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 
