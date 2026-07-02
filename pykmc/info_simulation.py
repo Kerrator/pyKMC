@@ -207,12 +207,15 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
     mapping_backward = dict(zip(idx_ref, reference_table.table['idx_backward'].values))
     mapping_energy = dict(zip(idx_ref, reference_table.table['energy_barrier'].values))
     
-    #get info applying mapping 
-    initial_topologies = np.array([mapping_event_id[ref] for ref in reference_events])
-    dra_i = np.array([mapping_dra[ref] for ref in reference_events])
-    backward_events = np.array([mapping_backward[ref] for ref in reference_events])
-    dE_backward = np.array([mapping_energy[ref] for ref in backward_events])
-    dra_f = np.array([mapping_dra[ref] for ref in backward_events])
+    #get info applying mapping
+    # Recycled active rows can outlive a purged reference event (forward or its
+    # backward sibling). Tolerate a missing ref here -- fall back to a sentinel
+    # rather than KeyError -- so an orphaned row only blanks its own log line.
+    initial_topologies = np.array([mapping_event_id.get(ref) for ref in reference_events])
+    dra_i = np.array([mapping_dra.get(ref, np.nan) for ref in reference_events])
+    backward_events = np.array([mapping_backward.get(ref, -1) for ref in reference_events])
+    dE_backward = np.array([mapping_energy.get(ref, np.nan) for ref in backward_events])
+    dra_f = np.array([mapping_dra.get(ref, np.nan) for ref in backward_events])
     
     dE_asym = np.abs(dE_forward - dE_backward)
 

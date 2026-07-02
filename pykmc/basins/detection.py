@@ -41,13 +41,19 @@ class DetectorThreshold(Detector) :
         else : 
             #Need to check if a backward reaction with low energy barrier exists. 
 
-            if is_refined : 
+            if is_refined :
                 #case where we need to find the generic event from the active one
                 idx_reference_event = pds_selected_active_event["num_reference_event"]
 
-                #generic event of the active one 
+                #generic event of the active one
                 #pds_generic_event_forward = df_reference_table.iloc[idx_reference_event]
-                pds_generic_event_forward = df_reference_table[df_reference_table['idx_ref'] == idx_reference_event].iloc[0] #is a pd.Serie
+                df_generic_event_forward = df_reference_table[df_reference_table['idx_ref'] == idx_reference_event]
+                #the executed row's generic ref may already be purged (a sibling row
+                #sharing this ref failed reconstruction this step) -- then there is
+                #no generic event to test, so the system is not in a basin.
+                if df_generic_event_forward.empty :
+                    return False
+                pds_generic_event_forward = df_generic_event_forward.iloc[0] #is a pd.Serie
             
             else : 
                 pds_generic_event_forward = pds_selected_active_event
