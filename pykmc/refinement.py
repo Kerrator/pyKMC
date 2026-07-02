@@ -52,7 +52,12 @@ class Refinement:
         self.manager = manager
         self.results = None
 
-    def execute(self, df_reference_events: pd.DataFrame, total_energy) -> None:
+    def execute(
+        self,
+        df_reference_events: pd.DataFrame,
+        total_energy,
+        existing_pairs: set[tuple[int, int]] | None = None,
+    ) -> None:
         """Execute event refinements for each reference event in the df_reference_events dataframe.
 
         It stores the results of the event refinements in self.results.
@@ -61,8 +66,16 @@ class Refinement:
         ----------
         df_reference_events : pd.DataFrame
             dataframe of reference events to refine.
+        total_energy : float
+            Total potential energy of the current system, used as the reference
+            for refined energy barriers.
+        existing_pairs : set[tuple[int, int]] | None, optional
+            ``(atom_index, num_reference_event)`` pairs already present in the
+            active event table (carried over from the previous step). These
+            are skipped during refinement. By default ``None``.
 
         """
+        existing_pairs = existing_pairs or set()
         self.results = []
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(df_reference_events)
@@ -76,8 +89,12 @@ class Refinement:
         for idx, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
-            
+            ref_idx = int(dfevent["idx_ref"])
+
             for at_idx in atoms_refine_idx:
+                ###=>Skip pairs already carried over from the previous step
+                if (at_idx, ref_idx) in existing_pairs:
+                    continue
                 ###=>refine single generic
                 futures = self.refine_single(at_idx, dfevent, total_energy, future_context, e_thr)
                 if isinstance(futures,list): #If symmetries

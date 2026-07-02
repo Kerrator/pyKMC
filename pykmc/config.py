@@ -108,6 +108,11 @@ class ControlConfig(BaseModel):
         description="Enable event selection bias. Requires a [Bias] section."
     )
 
+    recycle: Optional[bool] = Field(
+        default=False,
+        description="Recycle non-perturbed events from the previous KMC step instead of re-searching them. Requires an [EventRecycling] section.",
+    )
+
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
 
@@ -626,6 +631,29 @@ class ReconstructionConfig(BaseModel):
     )
 
 
+class EventRecyclingConfig(BaseModel):
+    """Event recycling parameters. Required when control.recycle = True."""
+
+    style: Literal["displacement"] = Field(
+        ...,
+        description=(
+            "Method used to decide which events can be recycled. "
+            "'displacement' = central atom moved less than movement_thr AND is "
+            "farther than distance_thr from the executed event."
+        ),
+    )
+    movement_thr: float = Field(
+        default=0.02,
+        description="Angstroms. Central atoms whose displacement from pre- to post-execution is below this are considered 'unmoved'.",
+        gt=0.0,
+    )
+    distance_thr: float = Field(
+        default=10.0,
+        description="Angstroms. Candidate events whose central atom is farther than this (PBC-aware minimum-image) from the executed event's central atom pass the distance check.",
+        gt=0.0,
+    )
+
+
 class RegionConfig(BaseModel):
     """Selects atoms by type, index, or geometric region (union semantics).
 
@@ -855,6 +883,11 @@ class Config(BaseModel):
 
     activevolume: Optional[ActiveVolume] = Field(default=None, description="Active volume parameters")
 
+    eventrecycling: Optional[EventRecyclingConfig] = Field(
+        default=None,
+        description="Event recycling parameters. Required when control.recycle = True.",
+    )
+
     inactive_atoms: Optional[RegionConfig] = Field(
         default=None,
         description="Atoms on which no event search can be centered. "
@@ -961,6 +994,7 @@ class Config(BaseModel):
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True) : ["basin"],
             ("control.active_volume", True) : ["activevolume"],
+            ("control.recycle", True) : ["eventrecycling"],
             ("control.bias", True) : ["bias"]
         }
 
