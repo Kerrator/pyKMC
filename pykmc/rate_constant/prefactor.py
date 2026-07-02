@@ -99,24 +99,30 @@ def compute_event_prefactors(
     periodic slabs with true translational invariance).
 
     """
-    masses = _masses_for(types)
-    free = select_free_indices(min1, central_index, free_radius, cell, pbc)
-
-    if hessian_fn is None:
-        # Default: finite-difference mass-weighted partial Hessian from forces.
-        def _fd_hessian(geom: np.ndarray, free_idx: np.ndarray) -> np.ndarray:
-            return mass_weighted_partial_hessian(forces_fn, geom, masses, free_idx, fd_step)
-
-        hessian = _fd_hessian
-    else:
-        hessian = hessian_fn
-
-    def _bounded(nu0: float) -> Optional[float]:
-        if not np.isfinite(nu0) or nu0 < nu0_min_hz or nu0 > nu0_max_hz:
-            return None
-        return nu0
-
+    # Everything that can touch malformed inputs (e.g. a None cell from a payload,
+    # bad types, a singular Hessian) lives inside the try so the documented
+    # "Never raises" contract holds: callers get a fallback EventPrefactors, not
+    # an exception. select_free_indices subscripts the cell, so a None cell must
+    # degrade here rather than escape and stall the engine handler / rank 0.
+    free: np.ndarray = np.empty(0, dtype=int)
     try:
+        masses = _masses_for(types)
+        free = select_free_indices(min1, central_index, free_radius, cell, pbc)
+
+        if hessian_fn is None:
+            # Default: finite-difference mass-weighted partial Hessian from forces.
+            def _fd_hessian(geom: np.ndarray, free_idx: np.ndarray) -> np.ndarray:
+                return mass_weighted_partial_hessian(forces_fn, geom, masses, free_idx, fd_step)
+
+            hessian = _fd_hessian
+        else:
+            hessian = hessian_fn
+
+        def _bounded(nu0: float) -> Optional[float]:
+            if not np.isfinite(nu0) or nu0 < nu0_min_hz or nu0 > nu0_max_hz:
+                return None
+            return nu0
+
         h_min1 = hessian(min1, free)
         h_sad = hessian(saddle, free)
         h_min2 = hessian(min2, free)

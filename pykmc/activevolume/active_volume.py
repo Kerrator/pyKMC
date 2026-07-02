@@ -10,42 +10,46 @@ from ..system import System
 from ..config import Config
 
 
-def define_AV(config, central_atom_idx: int, positions, cell):
-    # Defining parameters
-    # Radius of whole active volume in Ang
-    r_a = config.activevolume.ract  # Ensure AV is larger than topology analysis
-    # Defines the radius of atoms that can move.
-    r_m = config.activevolume.rmov
+def define_zone(central_atom_idx: int, positions, cell, r_total: float, r_movable: float):
+    """Crop a spherical subsystem around the central atom.
 
-    # NEED TO ADD WARNING IF R_A<R_M
+    Atoms within ``r_total`` of the central atom form the subsystem; those in the
+    ``r_movable``..``r_total`` shell are returned as ``buffer_idx`` (frozen by
+    ``make_AV``). This is the geometry shared by the active volume (r_total=ract,
+    r_movable=rmov) and the HTST nu0 zone (r_total=nu0_zone_radius,
+    r_movable=free_radius); both keep a frozen boundary so the inner region has a
+    full, fixed surrounding.
 
+    Returns
+    -------
+    (subsystem_positions, subsystem_indices, buffer_indices) in the original frame.
+    """
     center = positions[central_atom_idx]
 
-    inner_movable_idx = []
     buffer_idx = []
-    total_active_idx = []
-    non_active_idx = []
-
+    total_idx = []
     for i, pos in enumerate(positions):
         diff = pos - center
-        diff_mic, distance = find_mic(diff, cell, pbc=True)
-        if np.abs(distance) <= r_m:
-            inner_movable_idx.append(i)
-            total_active_idx.append(i)  # Inner is also part of total active
-        elif np.abs(distance) > r_m and np.abs(distance) <= r_a:  # Can change to make it between r_m and r_a
-            buffer_idx.append(i)
-            total_active_idx.append(i)
-        else:
-            non_active_idx.append(i)
+        _diff_mic, distance = find_mic(diff, cell, pbc=True)
+        if np.abs(distance) <= r_total:
+            total_idx.append(i)
+            if np.abs(distance) > r_movable:
+                buffer_idx.append(i)
 
     buffer_idx = np.array(sorted(buffer_idx))
-    av_idx = np.array(sorted(total_active_idx))
-
+    av_idx = np.array(sorted(total_idx))
     av_positions = positions[av_idx]
-
-    #print(len(av_idx)," atoms in AV,", len(av_idx)-len(buffer_idx), "movable atoms")
-
     return av_positions, av_idx, buffer_idx
+
+
+def define_AV(config, central_atom_idx: int, positions, cell):
+    # Active-volume specialization of define_zone: ract = whole volume,
+    # rmov = movable radius (the rmov..ract shell is the frozen buffer).
+    return define_zone(
+        central_atom_idx, positions, cell,
+        r_total=config.activevolume.ract,
+        r_movable=config.activevolume.rmov,
+    )
 
 def make_AV(engine, av_indices, buffer_indices):
 
