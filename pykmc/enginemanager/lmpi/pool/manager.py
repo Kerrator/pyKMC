@@ -2,8 +2,13 @@
 from ..sessions import MpiApiSession
 from dataclasses import dataclass
 from concurrent.futures import Future
+from typing import TYPE_CHECKING
 import queue
 import threading
+
+if TYPE_CHECKING:
+    import numpy as np
+    from ....config import Config
 
 #TODO : commented print should be log depending of the verbosity but need to thing of how we modify log before (also loggers are 
 #initiated in kmc, after the initialization of manager ...))
@@ -163,7 +168,26 @@ class Manager:
     def minimize_with_results(self, config, positions=None, types=None) :
         future = self.submit_job("minimize_with_results", {"config": config, "positions": positions, "types": types})
         return future
-    
+
+    def minimize_freeze_outer_sphere_with_results(
+        self,
+        config: "Config",
+        positions: "np.ndarray | None" = None,
+        freeze_positions: "np.ndarray | None" = None,
+        central_atom: "int | None" = None,
+        rmov: "float | None" = None,
+        cell: "np.ndarray | None" = None,
+        pbc: "np.ndarray | list[bool] | bool | None" = None,
+    ) -> Future :
+        """Submit an active-volume outer-sphere frozen minimize to the session pool.
+
+        Local-pool counterpart of ``minimize_with_results``; the global (rank-0
+        pool) form used by serial basin reconstruction is reached via the
+        ``global_`` prefix routing in ``__getattr__`` (``global_session``).
+        """
+        future = self.submit_job("minimize_freeze_outer_sphere_with_results", {"config": config, "positions": positions, "freeze_positions": freeze_positions, "central_atom": central_atom, "rmov": rmov, "cell": cell, "pbc": pbc})
+        return future
+
     def get_potential_energy(self, positions=None) :
         future = self.submit_job("get_potential_energy", {"positions": positions})
         return future

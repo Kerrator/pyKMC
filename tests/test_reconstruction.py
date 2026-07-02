@@ -15,6 +15,11 @@ def _config() -> Mock:
     config.reconstruction.shell_tolerance = 1.0
     config.atomicenvironment.rcut = 6.5
     config.psr.matching_score_thr = 0.1
+    #Active volume off: these tests exercise the unconstrained global minimize
+    #path. A Mock config would otherwise make control.active_volume a truthy Mock
+    #and route through the outer-sphere freeze op.
+    config.control.active_volume = False
+    config.activevolume = None
     return config
 
 

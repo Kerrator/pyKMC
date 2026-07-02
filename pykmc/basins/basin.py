@@ -422,19 +422,42 @@ class BasinsGenericEvents() :
         # Move system do saddle positions
         neighbors = self.states[from_state].neighbors_list.get_neighbors('rcut', central_atom)
 
-        if self.config.basin.style == "global" : 
+        #Runtime periodicity of the from-state and its unpushed geometry. Both the
+        #serial and the engine (MPI) basin paths must source these identically so
+        #the wrap/push and the active-volume outer-sphere freeze see the same
+        #geometry -> identical accept/reject. The engine sources pbc from
+        #self.states[from_state].system.pbc (see _prepare_reconstruct_kwargs).
+        from_pbc = self.states[from_state].system.pbc
+        from_positions = self.states[from_state].system.positions.copy()
+
+        if self.config.basin.style == "global" :
             new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
-            min2_pos, _ = self.manager.global_minimize_with_results(self.config, positions=new_system.positions.copy())
+            #Skip-reconstruction short-circuit: under active volume the engine
+            #freezes the outer sphere for this single minimize
+            #(_basin_reconstruct_impl style=='global' branch); the serial path must
+            #do the same so both land on the same relaxed final state.
+            if self.config.control.active_volume and self.config.activevolume is not None :
+                min2_pos, _ = self.manager.global_minimize_freeze_outer_sphere_with_results(
+                    self.config,
+                    positions=new_system.positions.copy(),
+                    freeze_positions=from_positions,
+                    central_atom=central_atom,
+                    rmov=self.config.activevolume.rmov,
+                    cell=new_system.cell,
+                    pbc=from_pbc,
+                )
+            else :
+                min2_pos, _ = self.manager.global_minimize_with_results(self.config, positions=new_system.positions.copy())
             new_system.update_positions(min2_pos)
 
-        elif self.config.basin.style == "global/reconstruction" : 
+        elif self.config.basin.style == "global/reconstruction" :
             new_system.update_positions(saddle_positions, atom_idx = neighbors)
 
             #Reconstruct the event
             #future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
             #min_pos, _ = future.result()
 
-            result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, neighbors, central_atom=central_atom)
+            result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, neighbors, central_atom=central_atom, pbc=from_pbc, from_positions=from_positions)
             if not result.is_ok() :
                 return result
             new_system.update_positions(result.ok_value().min2_positions)
