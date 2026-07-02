@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from .log import LogKMC, LOGGING_CONFIG
 from .system import System
 from .neighbors_list import NeighborsList
-from .atomic_environment import AtomicEnvironment
+from .atomic_environment import AtomicEnvironment, effective_types
 from .event_table import ReferenceEventTable
 from .bias import DirectionBias, PointBias, TopoBias
 from ase.data import chemical_symbols
@@ -106,6 +106,8 @@ class Initializer:
             self.kmc.neighbors_list.neighbors_list["rnei"],
             self.kmc.neighbors_list.neighbors_list["rcut"],
             self.kmc.config.atomicenvironment.neighbors_add,
+            types=effective_types(self.kmc.config, self.kmc.system.types),
+            coordination_threshold=self.kmc.config.atomicenvironment.coordination_threshold,
         )
 
     def initialize_reference_table(self) -> None:

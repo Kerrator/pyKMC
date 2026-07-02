@@ -4,6 +4,7 @@ This module defines the `KMC` class.
 """
 
 from pykmc import NeighborsList, AtomicEnvironment, ActiveEventTable, Config, Reconstruction
+from pykmc.atomic_environment import effective_types
 import random
 from .result import (
     EventSearchOutput,
@@ -139,6 +140,8 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                types=effective_types(self.config, self.system.types),
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
         self.inactive_ae = (
             AtomicEnvironment(
@@ -423,6 +426,8 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                types=effective_types(self.config, self.system.types),
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
             )
             self.inactive_ae = (
                 AtomicEnvironment(
