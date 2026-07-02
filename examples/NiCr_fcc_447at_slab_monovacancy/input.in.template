@@ -1,0 +1,79 @@
+# =============================================================================
+# NiCr FCC(100) slab -- 447 atoms, one top-surface vacancy
+# A demonstration of atom_coloring_mode: species-resolved (full) vs grey alloying
+#
+# Heads-up: this system is intentionally constructed so that grey alloying
+# fails, letting you see first-hand why species-resolved coloring (the
+# default) matters in alloys.
+#
+# The slab is ~15% random Cr, plus an alternating Cr/Ni shell around the
+# vacancy, so geometrically-equivalent Ni and Cr sites sit right next to the
+# defect. With atom_coloring_mode = grey, classification ignores species:
+# chemically-different environments share one graph hash, and during basin
+# exploration a catalogued event can be reconstructed onto a site with the
+# wrong species. The species-aware LAMMPS minimisation then relaxes into a
+# different minimum, and pykmc.log reports
+#     "Reconstruction fails (reference event N)".
+# With the default atom_coloring_mode = full, those environments stay
+# distinct and every reconstruction succeeds.
+#
+# Try it yourself:
+#   1. Run once with atom_coloring_mode = full (as set below) -- clean run.
+#   2. Switch atom_coloring_mode to grey and run again.
+#   3. Compare: grep "Reconstruction fails (reference event" pykmc.log
+#
+# Tip: keep basin acceleration on. Without it, plain rejection-free KMC only
+# ever picks the clean lowest-barrier hop, and grey and full behave the same.
+#
+# Run with at least 8 MPI ranks (n_sessions = 7 + 1 driver rank):
+#   mpirun -n 8 python -m pykmc -in input.in
+# =============================================================================
+
+[Control]
+initial_config = ./initial_config.xyz
+n_steps = 10
+engine = lammps
+verbosity = 2
+n_sessions = 7
+engine_use_rank_0 = False
+basin = True
+active_volume = False
+
+[Lammps]
+pair_style = eam/alloy
+# Species map to LAMMPS types alphabetically: Cr = type 1, Ni = type 2.
+pair_coeff = * * ./Bonny_2013_NiFeCr.eam Cr Ni
+min_style = cg
+minimize = 1e-10 1e-12 10000 10000
+
+[AtomicEnvironment]
+style = cna/graph
+rnei = 3.0
+rcut = 8.5
+# full = species-resolved (default, clean); grey = species-blind (mis-reconstructs here)
+atom_coloring_mode = full
+
+[EventSearch]
+style = partn
+nsearch = 20
+emax_event = 5.0
+emin_event = 0.0
+
+[pARTn]
+# Fixed seed so the discovered events (and the grey failure) are reproducible.
+zseed = 12345
+
+[RateConstant]
+style = constant
+k0 = 10.0
+T = 300.0
+
+[PSR]
+style = ira
+matching_score_thr = 0.4
+
+[IRA]
+kmax_factor = 2.0
+
+[BASIN]
+energy_thr = 0.59
