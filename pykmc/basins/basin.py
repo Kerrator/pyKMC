@@ -297,7 +297,7 @@ class BasinsGenericEvents() :
         #future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
         #min_pos, _ = future.result()
 
-        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, self.config.psr.matching_score_thr, neighbors)
+        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, new_system.positions, new_system.cell, neighbors=neighbors, central_atom=central_atom)
         if not result.is_ok() :
             return result
         new_system.update_positions(result.ok_value().min2_positions)
