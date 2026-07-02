@@ -26,7 +26,7 @@ class Reconstruction:
         cell,
         delr_thr,
         neighbors=None,
-        pbc=None,
+        pbc: bool | np.ndarray | None = None,
     ):
         """From a saddle point, try to reconstruct the event to see if it matches the
         supposed min1 and min2 positions, and that the to minima are connected.
@@ -53,9 +53,14 @@ class Reconstruction:
         central_atom : _type_
             _description_
         cell :
+            Simulation cell (3x3 matrix) defining the periodic boundaries.
+        delr_thr :
+            Threshold on the max per-atom displacement used to accept a match.
         neighbors : _type_, optional
             _description_, by default None
             typically the neighors list of the in the atomic environment of the atom on which we apply the event
+        pbc : bool or array-like of bool, optional
+            Periodic boundary conditions per dimension; defaults to fully periodic.
         """
 
         if neighbors is None:  # len min1 == len min2 == len saddle pos

@@ -42,7 +42,10 @@ def transform_positions(
 
 
 def translate(
-    positions: np.ndarray, displacement: np.ndarray, cell: np.ndarray
+    positions: np.ndarray,
+    displacement: np.ndarray,
+    cell: np.ndarray,
+    pbc: bool | np.ndarray = True,
 ) -> np.ndarray:
     """Translate atomic positions by a displacement vector and apply periodic wrapping.
 
@@ -54,6 +57,9 @@ def translate(
         Displacement vector of shape (3,) to be added to each position.
     cell : np.ndarray
         Simulation cell (3x3 matrix) defining the periodic boundaries.
+    pbc : bool or array-like of bool
+        Periodic boundary conditions, either a single bool or one per dimension.
+        Negatives are clamped to zero only in periodic dimensions.
 
     Returns
     -------
@@ -62,12 +68,26 @@ def translate(
 
     """
     positions += displacement
-    positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
-    positions[positions < 0] = 0
+    positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=pbc)
+    pbc_arr = np.asarray(pbc)
+    if pbc_arr.ndim != 0 and not np.all(pbc_arr):
+        for dim in range(3):
+            if pbc_arr[dim]:
+                positions[:, dim] = np.where(
+                    positions[:, dim] < 0, 0, positions[:, dim]
+                )
+    else:
+        positions[positions < 0] = 0
     return positions
 
 
-def push_towards(current_positions, target_positions, fraction=0.1, cell=None, pbc=None):
+def push_towards(
+    current_positions,
+    target_positions,
+    fraction=0.1,
+    cell=None,
+    pbc: bool | np.ndarray | None = None,
+):
     displacement = target_positions - current_positions
 
     if cell is not None:
@@ -103,7 +123,9 @@ def push_towards(current_positions, target_positions, fraction=0.1, cell=None, p
     return new_positions
 
 
-def compute_delr(positions_1, positions_2, cell=None, pbc=None):
+def compute_delr(
+    positions_1, positions_2, cell=None, pbc: bool | np.ndarray | None = None
+):
     displacements = positions_2 - positions_1
 
     if cell is not None:

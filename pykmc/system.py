@@ -129,13 +129,36 @@ class System:
             )
             # Clamp small negative positions to zero to avoid issues with KD-trees.
             # This handles floating-point inaccuracies that might result in values like -1e-10.
-            self.positions[self.positions < 0] = 0
+            # Only clamp in periodic dimensions; non-periodic (surface) directions can
+            # carry valid negative coordinates that must not be flattened onto zero.
+            self._clamp_negative_positions()
 
         else:
             self.positions[atom_idx] = new_positions
             self.positions = self.wrap_positions(
                 self.positions, cell=self.cell, pbc=self.pbc
             )
+            self._clamp_negative_positions()
+
+    def _clamp_negative_positions(self) -> None:
+        """Clamp small negative positions to zero in periodic dimensions only.
+
+        In fully periodic systems (or when ``pbc`` is unset) every dimension is
+        clamped, preserving the historical behaviour. For mixed-PBC (surface)
+        systems the non-periodic directions are left untouched so that atoms
+        sitting at small or negative coordinates are not distorted.
+        """
+        if (
+            self.pbc is not None
+            and hasattr(self.pbc, "__iter__")
+            and not np.all(self.pbc)
+        ):
+            for dim in range(3):
+                if self.pbc[dim]:
+                    self.positions[:, dim] = np.where(
+                        self.positions[:, dim] < 0, 0, self.positions[:, dim]
+                    )
+        else:
             self.positions[self.positions < 0] = 0
 
     def wrap_positions(
