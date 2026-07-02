@@ -1,10 +1,14 @@
-from mpi4py import MPI 
+from mpi4py import MPI
 import numpy as np
 from ...messenger import MpiMessenger
-from threading import RLock  
+from threading import RLock
 from functools import wraps
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 import time
+
+if TYPE_CHECKING:
+    from ....config import Config
 
 _POLL_INTERVAL_S = 0.05
 
@@ -226,6 +230,29 @@ class MpiApiSession :
         #print(f"[Session n°{self.session_id}] Minimizing and get positions and total energy")
         try :
             self.send_message({"type": "minimize_with_results", "value": {"config": config, "positions": positions, "types": types}})
+            return self._receive_result_or_error()
+        finally :
+            self._is_busy = False
+
+    def minimize_freeze_outer_sphere_with_results(
+        self,
+        config: "Config",
+        positions: "np.ndarray | None" = None,
+        freeze_positions: "np.ndarray | None" = None,
+        central_atom: "int | None" = None,
+        rmov: "float | None" = None,
+        cell: "np.ndarray | None" = None,
+        pbc: "np.ndarray | list[bool] | bool | None" = None,
+    ) -> object:
+        """Minimize with the active-volume outer sphere frozen; return positions + energy.
+
+        Session-side dispatch of the serial (global-pool) outer-sphere freeze
+        minimize used by ``Reconstruction.reconstruct`` so the serial basin path
+        relaxes the same constrained geometry as the engine (MPI) basin path.
+        """
+        self._is_busy = True
+        try :
+            self.send_message({"type": "minimize_freeze_outer_sphere_with_results", "value": {"config": config, "positions": positions, "freeze_positions": freeze_positions, "central_atom": central_atom, "rmov": rmov, "cell": cell, "pbc": pbc}})
             return self._receive_result_or_error()
         finally :
             self._is_busy = False

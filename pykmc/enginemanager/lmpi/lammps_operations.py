@@ -557,7 +557,77 @@ def minimize_with_results(engine, config, positions=None, types=None) :
     total_energy = get_total_energy(engine)
     if engine.rank == 0 :
         return new_positions, total_energy
-    
+
+
+def minimize_freeze_outer_sphere_with_results(
+    engine: "MpiApiEngine",
+    config: "Config",
+    positions: "np.ndarray | None" = None,
+    freeze_positions: "np.ndarray | None" = None,
+    central_atom: "int | None" = None,
+    rmov: "float | None" = None,
+    cell: "np.ndarray | None" = None,
+    pbc: "np.ndarray | list[bool] | bool | None" = None,
+) -> "tuple[np.ndarray, float] | None":
+    """Minimize with the active-volume outer sphere frozen; return positions + energy.
+
+    The serial (rank-0 global pool) counterpart of the outer-sphere freeze that
+    ``_basin_reconstruct_impl`` applies during its min1/min2 minimizations. It
+    lets the serial ``Reconstruction.reconstruct`` path relax the exact same
+    constrained geometry the engine (MPI) basin path relaxes, so both paths reach
+    the same relaxed minimum and therefore accept/reject identically under
+    ``config.control.active_volume=True``.
+
+    The frozen set is selected from ``freeze_positions`` (the unpushed from-state
+    geometry) exactly as ``_minimize_freeze_outer_sphere`` does: atoms farther
+    than ``rmov`` from ``central_atom`` (minimum-image) are zero-forced, all
+    others relax. When ``rmov`` is ``None`` (active volume off) this reduces to a
+    plain unconstrained minimize, matching the engine's ``av_rmov is None`` branch.
+
+    Parameters
+    ----------
+    engine : MpiApiEngine
+        Engine to run the minimize on.
+    config : Config
+        Run configuration (min style, frz_min, activevolume).
+    positions : np.ndarray or None, optional
+        (N, 3) geometry to load and minimize (typically the pushed saddle->min
+        geometry). ``None`` minimizes whatever is currently loaded.
+    freeze_positions : np.ndarray or None, optional
+        (N, 3) geometry used only to select the frozen outer-sphere atom set
+        (the unpushed from-state). Defaults to ``positions`` when not given.
+    central_atom : int or None, optional
+        0-based index of the atom at the centre of the active volume.
+    rmov : float or None, optional
+        Outer-sphere radius; ``None`` disables the freeze (plain minimize).
+    cell : np.ndarray or None, optional
+        3x3 simulation cell for the minimum-image frozen-set selection.
+    pbc : np.ndarray or None, optional
+        Per-axis periodicity for the minimum-image frozen-set selection.
+
+    Returns
+    -------
+    tuple[np.ndarray, float] or None
+        ``(minimized_positions, total_energy)`` on rank 0; ``None`` on others.
+
+    """
+    if positions is not None:
+        _require_finite_positions(positions, "minimize_freeze_outer_sphere_with_results")
+        set_positions(engine=engine, positions=positions)
+    if rmov is not None and central_atom is not None and cell is not None:
+        if freeze_positions is None:
+            freeze_positions = get_positions(engine)
+        _minimize_freeze_outer_sphere(
+            engine, config, freeze_positions, central_atom, rmov, cell, pbc,
+        )
+    else:
+        minimize(engine, config)
+    new_positions = get_positions(engine)
+    total_energy = get_total_energy(engine)
+    if engine.rank == 0:
+        return new_positions, total_energy
+
+
 def minimize_freeze_core(engine, config, core_idx) :
     """ 
     Freeze directly translated atoms and minimize to relax surrounding atoms
@@ -1115,7 +1185,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                     # Acceptance movers + radius-containment guard: mirror of the
                     # host-side Reconstruction.reconstruct so serial and wavefront
                     # basin reconstruction accept/reject identically.
-                    event_disp = per_atom_displacement(supposed_initial, supposed_final, cell)
+                    event_disp = per_atom_displacement(supposed_initial, supposed_final, cell, pbc)
                     movers = event_movers(
                         event_disp, config.reconstruction.n_movers, matching_score_thr)
                     if len(movers) == 0:
@@ -1201,7 +1271,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
 
             movers = proceed["movers"]
             t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=pbc)
-            disc1 = per_atom_displacement(supposed_initial, t1[nbr_indices], cell)
+            disc1 = per_atom_displacement(supposed_initial, t1[nbr_indices], cell, pbc)
             ok1, delr1, shell1 = reconstruction_matches(
                 disc1, movers, matching_score_thr, config.reconstruction.shell_tolerance)
             if not ok1:
@@ -1253,7 +1323,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
             movers = proceed2["movers"]
 
             t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=pbc)
-            disc2 = per_atom_displacement(supposed_final, t2[nbr_indices], cell)
+            disc2 = per_atom_displacement(supposed_final, t2[nbr_indices], cell, pbc)
             ok2, delr2, shell2 = reconstruction_matches(
                 disc2, movers, matching_score_thr, config.reconstruction.shell_tolerance)
             if not ok2:

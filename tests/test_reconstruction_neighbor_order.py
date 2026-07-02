@@ -60,6 +60,10 @@ def _config() -> Mock:
     cfg.reconstruction.containment_margin = 1.0
     cfg.atomicenvironment.rcut = 6.5
     cfg.psr.matching_score_thr = 0.1
+    #Active volume off: unconstrained global minimize path (Mock config would
+    #otherwise make control.active_volume a truthy Mock).
+    cfg.control.active_volume = False
+    cfg.activevolume = None
     return cfg
 
 

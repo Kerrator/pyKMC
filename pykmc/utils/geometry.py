@@ -133,6 +133,7 @@ def per_atom_displacement(
     positions_pre: np.ndarray,
     positions_post: np.ndarray,
     cell: np.ndarray,
+    pbc: "np.ndarray | list[bool] | bool | None" = None,
 ) -> np.ndarray:
     """Per-atom PBC-aware displacement magnitude (orthorhombic minimum-image).
 
@@ -147,6 +148,12 @@ def per_atom_displacement(
         Shape (N, 3) positions after the displacement.
     cell : np.ndarray
         3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+    pbc : np.ndarray or list[bool] or bool or None, optional
+        Per-axis periodicity. ``None`` (default) applies the minimum-image
+        wrap on all three axes, preserving the historical full-PBC behaviour.
+        On a non-periodic axis (e.g. the free-surface direction of a slab) the
+        wrap is skipped so an across-surface displacement is reported at its
+        true magnitude rather than folded back into the cell.
 
     Returns
     -------
@@ -156,8 +163,15 @@ def per_atom_displacement(
     """
     disp = positions_post - positions_pre
     cell_lengths = np.linalg.norm(cell, axis=1)
+    if pbc is None:
+        pbc_arr = np.array([True, True, True])
+    else:
+        pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
     for i in range(3):
-        disp[:, i] -= cell_lengths[i] * np.round(disp[:, i] / cell_lengths[i])
+        if pbc_arr[i]:
+            disp[:, i] -= cell_lengths[i] * np.round(disp[:, i] / cell_lengths[i])
     return np.linalg.norm(disp, axis=1)
 
 
