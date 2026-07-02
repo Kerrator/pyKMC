@@ -104,6 +104,8 @@ def compute_distances(positions_1, positions_2, cell=None) -> np.ndarray:
 
     return np.linalg.norm(displacements, axis=1)
 
+def compute_delr(positions_1, positions_2, cell=None):
+    return compute_delr_max(positions_1, positions_2, cell=cell)
 
 def count_moved_atoms(positions_1, positions_2, threshold, cell=None) -> int:
     """Return the number of atoms displaced by more than ``threshold``."""

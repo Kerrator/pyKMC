@@ -69,17 +69,21 @@ class _RecordingLoggers:
     def events_basin_info_line(self, *args: Any, **kwargs: Any) -> None:
         """Swallow events-file basin lines."""
 
+    def events_write(self, *args: Any, **kwargs: Any) -> None:
+        """Swallow events-file rows."""
+
     def table_line_info_kmc(
         self,
         name: str,
         step: int,
-        delta_t: float,
-        total_time: float,
-        num_reference_event: Any,
-        energy_barrier: Any,
-        k_event: Any,
-        k_tot: Any,
         total_energy: Any,
+        energy_barrier: Any,
+        delta_t: float,
+        k_event: Any,
+        total_time: float,
+        k_tot: Any,
+        num_reference_event: Any,
+        event_id: Any,
         cpu_time: float,
         wall_time: float,
     ) -> None:
@@ -151,8 +155,12 @@ def test_step_log_reads_executed_row_before_prune(
     sim.loggers = _RecordingLoggers()
     sim.reference_table = reference_table_Cu_fake
     sim.visited_environments = visited_environments_Cu
+    sim.reference_table.table = sim.reference_table.table.copy()
+    sim.reference_table.table["idx_ref"] = sim.reference_table.table.index.astype(int)
+    sim.reference_table.table["id_initial"] = sim.reference_table.table["event_id"]
+    sim.reference_table.table["dE_forward"] = sim.reference_table.table["energy_barrier"]
 
-    ref_idx = int(reference_table_Cu_fake.table.index[0])
+    ref_idx = int(sim.reference_table.table.iloc[0]["idx_ref"])
     positions = np.array(system_Cu.positions, copy=True)
     refined_event = EventRefinementOutput(
         central_atom_index=0,
@@ -167,7 +175,7 @@ def test_step_log_reads_executed_row_before_prune(
         min2_positions=positions.copy(), min2_etot=-1.0
     )
 
-    monkeypatch.setattr(sim, "minimize_system", lambda: None)
+    monkeypatch.setattr(sim, "minimize_system", lambda *args, **kwargs: None)
     monkeypatch.setattr(sim, "execute_event_searches", lambda atoms: _FakeEventSearch())
     monkeypatch.setattr(sim, "add_reference_events", lambda results: [])
     monkeypatch.setattr(

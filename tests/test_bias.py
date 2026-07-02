@@ -4,14 +4,21 @@ import numpy as np
 import pandas as pd
 import pytest
 from unittest.mock import MagicMock
-import importlib.util, sys, pathlib
+import importlib.util, sys, pathlib, types
 
 
 def _load(rel):
-    path = pathlib.Path(__file__).parent.parent / rel
-    spec = importlib.util.spec_from_file_location(path.stem, path)
+    root = pathlib.Path(__file__).parent.parent
+    path = root / rel
+    module_name = ".".join(path.relative_to(root).with_suffix("").parts)
+    package_name = module_name.split(".")[0]
+    if package_name not in sys.modules:
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(root / package_name)]
+        sys.modules[package_name] = package
+    spec = importlib.util.spec_from_file_location(module_name, path)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[path.stem] = mod
+    sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -42,6 +49,7 @@ def make_reference_table(move_atom_idx: int, idx_ref: int = 0):
         {
             "idx_ref": [idx_ref],
             "move_atom_idx": [move_atom_idx],
+            "event_id": [f"ev{idx_ref}"],
         }
     )
     ref = MagicMock()
@@ -343,8 +351,29 @@ def make_atomic_environment(topo_map: dict[str, list[int]]):
         Maps topology ID to list of atom indices carrying that topology.
     """
     ae = MagicMock()
+    max_idx = max((idx for atoms in topo_map.values() for idx in atoms), default=-1)
+    ae.atomic_environment_list = [None] * (max_idx + 1)
+    for topo_id, atoms in topo_map.items():
+        for atom_idx in atoms:
+            ae.atomic_environment_list[atom_idx] = topo_id
     ae.get_atoms_with_id.side_effect = lambda topo_id: topo_map.get(topo_id, [])
     return ae
+
+
+def make_topo_bias(
+    atomic_environment,
+    atom_source_idx: int = 0,
+    atom_target_idx: int | None = 1,
+    direction: np.ndarray | None = None,
+    **kwargs,
+):
+    return TopoBias(
+        atom_source_idx=atom_source_idx,
+        atomic_environment=atomic_environment,
+        atom_target_idx=atom_target_idx,
+        direction=direction,
+        **kwargs,
+    )
 
 
 class TestTopoBias:
@@ -358,7 +387,7 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         # displacement +x: moves from [0,0,0] toward [5,0,0] → final [1,0,0]
         event = make_event(atom_index=0, final_positions=[[1.0, 0.0, 0.0]])
@@ -369,7 +398,7 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         # displacement -x: moves away from [5,0,0] → final [-1,0,0]
         event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
@@ -380,7 +409,7 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia", pass_unlisted=True)
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1, pass_unlisted=True)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is True
@@ -390,27 +419,29 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is False
 
     def test_accept_when_source_topology_absent(self):
-        """When no atom carries topo_source, all events are accepted (fallback)."""
+        """When no atom carries topo_source on this step, non-source events follow pass_unlisted."""
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
-        ae = make_atomic_environment({"sia": [1]})  # no "vac" atoms
+        init_ae = make_atomic_environment({"vac": [0], "sia": [1]})
+        ae = make_atomic_environment({"sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(init_ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
-        assert bias.accept(event, system, ref) is True
+        assert bias.accept(event, system, ref) is False
 
     def test_accept_when_target_topology_absent(self):
         """When no atom carries topo_target, all events are accepted (fallback)."""
         system = make_system([[0.0, 0.0, 0.0]])
-        ae = make_atomic_environment({"vac": [0]})  # no "sia" atoms
+        init_ae = make_atomic_environment({"vac": [0], "sia": [1]})
+        ae = make_atomic_environment({"vac": [0]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(init_ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]])
         assert bias.accept(event, system, ref) is True
@@ -431,8 +462,8 @@ class TestTopoBias:
         )
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = MagicMock()
-        ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0]})
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]})
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         # event 0: moves source away from target (rejected)
         # event 1: moves source toward target (accepted)
         events = [
@@ -451,7 +482,7 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         events = [
             make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=1.0),
         ]
@@ -469,7 +500,7 @@ class TestTopoBias:
         system = make_system([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         bias.enabled = False
         events = [make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=1.0)]
         active = make_active_table(events)
@@ -489,7 +520,7 @@ def _two_event_setup():
     """System with 2 events: idx=0 moves +x (desired), idx=1 moves -x (undesired)."""
     system = make_system([[0.0, 0.0, 0.0]])
     ref = MagicMock()
-    ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0]})
+    ref.table = pd.DataFrame({"idx_ref": [0, 0], "move_atom_idx": [0, 0], "event_id": ["ev0", "ev0"]})
     events = [
         make_event(atom_index=0, final_positions=[[1.0, 0.0, 0.0]], k=1.0),
         make_event(atom_index=0, final_positions=[[-1.0, 0.0, 0.0]], k=9.0),
@@ -574,9 +605,10 @@ class TestBoostMode:
 
     def test_pass_unlisted_true_raises_topo(self):
         """TopoBias: boost + pass_unlisted=True → ValueError (always, no atom_indices check)."""
+        ae = make_atomic_environment({"vac": [0], "sia": [1]})
         with pytest.raises(ValueError, match="pass_unlisted=True"):
-            TopoBias(
-                topo_source="vac", topo_target="sia", mode="boost", pass_unlisted=True
+            make_topo_bias(
+                ae, atom_source_idx=0, atom_target_idx=1, mode="boost", pass_unlisted=True
             )
 
     def test_pass_unlisted_false_with_atom_indices_is_valid(self):
@@ -626,7 +658,7 @@ class TestPassUnlisted:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(topo_source="vac", topo_target="sia")
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is False
@@ -635,9 +667,7 @@ class TestPassUnlisted:
         system = make_system([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
         ae = make_atomic_environment({"vac": [0], "sia": [1]})
         ref = make_reference_table(move_atom_idx=0, idx_ref=0)
-        bias = TopoBias(
-            topo_source="vac", topo_target="sia", mode="filter", pass_unlisted=True
-        )
+        bias = make_topo_bias(ae, atom_source_idx=0, atom_target_idx=1, mode="filter", pass_unlisted=True)
         bias._prepare(system, ref, ae)
         event = make_event(atom_index=2, final_positions=[[1.0, 1.0, 0.0]])
         assert bias.accept(event, system, ref) is True

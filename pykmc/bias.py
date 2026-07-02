@@ -214,7 +214,9 @@ class Bias(ABC):
                 reference_table.table["idx_ref"] == num_ref
             ]
             event_id = (
-                fmt_hash(ref_rows["event_id"].values[0]) if len(ref_rows) > 0 else "?"
+                fmt_hash(ref_rows["event_id"].values[0])
+                if len(ref_rows) > 0 and "event_id" in ref_rows.columns
+                else "?"
             )
             if self.accept(event, system, reference_table, neighbors_list):
                 _LOGGER.debug(
@@ -280,7 +282,9 @@ class Bias(ABC):
         num_ref = selected_event.get("num_reference_event", None)
         ref_rows = reference_table.table[reference_table.table["idx_ref"] == num_ref]
         event_id = (
-            fmt_hash(ref_rows["event_id"].values[0]) if len(ref_rows) > 0 else "?"
+            fmt_hash(ref_rows["event_id"].values[0])
+            if len(ref_rows) > 0 and "event_id" in ref_rows.columns
+            else "?"
         )
         _LOGGER.debug(
             f"\t :=> Boost: selected event {idx},"
@@ -299,6 +303,10 @@ class Bias(ABC):
         atom_idx: int,
     ) -> np.ndarray:
         """Return displacement of atom_idx in this event via neighbourhood lookup."""
+        if neighbors_list is None:
+            final_positions = np.asarray(event["final_positions"], dtype=float)
+            target_position = final_positions if final_positions.ndim == 1 else final_positions[0]
+            return target_position - system.positions[atom_idx]
         neighborhood = np.asarray(
             neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
         )
@@ -312,6 +320,13 @@ class Bias(ABC):
         neighbors_list: NeighborsList,
     ):
         """Yield (atom_idx, displacement) for each biased atom in the neighbourhood."""
+        if neighbors_list is None:
+            atom_idx = int(event["atom_index"])
+            if atom_idx in self._atom_set:
+                final_positions = np.asarray(event["final_positions"], dtype=float)
+                target_position = final_positions if final_positions.ndim == 1 else final_positions[0]
+                yield atom_idx, target_position - system.positions[atom_idx]
+            return
         neighborhood = np.asarray(
             neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
         )

@@ -67,7 +67,6 @@ class EventSearch:
     ) -> dict[int, Result[EventSearchOutput, ErrorInfo]]:
         if not tasks:
             return {}
-
         if self.config.control.active_volume == True:
             if self.config.activevolume.ract <= self.config.atomicenvironment.rcut:
                 raise ValueError(
@@ -148,9 +147,6 @@ class EventSearch:
         rerun_tasks = [self.tasks[task_id] for task_id in retry_task_ids]
         for task_id, result in self._run_tasks(rerun_tasks).items():
             self.results[task_id] = result
-
-        # self.results = [f.result() for f in futures]
-
         # for i, at_idx in enumerate(central_atom_research_list):
         #    event_search_output = self.engine.search_event(self.system, at_idx)
         #    self.results.append(event_search_output)

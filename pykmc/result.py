@@ -159,6 +159,7 @@ class EventSearchOutput:
     move_atom_index: int
     # map: np.ndarray
     cell: Optional[np.ndarray] = None
+    types: Optional[list] = None
 
 
 @dataclass
@@ -381,6 +382,23 @@ class EventsInfo:
     id_saddle: list[str]
     id_final: list[str]
 
+    def output_msg(self) -> str:
+
+        df = pd.DataFrame(
+            {
+                "Types": self.types,
+                "Central Atom": self.central_atom,
+                "Ref Event": self.reference_events,
+                "dE forward": self.dE_forward,
+                "dE backward": self.dE_backward,
+                "dE asym": self.dE_asym,
+                "k": self.k,
+                "dra_i": self.dra_i,
+                "dra_f": self.dra_f,
+                "Refined": self.refined,
+            }
+        ).reset_index(drop=True)
+        return df.to_string(index=True)
 
 @dataclass
 class KMCLoopInfo:

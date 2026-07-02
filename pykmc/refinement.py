@@ -124,7 +124,7 @@ class Refinement:
                 if (at_idx, ref_idx) in existing_pairs:
                     continue
                 for symmetry_index, _sym in enumerate(dfevent.at["sym_matrix"]):
-                    raw_tasks.append((task_id, at_idx, dfevent, symmetry_index))
+                    raw_tasks += [(task_id, at_idx, dfevent, symmetry_index)]
                     supposed_ktot += dfevent.at["k"]
                     task_id += 1
         e_thr = self._get_energy_threshold(df_reference_events, supposed_ktot)
@@ -140,14 +140,6 @@ class Refinement:
             )
             for task_id, at_idx, dfevent, symmetry_index in raw_tasks
         ]
-
-    def retry(self, retry_task_ids: list[int]) -> None:
-        """Rerun only the requested refinement jobs."""
-        if not retry_task_ids:
-            return
-        retry_tasks = [self.tasks[task_id] for task_id in retry_task_ids]
-        for task_id, result in self._run_tasks(retry_tasks).items():
-            self.results[task_id] = result
 
     def _run_tasks(
         self,
@@ -274,7 +266,7 @@ class Refinement:
                 "central_atom": at_idx,
                 "positions": current_positions.copy(),
                 "cell": self.system.cell,
-                "type": self.system.types.copy(),
+                "types": self.system.types.copy(),
                 "saddle_idx": neighbors.copy(),
                 "saddle_positions": self.system.positions.copy()[neighbors.copy()],
                 "num_reference_event": num_reference_event,
@@ -287,6 +279,7 @@ class Refinement:
                 "positions": self.system.positions.copy(),
                 "cell": self.system.cell,
                 "types": self.system.types.copy(),
+                "saddle_idx": neighbors.copy(),
                 "num_reference_event": num_reference_event,
                 "symmetry_index": symmetry_index,
             }
@@ -380,9 +373,7 @@ class Refinement:
         # get energy corresponding to the first k value just under k_thr
         mask = df_reference_events["k"] < k_thr
         if mask.any():
-            e_value = (
-                df_reference_events.loc[mask].sort_values("k").iloc[-1]["dE_forward"]
-            )
+            e_value = df_reference_events.loc[mask].sort_values("k").iloc[-1]["dE_forward"]
         else:  # refine no event
             e_value = 0.0
         e_value += 0.1  # to be sure want using condition

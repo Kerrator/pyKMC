@@ -594,7 +594,6 @@ class LogKMC(LogManager):
                 continue
             cells.append(f"{value:<{width}{value_fmt}}")
         return " ".join(cells)
-
     def events_file_header(self, logger_name: str) -> None:
         """Write header of the events file
 
@@ -731,7 +730,6 @@ class LogKMC(LogManager):
                     fmt_hash(events_info.id_final[i]),
                 ),
             )
-
     def events_file_step_first_line(self, logger_name: str, step: int) -> None:
         """Write the first line with step informations
 

@@ -3,7 +3,6 @@ from ase.data import atomic_numbers, atomic_masses
 from mpi4py import MPI
 import ctypes
 import pypARTn
-from pathlib import Path
 from types import SimpleNamespace
 from ...utils.io_utils import capture_output
 from ...utils.geometry import compute_delr_max
@@ -254,8 +253,6 @@ def _build_extrapolation_error(
             )
         )
     return None
-
-
 def minimize(engine, config, positions=None):
     if positions is not None:
         set_positions(engine=engine, positions=positions)
@@ -294,6 +291,7 @@ def get_positions(engine) -> np.ndarray:
     return engine.engine_comm.bcast(result, root=0)
 
 
+
 def get_types(engine) -> list[str]:
     int_types = engine.lmp.gather_atoms("type", 0, 1)
     if engine.rank == 0:
@@ -322,35 +320,24 @@ def minimize_with_results(engine, config, positions=None, types=None):
     _remove_frozen_fix(engine, "f_frozen_min", atoms_frozen)
     _delete_frozen_group(engine, atoms_frozen)
     new_positions = get_positions(engine)
-    potential_energy = get_potential_energy(engine)
+    total_energy = get_total_energy(engine)
     if engine.rank == 0:
-        return new_positions, potential_energy
+        return new_positions, total_energy
 
 
-def minimize_freeze_core(
-    engine, central_atom_positions: np.ndarray, rcut: float, maxiter: int = 10
-):
+def minimize_freeze_core(engine, config, core_idx):
     """
-    Minimize with fix atom around central atom up to rcut
+    Freeze directly translated atoms and minimize to relax surrounding atoms
     """
 
-    # define core region and group
-    engine.command(
-        f"region sphere_region sphere {central_atom_positions[0]} {central_atom_positions[1]} {central_atom_positions[2]} {rcut}"
-    )
-    engine.command("group frozen_group region sphere_region")
-
-    # freeze core region
-    engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
-
-    # minimization
-    engine.command(f"min_style cg")
-    engine.command(f"minimize 1e-6 1e-8 {maxiter} {maxiter}")
-
-    # unfreeze/delte
-    engine.command("unfix freeze")
-    engine.command("group frozen_group delete")
-    engine.command("region sphere_region delete")
+    if core_idx is not None:
+        core_ids = [idx + 1 for idx in core_idx]
+        engine.command(f"group frozen_group id {' '.join(map(str, core_ids))}")
+        engine.command("fix freeze frozen_group setforce 0.0 0.0 0.0")
+        engine.command(f"min_style {config.lammps.min_style}")
+        engine.command(f"minimize {config.lammps.frz_min}")
+        engine.command("unfix freeze")
+        engine.command("group frozen_group delete")
 
 
 def _make_frozen_group(engine, config, positions, types) -> bool:
@@ -395,8 +382,6 @@ def _delete_frozen_group(engine, atoms_frozen: bool) -> None:
 
 def _reset_engine_state(engine, config, positions, cell, types) -> None:
     """Rebuild the local LAMMPS state after a search crashes mid-command."""
-    # if positions is None or cell is None or types is None:
-    #     return
     system = SimpleNamespace(
         types=np.array(types, copy=True),
         positions=np.array(positions, copy=True),
@@ -413,14 +398,11 @@ def partn_search(
     engine, config, central_atom_idx: int, positions=None, cell=None, types=None
 ):
     try:
-        # Check to see if system is in AV mode:
         if config.control.active_volume == True:
             atom_map, central_lammps_id = partn_search_AV(
                 engine, config, central_atom_idx, positions, cell, types
             )
-
         else:
-            # Set positions
             atom_map = None
             central_lammps_id = [central_atom_idx + 1]
             if positions is not None:
@@ -429,10 +411,7 @@ def partn_search(
         if config.control.otfml:
             reset_otf_flags(engine)
 
-        # INITILIZE ARTN on all ranks
         artn = pypARTn.artn(engine="lammps")
-
-        # LAMMPS COMMANDS
         engine.command(f"plugin load {artn.lib._name}")
         atoms_frozen = _make_frozen_group(engine, config, positions, types)
         _apply_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
@@ -440,23 +419,17 @@ def partn_search(
         _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
         engine.command("min_style fire")
 
-        # SETUP ARTN
         artn.reset_input()
-        # Control
         artn.set("filout", "artn.out." + str(engine.engine_id))
         artn.set("engine_units", "lammps/metal")
         artn.set("verbose", config.partn.verbosity)
         artn.set("struc_format_out", "none")
         artn.set("delr_thr", config.partn.delr_thr)
 
-        # Exploration
         artn.set("lpush_final", True)
-        artn.set(
-            "lmove_nextmin", False
-        )  # if true fortran runtime error when event not found
+        artn.set("lmove_nextmin", False)
         artn.set("zseed", config.partn.zseed)
 
-        # Initial push
         artn.set("push_mode", config.partn.push_mode)
         if config.partn.push_mode == "rad":
             artn.set("push_dist_thr", config.partn.push_dist_thr)
@@ -464,13 +437,11 @@ def partn_search(
         artn.set("push_ids", central_lammps_id)
         artn.set("ninit", config.partn.ninit)
 
-        # Lanczos
         artn.set("lanczos_min_size", config.partn.lanczos_min_size)
         artn.set("lanczos_max_size", config.partn.lanczos_max_size)
         artn.set("lanczos_disp", config.partn.lanczos_disp)
         artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
 
-        # Eigenvector push
         artn.set("eigval_thr", config.partn.eigval_thr)
         artn.set("eigen_step_size", config.partn.eigen_step_size)
         artn.set("nsmooth", config.partn.nsmooth)
@@ -478,7 +449,6 @@ def partn_search(
         artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
         artn.set("nnewchance", config.partn.nnewchance)
 
-        # Perpendicular relaxation
         if config.partn.nperp is not None:
             artn.set("nperp", config.partn.nperp)
         if config.partn.nperp_limitation is not None:
@@ -486,13 +456,8 @@ def partn_search(
         else:
             artn.set("lnperp_limitation", False)
 
-        # Convergence
         artn.set("forc_thr", config.partn.forc_thr)
-
-        # Final push
         artn.set("push_over", config.partn.push_over)
-
-        # RUN
         engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
     except Exception:
         raise
@@ -502,7 +467,6 @@ def partn_search(
     _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
     _delete_frozen_group(engine, atoms_frozen)
 
-    # EXTRACT DATA
     if engine.rank == 0:
         if config.control.otfml:
             extrapolation_error = _build_extrapolation_error(
@@ -517,14 +481,8 @@ def partn_search(
                 return extrapolation_error
 
         err = artn.get_error()
-        has_extract = (
-            artn.extract("has_sad")
-            and artn.extract("has_min1")
-            and artn.extract("has_min2")
-        )
-
+        has_extract = artn.extract("has_sad") and artn.extract("has_min1") and artn.extract("has_min2")
         if err[0] == 0 and has_extract:
-            # Results
             E_sad = artn.extract("etot_sad")
             E_min1 = artn.extract("etot_min1")
             E_min2 = artn.extract("etot_min2")
@@ -597,6 +555,7 @@ def partn_search(
                         saddle_positions=saddlepositions,
                         min2_positions=min2positions,
                         move_atom_index=index_move,
+                        types=types,
                     )
                 )
 
@@ -609,6 +568,7 @@ def partn_search(
                     saddle_positions=saddlepositions,
                     min2_positions=min1positions,
                     move_atom_index=index_move,
+                    types=types,
                 )
             )
         else:
@@ -636,7 +596,6 @@ def partn_refine(
     symmetry_index: int | None = None,
 ):
     try:
-        # Set positions
         if config.control.active_volume == True:
             E_init, atom_map, central_lammps_id = partn_refine_AV(
                 engine,
@@ -654,41 +613,25 @@ def partn_refine(
             atom_map = None
             if positions is not None:
                 set_positions(engine=engine, positions=positions)
-                # small minimization with fix core atoms around central atom
                 if minimize_outter_atoms:
-                    minimize_freeze_core(
-                        engine,
-                        positions[central_atom_idx],
-                        config.atomicenvironment.rcut,
-                        maxiter=10,
-                    )
+                    minimize_freeze_core(engine, config, saddle_idx)
 
         if config.control.otfml:
             reset_otf_flags(engine)
 
-        # INITILIZE ARTN
         artn = pypARTn.artn(engine="lammps")
-
-        # LAMMPS COMMANDS
         engine.command(f"plugin load {artn.lib._name}")
-
-        # SETUP ARTN
         artn.reset_input()
-        # Control
         artn.set("filout", "artn.out." + str(engine.engine_id))
         artn.set("engine_units", "lammps/metal")
         artn.set("verbose", config.partn.verbosity)
         artn.set("struc_format_out", "none")
         artn.set("delr_thr", config.partn.delr_thr)
 
-        # Exploration
         artn.set("lpush_final", False)
-        artn.set(
-            "lmove_nextmin", False
-        )  # if true fortran runtime error when event not found
+        artn.set("lmove_nextmin", False)
         artn.set("zseed", config.partn.zseed)
 
-        # Initial push : Should not happen when refining
         artn.set("push_mode", config.partn.r_push_mode)
         if config.partn.push_mode == "rad":
             artn.set("push_dist_thr", config.partn.r_push_dist_thr)
@@ -696,13 +639,11 @@ def partn_refine(
         artn.set("push_ids", central_lammps_id)  # fortran start at 1
         artn.set("ninit", config.partn.r_ninit)
 
-        # Lanczos
         artn.set("lanczos_min_size", config.partn.r_lanczos_min_size)
         artn.set("lanczos_max_size", config.partn.r_lanczos_max_size)
         artn.set("lanczos_disp", config.partn.r_lanczos_disp)
         artn.set("lanczos_eval_conv_thr", config.partn.r_lanczos_eval_conv_thr)
 
-        # Eigenvector push
         artn.set("eigval_thr", config.partn.r_eigval_thr)
         artn.set("eigen_step_size", config.partn.r_eigen_step_size)
         artn.set("nsmooth", config.partn.r_nsmooth)
@@ -710,7 +651,6 @@ def partn_refine(
         artn.set("alpha_mix_cr", config.partn.r_alpha_mix_cr)
         artn.set("nnewchance", config.partn.r_nnewchance)
 
-        # Perpendicular relaxation
         if config.partn.r_nperp is not None:
             artn.set("nperp", config.partn.r_nperp)
         if config.partn.r_nperp_limitation is not None:
@@ -718,12 +658,7 @@ def partn_refine(
         else:
             artn.set("lnperp_limitation", False)
 
-        # Convergence
         artn.set("forc_thr", config.partn.r_forc_thr)
-
-        # MAX attempt based on delr_sad (from initial position)
-        # Fix that sometime, we go back to the minimum, so saddle point found is the minimum
-        # When using a different seed it solves the problem
 
         max_attempts = config.partn.r_max_attempts
         inner_attempt = 0
@@ -732,16 +667,14 @@ def partn_refine(
 
         while inner_attempt < max_attempts:
             exit_flag = False
-            result = None  # for rank > 0
+            result = None
             engine.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
             _apply_frozen_fix(engine, "f_frozen_post", atoms_frozen)
             engine.command("min_style fire")
-            # RUN
             engine.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}")
             engine.command("unfix 10")
             _remove_frozen_fix(engine, "f_frozen_post", atoms_frozen)
 
-            # EXTRACT DATA
             if engine.rank == 0:
                 if config.control.otfml:
                     extrapolation_error = _build_extrapolation_error(
@@ -761,14 +694,11 @@ def partn_refine(
                     err = artn.get_error()
                     has_extract = artn.extract("has_sad")
 
-                    if err[0] == 0 and has_extract:  # No error
-                        # Check if went back to minimum
+                    if err[0] == 0 and has_extract:
                         delr_sad = artn.extract("delr_sad")
-                        if delr_sad < config.partn.r_delr_sad_thr:  # Success
+                        if delr_sad < config.partn.r_delr_sad_thr:
                             E_sad = artn.extract("etot_sad")
-                            E_result = (
-                                E_sad - E_init
-                            )  # If AV's are on, will return the activation energy of the event. If not, jsut saddle energy
+                            E_result = E_sad - E_init
                             saddlepositions = artn.extract("tau_sad")
 
                             if config.control.active_volume == True:
@@ -797,7 +727,6 @@ def partn_refine(
                                     refined="T",
                                 )
                             )
-            # Synchronize all ranks
             exit_flag = engine.local_engine_comm.bcast(exit_flag, root=0)
             if exit_flag:
                 _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
@@ -807,7 +736,7 @@ def partn_refine(
             inner_attempt += 1
             artn.set("zseed", config.partn.zseed)
 
-        else:  # fail after max attemps
+        else:
             _remove_frozen_fix(engine, "f_frozen_pre", atoms_frozen)
             _delete_frozen_group(engine, atoms_frozen)
             if engine.rank == 0:

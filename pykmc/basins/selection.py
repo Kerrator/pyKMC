@@ -127,7 +127,7 @@ class FPTASelector:
         for i in range(
             len(set(connectivity_table.df["state"]))
         ):  # only diag for transient states
-            # since M_ij has kj->i elements :
+            # since M_ij has kj->i elements:
             self.M_abs[i, i] = -sum(
                 [self.M_abs[j, i] for j in range(n_states) if j != i]
             )

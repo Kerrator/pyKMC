@@ -133,6 +133,9 @@ class KMC:
             self.neighbors_list.neighbors_list["rnei"],
             self.neighbors_list.neighbors_list["rcut"],
             self.config.atomicenvironment.neighbors_add,
+            coordination_threshold=self.config.atomicenvironment.coordination_threshold,
+            types=self.system.types,
+            coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
         )
         self.inactive_ae = (
             AtomicEnvironment(
@@ -495,6 +498,9 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
+                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
+                types=self.system.types,
+                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
             )
             self.inactive_ae = (
                 AtomicEnvironment(
@@ -794,8 +800,8 @@ class KMC:
                 ae_topo = self.reference_table.table[
                     self.reference_table.table["idx_ref"] == num_ref_event
                 ]["id_initial"].values[0]
-                err_reference.append(num_ref_event)
-                err_ae.append(ae_topo)
+                err_reference += [num_ref_event]
+                err_ae += [ae_topo]
 
                 self.loggers.info("log", "\t :=> Removing active event.")
                 active_table.remove(idx_selected_event)

@@ -107,7 +107,6 @@ class Reconstruction:
 
             # Compare min2pos with expected final_positions
             t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=True)
-            # delr2 = compute_delr_max(supposed_min2_positions, min2_pos[neighbors], cell)
             delr2 = compute_delr_max(supposed_min2_positions, t2[neighbors], cell)
             if delr2 > self.config.psr.matching_score_thr:
                 return Err(
