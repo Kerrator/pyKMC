@@ -102,13 +102,20 @@ class Refinement:
                 else:
                     all_futures.append(futures)
 
-        #Get results and update values : 
+        #Get results and update values :
         for f in all_futures:
-            #get results
-            res = f.result()
             #get specific results info
-            ctx = future_context[f]
-            _ = future_context.pop(f)
+            ctx = future_context.pop(f)
+            #get results — an engine-side failure now arrives as an error reply
+            #and raises here; skip the single refinement instead of killing the run
+            try:
+                res = f.result()
+            except Exception as exc:
+                self.loggers.info("log", "\t :=> refinement skipped (engine error): {}".format(exc))
+                res = Err(ErrorInfo(
+                    type=ErrorType.MPI_REMOTE_ERROR,
+                    message=str(exc),
+                ))
 
             self.loggers.progress_bar("progress", total_refinements-len(future_context), total_refinements)
 
