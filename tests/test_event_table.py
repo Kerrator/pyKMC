@@ -144,7 +144,14 @@ class TestReferenceTableTypes:
         reference_table = ReferenceEventTable(config)
         table = reference_table.table
 
-        assert {"idx_ref", "id_initial", "dE_forward", "dE_backward", "types", "dra"} <= set(table.columns)
+        assert {
+            "idx_ref",
+            "id_initial",
+            "dE_forward",
+            "dE_backward",
+            "types",
+            "dra",
+        } <= set(table.columns)
         assert table.loc[0, "idx_ref"] == 0
         assert isinstance(table.loc[0, "id_initial"], str)
         assert table.loc[0, "dE_forward"] == pytest.approx(0.3)
@@ -152,7 +159,9 @@ class TestReferenceTableTypes:
         assert table.loc[0, "types"] is None
         assert table.loc[0, "dra"] == pytest.approx(0.5)
         assert table.loc[0, "event_id"] == combine_ids(
-            table.loc[0, "id_initial"], table.loc[0, "id_saddle"], table.loc[0, "id_final"]
+            table.loc[0, "id_initial"],
+            table.loc[0, "id_saddle"],
+            table.loc[0, "id_final"],
         )
         subset = reference_table.has_id_subset_table([table.loc[0, "id_initial"]])
         assert subset["idx_ref"].tolist() == [0]

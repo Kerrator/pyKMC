@@ -76,7 +76,9 @@ class ReferenceEventTable:
             atom_idx = int(row["move_atom_idx"])
             initial_positions = np.asarray(row["initial_positions"], dtype=float)
             saddle_positions = np.asarray(row["saddle_positions"], dtype=float)
-            return float(np.linalg.norm(initial_positions[atom_idx] - saddle_positions[atom_idx]))
+            return float(
+                np.linalg.norm(initial_positions[atom_idx] - saddle_positions[atom_idx])
+            )
         except Exception:
             return float("nan")
 
@@ -103,18 +105,26 @@ class ReferenceEventTable:
             if column in table.columns:
                 table[column] = table[column].map(encode_cert)
 
-        if all(column in table.columns for column in ("id_initial", "id_saddle", "id_final")):
+        if all(
+            column in table.columns
+            for column in ("id_initial", "id_saddle", "id_final")
+        ):
             table["event_id"] = [
                 combine_ids(id_initial, id_saddle, id_final)
                 for id_initial, id_saddle, id_final in zip(
-                    table["id_initial"], table["id_saddle"], table["id_final"], strict=False
+                    table["id_initial"],
+                    table["id_saddle"],
+                    table["id_final"],
+                    strict=False,
                 )
             ]
         elif "event_id" in table.columns:
             table["event_id"] = table["event_id"].map(encode_cert)
 
         if "dE_backward" not in table.columns:
-            backward_map = dict(zip(table["idx_ref"], table["dE_forward"], strict=False))
+            backward_map = dict(
+                zip(table["idx_ref"], table["dE_forward"], strict=False)
+            )
             table["dE_backward"] = table["idx_backward"].map(backward_map).astype(float)
 
         if "types" not in table.columns:
