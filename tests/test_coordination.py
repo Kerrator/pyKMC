@@ -1,5 +1,6 @@
 from collections import Counter
 
+import numpy as np
 import pytest
 from pytest_lazy_fixtures import lf
 
@@ -84,3 +85,40 @@ class TestCoordination:
         )
         assert ae.coordination_threshold == 12
         assert sum(e == "noncrystal" for e in ae.atomic_environment_list) == 12
+
+    @pytest.mark.parametrize(
+        "system, config",
+        [(lf("system_binary_fcc"), lf("config_system_single_type"))],
+    )
+    def test_coordination_graph_honours_full_coloring(self, system, config):
+        """Binary vacancy graphs differ between grey and full coloring in coordination/graph."""
+        vacancy_system = type(system)()
+        vacancy_system.cell = np.array(system.cell, copy=True)
+        vacancy_system.pbc = np.array(system.pbc, copy=True)
+        vacancy_system.positions = np.delete(
+            np.array(system.positions, copy=True), 0, axis=0
+        )
+        vacancy_system.types = np.delete(np.array(system.types, copy=True), 0, axis=0)
+        vacancy_system.index = np.arange(len(vacancy_system.positions))
+
+        nl = NeighborsList(
+            vacancy_system,
+            config.atomicenvironment.rnei,
+            config.atomicenvironment.rcut,
+        )
+        kwargs = {
+            "style": "coordination/graph",
+            "neighbors_list": nl.neighbors_list["rnei"],
+            "environment_list": nl.neighbors_list["rcut"],
+            "coordination_threshold": 12,
+            "types": vacancy_system.types,
+        }
+
+        grey = AtomicEnvironment(coloring_mode="grey", **kwargs).atomic_environment_list
+        full = AtomicEnvironment(coloring_mode="full", **kwargs).atomic_environment_list
+
+        grey_non_crystal = [env for env in grey if env != "crystal"]
+        full_non_crystal = [env for env in full if env != "crystal"]
+
+        assert len(grey_non_crystal) == len(full_non_crystal) == 12
+        assert grey_non_crystal != full_non_crystal

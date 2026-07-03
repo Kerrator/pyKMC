@@ -252,6 +252,18 @@ class TestDirectionBias:
         assert idx == 0
         assert ktot > 0.0
 
+    def test_accept_full_system_positions_without_neighbors(self, ref_table_atom0):
+        """Without a neighbours list, full-system final_positions must use the event atom row."""
+        system = make_system([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        bias = DirectionBias(
+            direction=[1, 0, 0], atom_indices=[1], require_central=True
+        )
+        event = make_event(
+            atom_index=1,
+            final_positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        )
+        assert bias.accept(event, system, ref_table_atom0, neighbors_list=None) is True
+
 
 # ---------------------------------------------------------------------------
 # PointBias

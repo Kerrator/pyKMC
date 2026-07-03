@@ -213,8 +213,12 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
 
-        # Compute graph topology only for the non-crystalline atoms (uncolored graph())
-        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        list_graphs_hash = graph(
+            neighbors_list,
+            environment_list,
+            non_crystal_idx,
+            types=self.types if self.coloring_mode == "full" else None,
+        )
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 

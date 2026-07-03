@@ -82,6 +82,16 @@ class ReferenceEventTable:
         except Exception:
             return float("nan")
 
+    @staticmethod
+    def _normalize_types(row: pd.Series) -> list[str]:
+        nat = len(row["initial_positions"]) if "initial_positions" in row else 0
+        raw_types = row["types"] if "types" in row else None
+        if isinstance(raw_types, (list, tuple, np.ndarray, pd.Series)):
+            normalized = list(raw_types)
+            if len(normalized) == nat:
+                return normalized
+        return nat * ["X"]
+
     def _normalize_loaded_table(self, table: pd.DataFrame) -> pd.DataFrame:
         table = table.copy()
 
@@ -128,7 +138,8 @@ class ReferenceEventTable:
             table["dE_backward"] = table["idx_backward"].map(backward_map).astype(float)
 
         if "types" not in table.columns:
-            table["types"] = pd.Series([None] * len(table), dtype="object")
+            table["types"] = pd.Series([[]] * len(table), dtype="object")
+        table["types"] = table.apply(self._normalize_types, axis=1)
 
         if "dra" not in table.columns:
             table["dra"] = table.apply(self._compute_dra, axis=1)
@@ -610,10 +621,14 @@ class ReferenceEventTable:
         # the reference-table schema is mode-independent; colouring is only *applied*
         # in matching/symmetry, which is gated below.
         local_types_forward = (
-            list(np.array(types)[neighbor_list_forward]) if types is not None else None
+            list(np.array(types)[neighbor_list_forward])
+            if types is not None
+            else len(neighbor_list_forward) * ["X"]
         )
         local_types_backward = (
-            list(np.array(types)[neighbor_list_backward]) if types is not None else None
+            list(np.array(types)[neighbor_list_backward])
+            if types is not None
+            else len(neighbor_list_backward) * ["X"]
         )
 
         # Colour symmetry detection only in full coloring mode (usage gate).

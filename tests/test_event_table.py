@@ -156,13 +156,14 @@ class TestReferenceTableTypes:
         assert isinstance(table.loc[0, "id_initial"], str)
         assert table.loc[0, "dE_forward"] == pytest.approx(0.3)
         assert table.loc[0, "dE_backward"] == pytest.approx(0.4)
-        assert table.loc[0, "types"] is None
+        assert table.loc[0, "types"] == ["X", "X"]
         assert table.loc[0, "dra"] == pytest.approx(0.5)
         assert table.loc[0, "event_id"] == combine_ids(
             table.loc[0, "id_initial"],
             table.loc[0, "id_saddle"],
             table.loc[0, "id_final"],
         )
+        assert isinstance(reference_table.is_new_event(table.loc[0].copy()), bool)
         subset = reference_table.has_id_subset_table([table.loc[0, "id_initial"]])
         assert subset["idx_ref"].tolist() == [0]
 
