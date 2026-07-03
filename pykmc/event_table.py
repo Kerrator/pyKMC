@@ -59,7 +59,9 @@ class ReferenceEventTable:
                 "types": pd.Series(dtype="object"),
                 "k": pd.Series(dtype="float64"),
                 "event_id": pd.Series(dtype="str"),
+                "generic_event_id": pd.Series(dtype="str"),
                 "id_initial": pd.Series(dtype="str"),
+                "generic_id_initial": pd.Series(dtype="str"),
                 "id_saddle": pd.Series(dtype="str"),
                 "id_final": pd.Series(dtype="str"),
                 "move_atom_idx": pd.Series(dtype="int64"),
@@ -118,8 +120,12 @@ class ReferenceEventTable:
             len(subset) == 0
             and self.config.atomicenvironment.atom_coloring_mode == "full"
             and "legacy_untyped" in self.table.columns
+            and "generic_event_id" in self.table.columns
         ):
-            subset = self.table[self.table["legacy_untyped"]]
+            subset = self.table[
+                self.table["legacy_untyped"]
+                & (self.table["generic_event_id"] == dfevent["generic_event_id"])
+            ]
         return subset
 
     def _normalize_loaded_table(self, table: pd.DataFrame) -> pd.DataFrame:
@@ -161,6 +167,11 @@ class ReferenceEventTable:
         elif "event_id" in table.columns:
             table["event_id"] = table["event_id"].map(encode_cert)
 
+        if "generic_event_id" not in table.columns:
+            table["generic_event_id"] = table["event_id"]
+        if "generic_id_initial" not in table.columns:
+            table["generic_id_initial"] = table["id_initial"]
+
         if "dE_backward" not in table.columns:
             backward_map = dict(
                 zip(table["idx_ref"], table["dE_forward"], strict=False)
@@ -184,7 +195,9 @@ class ReferenceEventTable:
             "dE_backward": np.nan,
             "k": np.nan,
             "event_id": "",
+            "generic_event_id": "",
             "id_initial": "",
+            "generic_id_initial": "",
             "id_saddle": "",
             "id_final": "",
             "move_atom_idx": 0,
@@ -521,7 +534,9 @@ class ReferenceEventTable:
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 
-    def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
+    def has_id_subset_table(
+        self, ids: list[str], generic_ids: list[str] | None = None
+    ) -> pd.DataFrame:
         """Return subset table with event having id in ids.
 
         Parameters
@@ -538,9 +553,14 @@ class ReferenceEventTable:
         subset = self.table[self.table["id_initial"].isin(ids)]
         if (
             self.config.atomicenvironment.atom_coloring_mode == "full"
+            and generic_ids is not None
             and "legacy_untyped" in self.table.columns
+            and "generic_id_initial" in self.table.columns
         ):
-            legacy_subset = self.table[self.table["legacy_untyped"]]
+            legacy_subset = self.table[
+                self.table["legacy_untyped"]
+                & self.table["generic_id_initial"].isin(generic_ids)
+            ]
             subset = self.table.loc[subset.index.union(legacy_subset.index)]
         return subset
 
@@ -639,6 +659,26 @@ class ReferenceEventTable:
             atom_idx=[index_move],
             types=graph_types,
         )[0]
+        if full:
+            generic_id_min1 = graph(
+                min1neighbors_list.neighbors_list["rnei"],
+                min1neighbors_list.neighbors_list["rcut"],
+                atom_idx=[index_move],
+            )[0]
+            generic_id_saddle = graph(
+                saddleneighbors_list.neighbors_list["rnei"],
+                saddleneighbors_list.neighbors_list["rcut"],
+                atom_idx=[index_move],
+            )[0]
+            generic_id_min2 = graph(
+                min2neighbors_list.neighbors_list["rnei"],
+                min2neighbors_list.neighbors_list["rcut"],
+                atom_idx=[index_move],
+            )[0]
+        else:
+            generic_id_min1 = id_min1
+            generic_id_saddle = id_saddle
+            generic_id_min2 = id_min2
 
         # query_ball_point can hand back Python lists; coerce to arrays so the
         # element-wise comparisons (np.where) and type indexing below behave.
@@ -698,7 +738,11 @@ class ReferenceEventTable:
                 "types": local_types_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "event_id": combine_ids(id_min1, id_saddle, id_min2),
+                "generic_event_id": combine_ids(
+                    generic_id_min1, generic_id_saddle, generic_id_min2
+                ),
                 "id_initial": id_min1,
+                "generic_id_initial": generic_id_min1,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -727,7 +771,11 @@ class ReferenceEventTable:
                 "types": local_types_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "event_id": combine_ids(id_min2, id_saddle, id_min1),
+                "generic_event_id": combine_ids(
+                    generic_id_min2, generic_id_saddle, generic_id_min1
+                ),
                 "id_initial": id_min2,
+                "generic_id_initial": generic_id_min2,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],

@@ -86,7 +86,12 @@ class BasinGenericEventExplorer(Explorer):
 
         # Find all applicable events on the state
         df_applicable_events = self.reference_table.has_id_subset_table(
-            state.environment.atomic_environment_list
+            state.environment.atomic_environment_list,
+            generic_ids=(
+                state.environment.ids_for_coloring_mode("grey")
+                if self.config.atomicenvironment.atom_coloring_mode == "full"
+                else None
+            ),
         )
 
         # Loop over all applicable events :
@@ -102,7 +107,20 @@ class BasinGenericEventExplorer(Explorer):
                 df_event, self.reference_table.table, self.config.basin.energy_thr
             )
             # All atoms on which we can apply the event :
-            l_atoms = state.environment.get_atoms_with_id(df_event["id_initial"])
+            lookup_mode = (
+                "grey"
+                if bool(df_event.get("legacy_untyped", False))
+                and self.config.atomicenvironment.atom_coloring_mode == "full"
+                else None
+            )
+            lookup_id = (
+                df_event["generic_id_initial"]
+                if lookup_mode == "grey"
+                else df_event["id_initial"]
+            )
+            l_atoms = state.environment.get_atoms_with_id(
+                lookup_id, coloring_mode=lookup_mode
+            )
             # Find backward info
             backward_idx = self.reference_table.table.loc[idx].at["idx_backward"]
             dE_backward = self.reference_table.table[

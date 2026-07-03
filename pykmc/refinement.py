@@ -116,8 +116,19 @@ class Refinement:
         task_id = 0
         supposed_ktot = 0.0
         for _idx, dfevent in df_reference_events.iterrows():
+            lookup_mode = (
+                "grey"
+                if bool(dfevent.get("legacy_untyped", False))
+                and self.config.atomicenvironment.atom_coloring_mode == "full"
+                else None
+            )
+            lookup_id = (
+                dfevent["generic_id_initial"]
+                if lookup_mode == "grey"
+                else dfevent["id_initial"]
+            )
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
-                dfevent["id_initial"]
+                lookup_id, coloring_mode=lookup_mode
             )
             ref_idx = int(dfevent["idx_ref"])
             for at_idx in atoms_refine_idx:

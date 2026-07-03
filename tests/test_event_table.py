@@ -149,6 +149,7 @@ class TestReferenceTableTypes:
         assert {
             "idx_ref",
             "id_initial",
+            "generic_id_initial",
             "dE_forward",
             "dE_backward",
             "types",
@@ -167,7 +168,7 @@ class TestReferenceTableTypes:
         )
         assert isinstance(reference_table.is_new_event(table.loc[0].copy()), bool)
         subset = reference_table.has_id_subset_table([table.loc[0, "id_initial"]])
-        assert subset["idx_ref"].tolist() == [0, 1]
+        assert subset["idx_ref"].tolist() == [0]
 
     def test_legacy_grey_row_remains_compatible_in_full_mode(
         self, tmp_path, system_binary_fcc, config_system_single_type
@@ -189,7 +190,10 @@ class TestReferenceTableTypes:
         full_fwd, _ = _build_trivial_series(config, system_binary_fcc)
         assert bool(reference_table.table.loc[0, "legacy_untyped"]) is True
 
-        subset = reference_table.has_id_subset_table([full_fwd["id_initial"]])
+        subset = reference_table.has_id_subset_table(
+            [full_fwd["id_initial"]],
+            generic_ids=[full_fwd["generic_id_initial"]],
+        )
         assert subset["idx_ref"].tolist() == [0]
         assert reference_table.is_new_event(full_fwd) is False
 
