@@ -7,6 +7,8 @@ import pytest
 from pykmc import NeighborsList
 from pykmc.event_table import ReferenceEventTable
 from pykmc.environments.graph_nauty import combine_ids
+import pykmc.point_set_registration as psr_module
+from pykmc.point_set_registration import PointSetRegistration
 
 
 def _build_trivial_series(config, system):
@@ -165,7 +167,70 @@ class TestReferenceTableTypes:
         )
         assert isinstance(reference_table.is_new_event(table.loc[0].copy()), bool)
         subset = reference_table.has_id_subset_table([table.loc[0, "id_initial"]])
+        assert subset["idx_ref"].tolist() == [0, 1]
+
+    def test_legacy_grey_row_remains_compatible_in_full_mode(
+        self, tmp_path, system_binary_fcc, config_system_single_type
+    ):
+        config = config_system_single_type
+        config.atomicenvironment.atom_coloring_mode = "grey"
+        legacy_fwd, _ = _build_trivial_series(config, system_binary_fcc)
+        legacy_row = legacy_fwd.drop(labels=["types", "legacy_untyped"], errors="ignore").copy()
+        legacy_row["idx_ref"] = 0
+        legacy_row["idx_backward"] = 0
+        legacy_table = pd.DataFrame([legacy_row])
+        pickle_path = tmp_path / "legacy_binary_reference_table.pickle"
+        legacy_table.to_pickle(pickle_path)
+
+        config.atomicenvironment.atom_coloring_mode = "full"
+        config.control.reference_table = str(pickle_path)
+        reference_table = ReferenceEventTable(config)
+
+        full_fwd, _ = _build_trivial_series(config, system_binary_fcc)
+        assert bool(reference_table.table.loc[0, "legacy_untyped"]) is True
+
+        subset = reference_table.has_id_subset_table([full_fwd["id_initial"]])
         assert subset["idx_ref"].tolist() == [0]
+        assert reference_table.is_new_event(full_fwd) is False
+
+    def test_legacy_full_mode_psr_uses_current_neighbor_types(
+        self, tmp_path, system_binary_fcc, config_system_single_type, monkeypatch
+    ):
+        config = config_system_single_type
+        config.atomicenvironment.atom_coloring_mode = "grey"
+        legacy_fwd, _ = _build_trivial_series(config, system_binary_fcc)
+        legacy_row = legacy_fwd.drop(labels=["types", "legacy_untyped"], errors="ignore").copy()
+        legacy_table = pd.DataFrame([legacy_row])
+        pickle_path = tmp_path / "legacy_psr_reference_table.pickle"
+        legacy_table.to_pickle(pickle_path)
+
+        config.atomicenvironment.atom_coloring_mode = "full"
+        config.control.reference_table = str(pickle_path)
+        reference_table = ReferenceEventTable(config)
+        nl = NeighborsList(
+            system_binary_fcc,
+            config.atomicenvironment.rnei,
+            config.atomicenvironment.rcut,
+        )
+        captured = {}
+
+        class DummyIRA:
+            def match(self, nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor):
+                captured["typ1"] = list(typ1)
+                captured["typ2"] = list(typ2)
+                return np.eye(3), np.zeros(3), np.arange(nat2), 0.0
+
+        monkeypatch.setattr(psr_module.ira_mod, "IRA", lambda: DummyIRA())
+        result = PointSetRegistration(
+            config,
+            system_binary_fcc,
+            reference_table.table.loc[0],
+            nl,
+            0,
+        ).match()
+
+        assert result.is_ok()
+        assert captured["typ2"] == captured["typ1"]
 
 
 class TestGreyDedupSpeciesGating:

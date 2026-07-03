@@ -90,7 +90,10 @@ class PointSetRegistration:
 
         if self.config.atomicenvironment.atom_coloring_mode == "full":
             typ1 = list(np.array(self.system.types)[neighbor_list])
-            typ2 = list(self.dfevent.at["types"])
+            if bool(self.dfevent.get("legacy_untyped", False)):
+                typ2 = list(typ1)
+            else:
+                typ2 = list(self.dfevent.at["types"])
         else:
             typ1 = ["X"] * len(coords1)
             typ2 = ["X"] * nat2

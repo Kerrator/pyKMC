@@ -67,6 +67,7 @@ class ReferenceEventTable:
                 "sym_perm": pd.Series(dtype="object"),
                 "idx_backward": pd.Series(dtype="int64"),
                 "dra": pd.Series(dtype="float64"),
+                "legacy_untyped": pd.Series(dtype="bool"),
             }
         )
 
@@ -91,6 +92,35 @@ class ReferenceEventTable:
             if len(normalized) == nat:
                 return normalized
         return nat * ["X"]
+
+    @staticmethod
+    def _is_legacy_untyped_row(row: pd.Series) -> bool:
+        nat = len(row["initial_positions"]) if "initial_positions" in row else 0
+        raw_types = row["types"] if "types" in row else None
+        if isinstance(raw_types, (list, tuple, np.ndarray, pd.Series)):
+            normalized = list(raw_types)
+            if len(normalized) == nat and any(atom_type != "X" for atom_type in normalized):
+                return bool(row.get("legacy_untyped", False))
+        return True
+
+    def _matching_types(
+        self, row: pd.Series, nat: int, fallback_types: list[str] | None = None
+    ) -> list[str]:
+        if self.config.atomicenvironment.atom_coloring_mode != "full":
+            return nat * ["X"]
+        if bool(row.get("legacy_untyped", False)):
+            return list(fallback_types) if fallback_types is not None else nat * ["X"]
+        return list(row["types"]) if row["types"] is not None else nat * ["X"]
+
+    def _candidate_subset_for_matching(self, dfevent: pd.Series) -> pd.DataFrame:
+        subset = self.table[self.table["event_id"] == dfevent["event_id"]]
+        if (
+            len(subset) == 0
+            and self.config.atomicenvironment.atom_coloring_mode == "full"
+            and "legacy_untyped" in self.table.columns
+        ):
+            subset = self.table[self.table["legacy_untyped"]]
+        return subset
 
     def _normalize_loaded_table(self, table: pd.DataFrame) -> pd.DataFrame:
         table = table.copy()
@@ -140,6 +170,9 @@ class ReferenceEventTable:
         if "types" not in table.columns:
             table["types"] = pd.Series([[]] * len(table), dtype="object")
         table["types"] = table.apply(self._normalize_types, axis=1)
+        if "legacy_untyped" not in table.columns:
+            table["legacy_untyped"] = pd.Series([False] * len(table), dtype="bool")
+        table["legacy_untyped"] = table.apply(self._is_legacy_untyped_row, axis=1)
 
         if "dra" not in table.columns:
             table["dra"] = table.apply(self._compute_dra, axis=1)
@@ -157,6 +190,7 @@ class ReferenceEventTable:
             "move_atom_idx": 0,
             "idx_backward": 0,
             "dra": np.nan,
+            "legacy_untyped": False,
         }
         for column in empty.columns:
             if column not in table.columns:
@@ -408,7 +442,7 @@ class ReferenceEventTable:
 
         """
         # Only select rows with same event_id as dfenvent :
-        subset = self.table[self.table["event_id"] == dfevent["event_id"]]
+        subset = self._candidate_subset_for_matching(dfevent)
         if len(subset) == 0:
             return True
 
@@ -422,21 +456,12 @@ class ReferenceEventTable:
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        full = self.config.atomicenvironment.atom_coloring_mode == "full"
-        typ_event = (
-            list(dfevent["types"])
-            if full and dfevent["types"] is not None
-            else nat_event * ["X"]
-        )
+        typ_event = self._matching_types(dfevent, nat_event)
 
         for _, ev in subset.iterrows():
             ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = (
-                list(ev["types"])
-                if full and ev["types"] is not None
-                else nat_ref * ["X"]
-            )
+            typ_ref = self._matching_types(ev, nat_ref, fallback_types=typ_event)
             result = simple_ira(
                 nat_event,
                 typ_event,
@@ -510,7 +535,14 @@ class ReferenceEventTable:
             Subset of the reference table dataframe with only event having IDs in ids.
 
         """
-        return self.table[self.table["id_initial"].isin(ids)]
+        subset = self.table[self.table["id_initial"].isin(ids)]
+        if (
+            self.config.atomicenvironment.atom_coloring_mode == "full"
+            and "legacy_untyped" in self.table.columns
+        ):
+            legacy_subset = self.table[self.table["legacy_untyped"]]
+            subset = self.table.loc[subset.index.union(legacy_subset.index)]
+        return subset
 
     def _build_event_series(
         self,
@@ -674,6 +706,7 @@ class ReferenceEventTable:
                 "sym_perm": sym_perm,
                 "idx_backward": -1,  # unknown yet,
                 "dra": dra_forward,
+                "legacy_untyped": False,
             }
         )
 
@@ -702,6 +735,7 @@ class ReferenceEventTable:
                 "sym_perm": sym_perm,
                 "idx_backward": -1,  # unknown yet
                 "dra": dra_backward,
+                "legacy_untyped": False,
             }
         )
 
