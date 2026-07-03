@@ -38,9 +38,6 @@ class TestManager:
             return  # Engine processes stop here
         # ------------ SESSION CODE (rank 0) ------------
         manager.initialize_sessions(config, system)
-        manager.global_initialize_parameters()
-        manager.global_initialize_system(system)
-        manager.global_initialize_potential(config)
         f = manager.minimize(config)
         re = f.result()
         manager.global_minimize(config)

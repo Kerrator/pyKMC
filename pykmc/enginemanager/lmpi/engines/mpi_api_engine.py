@@ -27,13 +27,51 @@ class MpiApiEngine:
 
     def __init__(
         self,
-        local_messenger,
-        local_engine_comm: MPI.Comm,
-        local_engine_id: int,
-        global_messenger,
-        global_engine_comm: MPI.Comm,
-        global_engine_id: int,
+        local_messenger=None,
+        local_engine_comm: MPI.Comm | None = None,
+        local_engine_id: int | None = None,
+        global_messenger=None,
+        global_engine_comm: MPI.Comm | None = None,
+        global_engine_id: int | None = None,
+        messenger=None,
+        engine_comm: MPI.Comm | None = None,
+        engine_id: int | None = None,
     ) -> None:
+        if messenger is not None or engine_comm is not None or engine_id is not None:
+            if any(
+                value is not None
+                for value in [
+                    local_messenger,
+                    local_engine_comm,
+                    local_engine_id,
+                    global_messenger,
+                    global_engine_comm,
+                    global_engine_id,
+                ]
+            ):
+                raise ValueError(
+                    "Use either the compatibility `messenger/engine_comm/engine_id` constructor or the local/global constructor."
+                )
+            local_messenger = messenger
+            global_messenger = messenger
+            local_engine_comm = engine_comm
+            global_engine_comm = engine_comm
+            local_engine_id = engine_id
+            global_engine_id = engine_id
+
+        if global_messenger is None:
+            global_messenger = local_messenger
+        if global_engine_comm is None:
+            global_engine_comm = local_engine_comm
+        if global_engine_id is None:
+            global_engine_id = local_engine_id
+        if local_messenger is None:
+            local_messenger = global_messenger
+        if local_engine_comm is None:
+            local_engine_comm = global_engine_comm
+        if local_engine_id is None:
+            local_engine_id = global_engine_id
+
         self.local_messenger = local_messenger
         self.local_engine_comm = local_engine_comm
         if local_engine_comm is not None:
@@ -57,6 +95,10 @@ class MpiApiEngine:
             self.global_rank = 0
         self.global_engine_id = global_engine_id  # Identifier
         self.global_lmp = None  # Placeholder for Lammps instance
+        self._shared_lammps = (
+            self.local_engine_comm is self.global_engine_comm
+            and self.local_engine_id == self.global_engine_id
+        )
 
         self.use_global()  # Start with active properties mapped to global Lammps
 
@@ -115,15 +157,18 @@ class MpiApiEngine:
                 "lammps.log." + str(self.global_engine_id),
             ],
         )
-        self.local_lmp = lammps(
-            comm=self.local_engine_comm,
-            cmdargs=[
-                "-screen",
-                "none",
-                "-log",
-                "lammps.log." + str(self.local_engine_id),
-            ],
-        )
+        if self._shared_lammps:
+            self.local_lmp = self.global_lmp
+        else:
+            self.local_lmp = lammps(
+                comm=self.local_engine_comm,
+                cmdargs=[
+                    "-screen",
+                    "none",
+                    "-log",
+                    "lammps.log." + str(self.local_engine_id),
+                ],
+            )
         self.lmp = self.global_lmp
         self._is_alive = True
 
@@ -319,13 +364,15 @@ class MpiApiEngine:
     def close(self) -> None:
         """Close the LAMMPS engine."""
         print(f"[Engine Rank {self.rank}] Closing LAMMPS engine.")
-        if self.local_lmp is not None:
+        if self.local_lmp is not None and self.local_lmp is not self.global_lmp:
             self.local_lmp.close()
             self.local_lmp = None
 
         if self.global_lmp is not None:
             self.global_lmp.close()
             self.global_lmp = None
+
+        self.local_lmp = None
 
         self._is_alive = False
 

@@ -66,7 +66,9 @@ class ManagerFactory:
             global_comm = self.world.Split(color=MPI.UNDEFINED, key=self.world_rank)
         else:
             global_comm = self.world.Split(color=1, key=self.world_rank)
-        global_messenger = MpiMessenger(comm=self.world)
+        global_messenger = (
+            QueueMessenger() if self.start_rank == 0 else MpiMessenger(comm=self.world)
+        )
 
         if engine_id is not None:  #  rank in a chunk
             messenger = messengers[engine_id]

@@ -101,7 +101,9 @@ class ReferenceEventTable:
         raw_types = row["types"] if "types" in row else None
         if isinstance(raw_types, (list, tuple, np.ndarray, pd.Series)):
             normalized = list(raw_types)
-            if len(normalized) == nat and any(atom_type != "X" for atom_type in normalized):
+            if len(normalized) == nat and any(
+                atom_type != "X" for atom_type in normalized
+            ):
                 return bool(row.get("legacy_untyped", False))
         return True
 

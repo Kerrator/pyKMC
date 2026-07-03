@@ -109,7 +109,9 @@ def _select_event_generic(self):
                 self.reference_table.table.loc[i].at["id_initial"] in l_env
                 or (
                     generic_l_env is not None
-                    and bool(self.reference_table.table.loc[i].get("legacy_untyped", False))
+                    and bool(
+                        self.reference_table.table.loc[i].get("legacy_untyped", False)
+                    )
                     and self.reference_table.table.loc[i].at["generic_id_initial"]
                     in generic_l_env
                 )
@@ -140,7 +142,9 @@ def _select_central_atom_idx(self, idx_event_table):
             else None
         )
         lookup_id = (
-            event.at["generic_id_initial"] if lookup_mode == "grey" else event.at["id_initial"]
+            event.at["generic_id_initial"]
+            if lookup_mode == "grey"
+            else event.at["id_initial"]
         )
         possible = self.atomic_environment.get_atoms_with_id(
             lookup_id, coloring_mode=lookup_mode

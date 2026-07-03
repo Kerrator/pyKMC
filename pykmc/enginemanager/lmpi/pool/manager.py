@@ -47,7 +47,7 @@ class Manager:
         Send the same command to all sessions and wait for all to finish.
         """
         # print("[PoolManager] Broadcasting command:", cmd)
-        for session in self.sessions:
+        for session in self._active_sessions():
             session.command(cmd)
 
     def initialize_sessions(self, config, system):
@@ -162,6 +162,7 @@ class Manager:
 
     def set_all_positions(self, positions):
         # print("[Manager] Setting positions to all sessions.")
+        self.use_local()
         for session in self.sessions:
             session.set_positions(positions=positions)
 
@@ -175,7 +176,7 @@ class Manager:
             self.global_session.setup_otf_cycle(config)
 
     def submit_job(self, method_name: str, params: dict = None) -> Future:
-
+        self.use_local()
         future = Future()
         job = Job(method_name, params, future)
         # print(f"[PoolManager] Submitting job: {job.operation_name}") #with params: {job.params}")
@@ -254,8 +255,10 @@ class Manager:
         Close all sessions and their underlying engines.
         """
         # print("[PoolManager] Closing all sessions.")
-        if self.global_session is not None:
-            self.global_session.close(wait_status=False)
+        if self.using_global and self.global_session is not None:
+            self.global_session.close(wait_status=True)
+            return
+
         for session in self.sessions:
             session.close(wait_status=True)
 
@@ -267,6 +270,7 @@ class Manager:
                 raise RuntimeError("Global session is not available")
 
             def global_method(*args, **kwargs):
+                self.use_global()
                 method = getattr(self.global_session, method_name)
                 return method(*args, **kwargs)
 

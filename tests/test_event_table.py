@@ -176,7 +176,9 @@ class TestReferenceTableTypes:
         config = config_system_single_type
         config.atomicenvironment.atom_coloring_mode = "grey"
         legacy_fwd, _ = _build_trivial_series(config, system_binary_fcc)
-        legacy_row = legacy_fwd.drop(labels=["types", "legacy_untyped"], errors="ignore").copy()
+        legacy_row = legacy_fwd.drop(
+            labels=["types", "legacy_untyped"], errors="ignore"
+        ).copy()
         legacy_row["idx_ref"] = 0
         legacy_row["idx_backward"] = 0
         legacy_table = pd.DataFrame([legacy_row])
@@ -203,7 +205,9 @@ class TestReferenceTableTypes:
         config = config_system_single_type
         config.atomicenvironment.atom_coloring_mode = "grey"
         legacy_fwd, _ = _build_trivial_series(config, system_binary_fcc)
-        legacy_row = legacy_fwd.drop(labels=["types", "legacy_untyped"], errors="ignore").copy()
+        legacy_row = legacy_fwd.drop(
+            labels=["types", "legacy_untyped"], errors="ignore"
+        ).copy()
         legacy_table = pd.DataFrame([legacy_row])
         pickle_path = tmp_path / "legacy_psr_reference_table.pickle"
         legacy_table.to_pickle(pickle_path)

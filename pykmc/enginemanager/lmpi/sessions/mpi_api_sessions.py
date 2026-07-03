@@ -191,22 +191,6 @@ class MpiApiSession:
             {"type": "minimize", "value": {"config": config, "positions": positions}}
         )
 
-    # @session_locked
-    def get_total_energy(self) -> float:
-        """ """
-        self._is_busy = True  # Mark the session as busy
-        # print(f"[Session] Get total energy")
-        try:
-            self.send_message({"type": "get_total_energy"})
-            msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
-            if msg.get("type") == "result":
-                return msg["value"]
-            else:
-                raise RuntimeError(f"Unexpected message type: {msg}")
-        finally:
-            self._is_busy = False
-
-    # @session_locked
     def get_positions(self) -> np.ndarray[float]:
         self._is_busy = True
         # print(f"[Session] Get Positions")
@@ -270,7 +254,9 @@ class MpiApiSession:
         self._is_busy = True
         # print(f"[Session n°{self.session_id}]  get potential energy")
         try:
-            self.send_message({"type": "get_potential_energy"})
+            self.send_message(
+                {"type": "get_potential_energy", "value": {"positions": positions}}
+            )
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result":
                 return msg["value"]
