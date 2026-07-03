@@ -1,4 +1,4 @@
-# Facade/pluggable backend architecture
+# Facade/pluggable strategy architecture
 
 _Note: refactoring in progress. Objects marked "todo" below still need to be migrated to this architecture._
 
@@ -23,7 +23,7 @@ Currently, most of these objects only expose a single strategy, but the architec
 To that end, pyKMC uses a **facade/strategy pattern** built around two components:
 
 - A **facade** object, which is the user-facing API. It holds the relevant data and exposes a stable interface, regardless of which strategy is active underneath. It also provides a convenient create classmethod that reads the configuration, builds the requested strategy, and returns a wired facade.
-- A **strategy** object, which inherits from an abstract base class (ABC) and implements the specific method. Swapping backends does not affect the facade's interface.
+- A **strategy** object, which inherits from an abstract base class (ABC) and implements the specific method. Swapping strategies does not affect the facade's interface.
 
 ```mermaid 
 graph LR; A("FacadeXxx.create(params, strategy_name)") 
@@ -57,7 +57,7 @@ class Facade:
 	    return cls(param, strategy=StrategyXxx.create(strategy, **kwargs))
 ``` 
 
-This separation has two practical benefits. First, adding or modifying a strategy never risks breaking the user-facing interface. Second, the facade can be tested independently of any specific backend implementation. A `create` classmethod is the convenience constructor that builds the strategy and wires it, in practice : 
+This separation has two practical benefits. First, adding or modifying a strategy never risks breaking the user-facing interface. Second, the facade can be tested independently of any specific strategy implementation. A `create` classmethod is the convenience constructor that builds the strategy and wires it, in practice : 
 
 ```python 
 obj = Facade.create(params, strategy="my_strategy", config=cfg)
