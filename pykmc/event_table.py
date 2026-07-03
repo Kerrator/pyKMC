@@ -9,7 +9,7 @@ import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
 import numpy as np
-from .environments.graph_nauty import graph, combine_ids
+from .environments.graph_nauty import graph, combine_ids, encode_cert
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
@@ -45,6 +45,103 @@ class ReferenceEventTable:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._initialize_table()
+
+    @staticmethod
+    def _empty_table() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "idx_ref": pd.Series(dtype="int64"),
+                "initial_positions": pd.Series(dtype="object"),
+                "saddle_positions": pd.Series(dtype="object"),
+                "final_positions": pd.Series(dtype="object"),
+                "dE_forward": pd.Series(dtype="float64"),
+                "dE_backward": pd.Series(dtype="float64"),
+                "types": pd.Series(dtype="object"),
+                "k": pd.Series(dtype="float64"),
+                "event_id": pd.Series(dtype="str"),
+                "id_initial": pd.Series(dtype="str"),
+                "id_saddle": pd.Series(dtype="str"),
+                "id_final": pd.Series(dtype="str"),
+                "move_atom_idx": pd.Series(dtype="int64"),
+                "sym_matrix": pd.Series(dtype="object"),
+                "sym_perm": pd.Series(dtype="object"),
+                "idx_backward": pd.Series(dtype="int64"),
+                "dra": pd.Series(dtype="float64"),
+            }
+        )
+
+    @staticmethod
+    def _compute_dra(row: pd.Series) -> float:
+        try:
+            atom_idx = int(row["move_atom_idx"])
+            initial_positions = np.asarray(row["initial_positions"], dtype=float)
+            saddle_positions = np.asarray(row["saddle_positions"], dtype=float)
+            return float(np.linalg.norm(initial_positions[atom_idx] - saddle_positions[atom_idx]))
+        except Exception:
+            return float("nan")
+
+    def _normalize_loaded_table(self, table: pd.DataFrame) -> pd.DataFrame:
+        table = table.copy()
+
+        if "idx_ref" not in table.columns:
+            table["idx_ref"] = table.index.astype(int)
+        else:
+            table["idx_ref"] = table["idx_ref"].astype(int)
+
+        if "idx_backward" in table.columns:
+            table["idx_backward"] = table["idx_backward"].astype(int)
+        else:
+            table["idx_backward"] = table["idx_ref"]
+
+        if "dE_forward" not in table.columns and "energy_barrier" in table.columns:
+            table["dE_forward"] = table["energy_barrier"].astype(float)
+
+        if "id_initial" not in table.columns and "event_id" in table.columns:
+            table["id_initial"] = table["event_id"]
+
+        for column in ("id_initial", "id_saddle", "id_final"):
+            if column in table.columns:
+                table[column] = table[column].map(encode_cert)
+
+        if all(column in table.columns for column in ("id_initial", "id_saddle", "id_final")):
+            table["event_id"] = [
+                combine_ids(id_initial, id_saddle, id_final)
+                for id_initial, id_saddle, id_final in zip(
+                    table["id_initial"], table["id_saddle"], table["id_final"], strict=False
+                )
+            ]
+        elif "event_id" in table.columns:
+            table["event_id"] = table["event_id"].map(encode_cert)
+
+        if "dE_backward" not in table.columns:
+            backward_map = dict(zip(table["idx_ref"], table["dE_forward"], strict=False))
+            table["dE_backward"] = table["idx_backward"].map(backward_map).astype(float)
+
+        if "types" not in table.columns:
+            table["types"] = pd.Series([None] * len(table), dtype="object")
+
+        if "dra" not in table.columns:
+            table["dra"] = table.apply(self._compute_dra, axis=1)
+
+        empty = self._empty_table()
+        defaults = {
+            "idx_ref": 0,
+            "dE_forward": np.nan,
+            "dE_backward": np.nan,
+            "k": np.nan,
+            "event_id": "",
+            "id_initial": "",
+            "id_saddle": "",
+            "id_final": "",
+            "move_atom_idx": 0,
+            "idx_backward": 0,
+            "dra": np.nan,
+        }
+        for column in empty.columns:
+            if column not in table.columns:
+                table[column] = defaults.get(column, None)
+
+        return table[empty.columns.tolist()]
 
     def add_events(
         self, events: list[EventSearchOutput]
@@ -598,29 +695,11 @@ class ReferenceEventTable:
         If a path to a reference table is in the configurations it reads it, otherwise initialize an empty dataframe.
         """
         if self.config.control.reference_table is not None:
-            self.table = pd.read_pickle(self.config.control.reference_table)
-        else:
-            self.table = pd.DataFrame(
-                {
-                    "idx_ref": pd.Series(dtype="int64"),
-                    "initial_positions": pd.Series(dtype="object"),
-                    "saddle_positions": pd.Series(dtype="object"),
-                    "final_positions": pd.Series(dtype="object"),
-                    "dE_forward": pd.Series(dtype="float64"),
-                    "dE_backward": pd.Series(dtype="float64"),
-                    "types": pd.Series(dtype="object"),
-                    "k": pd.Series(dtype="float64"),
-                    "event_id": pd.Series(dtype="str"),
-                    "id_initial": pd.Series(dtype="str"),
-                    "id_saddle": pd.Series(dtype="str"),
-                    "id_final": pd.Series(dtype="str"),
-                    "move_atom_idx": pd.Series(dtype="int64"),
-                    "sym_matrix": pd.Series(dtype="object"),
-                    "sym_perm": pd.Series(dtype="object"),
-                    "idx_backward": pd.Series(dtype="int64"),
-                    "dra": pd.Series(dtype="float64"),
-                }
+            self.table = self._normalize_loaded_table(
+                pd.read_pickle(self.config.control.reference_table)
             )
+        else:
+            self.table = self._empty_table()
 
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event

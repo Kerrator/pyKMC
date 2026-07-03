@@ -155,12 +155,6 @@ def test_step_log_reads_executed_row_before_prune(
     sim.loggers = _RecordingLoggers()
     sim.reference_table = reference_table_Cu_fake
     sim.visited_environments = visited_environments_Cu
-    sim.reference_table.table = sim.reference_table.table.copy()
-    sim.reference_table.table["idx_ref"] = sim.reference_table.table.index.astype(int)
-    sim.reference_table.table["id_initial"] = sim.reference_table.table["event_id"]
-    sim.reference_table.table["dE_forward"] = sim.reference_table.table[
-        "energy_barrier"
-    ]
 
     ref_idx = int(sim.reference_table.table.iloc[0]["idx_ref"])
     positions = np.array(system_Cu.positions, copy=True)

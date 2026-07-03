@@ -141,6 +141,14 @@ class Refinement:
             for task_id, at_idx, dfevent, symmetry_index in raw_tasks
         ]
 
+    def retry(self, retry_task_ids: list[int]) -> None:
+        """Rerun only the requested refinement jobs."""
+        if not retry_task_ids:
+            return
+        retry_tasks = [self.tasks[task_id] for task_id in retry_task_ids]
+        for task_id, result in self._run_tasks(retry_tasks).items():
+            self.results[task_id] = result
+
     def _run_tasks(
         self,
         tasks: list[RefinementTask],
