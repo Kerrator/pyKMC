@@ -4,7 +4,7 @@ This module provides :class:`Strategy`, the domain-free base class that powers
 strategy registration and lookup across pyKMC.
 
 Concrete strategies live in their respective modules. See the
-architecture documentation [url] for the overall design and
+[architecture documentation](../dev_strategy_pattern.md) for the overall design and
 :func:`pykmc._core.discovery.autodiscover` for how strategy modules are loaded.
 """
 
