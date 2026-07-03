@@ -436,7 +436,7 @@ class TestLammpsApiMpiEngine:
         # ------------ SESSION CODE (rank 0) ------------
         manager.initialize_sessions(config, system)
         idx = 20 * [0]
-        futures = [manager.partn_refine(config, atom) for atom in idx]
+        futures = manager.partn_refine(config, idx)
         re = [f.result() for f in futures]
         manager.close_all()
 

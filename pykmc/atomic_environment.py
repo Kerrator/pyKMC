@@ -51,9 +51,6 @@ class AtomicEnvironment:
         self.coordination_threshold = coordination_threshold
         self.types = types
         self.coloring_mode = coloring_mode
-        self.region = region
-        self.positions = positions
-        self.atom_types = atom_types
 
         # Compute the atomic environment ID and store it in self.atomic_environment_list
         match self.style:
@@ -83,27 +80,8 @@ class AtomicEnvironment:
                 )
             case _:
                 raise Exception("Atomic environment style unknown")
-        self._ids_cache = {self.coloring_mode: self.atomic_environment_list}
 
-    def ids_for_coloring_mode(self, coloring_mode: str | None = None) -> list[str]:
-        if coloring_mode is None or self.style == "region":
-            return self.atomic_environment_list
-        if coloring_mode not in self._ids_cache:
-            self._ids_cache[coloring_mode] = AtomicEnvironment(
-                self.style,
-                self.neighbors_list,
-                self.environment_list,
-                self.neighbors_add,
-                types=self.types,
-                coloring_mode=coloring_mode,
-                region=self.region,
-                positions=self.positions,
-                atom_types=self.atom_types,
-                coordination_threshold=self.coordination_threshold,
-            ).atomic_environment_list
-        return self._ids_cache[coloring_mode]
-
-    def get_atoms_with_id(self, id: str, coloring_mode: str | None = None) -> list[int]:
+    def get_atoms_with_id(self, id: str) -> list[int]:
         """Return list of atom indices whose environment matches the given ID.
 
         Parameters
@@ -115,8 +93,7 @@ class AtomicEnvironment:
         list[int]
             List of atom indices
         """
-        ids = self.ids_for_coloring_mode(coloring_mode)
-        return [i for i, e in enumerate(ids) if e == id]
+        return [i for i, e in enumerate(self.atomic_environment_list) if e == id]
 
     def get_new_environments(self, visited_environments: set[str]) -> list[str]:
         """
@@ -236,12 +213,8 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
 
-        list_graphs_hash = graph(
-            neighbors_list,
-            environment_list,
-            non_crystal_idx,
-            types=self.types if self.coloring_mode == "full" else None,
-        )
+        # Compute graph topology only for the non-crystalline atoms (uncolored graph())
+        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
 

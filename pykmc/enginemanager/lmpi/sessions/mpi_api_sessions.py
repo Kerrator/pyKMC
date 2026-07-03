@@ -254,9 +254,7 @@ class MpiApiSession:
         self._is_busy = True
         # print(f"[Session n°{self.session_id}]  get potential energy")
         try:
-            self.send_message(
-                {"type": "get_potential_energy", "value": {"positions": positions}}
-            )
+            self.send_message({"type": "get_potential_energy"})
             msg = self.messenger.recv(source=self.engine_master_rank, tag=1)
             if msg.get("type") == "result":
                 return msg["value"]

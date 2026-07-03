@@ -9,7 +9,7 @@ import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
 import numpy as np
-from .environments.graph_nauty import graph, combine_ids, encode_cert
+from .environments.graph_nauty import graph, combine_ids
 from .system import System
 from .neighbors_list import NeighborsList
 from .symmetries import unique_symmetries
@@ -45,173 +45,6 @@ class ReferenceEventTable:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._initialize_table()
-
-    @staticmethod
-    def _empty_table() -> pd.DataFrame:
-        return pd.DataFrame(
-            {
-                "idx_ref": pd.Series(dtype="int64"),
-                "initial_positions": pd.Series(dtype="object"),
-                "saddle_positions": pd.Series(dtype="object"),
-                "final_positions": pd.Series(dtype="object"),
-                "dE_forward": pd.Series(dtype="float64"),
-                "dE_backward": pd.Series(dtype="float64"),
-                "types": pd.Series(dtype="object"),
-                "k": pd.Series(dtype="float64"),
-                "event_id": pd.Series(dtype="str"),
-                "generic_event_id": pd.Series(dtype="str"),
-                "id_initial": pd.Series(dtype="str"),
-                "generic_id_initial": pd.Series(dtype="str"),
-                "id_saddle": pd.Series(dtype="str"),
-                "id_final": pd.Series(dtype="str"),
-                "move_atom_idx": pd.Series(dtype="int64"),
-                "sym_matrix": pd.Series(dtype="object"),
-                "sym_perm": pd.Series(dtype="object"),
-                "idx_backward": pd.Series(dtype="int64"),
-                "dra": pd.Series(dtype="float64"),
-                "legacy_untyped": pd.Series(dtype="bool"),
-            }
-        )
-
-    @staticmethod
-    def _compute_dra(row: pd.Series) -> float:
-        try:
-            atom_idx = int(row["move_atom_idx"])
-            initial_positions = np.asarray(row["initial_positions"], dtype=float)
-            saddle_positions = np.asarray(row["saddle_positions"], dtype=float)
-            return float(
-                np.linalg.norm(initial_positions[atom_idx] - saddle_positions[atom_idx])
-            )
-        except Exception:
-            return float("nan")
-
-    @staticmethod
-    def _normalize_types(row: pd.Series) -> list[str]:
-        nat = len(row["initial_positions"]) if "initial_positions" in row else 0
-        raw_types = row["types"] if "types" in row else None
-        if isinstance(raw_types, (list, tuple, np.ndarray, pd.Series)):
-            normalized = list(raw_types)
-            if len(normalized) == nat:
-                return normalized
-        return nat * ["X"]
-
-    @staticmethod
-    def _is_legacy_untyped_row(row: pd.Series) -> bool:
-        nat = len(row["initial_positions"]) if "initial_positions" in row else 0
-        raw_types = row["types"] if "types" in row else None
-        if isinstance(raw_types, (list, tuple, np.ndarray, pd.Series)):
-            normalized = list(raw_types)
-            if len(normalized) == nat and any(
-                atom_type != "X" for atom_type in normalized
-            ):
-                return bool(row.get("legacy_untyped", False))
-        return True
-
-    def _matching_types(
-        self, row: pd.Series, nat: int, fallback_types: list[str] | None = None
-    ) -> list[str]:
-        if self.config.atomicenvironment.atom_coloring_mode != "full":
-            return nat * ["X"]
-        if bool(row.get("legacy_untyped", False)):
-            return list(fallback_types) if fallback_types is not None else nat * ["X"]
-        return list(row["types"]) if row["types"] is not None else nat * ["X"]
-
-    def _candidate_subset_for_matching(self, dfevent: pd.Series) -> pd.DataFrame:
-        subset = self.table[self.table["event_id"] == dfevent["event_id"]]
-        if (
-            len(subset) == 0
-            and self.config.atomicenvironment.atom_coloring_mode == "full"
-            and "legacy_untyped" in self.table.columns
-            and "generic_event_id" in self.table.columns
-        ):
-            subset = self.table[
-                self.table["legacy_untyped"]
-                & (self.table["generic_event_id"] == dfevent["generic_event_id"])
-            ]
-        return subset
-
-    def _normalize_loaded_table(self, table: pd.DataFrame) -> pd.DataFrame:
-        table = table.copy()
-
-        if "idx_ref" not in table.columns:
-            table["idx_ref"] = table.index.astype(int)
-        else:
-            table["idx_ref"] = table["idx_ref"].astype(int)
-
-        if "idx_backward" in table.columns:
-            table["idx_backward"] = table["idx_backward"].astype(int)
-        else:
-            table["idx_backward"] = table["idx_ref"]
-
-        if "dE_forward" not in table.columns and "energy_barrier" in table.columns:
-            table["dE_forward"] = table["energy_barrier"].astype(float)
-
-        if "id_initial" not in table.columns and "event_id" in table.columns:
-            table["id_initial"] = table["event_id"]
-
-        for column in ("id_initial", "id_saddle", "id_final"):
-            if column in table.columns:
-                table[column] = table[column].map(encode_cert)
-
-        if all(
-            column in table.columns
-            for column in ("id_initial", "id_saddle", "id_final")
-        ):
-            table["event_id"] = [
-                combine_ids(id_initial, id_saddle, id_final)
-                for id_initial, id_saddle, id_final in zip(
-                    table["id_initial"],
-                    table["id_saddle"],
-                    table["id_final"],
-                    strict=False,
-                )
-            ]
-        elif "event_id" in table.columns:
-            table["event_id"] = table["event_id"].map(encode_cert)
-
-        if "generic_event_id" not in table.columns:
-            table["generic_event_id"] = table["event_id"]
-        if "generic_id_initial" not in table.columns:
-            table["generic_id_initial"] = table["id_initial"]
-
-        if "dE_backward" not in table.columns:
-            backward_map = dict(
-                zip(table["idx_ref"], table["dE_forward"], strict=False)
-            )
-            table["dE_backward"] = table["idx_backward"].map(backward_map).astype(float)
-
-        if "types" not in table.columns:
-            table["types"] = pd.Series([[]] * len(table), dtype="object")
-        table["types"] = table.apply(self._normalize_types, axis=1)
-        if "legacy_untyped" not in table.columns:
-            table["legacy_untyped"] = pd.Series([False] * len(table), dtype="bool")
-        table["legacy_untyped"] = table.apply(self._is_legacy_untyped_row, axis=1)
-
-        if "dra" not in table.columns:
-            table["dra"] = table.apply(self._compute_dra, axis=1)
-
-        empty = self._empty_table()
-        defaults = {
-            "idx_ref": 0,
-            "dE_forward": np.nan,
-            "dE_backward": np.nan,
-            "k": np.nan,
-            "event_id": "",
-            "generic_event_id": "",
-            "id_initial": "",
-            "generic_id_initial": "",
-            "id_saddle": "",
-            "id_final": "",
-            "move_atom_idx": 0,
-            "idx_backward": 0,
-            "dra": np.nan,
-            "legacy_untyped": False,
-        }
-        for column in empty.columns:
-            if column not in table.columns:
-                table[column] = defaults.get(column, None)
-
-        return table[empty.columns.tolist()]
 
     def add_events(
         self, events: list[EventSearchOutput]
@@ -457,7 +290,7 @@ class ReferenceEventTable:
 
         """
         # Only select rows with same event_id as dfenvent :
-        subset = self._candidate_subset_for_matching(dfevent)
+        subset = self.table[self.table["event_id"] == dfevent["event_id"]]
         if len(subset) == 0:
             return True
 
@@ -471,12 +304,21 @@ class ReferenceEventTable:
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        typ_event = self._matching_types(dfevent, nat_event)
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        typ_event = (
+            list(dfevent["types"])
+            if full and dfevent["types"] is not None
+            else nat_event * ["X"]
+        )
 
         for _, ev in subset.iterrows():
             ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = self._matching_types(ev, nat_ref, fallback_types=typ_event)
+            typ_ref = (
+                list(ev["types"])
+                if full and ev["types"] is not None
+                else nat_ref * ["X"]
+            )
             result = simple_ira(
                 nat_event,
                 typ_event,
@@ -536,9 +378,7 @@ class ReferenceEventTable:
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
 
-    def has_id_subset_table(
-        self, ids: list[str], generic_ids: list[str] | None = None
-    ) -> pd.DataFrame:
+    def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
         """Return subset table with event having id in ids.
 
         Parameters
@@ -552,19 +392,7 @@ class ReferenceEventTable:
             Subset of the reference table dataframe with only event having IDs in ids.
 
         """
-        subset = self.table[self.table["id_initial"].isin(ids)]
-        if (
-            self.config.atomicenvironment.atom_coloring_mode == "full"
-            and generic_ids is not None
-            and "legacy_untyped" in self.table.columns
-            and "generic_id_initial" in self.table.columns
-        ):
-            legacy_subset = self.table[
-                self.table["legacy_untyped"]
-                & self.table["generic_id_initial"].isin(generic_ids)
-            ]
-            subset = self.table.loc[subset.index.union(legacy_subset.index)]
-        return subset
+        return self.table[self.table["id_initial"].isin(ids)]
 
     def _build_event_series(
         self,
@@ -661,27 +489,6 @@ class ReferenceEventTable:
             atom_idx=[index_move],
             types=graph_types,
         )[0]
-        if full:
-            generic_id_min1 = graph(
-                min1neighbors_list.neighbors_list["rnei"],
-                min1neighbors_list.neighbors_list["rcut"],
-                atom_idx=[index_move],
-            )[0]
-            generic_id_saddle = graph(
-                saddleneighbors_list.neighbors_list["rnei"],
-                saddleneighbors_list.neighbors_list["rcut"],
-                atom_idx=[index_move],
-            )[0]
-            generic_id_min2 = graph(
-                min2neighbors_list.neighbors_list["rnei"],
-                min2neighbors_list.neighbors_list["rcut"],
-                atom_idx=[index_move],
-            )[0]
-        else:
-            generic_id_min1 = id_min1
-            generic_id_saddle = id_saddle
-            generic_id_min2 = id_min2
-
         # query_ball_point can hand back Python lists; coerce to arrays so the
         # element-wise comparisons (np.where) and type indexing below behave.
         neighbor_list_forward = np.asarray(
@@ -691,18 +498,11 @@ class ReferenceEventTable:
             min2neighbors_list.neighbors_list["rcut"][index_move]
         )
 
-        # Element types of each neighbor. These are ALWAYS stored (both modes) so
-        # the reference-table schema is mode-independent; colouring is only *applied*
-        # in matching/symmetry, which is gated below.
         local_types_forward = (
-            list(np.array(types)[neighbor_list_forward])
-            if types is not None
-            else len(neighbor_list_forward) * ["X"]
+            list(np.array(types)[neighbor_list_forward]) if types is not None else None
         )
         local_types_backward = (
-            list(np.array(types)[neighbor_list_backward])
-            if types is not None
-            else len(neighbor_list_backward) * ["X"]
+            list(np.array(types)[neighbor_list_backward]) if types is not None else None
         )
 
         # Colour symmetry detection only in full coloring mode (usage gate).
@@ -740,11 +540,7 @@ class ReferenceEventTable:
                 "types": local_types_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "event_id": combine_ids(id_min1, id_saddle, id_min2),
-                "generic_event_id": combine_ids(
-                    generic_id_min1, generic_id_saddle, generic_id_min2
-                ),
                 "id_initial": id_min1,
-                "generic_id_initial": generic_id_min1,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -752,7 +548,6 @@ class ReferenceEventTable:
                 "sym_perm": sym_perm,
                 "idx_backward": -1,  # unknown yet,
                 "dra": dra_forward,
-                "legacy_untyped": False,
             }
         )
 
@@ -773,11 +568,7 @@ class ReferenceEventTable:
                 "types": local_types_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "event_id": combine_ids(id_min2, id_saddle, id_min1),
-                "generic_event_id": combine_ids(
-                    generic_id_min2, generic_id_saddle, generic_id_min1
-                ),
                 "id_initial": id_min2,
-                "generic_id_initial": generic_id_min2,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -785,7 +576,6 @@ class ReferenceEventTable:
                 "sym_perm": sym_perm,
                 "idx_backward": -1,  # unknown yet
                 "dra": dra_backward,
-                "legacy_untyped": False,
             }
         )
 
@@ -804,11 +594,29 @@ class ReferenceEventTable:
         If a path to a reference table is in the configurations it reads it, otherwise initialize an empty dataframe.
         """
         if self.config.control.reference_table is not None:
-            self.table = self._normalize_loaded_table(
-                pd.read_pickle(self.config.control.reference_table)
-            )
+            self.table = pd.read_pickle(self.config.control.reference_table)
         else:
-            self.table = self._empty_table()
+            self.table = pd.DataFrame(
+                {
+                    "idx_ref": pd.Series(dtype="int64"),
+                    "initial_positions": pd.Series(dtype="object"),
+                    "saddle_positions": pd.Series(dtype="object"),
+                    "final_positions": pd.Series(dtype="object"),
+                    "dE_forward": pd.Series(dtype="float64"),
+                    "dE_backward": pd.Series(dtype="float64"),
+                    "types": pd.Series(dtype="object"),
+                    "k": pd.Series(dtype="float64"),
+                    "event_id": pd.Series(dtype="str"),
+                    "id_initial": pd.Series(dtype="str"),
+                    "id_saddle": pd.Series(dtype="str"),
+                    "id_final": pd.Series(dtype="str"),
+                    "move_atom_idx": pd.Series(dtype="int64"),
+                    "sym_matrix": pd.Series(dtype="object"),
+                    "sym_perm": pd.Series(dtype="object"),
+                    "idx_backward": pd.Series(dtype="int64"),
+                    "dra": pd.Series(dtype="float64"),
+                }
+            )
 
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
