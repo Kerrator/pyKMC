@@ -240,19 +240,13 @@ class KMC:
 
             # == Update variables ==
             l_ids = list(set(self.atomic_environment.atomic_environment_list))
-            generic_l_ids = (
-                list(set(self.atomic_environment.ids_for_coloring_mode("grey")))
-                if self.config.atomicenvironment.atom_coloring_mode == "full"
-                else None
-            )
             self.visited_environments.update(
                 set(l_ids).difference(self.visited_environments)
             )
             # == Refinement ==
             ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
-                self.atomic_environment.atomic_environment_list,
-                generic_ids=generic_l_ids,
+                self.atomic_environment.atomic_environment_list
             )
             ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
             refinement = self.execute_refinements(
