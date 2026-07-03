@@ -72,7 +72,10 @@ class Strategy(ABC):
         Raises
         ------
         TypeError
-            If a concrete strategy does not define a non-empty string ``name``.
+            If an abstract subclass declares ``name`` in its own ``__dict__``
+            (likely a typo in an abstract-method override), or if a concrete
+            strategy does not declare a non-empty string ``name`` directly (not
+            inherited).
         RuntimeError
             If ``name`` is already registered in the module (name collision).
         """
@@ -84,13 +87,22 @@ class Strategy(ABC):
             cls._root = cls
             return
 
-        # Skip intermediate abstract bases (abstract methods still unimplemented):
-        # they are not usable strategies and must not be registered.
+        # If the class is still abstract but declared its own name
         if inspect.isabstract(cls):
+            if "name" in cls.__dict__:
+                unimplemented = sorted(
+                    attr
+                    for attr in dir(cls)
+                    if getattr(getattr(cls, attr, None), "__isabstractmethod__", False)
+                )
+                raise TypeError(
+                    f"{cls.__name__} defines 'name' but is still abstract "
+                    f"(unimplemented: {unimplemented})"
+                )
             return
 
-        # A concrete strategy must declare a non-empty string name.
-        name = getattr(cls, "name", None)
+        # Each concrete class must declare its own name
+        name = cls.__dict__.get("name")
         if not isinstance(name, str) or not name:
             raise TypeError(f"{cls.__name__} must define a non-empty 'name' str")
 

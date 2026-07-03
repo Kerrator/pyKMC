@@ -104,6 +104,24 @@ class TestRegistration:
         with pytest.raises(TypeError):
             Strategy.create("addition")
 
+    def test_abstract_with_name_raises_type_error(self):
+        """A typo in an abstract-method override is caught at class definition."""
+        with pytest.raises(TypeError, match="still abstract"):
+
+            class TypoCompute(BaseOperationStrategy):
+                name = "typo"
+
+                def computee(self, a, b):  # typo: compute → computee
+                    return a + b
+
+    def test_inherited_name_not_accepted(self):
+        """A subclass must declare its own name; inheriting a parent's is rejected."""
+        with pytest.raises(TypeError, match="non-empty 'name'"):
+
+            class Child(Addition):  # inherits name="addition" from Addition
+                def compute(self, a, b):
+                    return a - b
+
     def test_intermediate_abstract_base_not_registered(self):
         class IntermediateOp(BaseOperationStrategy):
             def _helper(self): ...
