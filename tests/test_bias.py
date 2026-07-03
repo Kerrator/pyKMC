@@ -36,10 +36,13 @@ rejection_free = _algo.rejection_free
 # ---------------------------------------------------------------------------
 
 
-def make_system(positions: np.ndarray):
+def make_system(positions: np.ndarray, cell: np.ndarray | None = None):
     """Return a minimal System-like mock with the given positions array."""
     system = MagicMock()
     system.positions = np.asarray(positions, dtype=float)
+    # Large default cell so minimum-image wrapping is a no-op for tests
+    # that aren't specifically exercising periodic-border behaviour.
+    system.cell = np.eye(3) * 1000.0 if cell is None else np.asarray(cell, dtype=float)
     return system
 
 
@@ -251,6 +254,22 @@ class TestDirectionBias:
         )
         assert idx == 0
         assert ktot > 0.0
+
+    def test_accept_hop_across_periodic_border(self, ref_table_atom0):
+        """An atom hopping across a periodic boundary must use the minimum-image
+        displacement, not the raw difference between two independently-wrapped
+        absolute positions."""
+        cell = np.eye(3) * 10.0
+        # Atom sits just inside the +x face; the event moves it a small step
+        # further in +x, which wraps it back to just past x=0.
+        system = make_system([[9.9, 0.0, 0.0]], cell=cell)
+        bias = DirectionBias(direction=[1, 0, 0])
+        event = make_event(atom_index=0, final_positions=[[0.1, 0.0, 0.0]])
+        # True physical displacement is +0.2 in x (9.9 -> 10.1 -> wrapped 0.1),
+        # not the -9.8 the raw difference would give.
+        displacement = bias._get_displacement(event, system, None, atom_idx=0)
+        assert np.allclose(displacement, [0.2, 0.0, 0.0])
+        assert bias.accept(event, system, ref_table_atom0) is True
 
     def test_accept_full_system_positions_without_neighbors(self, ref_table_atom0):
         """Without a neighbours list, full-system final_positions must use the event atom row."""

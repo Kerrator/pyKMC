@@ -10,6 +10,7 @@ __all__ = [
     "compute_delr_l2",
     "per_atom_displacement",
     "minimum_image_distance",
+    "minimum_image_vector",
 ]
 import ase.geometry
 import numpy as np
@@ -138,12 +139,19 @@ def per_atom_displacement(
     return np.linalg.norm(disp, axis=1)
 
 
-def minimum_image_distance(
+def minimum_image_vector(
     position_a: np.ndarray, position_b: np.ndarray, cell: np.ndarray
-) -> float:
-    """PBC minimum-image Euclidean distance between two positions (orthorhombic)."""
+) -> np.ndarray:
+    """PBC minimum-image displacement vector position_b - position_a (orthorhombic)."""
     dvec = position_b - position_a
     cell_lengths = np.linalg.norm(cell, axis=1)
     for i in range(3):
         dvec[i] -= cell_lengths[i] * np.round(dvec[i] / cell_lengths[i])
-    return float(np.linalg.norm(dvec))
+    return dvec
+
+
+def minimum_image_distance(
+    position_a: np.ndarray, position_b: np.ndarray, cell: np.ndarray
+) -> float:
+    """PBC minimum-image Euclidean distance between two positions (orthorhombic)."""
+    return float(np.linalg.norm(minimum_image_vector(position_a, position_b, cell)))

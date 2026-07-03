@@ -7,6 +7,7 @@ import logging
 import numpy as np
 import pandas as pd
 from .log import fmt_hash
+from .utils.geometry import minimum_image_vector
 
 if TYPE_CHECKING:
     from .event_table import ActiveEventTable, ReferenceEventTable
@@ -311,12 +312,16 @@ class Bias(ABC):
                 target_position = final_positions[atom_idx]
             else:
                 target_position = final_positions[0]
-            return target_position - system.positions[atom_idx]
+            return minimum_image_vector(
+                system.positions[atom_idx], target_position, system.cell
+            )
         neighborhood = np.asarray(
             neighbors_list.get_neighbors("rcut", int(event["atom_index"]))
         )
         k = int(np.where(neighborhood == atom_idx)[0][0])
-        return event["final_positions"][k] - system.positions[atom_idx]
+        return minimum_image_vector(
+            system.positions[atom_idx], event["final_positions"][k], system.cell
+        )
 
     def _biased_atom_displacements(
         self,
@@ -341,7 +346,9 @@ class Bias(ABC):
             if len(where) == 0:
                 continue
             k = int(where[0])
-            yield atom_idx, event["final_positions"][k] - system.positions[atom_idx]
+            yield atom_idx, minimum_image_vector(
+                system.positions[atom_idx], event["final_positions"][k], system.cell
+            )
 
 
 class DirectionBias(Bias):
