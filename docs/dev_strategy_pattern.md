@@ -18,11 +18,11 @@ pyKMC relies on several objects to perform specific tasks:
 
 These tasks are independent of the main KMC loop, and each of them can have multiple valid implementations. For example, atomic environments can be represented using graphs or descriptors, event search can rely on the Activation Relaxation Technique or the dimer method. Implementations may also depend on different tools, for example, computing a common neighbor analysis could use the pure Python implementation in pyKMC, or delegate directly to LAMMPS when it is the active engine. In the following, we refer to each such implementation as a **strategy**.
 
-Currently, most of these objects only expose a singlestrategy, but the architecture was designed from the start with extensibility in mind, to facilitate testing, and to allow users to plug in their own implementations.
+Currently, most of these objects only expose a single strategy, but the architecture was designed from the start with extensibility in mind, to facilitate testing, and to allow users to plug in their own implementations.
 
 To that end, pyKMC uses a **facade/strategy pattern** built around two components:
 
-- A **facade** object, which is the user-facing API. It holds the relevant data and exposes a stable interface, regardless of which strategy is active underneath. It also provide a convinent create classmethod that reads the configuration, builds the requested strategy, and return a wired facade.
+- A **facade** object, which is the user-facing API. It holds the relevant data and exposes a stable interface, regardless of which strategy is active underneath. It also provides a convenient create classmethod that reads the configuration, builds the requested strategy, and returns a wired facade.
 - A **strategy** object, which inherits from an abstract base class (ABC) and implements the specific method. Swapping backends does not affect the facade's interface.
 
 ```mermaid 
@@ -111,7 +111,7 @@ autodiscover(__name__, __path__)
 
 ## Adding a new strategy
 
-**1.** Create `pykmc/my_module/strategy/my_strategy.py`
+**1.** Create `pykmc/my_module/strategies/my_strategy.py`
 
 **2.** Define a config protocol and a strategy class:
 
