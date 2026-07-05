@@ -253,8 +253,8 @@ class Manager:
         Close all sessions and their underlying engines.
         """
         # print("[PoolManager] Closing all sessions.")
-        if self.global_session is not None:
-            self.global_session.close(wait_status=False)
+        # global_session shares its master rank with self.sessions[0] (see ManagerFactory),
+        # so closing it separately races with that session's close over the same rank.
         for session in self.sessions:
             session.close(wait_status=True)
 
