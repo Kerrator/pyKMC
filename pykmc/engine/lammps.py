@@ -67,7 +67,7 @@ class LammpsEngine(Engine):
     This class is designed to be used in a master-worker MPI pattern.
     All LAMMPS commands are executed collectively across all ranks,
     but data extraction methods (get_positions, get_total_energy, etc.)
-    only return values on rank 0 — other ranks return None.
+    only return values on rank 0, other ranks return None.
 
     Parameters
     ----------
@@ -216,17 +216,10 @@ class LammpsEngine(Engine):
         )
 
     @lammps_error_handler
-    def initialize_potential(self, rcut: float = None) -> None :
-        pair_style = self.config.pair_style 
-        pair_coeff = self.config.pair_coeff
+    def initialize_potential(self) -> None :
+        self.lmp.command("pair_style {}".format(self.config.pair_style))
+        self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
         
-        if rcut is None : 
-            self.lmp.command("pair_style {}".format(pair_style))
-            self.lmp.command("pair_coeff {}".format(pair_coeff))
-        else : 
-            self.lmp.command("pair_style hybrid/overlay {} zero {} full".format(pair_style, rcut))
-            self.lmp.command("pair_coeff {}".format(pair_coeff))
-            self.lmp.command("pair_coeff * * zero")
 
     @lammps_error_handler
     def get_positions(self) -> np.ndarray | None : 
