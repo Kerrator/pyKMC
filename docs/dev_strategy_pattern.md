@@ -65,34 +65,36 @@ obj = Facade.create(params, strategy="my_strategy", config=cfg)
 
 ### Strategy 
 
-A strategy inherits from the module's abstract base (declared with `root=True`) and implements the required abstract methods. The `name` attribute identifies it in the registry and is validated at class-definition time via `__init_subclass__`. All the plumbing lives once in `pykmc/_core/strategy.py` and is reused by every module.
+A strategy inherits from the module's abstract base (declared with `root=True`) and implements the required abstract methods. The `name` attribute identifies it in the registry and is validated at class-definition time via `__init_subclass__`. All the plumbing lives once in `pykmc/_core/registrable.py` (via the `Registrable` base class) and is reused by every module.
 
 Each strategy declares its own configuration as a `Protocol`. This keeps the strategy decoupled from any concrete config class: it only requires that the config object exposes the expected attributes, without enforcing how it is built. In practice pyKMC uses Pydantic `BaseModel`s as configs, which are structurally compatible with any matching `Protocol`. The strategy can therefore be instantiated with a Pydantic model in production, or with a plain dataclass / stub in tests, as long as the interface matches.
 
 
 ```python 
-from pykmc._core import Strategy 
+from pykmc._core import Registrable
 from abc import abstractmethod
 from typing import Protocol
 
-class XxxStrategy(Strategy, root=True) : 
-	@abstractmethod
-	def some_compute(self, **kwargs) -> T:
-	    pass
+class XxxStrategy(Registrable, root=True): 
+    @abstractmethod
+    def some_compute(self, **kwargs) -> T:
+        pass
         
 class MyStrategyConfig(Protocol): 
-	my_param1: float 
-	my_param2: str 
+    my_param1: float 
+    my_param2: str 
 	
 class Strategy1(XxxStrategy): 
-	name = "my_strategy" 
+    name = "my_strategy" 
 	
-	def __init__(self, config: MyStrategyConfig) -> None: 
-		self.config = config 
+    def __init__(self, config: MyStrategyConfig) -> None: 
+        self.config = config 
 		
-	def some_compute(self, **kwargs) -> T: 
-		...
+    def some_compute(self, **kwargs) -> T: 
+        ...
 ```
+
+> **Naming convention**: the `XxxStrategy` suffix signals that a class's concrete subclasses are interchangeable algorithm implementations. It is a convention, not a base class, the technical plumbing comes entirely from `Registrable`. Non-algorithmic backends (e.g. `Engine`) also inherit from `Registrable` directly.
 
 ### Strategy registry 
 
@@ -117,7 +119,8 @@ autodiscover(__name__, __path__)
 
 ```python
 from typing import Protocol
-from .base import XxxStrategy
+from pykmc._core import Registrable
+from .base import XxxStrategy  # XxxStrategy(Registrable, root=True) défini dans base.py
 
 class MyStrategyConfig(Protocol):
     my_param: float

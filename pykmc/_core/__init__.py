@@ -1,4 +1,4 @@
-from pykmc._core.strategy import Strategy
+from pykmc._core.registrable import Registrable
 from pykmc._core.discovery import autodiscover
 
-__all__ = ["Strategy", "autodiscover"]
+__all__ = ["Registrable", "autodiscover"]
