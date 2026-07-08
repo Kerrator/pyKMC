@@ -1,7 +1,7 @@
 """Unit tests for the Registrable mechanism (pykmc._core.registrable).
 
 Tests the registry plumbing in isolation: auto-registration, validation,
-collision detection, and registry isolation.  See test_strategy.py for an
+collision detection, and registry isolation. See test_strategy.py for an
 end-to-end example of the facade/strategy pattern built on top of Registrable.
 """
 
@@ -74,7 +74,7 @@ class TestRegistration:
             FakeRoot.create("nonexistent")
 
     def test_create_on_registrable_base_raises_type_error(self):
-        """Registrable itself has no _registry; create() must reject it."""
+        """Registrable itself has no _registry, create() must reject it."""
         with pytest.raises(TypeError):
             Registrable.create("alpha")
 
@@ -89,7 +89,7 @@ class TestRegistration:
                     return 0
 
     def test_inherited_name_not_accepted(self):
-        """A subclass must declare its own name; inheriting a parent's is rejected."""
+        """A subclass must declare its own name, inheriting a parent's is rejected."""
         with pytest.raises(TypeError, match="non-empty 'name'"):
 
             class Child(Alpha):
