@@ -95,7 +95,5 @@ class Registrable(ABC):
                 "create() must be called on a root class, not on Registrable itself"
             )
         if name not in cls._registry:
-            raise ValueError(
-                f"'{name}' unknown. Available: {list(cls._registry)}"
-            )
+            raise ValueError(f"'{name}' unknown. Available: {list(cls._registry)}")
         return cls._registry[name](**kwargs)

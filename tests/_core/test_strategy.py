@@ -62,6 +62,7 @@ class ComputeOperation:
 
 # Tests
 
+
 class TestFacadePattern:
     def test_addition(self):
         assert ComputeOperation.create("addition").compute(3, 2) == 5
