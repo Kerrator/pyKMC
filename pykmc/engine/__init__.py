@@ -1,4 +1,6 @@
 from .base import Engine, EngineExtension
-from .lammps import LammpsEngine, LammpsConfigProtocol
+from pykmc._core import autodiscover
 
-__all__ = ["Engine", "LammpsEngine", "LammpsConfigProtocol", "EngineExtension"]
+autodiscover(__name__, __path__)
+
+__all__ = ["Engine", "EngineExtension"]
