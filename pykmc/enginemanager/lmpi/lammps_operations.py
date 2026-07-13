@@ -111,9 +111,11 @@ def get_positions(engine):
 
 
 def get_types(engine) -> list[str]:
-    int_types = engine.lmp.gather_atoms("type", 0, 1)
-    labels = engine.lmp.get_category_keywords("typelabel")
-    return [labels[t - 1] for t in int_types]
+    # get_category_keywords does not exist — disabled temporarily
+    # int_types = engine.lmp.gather_atoms("type", 0, 1)
+    # labels = engine.lmp.get_category_keywords("typelabel")
+    # return [labels[t - 1] for t in int_types]
+    raise NotImplementedError("get_types is temporarily disabled")
 
 
 def set_positions(engine, positions):
@@ -161,8 +163,10 @@ def _make_frozen_group(engine, config, positions, types) -> bool:
         return False
     if positions is None:
         positions = get_positions(engine)
-    if types is None:
-        types = get_types(engine)
+    # if types is None:
+    #     types = get_types(engine)
+    if types is None and config.frozen_atoms.types:
+        raise NotImplementedError("frozen_atoms by type requires types — get_types is disabled")
     frozen_ae = AtomicEnvironment(
         style="region",
         region=config.frozen_atoms,
