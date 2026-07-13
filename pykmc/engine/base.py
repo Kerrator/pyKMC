@@ -127,7 +127,7 @@ class Engine(Registrable, root=True):
         """Load atomic system into the engine."""
 
     @abstractmethod
-    def initialize_potential(self, rcut: float | None = None) -> None:
+    def initialize_potential(self) -> None:
         """Set interatomic potential."""
 
     @abstractmethod 
