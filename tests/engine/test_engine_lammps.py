@@ -3,9 +3,11 @@ from pykmc.engine import LammpsEngine, LammpsConfigProtocol, EngineExtension
 from .test_engine_contract import EngineContractTests
 from dataclasses import dataclass
 
+
 @pytest.fixture(params=["ni_orthorhombic", "ni_triclinic", "ni_slab"])
 def system(request):
     return request.getfixturevalue(request.param)
+
 
 @pytest.fixture(scope="session")
 def lammps_config_Ni():
@@ -15,12 +17,26 @@ def lammps_config_Ni():
         pair_coeff: str = "* * 0.52 2.274"
         min_style:  str = "cg"
         minimize:   str = "1e-6 1e-8 1000 10000"
+        frz_min:    str = "1e-4 1e-6 100 1000"
         verbosity:  int = 0
     return LammpsConfig()
 
 
-class TestLammpsEngineSerial(EngineContractTests):
+class LammpsEngineExtraTests:
+    """Tests pour les méthodes propres à LammpsEngine, hors contrat Engine abstrait."""
 
+    def test_get_types(self):
+        """get_types() retourne les types dans l'ordre des atomes créés."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+        types = engine.get_types()
+        assert len(types) == len(self.system.types)
+        assert list(types) == list(self.system.types)
+        engine.close()
+
+
+class TestLammpsEngineSerial(EngineContractTests, LammpsEngineExtraTests):
 
     @pytest.fixture(autouse=True)
     def require_serial(self):
@@ -33,34 +49,33 @@ class TestLammpsEngineSerial(EngineContractTests):
         self.config = lammps_config_Ni
         self.system = system
 
-    def make_engine(self): 
+    def make_engine(self):
         return LammpsEngine(config=self.config, comm=None)
-    
+
     def make_test_extension(self, engine) -> EngineExtension:
         return _ComputeKineticEnergy(engine=engine)
 
     def make_conflicting_extension(self, engine) -> EngineExtension:
         return _ConflictingExtension(engine=engine)
-    
+
     def test_kinetic_energy_returns_float(self):
-        """Test that _ComputeKineticEnergy.get_kinetic_energy() returns a float on rank 0."""
+        """_ComputeKineticEnergy.get_kinetic_energy() retourne un float."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         _ComputeKineticEnergy(engine=engine)
         ke = engine.get_kinetic_energy()
-        print(ke)
-        if self.is_rank0:
-            assert isinstance(ke, float)
+        assert isinstance(ke, float)
         engine.close()
-    
+
+
 @pytest.mark.mpi
-class TestLammpsEngineMPI(EngineContractTests):
+class TestLammpsEngineMPI(EngineContractTests, LammpsEngineExtraTests):
     """
-    Lancé avec : mpirun -n 4 pytest tests/engine/test_lammps_engine.py
+    Lancé avec : mpirun -n 4 pytest tests/engine/test_engine_lammps.py
 
     Tous les ranks exécutent chaque test collectivement.
-    Les assertions sont restreintes au rank 0 via is_rank0.
+    Les assertions scalaires sont restreintes au rank 0 via is_rank0.
     """
 
     @pytest.fixture(autouse=True)
@@ -69,6 +84,8 @@ class TestLammpsEngineMPI(EngineContractTests):
         self.config = lammps_config_Ni
         self.system = system
         self.comm = MPI.COMM_WORLD
+        yield
+        MPI.COMM_WORLD.Barrier()
 
     @pytest.fixture(autouse=True)
     def require_mpi(self):
@@ -83,28 +100,29 @@ class TestLammpsEngineMPI(EngineContractTests):
 
     def make_engine(self) -> LammpsEngine:
         return LammpsEngine(config=self.config, comm=self.comm)
-    
+
     def make_test_extension(self, engine) -> EngineExtension:
         return _ComputeKineticEnergy(engine=engine)
 
     def make_conflicting_extension(self, engine) -> EngineExtension:
         return _ConflictingExtension(engine=engine)
-    
+
     def test_kinetic_energy_returns_float(self):
-        """Test that _ComputeKineticEnergy.get_kinetic_energy() returns a float on rank 0."""
+        """_ComputeKineticEnergy.get_kinetic_energy() retourne un float sur rank 0."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         _ComputeKineticEnergy(engine=engine)
         ke = engine.get_kinetic_energy()
-        print(ke)
         if self.is_rank0:
             assert isinstance(ke, float)
         engine.close()
-    
-#To test add extension
+
+
+# ── Extensions de test ────────────────────────────────────────────────────────
+
 class _ComputeKineticEnergy(EngineExtension):
-    """Extension test : add get_kinetic_energy() via compute LAMMPS."""
+    """Extension test : ajoute get_kinetic_energy() via un compute LAMMPS."""
 
     def __init__(self, engine):
         super().__init__(engine)
@@ -122,10 +140,10 @@ class _ComputeKineticEnergy(EngineExtension):
 
 
 class _ConflictingExtension(EngineExtension):
-    """Extension test : another get_kinetic_energy() to check conflict."""
+    """Extension test : même nom de méthode que _ComputeKineticEnergy pour tester le conflit."""
 
     def __init__(self, engine):
         super().__init__(engine)
 
-    def get_kinetic_energy(self) -> None:  #Same name
+    def get_kinetic_energy(self) -> None:
         pass

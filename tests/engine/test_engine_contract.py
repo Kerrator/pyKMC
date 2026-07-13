@@ -1,4 +1,4 @@
-from pykmc.engine import Engine, EngineExtension  
+from pykmc.engine import Engine, EngineExtension
 import numpy as np
 import pytest
 
@@ -13,7 +13,7 @@ class EngineContractTests:
 
     def make_engine(self) -> Engine:
         raise NotImplementedError
-    
+
     @property
     def is_rank0(self) -> bool:
         """True si le rank courant doit valider les assertions."""
@@ -27,8 +27,7 @@ class EngineContractTests:
         engine.start()
         engine.close()
 
-
-    def initialize(self, engine) : 
+    def initialize(self, engine):
         """Initialization parameters and system convenience method."""
         engine.initialize_parameters()
         engine.initialize_system(
@@ -38,80 +37,93 @@ class EngineContractTests:
             pbc=self.system.pbc,
         )
         engine.initialize_potential()
-    def test_initialize(self)  : 
+
+    def test_initialize(self):
         """Test initialization parameters and system."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         engine.close()
 
+    # ── positions ─────────────────────────────────────────────────────────────
 
     def test_set_get_positions(self):
-        """Test set_positions() and get_positions() consistency."""
-        engine = self.make_engine() 
-        engine.start() 
+        """set_positions() puis get_positions() retourne les mêmes positions."""
+        engine = self.make_engine()
+        engine.start()
         self.initialize(engine)
-        positions = self.system.positions 
-        positions[0,0] += 0.2
+        positions = self.system.positions.copy()
+        positions[0, 0] += 0.2
         engine.set_positions(positions)
         result = engine.get_positions()
         if self.is_rank0:
             np.testing.assert_allclose(result, positions, atol=1e-10)
         engine.close()
 
-    def test_get_potential_energy(self) : 
-        """Test get potential energy."""
-        engine = self.make_engine() 
-        engine.start() 
+    # ── énergie ───────────────────────────────────────────────────────────────
+
+    def test_get_potential_energy(self):
+        """get_potential_energy() retourne un float."""
+        engine = self.make_engine()
+        engine.start()
         self.initialize(engine)
         pe = engine.get_potential_energy()
         if self.is_rank0:
             assert isinstance(pe, float)
         engine.close()
 
-
-    def test_get_total_energy(self) : 
-        """Test get total energy."""
-        engine = self.make_engine() 
-        engine.start() 
+    def test_get_total_energy(self):
+        """get_total_energy() retourne un float."""
+        engine = self.make_engine()
+        engine.start()
         self.initialize(engine)
         tot_e = engine.get_total_energy()
         if self.is_rank0:
             assert isinstance(tot_e, float)
         engine.close()
 
-    def minimize_with_results(self) : 
-        """Test minimization and lower energy after."""
-        engine = self.make_engine() 
-        engine.start() 
+    # ── minimisation ──────────────────────────────────────────────────────────
+
+    def test_minimize(self):
+        """minimize() réduit l'énergie d'une configuration perturbée."""
+        engine = self.make_engine()
+        engine.start()
         self.initialize(engine)
-        positions = self.system.positions
-        #perturbations
-        rng = np.random.default_rng(seed=42)
-        positions = self.system.positions + rng.uniform(-0.1, 0.1, size=self.system.positions.shape)
-        tot_e1 = engine.get_potential_energy()
-        #minimization 
-        min_positions, tot_e2 =  engine.minimize_with_results(positions=positions)
+        rng = np.random.default_rng(seed=0)
+        perturbed = self.system.positions.copy() + rng.uniform(-0.05, 0.05, size=self.system.positions.shape)
+        e_before = engine.get_potential_energy(positions=perturbed)
+        engine.minimize()
+        e_after = engine.get_potential_energy()
         if self.is_rank0:
-            assert min_positions.shape == (self.system.n_atoms, 3)
-            assert tot_e2 < tot_e1
+            assert e_after < e_before
         engine.close()
 
-    #Extension part 
+    def test_minimize_with_results(self):
+        """minimize_with_results() réduit l'énergie et retourne positions + énergie."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+        rng = np.random.default_rng(seed=42)
+        perturbed = self.system.positions.copy() + rng.uniform(-0.1, 0.1, size=self.system.positions.shape)
+        e_perturbed = engine.get_potential_energy(positions=perturbed)
+        min_positions, e_min = engine.minimize_with_results(positions=perturbed)
+        if self.is_rank0:
+            assert min_positions.shape == self.system.positions.shape
+            assert e_min < e_perturbed
+        engine.close()
+
+    # ── extensions ────────────────────────────────────────────────────────────
+
     def make_test_extension(self, engine) -> EngineExtension:
-        """Return a concrete extension compatible with this engine.
-        Must be overridden in each concrete test class.
-        """
+        """Retourne une extension concrète compatible avec cet engine."""
         raise NotImplementedError
-    
+
     def make_conflicting_extension(self, engine) -> EngineExtension:
-        """Return an extension that conflicts with make_test_extension().
-        Must be overridden in each concrete test class.
-        """
+        """Retourne une extension dont les méthodes entrent en conflit avec make_test_extension()."""
         raise NotImplementedError
 
     def test_extension_registers_and_delegates(self):
-        """A registered extension exposes its public methods through the engine."""
+        """Une extension enregistrée expose ses méthodes publiques via l'engine."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -121,7 +133,7 @@ class EngineContractTests:
         engine.close()
 
     def test_extension_conflict_raises(self):
-        """Registering two extensions with a method of the same name raises ValueError."""
+        """Enregistrer deux extensions avec un nom de méthode identique lève ValueError."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
