@@ -72,9 +72,17 @@ def make_AV(engine, av_indices, buffer_indices):
     engine.command('run 0 post no')
 
 
-def reset(engine, config, cell) -> None:
+def reset(engine, config, cell, n_types: int = 1) -> None:
     """
     Clear lammps instance, preps it for the new sim:
+
+    ``n_types`` is the number of LAMMPS atom types (distinct species) the cropped
+    subsystem's box must hold. It must be >= the largest integer type ref the
+    caller assigns via its ``sorted(set(types))`` map, and must equal the element
+    count of ``config.lammps.pair_coeff``. For a single-species system this is 1;
+    for an alloy (NiCr, NiFe, ...) it is 2+. eam/alloy sets per-type masses from
+    the potential file at ``pair_coeff`` time, so no explicit ``mass`` command is
+    needed here (mirroring the single-species path).
     """
 
     engine.command('clear')
@@ -84,7 +92,7 @@ def reset(engine, config, cell) -> None:
     engine.command(
         "region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi)
     )
-    engine.command('create_box 1 box')  # NEEDS TO BE UPDATED FOR ALLOYS
+    engine.command('create_box {} box'.format(n_types))
     initialize_potential(engine, config)
 
 def clear(engine):
@@ -111,7 +119,7 @@ def redefine_atoms(engine, positions, type=None) -> None:
     engine.command('unfix 1')
 
 def partn_search_AV(engine, config, central_atom_idx: int, positions, cell, type) -> [np.array, int]:
-    reset(engine, config, cell)
+    reset(engine, config, cell, n_types=len(set(type)))
     av_positions, av_idx, buffer_idx = define_AV(config, central_atom_idx, positions, cell)
 
     #Need to map type to positions
@@ -137,7 +145,7 @@ def partn_refine_AV(engine, config, central_atom_idx:int, positions, cell, type,
         Active Volumes.
     '''
 
-    reset(engine, config, cell)
+    reset(engine, config, cell, n_types=len(set(type)))
     av_positions, av_idx, buffer_idx = define_AV(config, central_atom_idx, positions, cell)
 
     #Need to map types to positions
