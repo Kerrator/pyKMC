@@ -372,7 +372,7 @@ def compute_event_prefactors(
             r_total, r_movable = rc.nu0_zone_radius, rc.free_radius
 
         serial = _get_serial_hessian_engine(engine)
-        reset(serial, config, cell)
+        reset(serial, config, cell, n_types=len(set(types_used)))
         av_positions, av_idx, buffer_idx = define_zone(
             central, min1, cell, r_total=r_total, r_movable=r_movable
         )
