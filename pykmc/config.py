@@ -505,6 +505,14 @@ class PartnConfig(BaseModel):
                 raise ValueError(f"Invalid list of integers: {v}")
         return v
 
+
+# Physically-plausible upper bound (ps^-1) for the fallback prefactor ``k0``.
+# Real attempt frequencies are ~1-100 ps^-1 (THz); this generous cap (1e4 THz)
+# admits any real prefactor yet rejects a value entered in Hz (e.g. 1e12), which
+# under the ps^-1 rate contract would be ~1e10x a physical attempt frequency.
+K0_MAX_PS_INV: float = 1.0e4
+
+
 class RateConstantConfig(BaseModel):
     """Rate constant computation parameters.
 
@@ -595,6 +603,24 @@ class RateConstantConfig(BaseModel):
                 "subsystem has to contain the free region plus a frozen boundary".format(
                     self.nu0_zone_radius, self.free_radius
                 )
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_k0_units(self) -> "RateConstantConfig":
+        """Reject a Hz-scale ``k0`` that would break the ps^-1 rate contract.
+
+        The ``htst``/``rpa`` backends convert a successful Vineyard ``nu0`` from
+        Hz to ps^-1 but fall back to the raw ``k0`` when ``nu0`` fails. A ``k0``
+        entered in Hz (e.g. ``1e12``) then makes failed-``nu0`` events ~1e12x too
+        fast, so they dominate BKL selection and freeze the KMC clock. ``k0`` is a
+        ps^-1 prefactor, so any physical value stays well below ``K0_MAX_PS_INV``.
+        """
+        if self.style in ("htst", "rpa") and self.k0 > K0_MAX_PS_INV:
+            raise ValueError(
+                "k0 is a fallback prefactor in ps^-1 (1 THz = 1.0). Got {:g}, which "
+                "is ~{:.0e}x a physical attempt frequency -- did you enter it in Hz? "
+                "Use k0=1.0 for a 1 THz fallback.".format(self.k0, self.k0 / 100.0)
             )
         return self
 
