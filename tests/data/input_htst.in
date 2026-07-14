@@ -30,7 +30,7 @@ path_artnso = /root/programs/artn-plugin/lib/libartn-lmp.so
 
 [RateConstant]
 style = htst
-k0 = 1e12
+k0 = 1.0
 T = 300.0
 free_radius = 6.0
 fd_step = 0.01
