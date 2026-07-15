@@ -2,13 +2,14 @@ from pykmc.engine import Engine, EngineExtension
 import numpy as np
 import pytest
 
+
 class EngineContractTests:
     """
-    Suite de tests définissant le contrat que toute implémentation
-    d'Engine doit respecter. Ne pas instancier directement.
+    Test suite defining the contract that every Engine implementation
+    must satisfy. Do not instantiate directly.
 
-    Les sous-classes doivent implémenter `make_engine()`, qui retourne
-    une instance configurée mais non démarrée de l'engine.
+    Subclasses must implement `make_engine()`, which returns a configured
+    but not yet started engine instance.
     """
 
     def make_engine(self) -> Engine:
@@ -16,10 +17,8 @@ class EngineContractTests:
 
     @property
     def is_rank0(self) -> bool:
-        """True si le rank courant doit valider les assertions."""
+        """True if the current rank should validate assertions."""
         return True
-
-    # ── start / close ─────────────────────────────────────────────────────────
 
     def test_start_does_not_raise(self):
         """Test open and close engine."""
@@ -45,10 +44,8 @@ class EngineContractTests:
         self.initialize(engine)
         engine.close()
 
-    # ── positions ─────────────────────────────────────────────────────────────
-
     def test_set_get_positions(self):
-        """set_positions() puis get_positions() retourne les mêmes positions."""
+        """set_positions() followed by get_positions() returns the same positions."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -60,10 +57,8 @@ class EngineContractTests:
             np.testing.assert_allclose(result, positions, atol=1e-10)
         engine.close()
 
-    # ── énergie ───────────────────────────────────────────────────────────────
-
     def test_get_potential_energy(self):
-        """get_potential_energy() retourne un float."""
+        """get_potential_energy() returns a float."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -73,7 +68,7 @@ class EngineContractTests:
         engine.close()
 
     def test_get_total_energy(self):
-        """get_total_energy() retourne un float."""
+        """get_total_energy() returns a float."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -82,15 +77,15 @@ class EngineContractTests:
             assert isinstance(tot_e, float)
         engine.close()
 
-    # ── minimisation ──────────────────────────────────────────────────────────
-
     def test_minimize(self):
-        """minimize() réduit l'énergie d'une configuration perturbée."""
+        """minimize() reduces the energy of a perturbed configuration."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         rng = np.random.default_rng(seed=0)
-        perturbed = self.system.positions.copy() + rng.uniform(-0.05, 0.05, size=self.system.positions.shape)
+        perturbed = self.system.positions.copy() + rng.uniform(
+            -0.05, 0.05, size=self.system.positions.shape
+        )
         e_before = engine.get_potential_energy(positions=perturbed)
         engine.minimize()
         e_after = engine.get_potential_energy()
@@ -99,12 +94,14 @@ class EngineContractTests:
         engine.close()
 
     def test_minimize_with_results(self):
-        """minimize_with_results() réduit l'énergie et retourne positions + énergie."""
+        """minimize_with_results() reduces the energy and returns positions + energy."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         rng = np.random.default_rng(seed=42)
-        perturbed = self.system.positions.copy() + rng.uniform(-0.1, 0.1, size=self.system.positions.shape)
+        perturbed = self.system.positions.copy() + rng.uniform(
+            -0.1, 0.1, size=self.system.positions.shape
+        )
         e_perturbed = engine.get_potential_energy(positions=perturbed)
         result = engine.minimize_with_results(positions=perturbed)
         if self.is_rank0:
@@ -113,18 +110,16 @@ class EngineContractTests:
             assert e_min < e_perturbed
         engine.close()
 
-    # ── extensions ────────────────────────────────────────────────────────────
-
     def make_test_extension(self, engine) -> EngineExtension:
-        """Retourne une extension concrète compatible avec cet engine."""
+        """Return a concrete extension compatible with this engine."""
         raise NotImplementedError
 
     def make_conflicting_extension(self, engine) -> EngineExtension:
-        """Retourne une extension dont les méthodes entrent en conflit avec make_test_extension()."""
+        """Return an extension whose methods conflict with those from make_test_extension()."""
         raise NotImplementedError
 
     def test_extension_registers_and_delegates(self):
-        """Une extension enregistrée expose ses méthodes publiques via l'engine."""
+        """A registered extension exposes its public methods through the engine."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -134,7 +129,7 @@ class EngineContractTests:
         engine.close()
 
     def test_extension_conflict_raises(self):
-        """Enregistrer deux extensions avec un nom de méthode identique lève ValueError."""
+        """Registering two extensions with the same method name raises ValueError."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)

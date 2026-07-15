@@ -15,18 +15,19 @@ def lammps_config_Ni():
     class LammpsConfig:
         pair_style: str = "lj/cut 6.0"
         pair_coeff: str = "* * 0.52 2.274"
-        min_style:  str = "cg"
-        minimize:   str = "1e-6 1e-8 1000 10000"
-        frz_min:    str = "1e-4 1e-6 100 1000"
-        verbosity:  int = 0
+        min_style: str = "cg"
+        minimize: str = "1e-6 1e-8 1000 10000"
+        frz_min: str = "1e-4 1e-6 100 1000"
+        verbosity: int = 0
+
     return LammpsConfig()
 
 
 class TestLammpsEngineSerial(EngineContractTests):
-
     @pytest.fixture(autouse=True)
     def require_serial(self):
         from mpi4py import MPI
+
         if MPI.COMM_WORLD.Get_size() > 1:
             pytest.skip("serial tests must run without mpirun")
 
@@ -45,7 +46,7 @@ class TestLammpsEngineSerial(EngineContractTests):
         return _ConflictingExtension(engine=engine)
 
     def test_kinetic_energy_returns_float(self):
-        """_ComputeKineticEnergy.get_kinetic_energy() retourne un float."""
+        """_ComputeKineticEnergy.get_kinetic_energy() returns a float."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -58,15 +59,16 @@ class TestLammpsEngineSerial(EngineContractTests):
 @pytest.mark.mpi
 class TestLammpsEngineMPI(EngineContractTests):
     """
-    Lancé avec : mpirun -n 4 pytest tests/engine/test_engine_lammps.py
+    Run with: mpirun -n 4 pytest tests/engine/test_engine_lammps.py
 
-    Tous les ranks exécutent chaque test collectivement.
-    Les assertions scalaires sont restreintes au rank 0 via is_rank0.
+    All ranks execute each test collectively.
+    Scalar assertions are restricted to rank 0 via is_rank0.
     """
 
     @pytest.fixture(autouse=True)
     def setup(self, lammps_config_Ni, system):
         from mpi4py import MPI
+
         self.config = lammps_config_Ni
         self.system = system
         self.comm = MPI.COMM_WORLD
@@ -76,12 +78,14 @@ class TestLammpsEngineMPI(EngineContractTests):
     @pytest.fixture(autouse=True)
     def require_mpi(self):
         from mpi4py import MPI
+
         if MPI.COMM_WORLD.Get_size() == 1:
             pytest.skip("requires mpirun -n N")
 
     @property
     def is_rank0(self) -> bool:
         from mpi4py import MPI
+
         return self.comm.Get_rank() == 0
 
     def make_engine(self) -> Engine:
@@ -94,7 +98,7 @@ class TestLammpsEngineMPI(EngineContractTests):
         return _ConflictingExtension(engine=engine)
 
     def test_kinetic_energy_returns_float(self):
-        """_ComputeKineticEnergy.get_kinetic_energy() retourne un float sur rank 0."""
+        """_ComputeKineticEnergy.get_kinetic_energy() returns a float on rank 0."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -105,10 +109,8 @@ class TestLammpsEngineMPI(EngineContractTests):
         engine.close()
 
 
-# ── Extensions de test ────────────────────────────────────────────────────────
-
 class _ComputeKineticEnergy(EngineExtension):
-    """Extension test : ajoute get_kinetic_energy() via un compute LAMMPS."""
+    """Test extension: adds get_kinetic_energy() via a LAMMPS compute."""
 
     def __init__(self, engine):
         super().__init__(engine)
@@ -126,7 +128,7 @@ class _ComputeKineticEnergy(EngineExtension):
 
 
 class _ConflictingExtension(EngineExtension):
-    """Extension test : même nom de méthode que _ComputeKineticEnergy pour tester le conflit."""
+    """Test extension: same method name as _ComputeKineticEnergy to test conflict detection."""
 
     def __init__(self, engine):
         super().__init__(engine)
