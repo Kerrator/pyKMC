@@ -106,8 +106,9 @@ class EngineContractTests:
         rng = np.random.default_rng(seed=42)
         perturbed = self.system.positions.copy() + rng.uniform(-0.1, 0.1, size=self.system.positions.shape)
         e_perturbed = engine.get_potential_energy(positions=perturbed)
-        min_positions, e_min = engine.minimize_with_results(positions=perturbed)
+        result = engine.minimize_with_results(positions=perturbed)
         if self.is_rank0:
+            min_positions, e_min = result
             assert min_positions.shape == self.system.positions.shape
             assert e_min < e_perturbed
         engine.close()

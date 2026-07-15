@@ -1,5 +1,5 @@
 import pytest
-from pykmc.engine import LammpsEngine, LammpsConfigProtocol, EngineExtension
+from pykmc.engine import Engine, EngineExtension
 from .test_engine_contract import EngineContractTests
 from dataclasses import dataclass
 
@@ -22,21 +22,7 @@ def lammps_config_Ni():
     return LammpsConfig()
 
 
-class LammpsEngineExtraTests:
-    """Tests pour les méthodes propres à LammpsEngine, hors contrat Engine abstrait."""
-
-    def test_get_types(self):
-        """get_types() retourne les types dans l'ordre des atomes créés."""
-        engine = self.make_engine()
-        engine.start()
-        self.initialize(engine)
-        types = engine.get_types()
-        assert len(types) == len(self.system.types)
-        assert list(types) == list(self.system.types)
-        engine.close()
-
-
-class TestLammpsEngineSerial(EngineContractTests, LammpsEngineExtraTests):
+class TestLammpsEngineSerial(EngineContractTests):
 
     @pytest.fixture(autouse=True)
     def require_serial(self):
@@ -50,7 +36,7 @@ class TestLammpsEngineSerial(EngineContractTests, LammpsEngineExtraTests):
         self.system = system
 
     def make_engine(self):
-        return LammpsEngine(config=self.config, comm=None)
+        return Engine.create("lammps", config=self.config, comm=None)
 
     def make_test_extension(self, engine) -> EngineExtension:
         return _ComputeKineticEnergy(engine=engine)
@@ -70,7 +56,7 @@ class TestLammpsEngineSerial(EngineContractTests, LammpsEngineExtraTests):
 
 
 @pytest.mark.mpi
-class TestLammpsEngineMPI(EngineContractTests, LammpsEngineExtraTests):
+class TestLammpsEngineMPI(EngineContractTests):
     """
     Lancé avec : mpirun -n 4 pytest tests/engine/test_engine_lammps.py
 
@@ -98,8 +84,8 @@ class TestLammpsEngineMPI(EngineContractTests, LammpsEngineExtraTests):
         from mpi4py import MPI
         return self.comm.Get_rank() == 0
 
-    def make_engine(self) -> LammpsEngine:
-        return LammpsEngine(config=self.config, comm=self.comm)
+    def make_engine(self) -> Engine:
+        return Engine.create("lammps", config=self.config, comm=self.comm)
 
     def make_test_extension(self, engine) -> EngineExtension:
         return _ComputeKineticEnergy(engine=engine)
