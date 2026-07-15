@@ -295,9 +295,11 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def get_types(self) -> list[str]:
-        int_types = self.lmp.gather_atoms("type", 0, 1)
-        labels = self.lmp.get_category_keywords("typelabel")
-        return [labels[t - 1] for t in int_types]
+        # get_category_keywords does not exist — disabled temporarily
+        # int_types = self.lmp.gather_atoms("type", 0, 1)
+        # labels = self.lmp.get_category_keywords("typelabel")
+        # return [labels[t - 1] for t in int_types]
+        raise NotImplementedError("get_types is temporarily disabled")
 
     # ------------------------------------------------------------------
     # Frozen-atom helpers
@@ -309,8 +311,8 @@ class LammpsEngine(Engine):
             return False
         if positions is None:
             positions = self.get_positions()
-        if types is None:
-            types = self.get_types()
+        if types is None and config.frozen_atoms.types:
+            raise NotImplementedError("frozen_atoms by type requires types — get_types is disabled")
         frozen_ae = AtomicEnvironment(
             style="region",
             region=config.frozen_atoms,
