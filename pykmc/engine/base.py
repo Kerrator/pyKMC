@@ -4,6 +4,7 @@ import numpy as np
 from ase.cell import Cell
 from pykmc._core import Registrable
 
+
 class EngineExtension:
     """
     Base class for all engine extensions.
@@ -35,6 +36,7 @@ class EngineExtension:
 
             def my_method(self): ...
     """
+
     def __init__(self, engine: Engine):
         self.engine = engine
         engine.register(self)
@@ -45,7 +47,7 @@ class Engine(Registrable, root=True):
     Abstract base class for engines use for the KMC simulation.
 
     An engine can be used standalone or as a backend in a master-worker
-    architecture via the manager module. 
+    architecture via the manager module.
 
     All abtract methods are mandatory in order to perform the simulation.
     """
@@ -74,21 +76,21 @@ class Engine(Registrable, root=True):
             provided by a registered extension.
         """
 
-        #Name of the extension, ie class name
+        # Name of the extension, ie class name
         ext_name = type(ext).__name__
         if ext_name in self._extensions:
             raise ValueError(f"Extension '{ext_name}' already registered.")
 
-        #Get all pulic method of ext
+        # Get all pulic method of ext
         new_methods = {
-            m for m in dir(ext)
-            if not m.startswith("_") and callable(getattr(ext, m))
+            m for m in dir(ext) if not m.startswith("_") and callable(getattr(ext, m))
         }
 
-        #Check if method name already present in extension
+        # Check if method name already present in extension
         for registered_name, registered_ext in self._extensions.items():
             clash = new_methods & {
-                m for m in dir(registered_ext)
+                m
+                for m in dir(registered_ext)
                 if not m.startswith("_") and callable(getattr(registered_ext, m))
             }
             if clash:
@@ -108,44 +110,49 @@ class Engine(Registrable, root=True):
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     @abstractmethod
-    def start(self) -> None : 
-        """Start the engine. Must be called before any operation. 
-        """
+    def start(self) -> None:
+        """Start the engine. Must be called before any operation."""
 
     @abstractmethod
-    def close(self) -> None : 
-        """Shut down the engine and free resources.
-        """
+    def close(self) -> None:
+        """Shut down the engine and free resources."""
 
-    @abstractmethod 
-    def initialize_parameters(self) -> None : 
-        """Set default simulation parameters so the engine can run operations (e.g. units, pbc, ...).
-        """
-    
     @abstractmethod
-    def initialize_system(self, types: list[str] | np.ndarray, positions: np.ndarray, cell: Cell, pbc: list[bool] | np.ndarray) -> None:
+    def initialize_parameters(self) -> None:
+        """Set default simulation parameters so the engine can run operations (e.g. units, pbc, ...)."""
+
+    @abstractmethod
+    def initialize_system(
+        self,
+        types: list[str] | np.ndarray,
+        positions: np.ndarray,
+        cell: Cell,
+        pbc: list[bool] | np.ndarray,
+    ) -> None:
         """Load atomic system into the engine."""
 
     @abstractmethod
     def initialize_potential(self) -> None:
         """Set interatomic potential."""
 
-    @abstractmethod 
-    def get_positions(self) -> np.ndarray|None : 
-        """Return current atomic positions, shape (N,3).
-        """
-    
-    @abstractmethod 
-    def set_positions(self, positions: np.ndarray) -> None : 
-        """Set atomic position, shape(N,3).
-        """
+    @abstractmethod
+    def get_positions(self) -> np.ndarray | None:
+        """Return current atomic positions, shape (N,3)."""
 
     @abstractmethod
-    def get_total_energy(self, positions: np.ndarray | None = None, recompute: bool = True) -> float | None:
+    def set_positions(self, positions: np.ndarray) -> None:
+        """Set atomic position, shape(N,3)."""
+
+    @abstractmethod
+    def get_total_energy(
+        self, positions: np.ndarray | None = None, recompute: bool = True
+    ) -> float | None:
         """Return total energy of the system."""
 
     @abstractmethod
-    def get_potential_energy(self, positions: np.ndarray | None = None, recompute: bool = True) -> float | None:
+    def get_potential_energy(
+        self, positions: np.ndarray | None = None, recompute: bool = True
+    ) -> float | None:
         """Return potential energy of the system."""
 
     @abstractmethod
@@ -153,5 +160,7 @@ class Engine(Registrable, root=True):
         """Run energy minimization."""
 
     @abstractmethod
-    def minimize_with_results(self, positions: np.ndarray | None = None) -> tuple[np.ndarray, float] | None:
+    def minimize_with_results(
+        self, positions: np.ndarray | None = None
+    ) -> tuple[np.ndarray, float] | None:
         """Run energy minimization and return (positions, total_energy)."""

@@ -20,21 +20,36 @@ from ase.build import bulk, surface
 
 # Systems
 
+
 @pytest.fixture(scope="session")
 def ni_orthorhombic():
     """FCC Ni — orthorhomic."""
     atoms = bulk("Ni", crystalstructure="fcc", a=3.524, cubic=True)
-    atoms = atoms.repeat([4,4,4])
-    system = System(types = atoms.get_chemical_symbols(), positions = atoms.get_positions(), cell = atoms.get_cell(), pbc = atoms.get_pbc(), index = np.arange(len(atoms)))
+    atoms = atoms.repeat([4, 4, 4])
+    system = System(
+        types=atoms.get_chemical_symbols(),
+        positions=atoms.get_positions(),
+        cell=atoms.get_cell(),
+        pbc=atoms.get_pbc(),
+        index=np.arange(len(atoms)),
+    )
     return system
+
 
 @pytest.fixture(scope="session")
 def ni_triclinic():
     """FCC Ni — triclinic."""
     atoms = bulk("Ni", crystalstructure="fcc", a=3.524, cubic=False)
-    atoms = atoms.repeat([4,4,4])
-    system = System(types = atoms.get_chemical_symbols(), positions = atoms.get_positions(), cell = atoms.get_cell(), pbc = atoms.get_pbc(), index = np.arange(len(atoms)))
+    atoms = atoms.repeat([4, 4, 4])
+    system = System(
+        types=atoms.get_chemical_symbols(),
+        positions=atoms.get_positions(),
+        cell=atoms.get_cell(),
+        pbc=atoms.get_pbc(),
+        index=np.arange(len(atoms)),
+    )
     return system
+
 
 @pytest.fixture(scope="session")
 def ni_slab():
@@ -42,8 +57,14 @@ def ni_slab():
     Slab Ni(100) — 4 layers, pbc=[True, True, False], vacuum 10 Å en z.
     """
     atoms = surface("Ni", (1, 0, 0), layers=4, vacuum=5.0)
-    atoms = atoms.repeat([4,4,1])
-    system = System(types = atoms.get_chemical_symbols(), positions = atoms.get_positions(), cell = atoms.get_cell(), pbc = atoms.get_pbc(), index = np.arange(len(atoms)))
+    atoms = atoms.repeat([4, 4, 1])
+    system = System(
+        types=atoms.get_chemical_symbols(),
+        positions=atoms.get_positions(),
+        cell=atoms.get_cell(),
+        pbc=atoms.get_pbc(),
+        index=np.arange(len(atoms)),
+    )
     return system
 
 
@@ -165,7 +186,6 @@ def system_single_type_fcc() -> System:
 
 @pytest.fixture
 def system_single_type_fcc_vacancy(system_single_type_fcc: System) -> System:
-
     system = deepcopy(system_single_type_fcc)
     # remove atom
     system.positions = np.delete(system.positions, 0, axis=0)

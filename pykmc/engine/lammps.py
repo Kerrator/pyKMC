@@ -8,6 +8,7 @@ from typing import Protocol
 from .base import Engine
 from ase.cell import Cell
 from ase.data import atomic_masses, atomic_numbers
+
 try:
     from mpi4py import MPI
 except ImportError:
@@ -17,12 +18,24 @@ try:
 except ImportError:
     pypARTn = None
 
-from ..activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV
+from ..activevolume.active_volume import (
+    partn_search_AV,
+    partn_refine_AV,
+    position_results_AV,
+)
 from ..atomic_environment import AtomicEnvironment
-from ..result import ErrorInfo, EventSearchOutput, EventRefinementOutput, Ok, Err, ErrorType
+from ..result import (
+    ErrorInfo,
+    EventSearchOutput,
+    EventRefinementOutput,
+    Ok,
+    Err,
+    ErrorType,
+)
 
 try:
     from lammps import LAMMPSException as _LAMMPSException
+
     _LAMMPS_EXCEPTIONS = (_LAMMPSException,)
 except ImportError:
     _LAMMPS_EXCEPTIONS = ()  # LAMMPS not compiled with -DLAMMPS_EXCEPTIONS=yes — decorator is a no-op
@@ -34,6 +47,7 @@ def lammps_error_handler(method):
     Requires LAMMPS compiled with -DLAMMPS_EXCEPTIONS=yes.
     Without it, LAMMPS calls MPI_Abort and no exception is raised.
     """
+
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         try:
@@ -43,9 +57,11 @@ def lammps_error_handler(method):
             raise RuntimeError(
                 f"[LammpsEngine] LAMMPS error in `{method.__name__}`: {e}"
             ) from e
+
     return wrapper
 
-class LammpsConfigProtocol(Protocol) :
+
+class LammpsConfigProtocol(Protocol):
     """
     Protocol defining the configuration interface for LammpsEngine.
 
@@ -64,12 +80,14 @@ class LammpsConfigProtocol(Protocol) :
     verbosity : int
         Log verbosity. 0 disables log file, any other value enables it.
     """
+
     pair_style: str
     pair_coeff: str
     min_style: str
     minimize: str
     frz_min: str
     verbosity: int
+
 
 class LammpsEngine(Engine):
     name = "lammps"
@@ -129,75 +147,87 @@ class LammpsEngine(Engine):
         # ... only rank 0 receives data from extraction methods
     """
 
-    def __init__(self, config: LammpsConfigProtocol, comm: "MPI.COMM"|None = None, engine_id: int = 0) -> None :
+    def __init__(
+        self,
+        config: LammpsConfigProtocol,
+        comm: "MPI.COMM" | None = None,
+        engine_id: int = 0,
+    ) -> None:
         super().__init__()
         self.config = config
         self.comm = comm
         self.engine_id = engine_id
         self._is_orthorhombic = None
 
-    #Convenience
+    # Convenience
     @property
     def _is_rank0(self) -> bool:
         return self.comm is None or self.comm.Get_rank() == 0
-    
+
     def _positions_to_lammps(self, positions: np.ndarray) -> np.ndarray:
         return positions @ self.Q.T if not self._is_orthorhombic else positions
 
     def _positions_from_lammps(self, positions: np.ndarray) -> np.ndarray:
         return positions @ self.Q if not self._is_orthorhombic else positions
-    
+
     def _has_compute(self, compute_id: str) -> bool:
         """Check if a compute with the given id exists in LAMMPS."""
         return self.lmp.has_id("compute", compute_id)
 
     @lammps_error_handler
-    def start(self) -> None :
-        engine_log = "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
-        self.lmp = lammps(comm=self.comm, cmdargs = ['-screen', 'none', '-log', engine_log])
+    def start(self) -> None:
+        engine_log = (
+            "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
+        )
+        self.lmp = lammps(
+            comm=self.comm, cmdargs=["-screen", "none", "-log", engine_log]
+        )
 
-    def close(self) -> None :
+    def close(self) -> None:
         self.lmp.close()
 
     @lammps_error_handler
-    def initialize_parameters(self) -> None :
+    def initialize_parameters(self) -> None:
         self.lmp.command("units metal")
         self.lmp.command("atom_style atomic")
         self.lmp.command("dimension 3")
-        self.lmp.command("atom_modify map array") #! necessary for scatter atoms
-        self.lmp.command("atom_modify sort 0 0.0") #! necessary for partn
+        self.lmp.command("atom_modify map array")  #! necessary for scatter atoms
+        self.lmp.command("atom_modify sort 0 0.0")  #! necessary for partn
 
     @lammps_error_handler
-    def initialize_system(self, types: list[str]|np.ndarray[str], positions: np.ndarray, cell: Cell , pbc: list[bool]|np.ndarray[bool]) -> None : 
-
-        #system parameters 
+    def initialize_system(
+        self,
+        types: list[str] | np.ndarray[str],
+        positions: np.ndarray,
+        cell: Cell,
+        pbc: list[bool] | np.ndarray[bool],
+    ) -> None:
+        # system parameters
         natoms = len(types)
-            #To deal with Lammps convention if non orthonhombic cell
+        # To deal with Lammps convention if non orthonhombic cell
         self._is_orthorhombic = cell.orthorhombic
         if not self._is_orthorhombic:
             cell_lammps, self.Q = cell.standard_form()
         else:
             cell_lammps = np.array(cell)
-        
+
         positions = self._positions_to_lammps(positions=positions)
 
-        x = positions.flatten() #Lammps format 
-         #cell 
+        x = positions.flatten()  # Lammps format
+        # cell
         xhi = cell_lammps[0, 0]
         yhi = cell_lammps[1, 1]
         zhi = cell_lammps[2, 2]
-            # non diagonal terms
+        # non diagonal terms
         xy = cell_lammps[1, 0]
         xz = cell_lammps[2, 0]
         yz = cell_lammps[2, 1]
 
-        # boundary 
+        # boundary
         boundary = " ".join("p" if p else "f" for p in pbc)
         self.lmp.command(f"boundary {boundary}")
 
-        
-
-        ind = np.arange(1, natoms+1) #Lammps ids start at 1
+        ind = np.arange(1, natoms + 1)  # Lammps ids start at 1
         # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
         map_type = {
             atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
@@ -206,10 +236,10 @@ class LammpsEngine(Engine):
         int_types = [map_type[element]["ref"] for element in types]  # map to integer
 
         # lammps create system
-        #ortho 
+        # ortho
         if np.allclose([xy, xz, yz], 0):
             self.lmp.command(f"region box block 0.0 {xhi} 0.0 {yhi} 0.0 {zhi}")
-        #triclinic
+        # triclinic
         else:
             self.lmp.command(
                 f"region box prism 0.0 {xhi} 0.0 {yhi} 0.0 {zhi} {xy} {xz} {yz}"
@@ -228,24 +258,23 @@ class LammpsEngine(Engine):
         )
 
     @lammps_error_handler
-    def initialize_potential(self) -> None :
+    def initialize_potential(self) -> None:
         self.lmp.command("pair_style {}".format(self.config.pair_style))
         self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
-        
 
     @lammps_error_handler
-    def get_positions(self) -> np.ndarray | None : 
+    def get_positions(self) -> np.ndarray | None:
         result = self.lmp.gather_atoms("x", 1, 3)
-        if self._is_rank0 :
+        if self._is_rank0:
             # convert ctype positions into a numpy array
             result = np.ctypeslib.as_array(result)
             result = np.reshape(result, (-1, 3))
-            return self._positions_from_lammps(positions=result) 
-        else : 
+            return self._positions_from_lammps(positions=result)
+        else:
             return None
 
     @lammps_error_handler
-    def set_positions(self, positions: np.ndarray) -> None : 
+    def set_positions(self, positions: np.ndarray) -> None:
         positions = self._positions_to_lammps(positions=positions)
         positions = positions.flatten().astype(np.float64)
         positions = np.ascontiguousarray(positions)
@@ -253,31 +282,35 @@ class LammpsEngine(Engine):
         self.lmp.scatter_atoms("x", 1, 3, c_array)
 
     @lammps_error_handler
-    def get_total_energy(self, positions: np.ndarray = None, recompute:bool = True) -> float|None : 
-        if positions is not None :
+    def get_total_energy(
+        self, positions: np.ndarray = None, recompute: bool = True
+    ) -> float | None:
+        if positions is not None:
             self.set_positions(positions=positions)
-        #Get total energy
-        if recompute : 
+        # Get total energy
+        if recompute:
             self.lmp.command("run 0 post no")
         result = self.lmp.get_thermo("etotal")
-        if self._is_rank0 :
+        if self._is_rank0:
             return result
-        else : 
+        else:
             return None
 
     @lammps_error_handler
-    def get_potential_energy(self, positions: np.ndarray = None, recompute: bool = True) -> float|None :
-        if positions is not None :
+    def get_potential_energy(
+        self, positions: np.ndarray = None, recompute: bool = True
+    ) -> float | None:
+        if positions is not None:
             self.set_positions(positions=positions)
 
         # Check if compute exists (rank 0 only)
-        define_compute = self._has_compute('c_pe')
+        define_compute = self._has_compute("c_pe")
 
         if not define_compute:
             self.lmp.command("compute c_pe all pe")
 
-        #If run to get up-to-date value
-        if recompute :
+        # If run to get up-to-date value
+        if recompute:
             self.lmp.command("run 0 post no")
         result = self.lmp.extract_compute("c_pe", 0, 0)
 
@@ -285,10 +318,9 @@ class LammpsEngine(Engine):
             return result
         return None
 
-        
     @lammps_error_handler
-    def minimize(self, positions: np.ndarray = None) -> None :
-        if positions is not None : 
+    def minimize(self, positions: np.ndarray = None) -> None:
+        if positions is not None:
             self.set_positions(positions=positions)
         self.lmp.command("min_style {}".format(self.config.min_style))
         self.lmp.command("minimize {}".format(self.config.minimize))
@@ -312,7 +344,9 @@ class LammpsEngine(Engine):
         if positions is None:
             positions = self.get_positions()
         if types is None and config.frozen_atoms.types:
-            raise NotImplementedError("frozen_atoms by type requires types — get_types is disabled")
+            raise NotImplementedError(
+                "frozen_atoms by type requires types — get_types is disabled"
+            )
         frozen_ae = AtomicEnvironment(
             style="region",
             region=config.frozen_atoms,
@@ -343,11 +377,17 @@ class LammpsEngine(Engine):
     # ------------------------------------------------------------------
 
     @lammps_error_handler
-    def minimize_with_results(self, positions=None, config=None, types=None) -> tuple[np.ndarray, float] | None:
+    def minimize_with_results(
+        self, positions=None, config=None, types=None
+    ) -> tuple[np.ndarray, float] | None:
         """Minimize and return (positions, total_energy). Pass config and types to enable frozen-atom support."""
         if positions is not None:
             self.set_positions(positions=positions)
-        atoms_frozen = self._make_frozen_group(config, positions, types) if config is not None else False
+        atoms_frozen = (
+            self._make_frozen_group(config, positions, types)
+            if config is not None
+            else False
+        )
         self._apply_frozen_fix("f_frozen_min", atoms_frozen)
         self.minimize()
         self._remove_frozen_fix("f_frozen_min", atoms_frozen)
@@ -375,7 +415,9 @@ class LammpsEngine(Engine):
     # pARTn search and refinement
     # ------------------------------------------------------------------
 
-    def partn_search(self, config, central_atom_idx: int, positions=None, cell=None, types=None):
+    def partn_search(
+        self, config, central_atom_idx: int, positions=None, cell=None, types=None
+    ):
         original_stdout_fd = os.dup(1)
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, 1)
@@ -473,39 +515,47 @@ class LammpsEngine(Engine):
                         index_move = np.argmax(dist)
 
                     if delr1 < delr2:
-                        return Ok(EventSearchOutput(
-                            central_atom_index=central_atom_idx,
-                            dE_forward=dE_forward,
-                            dE_backward=dE_backward,
-                            min1_positions=min1positions,
-                            saddle_positions=saddlepositions,
-                            min2_positions=min2positions,
-                            move_atom_index=index_move,
-                            types=types,
-                        ))
+                        return Ok(
+                            EventSearchOutput(
+                                central_atom_index=central_atom_idx,
+                                dE_forward=dE_forward,
+                                dE_backward=dE_backward,
+                                min1_positions=min1positions,
+                                saddle_positions=saddlepositions,
+                                min2_positions=min2positions,
+                                move_atom_index=index_move,
+                                types=types,
+                            )
+                        )
                     else:
-                        return Ok(EventSearchOutput(
-                            central_atom_index=central_atom_idx,
-                            dE_forward=dE_backward,
-                            dE_backward=dE_forward,
-                            min1_positions=min2positions,
-                            saddle_positions=saddlepositions,
-                            min2_positions=min1positions,
-                            move_atom_index=index_move,
-                            types=types,
-                        ))
+                        return Ok(
+                            EventSearchOutput(
+                                central_atom_index=central_atom_idx,
+                                dE_forward=dE_backward,
+                                dE_backward=dE_forward,
+                                min1_positions=min2positions,
+                                saddle_positions=saddlepositions,
+                                min2_positions=min1positions,
+                                move_atom_index=index_move,
+                                types=types,
+                            )
+                        )
                 else:
-                    return Err(ErrorInfo(
-                        type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
-                        message="delr1 and delr2 > at {}".format(delr_threshold),
-                        variables={"delr1": delr1, "delr2": delr2},
-                    ))
+                    return Err(
+                        ErrorInfo(
+                            type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
+                            message="delr1 and delr2 > at {}".format(delr_threshold),
+                            variables={"delr1": delr1, "delr2": delr2},
+                        )
+                    )
             else:
-                return Err(ErrorInfo(
-                    type=ErrorType.EVENT_NOT_FOUND,
-                    message="No event found",
-                    details=err,
-                ))
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.EVENT_NOT_FOUND,
+                        message="No event found",
+                        details=err,
+                    )
+                )
 
     def partn_refine(
         self,
@@ -520,7 +570,14 @@ class LammpsEngine(Engine):
     ):
         if config.control.active_volume:
             E_init, atom_map, central_lammps_id = partn_refine_AV(
-                self, config, central_atom_idx, positions, cell, types, saddle_idx, saddle_positions,
+                self,
+                config,
+                central_atom_idx,
+                positions,
+                cell,
+                types,
+                saddle_idx,
+                saddle_positions,
             )
         else:
             central_lammps_id = [central_atom_idx + 1]
@@ -597,14 +654,20 @@ class LammpsEngine(Engine):
                         else:
                             saddlepositions_results = saddlepositions
                         exit_flag = True
-                        result = Ok(EventRefinementOutput(
-                            central_atom_index=central_atom_idx,
-                            saddle_positions=saddlepositions_results,
-                            E_saddle=E_result,
-                            refined="T",
-                        ))
+                        result = Ok(
+                            EventRefinementOutput(
+                                central_atom_index=central_atom_idx,
+                                saddle_positions=saddlepositions_results,
+                                E_saddle=E_result,
+                                refined="T",
+                            )
+                        )
 
-            exit_flag = self.comm.bcast(exit_flag, root=0) if self.comm is not None else exit_flag
+            exit_flag = (
+                self.comm.bcast(exit_flag, root=0)
+                if self.comm is not None
+                else exit_flag
+            )
             if exit_flag:
                 self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
                 self._delete_frozen_group(atoms_frozen)
@@ -618,9 +681,11 @@ class LammpsEngine(Engine):
             self._delete_frozen_group(atoms_frozen)
             if self._is_rank0:
                 err = artn.get_error()
-                return Err(ErrorInfo(
-                    type=ErrorType.EVENT_NOT_FOUND,
-                    message="no event found",
-                    details=err,
-                ))
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.EVENT_NOT_FOUND,
+                        message="no event found",
+                        details=err,
+                    )
+                )
             return None
