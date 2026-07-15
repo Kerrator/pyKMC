@@ -34,7 +34,6 @@ def initialize_parameters(engine):
 
 
 def initialize_system(engine, system):
-
     # system parameters
     natoms = len(system.types)
     cell = system.cell
@@ -166,7 +165,9 @@ def _make_frozen_group(engine, config, positions, types) -> bool:
     # if types is None:
     #     types = get_types(engine)
     if types is None and config.frozen_atoms.types:
-        raise NotImplementedError("frozen_atoms by type requires types — get_types is disabled")
+        raise NotImplementedError(
+            "frozen_atoms by type requires types — get_types is disabled"
+        )
     frozen_ae = AtomicEnvironment(
         style="region",
         region=config.frozen_atoms,
@@ -387,7 +388,6 @@ def partn_refine(
     saddle_positions=None,
     minimize_outer_atoms: bool = True,
 ):
-
     # Set positions
     if config.control.active_volume == True:
         E_init, atom_map, central_lammps_id = partn_refine_AV(
