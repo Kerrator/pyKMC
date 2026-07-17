@@ -90,8 +90,7 @@ class LammpsConfigProtocol(Protocol):
 
 
 class LammpsEngine(Engine):
-    name = "lammps"
-    """ 
+    """
     LAMMPS engine wrapper.
 
     This class is designed to be used in a master-worker MPI pattern.
@@ -142,10 +141,12 @@ class LammpsEngine(Engine):
         comm = MPI.COMM_WORLD
         engine = LammpsEngine(config=my_config, comm=comm, engine_id=0)
         engine.start()
-        ... 
+        ...
         pe = engine.get_total_energy()
         # ... only rank 0 receives data from extraction methods
     """
+
+    name = "lammps"
 
     def __init__(
         self,
