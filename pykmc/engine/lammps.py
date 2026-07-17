@@ -151,7 +151,7 @@ class LammpsEngine(Engine):
     def __init__(
         self,
         config: LammpsConfigProtocol,
-        comm: "MPI.COMM" | None = None,
+        comm: MPI.Intracomm | None = None,
         engine_id: int = 0,
     ) -> None:
         super().__init__()
