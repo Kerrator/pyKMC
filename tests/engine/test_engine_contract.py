@@ -56,6 +56,8 @@ class EngineContractTests:
         result = engine.get_positions()
         if self.is_rank0:
             np.testing.assert_allclose(result, positions, atol=1e-10)
+        else:
+            assert result is None
         engine.close()
 
     def test_get_potential_energy(self):
@@ -66,6 +68,8 @@ class EngineContractTests:
         pe = engine.get_potential_energy()
         if self.is_rank0:
             assert isinstance(pe, float)
+        else:
+            assert pe is None
         engine.close()
 
     def test_get_total_energy(self):
@@ -76,6 +80,8 @@ class EngineContractTests:
         tot_e = engine.get_total_energy()
         if self.is_rank0:
             assert isinstance(tot_e, float)
+        else:
+            assert tot_e is None
         engine.close()
 
     def test_minimize(self):
@@ -109,6 +115,8 @@ class EngineContractTests:
             min_positions, e_min = result
             assert min_positions.shape == self.system.positions.shape
             assert e_min < e_perturbed
+        else:
+            assert result is None
         engine.close()
 
     def make_test_extension(self, engine) -> EngineExtension:
