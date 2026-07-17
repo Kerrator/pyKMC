@@ -87,7 +87,21 @@ class Engine(Registrable, root=True):
             m for m in dir(ext) if not m.startswith("_") and callable(getattr(ext, m))
         }
 
-        # Check if method name already present in extension
+        # Check against native engine methods
+        native = {
+            name
+            for cls in type(self).__mro__
+            for name in cls.__dict__
+            if not name.startswith("_")
+        }
+        clash_with_native = new_methods & native
+        if clash_with_native:
+            raise ValueError(
+                f"Extension '{ext_name}' shadows native engine methods: "
+                + ", ".join(f"'{m}'" for m in sorted(clash_with_native))
+            )
+
+        # Check against already registered extensions
         for registered_name, registered_ext in self._extensions.items():
             clash = new_methods & {
                 m
@@ -104,16 +118,23 @@ class Engine(Registrable, root=True):
     def __dir__(self) -> list[str]:
         names = list(super().__dir__())
         for ext in self._extensions.values():
-            names.extend(m for m in dir(ext) if not m.startswith("_"))
+            names.extend(
+                m
+                for m in dir(ext)
+                if not m.startswith("_") and callable(getattr(ext, m, None))
+            )
         return names
 
     def __getattr__(self, name: str) -> Any:
         # Called only when `name` is not found through normal attribute lookup.
         # Protects against RecursionError if _extensions is not yet set.
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
         extensions = object.__getattribute__(self, "_extensions")
         for ext in extensions.values():
-            if hasattr(ext, name):
-                return getattr(ext, name)
+            attr = getattr(ext, name, None)
+            if callable(attr):
+                return attr
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     @abstractmethod

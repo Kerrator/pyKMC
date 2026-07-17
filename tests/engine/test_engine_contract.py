@@ -120,24 +120,46 @@ class EngineContractTests:
         raise NotImplementedError
 
     def test_extension_registers_and_delegates(self):
-        """A registered extension exposes its public methods through the engine."""
+        """A registered extension exposes its public callable methods through the engine."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         ext = self.make_test_extension(engine)
-        public = [m for m in dir(ext) if not m.startswith("_")]
-        assert all(hasattr(engine, m) for m in public)
+        public_callables = [
+            m
+            for m in dir(ext)
+            if not m.startswith("_") and callable(getattr(ext, m, None))
+        ]
+        assert all(hasattr(engine, m) for m in public_callables)
         engine.close()
 
     def test_extension_methods_visible_in_dir(self):
-        """Extension methods appear in dir(engine) after registration."""
+        """Extension callable methods appear in dir(engine) after registration."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
         ext = self.make_test_extension(engine)
-        public = [m for m in dir(ext) if not m.startswith("_")]
+        public_callables = [
+            m
+            for m in dir(ext)
+            if not m.startswith("_") and callable(getattr(ext, m, None))
+        ]
         engine_dir = dir(engine)
-        assert all(m in engine_dir for m in public)
+        assert all(m in engine_dir for m in public_callables)
+        engine.close()
+
+    def test_extension_cannot_shadow_native_method(self):
+        """Registering an extension that shadows a native engine method raises ValueError."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+
+        class _ShadowsClose(EngineExtension):
+            def close(self):
+                pass
+
+        with pytest.raises(ValueError, match="shadows native"):
+            _ShadowsClose(engine)
         engine.close()
 
     def test_extension_methods_visible_to_inspect(self):
