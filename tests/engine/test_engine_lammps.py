@@ -1,4 +1,7 @@
 import pytest
+
+pytest.importorskip("lammps")
+
 from pykmc.engine import Engine, EngineExtension
 from .test_engine_contract import EngineContractTests
 from dataclasses import dataclass

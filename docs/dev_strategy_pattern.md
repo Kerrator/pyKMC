@@ -104,8 +104,9 @@ The files must be imported, `autodiscover` does that in one line per module :
 ```python
 # pykmc/<module>/strategies/__init__.py
 from pykmc._core import autodiscover
+from .base import XxxStrategy
 
-autodiscover(__name__, __path__)
+XxxStrategy._import_errors = autodiscover(__name__, __path__)
 ```
 
 - It works at any inheritance depth. If you add an intermediate base to share code, its concrete children still register

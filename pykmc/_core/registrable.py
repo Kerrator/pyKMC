@@ -45,6 +45,7 @@ class Registrable(ABC):
 
         if root:
             cls._registry = {}
+            cls._import_errors: dict[str, ImportError] = {}
             cls._root = cls
             return
 
@@ -95,5 +96,9 @@ class Registrable(ABC):
                 "create() must be called on a root class, not on Registrable itself"
             )
         if name not in cls._registry:
+            if name in cls._import_errors:
+                raise ImportError(
+                    f"'{name}' is unavailable: {cls._import_errors[name]}"
+                ) from cls._import_errors[name]
             raise ValueError(f"'{name}' unknown. Available: {list(cls._registry)}")
         return cls._registry[name](**kwargs)

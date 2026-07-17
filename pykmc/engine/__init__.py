@@ -1,6 +1,6 @@
 from .base import Engine, EngineExtension
 from pykmc._core import autodiscover
 
-autodiscover(__name__, __path__)
+Engine._import_errors = autodiscover(__name__, __path__)
 
 __all__ = ["Engine", "EngineExtension"]
