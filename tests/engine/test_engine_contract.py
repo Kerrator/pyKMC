@@ -148,6 +148,31 @@ class EngineContractTests:
         assert all(m in engine_dir for m in public_callables)
         engine.close()
 
+    def test_extension_with_property_registers_without_crash(self):
+        """Registration must not execute @property getters — subclass fields may not exist yet."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+
+        class _ExtWithProperty(EngineExtension):
+            def __init__(self, eng):
+                super().__init__(eng)  # register() runs here, before my_param is set
+                self.my_param = 1.0
+
+            @property
+            def tolerance(self):
+                return (
+                    self.my_param * 0.01
+                )  # would crash if getter ran during registration
+
+            def my_op(self):
+                return self.tolerance
+
+        ext = _ExtWithProperty(engine)
+        assert not hasattr(engine, "tolerance")  # property stays on the extension
+        assert hasattr(engine, "my_op")
+        engine.close()
+
     def test_extension_cannot_shadow_native_method(self):
         """Registering an extension that shadows a native engine method raises ValueError."""
         engine = self.make_engine()

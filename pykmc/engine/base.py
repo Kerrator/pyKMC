@@ -82,9 +82,12 @@ class Engine(Registrable, root=True):
         if ext_name in self._extensions:
             raise ValueError(f"Extension '{ext_name}' already registered.")
 
-        # Get all pulic method of ext
+        # Discover methods statically from the class to avoid executing @property getters,
+        # which would crash if called before the subclass __init__ body has run.
         new_methods = {
-            m for m in dir(ext) if not m.startswith("_") and callable(getattr(ext, m))
+            m
+            for m in dir(type(ext))
+            if not m.startswith("_") and callable(getattr(type(ext), m, None))
         }
 
         # Check against native engine methods
@@ -105,8 +108,9 @@ class Engine(Registrable, root=True):
         for registered_name, registered_ext in self._extensions.items():
             clash = new_methods & {
                 m
-                for m in dir(registered_ext)
-                if not m.startswith("_") and callable(getattr(registered_ext, m))
+                for m in dir(type(registered_ext))
+                if not m.startswith("_")
+                and callable(getattr(type(registered_ext), m, None))
             }
             if clash:
                 raise ValueError(
