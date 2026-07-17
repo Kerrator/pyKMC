@@ -159,6 +159,7 @@ class LammpsEngine(Engine):
         self.comm = comm
         self.engine_id = engine_id
         self._is_orthorhombic = None
+        self.lmp = None
 
     # Convenience
     @property
@@ -196,7 +197,9 @@ class LammpsEngine(Engine):
         )
 
     def close(self) -> None:
-        self.lmp.close()
+        if self.lmp is not None:
+            self.lmp.close()
+            self.lmp = None
 
     @lammps_error_handler
     def initialize_parameters(self) -> None:
@@ -315,7 +318,7 @@ class LammpsEngine(Engine):
         if positions is not None:
             self.set_positions(positions=positions)
 
-        # Check if compute exists (rank 0 only)
+        # Check if compute exists 
         define_compute = self._has_compute("c_pe")
 
         if not define_compute:
