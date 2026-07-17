@@ -59,21 +59,56 @@ class Manager:
             session._op_timeout = op_timeout
         if self.global_session is not None:
             self.global_session._op_timeout = op_timeout
+        # Fix the LAMMPS type universe from the pair_coeff element list so every
+        # engine declares one type per element even if the initial atom set (or a
+        # restart config) is missing a species; harmless when all are present.
+        from ....system import elements_from_pair_coeff
+        elements = elements_from_pair_coeff(config.lammps.pair_coeff)
         print("[Manager] use local")
         self.use_local()
         print("[Manager] Initializing all Lammps engines")
-        for session in self.sessions : 
-            session.initialize_parameters() 
-            session.initialize_system(system)
+        for session in self.sessions :
+            session.initialize_parameters()
+            session.initialize_system(system, elements)
             session.initialize_potential(config)
         print("[Manager] use global")
         self.use_global()
         print("[Manager] Initializing global Lammps engines")
         if self.global_session is not None :
             self.global_initialize_parameters()
-            self.global_initialize_system(system)
+            self.global_initialize_system(system, elements)
             self.global_initialize_potential(config)
 
+
+    def reinitialize_system(self, config: "Config", system: object) -> None:
+        """Rebuild every engine's LAMMPS instance for a changed atom count.
+
+        When the KMC system loses an atom (dissolution), the pool's engines still
+        hold the previous atom count, so a plain ``set_positions`` / ``minimize``
+        would scatter a mismatched configuration. This clears and re-creates each
+        engine from the current ``system`` -- the same clear + initialize sequence
+        as ``lammps_operations._ensure_full_system(force=True)`` -- for BOTH the
+        local and the global LAMMPS instance of every engine.
+
+        The pair_coeff element list fixes the LAMMPS type universe so the rebuilt
+        box declares one type per element even when the deletion removed the last
+        atom of a species (dealloying) -- otherwise create_box + pair_coeff would
+        disagree on the type count and every engine would be left with no potential.
+        """
+        from ....system import elements_from_pair_coeff
+        elements = elements_from_pair_coeff(config.lammps.pair_coeff)
+        self.use_local()
+        for session in self.sessions:
+            session.command("clear")
+            session.initialize_parameters()
+            session.initialize_system(system, elements)
+            session.initialize_potential(config)
+        self.use_global()
+        if self.global_session is not None:
+            self.global_command("clear")
+            self.global_initialize_parameters()
+            self.global_initialize_system(system, elements)
+            self.global_initialize_potential(config)
 
     def use_local(self):
         """Have engines switch from global pool to local pools

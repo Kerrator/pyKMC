@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator, ValidationError, field_v
 import configparser
 from typing import Any, Literal
 from dataclasses import dataclass
+from ase.data import chemical_symbols
 
 
 @dataclass
@@ -130,6 +131,12 @@ class ControlConfig(BaseModel):
     bias: Optional[bool] = Field(
         default=False,
         description="Enable event selection bias. Requires a [Bias] section."
+    )
+
+    dissolution: Optional[bool] = Field(
+        default=False,
+        description="Enable dealloying dissolution events (delete under-coordinated "
+        "less-noble atoms). Requires a [Dissolution] section.",
     )
 
 class AtomicEnvironmentConfig(BaseModel):
@@ -1037,6 +1044,80 @@ class BiasConfig(BaseModel):
     )
 
 
+class DissolutionConfig(BaseModel):
+    """Dealloying dissolution parameters.
+
+    When enabled (``control.dissolution = True``), an atom of a configured
+    dissolvable ``elements`` whose first-shell (rnei) coordination is
+    ``<= coord_max`` competes in the BKL selection with an Erlebacher
+    bond-counting dissolution event of rate
+    ``k_diss(n) = nu_d * exp(-n * E_b / (kb * T))`` (n = the atom's current
+    coordination). Selecting the event deletes the atom, so the surface recedes
+    as less-noble atoms dissolve.
+    """
+
+    elements: list[str] = Field(
+        default=...,
+        description="Chemical symbols of the dissolvable (less-noble) species, "
+        "e.g. 'Cr' or 'Cr,Fe'. Never include the noble matrix element (Ni).",
+    )
+    nu_d: float = Field(
+        default=...,
+        description="Dissolution attempt frequency in ps^-1 (same unit contract as "
+        "rateconstant.k0/nu0: 1 THz = 1.0). A Hz-scale value is rejected.",
+    )
+    E_b: float = Field(
+        default=...,
+        gt=0.0,
+        description="Effective bond energy (eV) in the bond-counting rate; must be "
+        "> 0 for a physical (monotone-decreasing in coordination) rate.",
+    )
+    coord_max: int = Field(
+        default=6,
+        description="Maximum first-shell coordination for which an atom may dissolve. "
+        "Default 6: kinks and worse dissolve; a vacancy-ring atom (7) rearranges but "
+        "does not dissolve.",
+    )
+
+    @field_validator("elements", mode="before")
+    @classmethod
+    def parse_elements(cls, v: object) -> object:
+        """Parse a comma-separated element list and validate each symbol.
+
+        Accepts ``"Cr"`` or ``"Cr,Fe"`` (and an already-parsed list); every entry
+        must be a real chemical symbol (``ase.data.chemical_symbols``) so a typo
+        cannot silently make a species undissolvable.
+        """
+        if isinstance(v, str):
+            v = [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            bad = [s for s in v if s not in chemical_symbols]
+            if bad:
+                raise ValueError(
+                    "elements contains non-element symbol(s): {}. Use valid "
+                    "chemical symbols, e.g. 'Cr' or 'Cr,Fe'.".format(bad)
+                )
+        return v
+
+    @model_validator(mode="after")
+    def _check_nu_d_units(self) -> "DissolutionConfig":
+        """Reject a Hz-scale ``nu_d`` that would break the ps^-1 rate contract.
+
+        ``nu_d`` is a ps^-1 attempt frequency (1 THz = 1.0). A value entered in
+        Hz (e.g. 1e13) makes every dissolution ~1e12x too fast, so dissolution
+        dominates BKL selection and freezes the KMC clock -- the same failure
+        mode guarded by ``RateConstantConfig._check_k0_units`` for ``k0``.
+        """
+        if self.nu_d > K0_MAX_PS_INV:
+            raise ValueError(
+                "nu_d is a dissolution attempt frequency in ps^-1 (1 THz = 1.0). "
+                "Got {:g}, which is ~{:.0e}x a physical attempt frequency -- did "
+                "you enter it in Hz? Use e.g. nu_d=10.0 for a 10 THz attempt "
+                "frequency.".format(self.nu_d, self.nu_d / 100.0)
+            )
+        return self
+
+
 class Config(BaseModel):
     """Config for the KMC simulations."""
 
@@ -1099,6 +1180,12 @@ class Config(BaseModel):
     )
 
     bias: Optional[BiasConfig] = Field(default=None, description="Event selection bias parameters.")
+
+    dissolution: Optional[DissolutionConfig] = Field(
+        default=None,
+        description="Dealloying dissolution parameters. Required when "
+        "control.dissolution = True.",
+    )
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
@@ -1193,6 +1280,7 @@ class Config(BaseModel):
             ("control.active_volume", True) : ["activevolume"],
             ("control.recycle", True) : ["eventrecycling"],
             ("control.bias", True) : ["bias"],
+            ("control.dissolution", True) : ["dissolution"],
         }
 
         for (field_path, condition_value), required_fields in validation_rules.items():
@@ -1208,6 +1296,35 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_bias_with_dissolution(self) -> Config:
+        """Forbid combining biased selection with dissolution events.
+
+        Dissolution events do not enter the biased selection: ``bias.select``
+        operates only on the active-event rate rows, so with both enabled a
+        dissolution would either never fire (its rate is dropped) or, when the
+        active table is empty, drive ``rejection_free`` onto an empty vector.
+        Reject the combination up front with an actionable message.
+
+        Returns
+        -------
+        Config
+            The validated ``Config`` instance.
+
+        Raises
+        ------
+        ValueError
+            If both ``control.bias`` and ``control.dissolution`` are True.
+
+        """
+        if self.control.bias and self.control.dissolution:
+            raise ValueError(
+                "control.bias and control.dissolution cannot both be True: "
+                "dissolution events do not enter the biased selection (bias.select "
+                "operates only on active-event rows). Run them separately."
+            )
         return self
 
     @model_validator(mode="after")

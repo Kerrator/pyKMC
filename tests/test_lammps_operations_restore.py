@@ -184,7 +184,7 @@ def test_ensure_full_system_reinitializes_after_atom_count_mismatch(monkeypatch)
     #_ensure_full_system inlines the rebuild: clear + the same initialize sequence
     #the engine boot path uses. Capture each stage instead of one reinit function.
     monkeypatch.setattr(ops, "initialize_parameters", lambda eng: captured.update(params_engine=eng))
-    monkeypatch.setattr(ops, "initialize_system", lambda eng, system: captured.update(system=system))
+    monkeypatch.setattr(ops, "initialize_system", lambda eng, system, elements=None: captured.update(system=system, elements=elements))
     monkeypatch.setattr(ops, "initialize_potential", lambda eng, cfg: captured.update(config=cfg))
 
     ops._ensure_full_system(engine, config, positions, cell, types)
@@ -747,7 +747,7 @@ def test_basin_reconstruct_force_rebuilds_when_natoms_stale_after_error(monkeypa
     # _ensure_full_system so the count short-circuit is actually under test.
     rebuilt = {"params": False, "system": None, "potential": False}
     monkeypatch.setattr(ops, "initialize_parameters", lambda eng: rebuilt.update(params=True))
-    monkeypatch.setattr(ops, "initialize_system", lambda eng, system: rebuilt.update(system=system))
+    monkeypatch.setattr(ops, "initialize_system", lambda eng, system, elements=None: rebuilt.update(system=system))
     monkeypatch.setattr(ops, "initialize_potential", lambda eng, cfg: rebuilt.update(potential=True))
 
     result = ops.basin_reconstruct(engine, config, **args)

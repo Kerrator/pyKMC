@@ -10,7 +10,37 @@ import warnings
 
 import ase.geometry
 import numpy as np
+from ase.data import chemical_symbols
 from ase.io import read
+
+
+def elements_from_pair_coeff(pair_coeff: str | None) -> list[str] | None:
+    """Extract element symbols (in LAMMPS type order) from a pair_coeff string.
+
+    e.g. ``"* * Ni_v6_2.0.eam Ni"`` -> ``["Ni"]``;
+    ``"* * FeNiCr.eam Fe Ni Cr"`` -> ``["Fe", "Ni", "Cr"]``. Returns ``None`` when
+    no element symbols can be parsed (e.g. an empty or MTP-style pair_coeff).
+
+    Used to fix the LAMMPS *type universe* for the whole run: every engine box
+    must declare one atom type per pair_coeff element even when the live atom set
+    is missing a species (e.g. after dealloying deletes the last atom of one
+    element), otherwise ``create_box`` / ``pair_coeff`` disagree on the type count.
+
+    Parameters
+    ----------
+    pair_coeff : str or None
+        The LAMMPS ``pair_coeff`` command string.
+
+    Returns
+    -------
+    list[str] or None
+        Element symbols in pair_coeff order, or ``None`` if none are parseable.
+
+    """
+    if not pair_coeff:
+        return None
+    elements = [tok for tok in str(pair_coeff).split() if tok in chemical_symbols]
+    return elements or None
 
 
 class System:

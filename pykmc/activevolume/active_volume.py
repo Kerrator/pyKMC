@@ -6,8 +6,25 @@ import pypARTn
 import numpy as np
 import ctypes
 from ase.geometry import find_mic, wrap_positions
-from ..system import System
+from ..system import System, elements_from_pair_coeff
 from ..config import Config
+
+
+def _type_universe(types: object, config: object) -> list:
+    """Return the alphabetically-ordered LAMMPS type universe for an AV crop.
+
+    The universe is ``sorted(set(types) | set(pair_coeff elements))`` so the
+    cropped box always declares one LAMMPS type per pair_coeff element -- even
+    when the crop (or the whole system, after dealloying deleted the last atom of
+    a species) is missing one. Alphabetical order matches how pyKMC numbers atom
+    types and how ``pair_coeff`` must list its elements, so type i always maps to
+    the same element. Behaviour-preserving when every species is present.
+    """
+    elements = elements_from_pair_coeff(
+        getattr(getattr(config, "lammps", None), "pair_coeff", None)
+    )
+    universe = set(types) | (set(elements) if elements else set())
+    return sorted(universe)
 
 
 def define_zone(central_atom_idx: int, positions, cell, r_total: float, r_movable: float):
@@ -119,14 +136,15 @@ def redefine_atoms(engine, positions, type=None) -> None:
     engine.command('unfix 1')
 
 def partn_search_AV(engine, config, central_atom_idx: int, positions, cell, type) -> [np.array, int]:
-    reset(engine, config, cell, n_types=len(set(type)))
+    universe = _type_universe(type, config)
+    reset(engine, config, cell, n_types=len(universe))
     av_positions, av_idx, buffer_idx = define_AV(config, central_atom_idx, positions, cell)
 
     #Need to map type to positions
     atom_map = np.array(av_idx, dtype=int)
     map_type = {
         atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(type)))
+        for i, atom_type in enumerate(universe)
     }
     type = np.array([map_type[element]["ref"] for element in type]) # map to integer
 
@@ -145,14 +163,15 @@ def partn_refine_AV(engine, config, central_atom_idx:int, positions, cell, type,
         Active Volumes.
     '''
 
-    reset(engine, config, cell, n_types=len(set(type)))
+    universe = _type_universe(type, config)
+    reset(engine, config, cell, n_types=len(universe))
     av_positions, av_idx, buffer_idx = define_AV(config, central_atom_idx, positions, cell)
 
     #Need to map types to positions
     atom_map = np.array(av_idx, dtype=int)
     map_type = {
         atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(type)))
+        for i, atom_type in enumerate(universe)
     }
     type = np.array([map_type[element]["ref"] for element in type]) # map to integer
 

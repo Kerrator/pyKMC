@@ -9,26 +9,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .kmc import KMC
 from .log import LogKMC, LOGGING_CONFIG
-from .system import System
+from .system import System, elements_from_pair_coeff as _elements_from_pair_coeff
 from .neighbors_list import NeighborsList
 from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
 from .bias import DirectionBias, PointBias, TopoBias
-from ase.data import chemical_symbols
 import pickle
-
-
-def _elements_from_pair_coeff(pair_coeff: str | None) -> list[str] | None:
-    """Extract element symbols (in LAMMPS type order) from a pair_coeff string.
-
-    e.g. ``"* * Ni_v6_2.0.eam Ni"`` -> ``["Ni"]``;
-    ``"* * FeNiCr.eam Fe Ni Cr"`` -> ``["Fe", "Ni", "Cr"]``. Returns None when no
-    element symbols can be parsed (e.g. an empty or MTP-style pair_coeff).
-    """
-    if not pair_coeff:
-        return None
-    elements = [tok for tok in str(pair_coeff).split() if tok in chemical_symbols]
-    return elements or None
 
 
 class Initializer:

@@ -180,12 +180,18 @@ class MpiApiSession :
         self.send_message({"type": "initialize_parameters"})
 
     #@session_locked
-    def initialize_system(self, system) -> None :
-        """ 
+    def initialize_system(self, system, elements: "list[str] | None" = None) -> None :
+        """
         Initialize Lammps system
+
+        ``elements`` (pair_coeff element list) fixes the LAMMPS type universe so
+        the box declares one type per element even when the live atom set is
+        missing a species (e.g. after dealloying deletes the last of one).
         """
         #print(f"[Session {self.session_id}] Initializing Lammps System")
-        self.send_message({"type": "initialize_system", "value": system})
+        self.send_message(
+            {"type": "initialize_system", "value": {"system": system, "elements": elements}}
+        )
     
     #@session_locked
     def initialize_potential(self, config) -> None :

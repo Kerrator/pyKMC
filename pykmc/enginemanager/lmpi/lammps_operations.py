@@ -38,7 +38,7 @@ def initialize_parameters(engine) :
     engine.command("atom_modify map array") #! necessary for scatter atoms
     engine.command("atom_modify sort 0 0.0") #! necessary for partn
 
-def initialize_system(engine, system) : 
+def initialize_system(engine, system, elements: "list[str] | None" = None) :
 
         #system parameters
         natoms = len(system.types)
@@ -51,9 +51,15 @@ def initialize_system(engine, system) :
         ind = np.linspace(0, natoms - 1, natoms).astype(int)
         ind += 1  # Lammps id start at 1
         # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
+        # `elements` fixes the type universe for the whole run (the pair_coeff
+        # element list): every declared element gets a type ref/mass/labelmap
+        # entry even with ZERO atoms present, so create_box + pair_coeff always
+        # agree on the type count -- otherwise deleting the last atom of a species
+        # (dealloying) shrinks set(types) and LAMMPS raises a type-count mismatch.
+        universe = set(types) | (set(elements) if elements else set())
         map_type = {
             atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-            for i, atom_type in enumerate(sorted(set(types)))
+            for i, atom_type in enumerate(sorted(universe))
         }
         types = [map_type[element]["ref"] for element in types]  # map to integer
 
@@ -124,10 +130,14 @@ def _ensure_full_system(engine: "MpiApiEngine", config: "Config", positions: "np
         index=np.arange(expected_natoms),
     )
     #Clear and rebuild the engine with the full system (same sequence the
-    #engine boot path uses; boundary stays fully periodic).
+    #engine boot path uses; boundary stays fully periodic). The pair_coeff
+    #element list fixes the type universe so a restore after the last atom of a
+    #species was deleted (dealloying) still declares every pair_coeff element.
+    from ...system import elements_from_pair_coeff
+    _pair_coeff = getattr(getattr(config, "lammps", None), "pair_coeff", None)
     engine.lmp.command("clear")
     initialize_parameters(engine)
-    initialize_system(engine, system)
+    initialize_system(engine, system, elements_from_pair_coeff(_pair_coeff))
     initialize_potential(engine, config)
 
 
@@ -372,13 +382,22 @@ def compute_event_prefactors(
             r_total, r_movable = rc.nu0_zone_radius, rc.free_radius
 
         serial = _get_serial_hessian_engine(engine)
-        reset(serial, config, cell, n_types=len(set(types_used)))
+        # Fixed type universe (pair_coeff elements ∪ present species) so the crop
+        # declares one LAMMPS type per pair_coeff element even when it lacks a
+        # species -- otherwise the int-type numbering shifts vs pair_coeff and the
+        # wrong element's potential is silently assigned.
+        from ...system import elements_from_pair_coeff
+        _pc_elements = elements_from_pair_coeff(
+            getattr(getattr(config, "lammps", None), "pair_coeff", None)
+        )
+        universe = sorted(set(types_used) | (set(_pc_elements) if _pc_elements else set()))
+        reset(serial, config, cell, n_types=len(universe))
         av_positions, av_idx, buffer_idx = define_zone(
             central, min1, cell, r_total=r_total, r_movable=r_movable
         )
         atom_map = np.array(av_idx, dtype=int)
         map_type = {
-            atom_type: i + 1 for i, atom_type in enumerate(sorted(set(types_used)))
+            atom_type: i + 1 for i, atom_type in enumerate(universe)
         }
         int_types = np.array([map_type[t] for t in types_used])
         redefine_atoms(serial, av_positions, int_types[atom_map])

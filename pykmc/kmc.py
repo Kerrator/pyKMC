@@ -47,6 +47,7 @@ from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
+from .dissolution import DissolutionSelection, dissolution_rates, eligible_atoms
 
 
 # Reconstruction failures that are specific to *this active row* (a per-site IRA
@@ -111,6 +112,12 @@ class KMC:
         self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
         self.bias: Bias | None = None
+        # Per-step dissolution candidates: (indices, rates, coordinations) of the
+        # atoms eligible to dissolve this step, or None when the feature is off.
+        # Recomputed each step; the rates compete in the same BKL vector.
+        self._dissolution_candidates: (
+            tuple[np.ndarray, np.ndarray, np.ndarray] | None
+        ) = None
         # The recycler decides what to carry over between KMC steps at
         # end-of-step; with no recycler the active table is cleared each
         # step (same observable behavior as prior releases).
@@ -203,6 +210,18 @@ class KMC:
             self.config, recycler=self.recycler, manager=self.manager
         )
 
+        # Warn loudly if a configured dissolvable element is absent from the
+        # initial system (a likely misconfiguration -- nothing would ever dissolve).
+        if self.config.control.dissolution:
+            present = set(np.asarray(self.system.types).tolist())
+            for el in self.config.dissolution.elements:
+                if el not in present:
+                    self.loggers.warning(
+                        "log",
+                        "Dissolution element '{}' is not present in the initial "
+                        "system; no atom of it can ever dissolve.".format(el),
+                    )
+
         # KMC LOOP
         for step in range(last_step, nkmc_steps+last_step):
             start_real = time.time()
@@ -217,6 +236,9 @@ class KMC:
 
             # == Find Current atomic environments that has not been visited ==
             new_environments = self.get_new_environments()
+
+            # == Scan for dealloying dissolution candidates (competes in BKL) ==
+            self._compute_dissolution_candidates()
 
             if self.config.control.recycle and len(self.active_table.table) > 0:
                 self.loggers.info(
@@ -243,8 +265,10 @@ class KMC:
                 search_results = [r for r in search_results if r.move_atom_index not in inactive_set]
             results_is_valid_events = self.add_reference_events(search_results)
 
-            ##=>Close simulation if no events in the reference table
-            if len(self.reference_table.table) == 0:
+            ##=>Close simulation if no events in the reference table AND no
+            ##  dissolution candidate can carry the step (dissolution needs no
+            ##  reference event -- the atom just leaves).
+            if len(self.reference_table.table) == 0 and self._n_dissolution() == 0:
                 self.loggers.error(
                     "log",
                     "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.",
@@ -285,6 +309,11 @@ class KMC:
             # == Update System ==
             self.manager.use_global()
             result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae = self.reconstruction(active_table)
+            # A dissolution row won the BKL draw: no saddle/reconstruction, the
+            # atom just leaves. Detected here so every downstream consumer of the
+            # (now out-of-range) idx_selected_event -- the events file, the basin
+            # detector, the step log, the prune -- branches on it.
+            is_dissolution = isinstance(result_reconstruction, DissolutionSelection)
             events_info = info_active_events(self.system.types, self.reference_table, active_table)
             # Refs purged this step; the orphan eviction is DEFERRED until after the
             # prune block below (see the drop_orphans call there for the rationale).
@@ -301,7 +330,25 @@ class KMC:
 
             #INFO :
             self.loggers.events_file_step_first_line("events", step)
-            self.loggers.events_applicable_info_line("events", idx_selected_event)
+            if is_dissolution :
+                # idx_selected_event is a concatenated (past-the-active-rows)
+                # index that has no row in the listing below, so write the -1
+                # sentinel and a parseable dissolution record instead (consumed by
+                # the PyKMC_Analysis events parser).
+                self.loggers.events_applicable_info_line("events", -1)
+                diss_pos = self.system.positions[result_reconstruction.atom_index]
+                self.loggers.info(
+                    "events",
+                    "#Dissolution: element={} position=[{:.4f}, {:.4f}, {:.4f}] "
+                    "coordination={} k={:.6e}".format(
+                        self.system.types[result_reconstruction.atom_index],
+                        diss_pos[0], diss_pos[1], diss_pos[2],
+                        result_reconstruction.coordination,
+                        result_reconstruction.rate,
+                    ),
+                )
+            else :
+                self.loggers.events_applicable_info_line("events", idx_selected_event)
             self.loggers.info("events", events_info)
 
                 #TODO: Temporary, need to unified kmc main loop and basin operations + ugly
@@ -310,7 +357,10 @@ class KMC:
             if self.config.control.recycle:
                 self._pre_exec_positions = self.system.positions.copy()
                 #IF selected event shows we are in a basin
-            if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
+            if is_dissolution :
+                self._execute_dissolution(result_reconstruction, total_time)
+                prune_detach_recycler = False
+            elif self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
                 self.loggers.info("log","\t :=> System is in a Basin." )
                 self.loggers.info("log","\t :=> Exploring the Basin." )
                 #get basin info/explore
@@ -396,14 +446,25 @@ class KMC:
             elapsed_real = time.time() - start_real
             elapsed_cpu = time.process_time() - start_cpu
 
+            # Dissolution steps have no reference event / active row to read; log
+            # honest surrogate columns (ref = -1, Ea = n*E_b, k = the bond-counting
+            # rate) so the output table stays parseable.
+            if is_dissolution :
+                ref_event_col = -1
+                ea_col = result_reconstruction.coordination * self.config.dissolution.E_b
+                k_evt_col = result_reconstruction.rate
+            else :
+                ref_event_col = active_table.table.loc[idx_selected_event].at["num_reference_event"]
+                ea_col = active_table.table.loc[idx_selected_event].at["energy_barrier"]
+                k_evt_col = active_table.table.loc[idx_selected_event].at["k"]
             self.loggers.table_line_info_kmc(
                 "output",
                 step,
                 delta_t * 10**-12,
                 total_time,
-                active_table.table.loc[idx_selected_event].at["num_reference_event"],
-                active_table.table.loc[idx_selected_event].at["energy_barrier"],
-                active_table.table.loc[idx_selected_event].at["k"],
+                ref_event_col,
+                ea_col,
+                k_evt_col,
                 ktot,
                 self.total_energy,
                 elapsed_cpu,
@@ -414,7 +475,12 @@ class KMC:
             # Must run AFTER the step log above, which reads the executed event's
             # row; with no recycler (recycle = False, the default) the prune clears
             # the whole table and the lookup would raise KeyError.
-            if prune_detach_recycler:
+            if is_dissolution:
+                # The deletion shifted every atom index and dropped an atom, so no
+                # active row (its atom_index / neighbours) can be trusted or
+                # recycled. Flush the table; the next step rebuilds from scratch.
+                self.active_table.table = self.active_table.table.iloc[0:0].reset_index(drop=True)
+            elif prune_detach_recycler:
                 saved_recycler = self.active_table.recycler
                 self.active_table.recycler = None
                 self.active_table.prune_for_recycling(
@@ -693,9 +759,15 @@ class KMC:
 
         """
         l_k = np.array(
-            [active_table.table.loc[i].at["k"] for i in range(len(active_table.table))]
+            [active_table.table.loc[i].at["k"] for i in range(len(active_table.table))],
+            dtype=float,
         )
         if self.bias is None:
+            # Dissolution rows compete in the SAME rejection-free vector, appended
+            # after the active-event rows (so a selected index >= len(table) maps
+            # to a dissolution). ktot then includes them and delta_t is correct.
+            if self._n_dissolution() > 0:
+                l_k = np.concatenate([l_k, self._dissolution_candidates[1]])
             idx_selected_event, delta_t, ktot = rejection_free(l_k)
         else:
             idx_selected_event, delta_t, ktot = self.bias.select(
@@ -704,15 +776,157 @@ class KMC:
             )
         return idx_selected_event, delta_t, ktot
 
+    def _n_dissolution(self) -> int:
+        """Return the number of dissolution candidates eligible this step.
+
+        Returns
+        -------
+        int
+            Number of atoms eligible to dissolve, or 0 when the feature is off.
+
+        """
+        if self._dissolution_candidates is None:
+            return 0
+        return len(self._dissolution_candidates[0])
+
+    def _compute_dissolution_candidates(self) -> None:
+        """Scan the current system for atoms eligible to dissolve and rate them.
+
+        Populates ``self._dissolution_candidates`` with an aligned
+        ``(indices, rates, coordinations)`` tuple (``None`` when the feature is
+        off). Coordination is the per-atom first-shell (rnei) neighbour count of
+        the current neighbour list, so the scan reflects the live configuration.
+        """
+        if not self.config.control.dissolution:
+            self._dissolution_candidates = None
+            return
+        coordination = np.array(
+            [len(n) for n in self.neighbors_list.neighbors_list["rnei"]], dtype=int
+        )
+        diss = self.config.dissolution
+        idx = eligible_atoms(
+            self.system.types, coordination, diss.elements, diss.coord_max
+        )
+        # Respect the region gates: an atom the run may not search on
+        # (inactive_atoms) or move (frozen_atoms) must not dissolve either.
+        excluded: set[int] = set()
+        inactive_ae = getattr(self, "inactive_ae", None)
+        if inactive_ae is not None:
+            excluded |= set(inactive_ae.get_atoms_with_id("in"))
+        frozen_ae = getattr(self, "frozen_ae", None)
+        if frozen_ae is not None:
+            excluded |= set(frozen_ae.get_atoms_with_id("in"))
+        if excluded:
+            idx = np.array([i for i in idx if int(i) not in excluded], dtype=int)
+        coords = coordination[idx]
+        rates = dissolution_rates(
+            coords, diss.nu_d, diss.E_b, self.config.rateconstant.T
+        )
+        self._dissolution_candidates = (idx, rates, coords)
+
+    def _delete_atom(self, atom_idx: int) -> None:
+        """Remove one atom from every n_atoms-sized ``System`` array.
+
+        ``positions``, ``types`` and ``index`` are all length-N; each is trimmed
+        so the system stays internally consistent, and ``index`` is renumbered to
+        ``arange(N-1)`` to match the positional numbering used everywhere else.
+        Indices after ``atom_idx`` shift down by one.
+
+        Parameters
+        ----------
+        atom_idx : int
+            Index (current numbering) of the atom to remove.
+
+        """
+        n = len(self.system.types)
+        keep = np.ones(n, dtype=bool)
+        keep[atom_idx] = False
+        self.system.positions = np.ascontiguousarray(self.system.positions[keep])
+        # Keep types an ndarray per the System contract (create_from_file seeds a
+        # list; np.asarray tolerates both).
+        self.system.types = np.asarray(self.system.types)[keep]
+        self.system.index = np.arange(n - 1)
+
+    def _execute_dissolution(
+        self, selection: DissolutionSelection, total_time: float
+    ) -> None:
+        """Delete a dissolved atom, rebuild the engines, and relax the surface.
+
+        A dissolution event has no saddle/reconstruction: the atom simply leaves.
+        Its removal shrinks the system and shifts every later atom index, so all
+        n_atoms-sized structures are trimmed (:meth:`_delete_atom`), every LAMMPS
+        engine (local + global instances) is rebuilt to the reduced count before
+        any positions are scattered, and the system is re-minimised so the total
+        energy stays honest. Neighbour lists and the classifier are rebuilt at the
+        end of the step from the updated system; the active table is flushed by
+        the caller (indices shifted).
+
+        Parameters
+        ----------
+        selection : DissolutionSelection
+            The chosen dissolution event (atom index, coordination, rate).
+        total_time : float
+            Simulation clock (s) at this step, for the log line.
+
+        """
+        atom_idx = selection.atom_index
+        element = self.system.types[atom_idx]
+        position = np.asarray(self.system.positions[atom_idx], dtype=float).copy()
+        self._delete_atom(atom_idx)
+        # Position (not index) is the stable identity of the dissolved atom --
+        # indices shift with each deletion. Report the remaining count of each
+        # dissolvable species so dealloying curves fall out of the log directly.
+        remaining = ", ".join(
+            "{}={}".format(el, int(np.count_nonzero(np.asarray(self.system.types) == el)))
+            for el in self.config.dissolution.elements
+        )
+        self.loggers.info(
+            "log",
+            "\t :=> [dissolution] {} atom index {} coordination {} at "
+            "[{:.4f}, {:.4f}, {:.4f}] dissolves; remaining {} (t = {:.6e} s)".format(
+                element,
+                atom_idx,
+                selection.coordination,
+                position[0],
+                position[1],
+                position[2],
+                remaining,
+                total_time,
+            ),
+        )
+        # Every engine still holds the old atom count; rebuild both the local and
+        # global LAMMPS instance from the reduced system (clear + reinit, the
+        # _ensure_full_system(force=True) sequence) before any positions are set.
+        self.manager.reinitialize_system(self.config, self.system)
+        # Relax the surface after the atom left and refresh the total energy.
+        # apply_positions=True so a resumed run (restart_file set) also applies
+        # the relaxed positions instead of scattering the stale unrelaxed ones.
+        self.minimize_system(apply_positions=True)
 
     def reconstruction(self, active_table) :
             #TODO make a Result
 
             err_reference = []
             err_ae = []
-            while len(active_table.table) > 0 :
+            # Dissolution rows keep the pool non-empty even after every active
+            # event has been removed, so a dissolution stays selectable rather
+            # than dying via the "all reconstructions failed" path below.
+            while len(active_table.table) > 0 or self._n_dissolution() > 0 :
                 ##=>Select event
                 idx_selected_event, delta_t, ktot = self._select_event(active_table)
+                ##=>A dissolution row won (index past the active rows): no event to
+                ##  reconstruct, the selection always "succeeds". Return the chosen
+                ##  atom so run() deletes it (delta_t/ktot already include its rate).
+                n_active = len(active_table.table)
+                if idx_selected_event >= n_active :
+                    indices, rates, coords = self._dissolution_candidates
+                    local = idx_selected_event - n_active
+                    selection = DissolutionSelection(
+                        atom_index=int(indices[local]),
+                        coordination=int(coords[local]),
+                        rate=float(rates[local]),
+                    )
+                    return selection, delta_t, ktot, idx_selected_event, err_reference, err_ae
                 ##=>Reconstruct event
                 self.loggers.info("log", "\t :=> Event Reconstruction")
                 result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
@@ -829,9 +1043,25 @@ class KMC:
         self.system.update_positions(reconstruction_output.min2_positions)
         self.total_energy = reconstruction_output.min2_etot
 
-    def minimize_system(self, positions = None) -> None:
-        """Minimize the system and update its positions."""
-        if self.config.control.restart_file is None:
+    def minimize_system(self, positions = None, apply_positions: bool | None = None) -> None:
+        """Minimize the system and update its positions.
+
+        Parameters
+        ----------
+        positions : np.ndarray | None, optional
+            Positions to minimise from; ``None`` uses the engine's current state.
+        apply_positions : bool | None, optional
+            Whether to write the minimised positions back onto ``self.system``.
+            ``None`` (default) keeps the legacy init-time gate (apply only on a
+            fresh run, i.e. ``restart_file is None`` -- a resumed run trusts its
+            own restart positions). ``True`` always applies: the dissolution path
+            passes this so a resumed run relaxes the post-deletion surface instead
+            of scattering stale positions with a freshly-minimised energy.
+
+        """
+        if apply_positions is None:
+            apply_positions = self.config.control.restart_file is None
+        if self.config.control.restart_file is None or apply_positions:
             self.loggers.info("log", ":=> Minimizing the system")
         else :
             self.loggers.info("log", ":=> Computing energies")
@@ -841,7 +1071,7 @@ class KMC:
         #new_positions, total_energy = future.result()
         #np.savetxt('before_min.dat', self.system.positions)
         #np.savetxt('after_min.dat', new_positions)
-        if self.config.control.restart_file is None :
+        if apply_positions :
             self.system.update_positions(new_positions)
         self.total_energy = total_energy
         self.potential_energy = self.manager.global_get_potential_energy()
