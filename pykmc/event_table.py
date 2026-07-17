@@ -28,6 +28,13 @@ from .utils.geometry import align_positions_by_neighbors, compute_delr
 
 logger = logging.getLogger(__name__)
 
+# Coordination classifier coarse-grain labels (see
+# pykmc/environments/coordination.py): an atom with coordination >= threshold is
+# labelled "crystal", otherwise "noncrystal". Neither is a per-atom graph hash,
+# so a mover carrying one of these labels is invisible to the live classifier --
+# an event keyed by it could never be selected by has_id_subset_table.
+_COORDINATION_LABELS = frozenset({"crystal", "noncrystal"})
+
 if TYPE_CHECKING:
     from .event_recycling import Recycling
 
@@ -57,7 +64,10 @@ class ReferenceEventTable:
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput], types: "list[str] | None" = None
+        self,
+        events: list[EventSearchOutput],
+        types: "list[str] | None" = None,
+        atomic_environment_list: "list | None" = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Add events to the table dataframe, then backfill per-event prefactors.
 
@@ -74,6 +84,16 @@ class ReferenceEventTable:
         types : list[str] | None
             Per-atom chemical symbols of the full system (required for the
             htst/rpa prefactor payloads; unused for the constant style).
+        atomic_environment_list : list | None
+            The live per-atom classifier ids for the current system (as produced
+            by ``AtomicEnvironment``). When supplied, each event's forward
+            ``event_id`` is keyed by the mover's LIVE id rather than a hash
+            re-derived from the event's own (active-volume-relaxed) geometry, so
+            an accepted event is guaranteed selectable by
+            ``has_id_subset_table``; a mover the classifier coarse-grains
+            (``"crystal"``/``"noncrystal"``) is rejected instead of stored as an
+            unmatchable orphan. ``None`` (legacy callers) keeps the previous
+            re-derived-hash behaviour unchanged.
 
         Returns
         -------
@@ -85,6 +105,13 @@ class ReferenceEventTable:
         backfill: "list[tuple[int, int | None, dict[str, object]]]" = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
+            # Look up the mover's LIVE classifier id when the classification is
+            # supplied; out-of-range/None falls back to the legacy hash path.
+            live_id = None
+            if atomic_environment_list is not None:
+                move_idx = int(ev.move_atom_index)
+                if 0 <= move_idx < len(atomic_environment_list):
+                    live_id = atomic_environment_list[move_idx]
             res = self.is_valid_new_event(
                     min1_positions=ev.min1_positions,
                     saddle_positions=ev.saddle_positions,
@@ -94,6 +121,7 @@ class ReferenceEventTable:
                     dE_backward=ev.dE_backward,
                     cell=ev.cell,
                     types=types,
+                    live_id=live_id,
                 )
             results_is_valid_events.append(res)
             if res.is_ok():
@@ -175,6 +203,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: "list[str] | None" = None,
+        live_id: "str | None" = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -194,6 +223,14 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str] | None
+            Per-atom chemical symbols of the full system (full-colour graph
+            hashing / per-event neighbour types). ``None`` for grey mode.
+        live_id : str | None
+            The mover's LIVE classifier id. When it is a coordination
+            coarse-grain label the event is rejected (the mover is invisible to
+            the classifier); when it is a graph hash it is used to key the
+            forward event. ``None`` keeps the legacy re-derived-hash behaviour.
 
         Returns
         -------
@@ -256,6 +293,35 @@ class ReferenceEventTable:
                 )
             )
 
+        # Mover invisible to the live classifier: reject BEFORE the expensive
+        # series build. A coordination coarse-grain label ("crystal"/
+        # "noncrystal") is not a per-atom id, so has_id_subset_table could never
+        # select this event -- it would be stored forever as an unmatchable
+        # orphan (the production "Refining 0 events" death). Only fires when a
+        # live classification is supplied (legacy live_id=None is unaffected).
+        elif live_id is not None and live_id in _COORDINATION_LABELS:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.EVENT_MOVER_NOT_CLASSIFIED,
+                    message=(
+                        "Event mover is coarse-grained by the live classifier "
+                        "(id '{}'), so it is not individually resolvable and an "
+                        "event keyed by it could never be selected "
+                        "(has_id_subset_table) -- it would be stored as an "
+                        "unmatchable orphan. Cause: the mover's coordination >= "
+                        "atomicenvironment.coordination_threshold; raise "
+                        "coordination_threshold (e.g. 12 for FCC) so defect "
+                        "movers fall below it and are graph-classified.".format(
+                            live_id
+                        )
+                    ),
+                    details="move_atom_idx = {}, coordination_threshold = {}".format(
+                        move_atom_idx,
+                        self.config.atomicenvironment.coordination_threshold,
+                    ),
+                )
+            )
+
         else:  # Event is valid, construct event Series
             dfevent_forward, dfevent_backward = self._build_event_series(
                 min1_positions=min1_positions,
@@ -266,6 +332,7 @@ class ReferenceEventTable:
                 dE_backward=dE_backward,
                 cell=cell,
                 types=types,
+                live_id=live_id,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -442,6 +509,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: "list[str] | None" = None,
+        live_id: "str | None" = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series (k0-placeholder rates).
 
@@ -461,6 +529,14 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str] | None
+            Per-atom chemical symbols of the full system (full-colour hashing).
+        live_id : str | None
+            The mover's LIVE classifier id. When it is a graph hash it becomes
+            the forward row's ``event_id`` (in place of the hash re-derived from
+            this event's own, possibly drifted, min1 geometry) so the event is
+            matchable by ``has_id_subset_table``. ``None`` / a coordination label
+            keeps the re-derived ``id_min1``.
 
         Returns
         -------
@@ -558,10 +634,22 @@ class ReferenceEventTable:
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
         dra_backward = np.linalg.norm(min1_positions[neighbor_list_backward][move_atom_idx_backward]-saddle_positions[neighbor_list_backward][move_atom_idx_backward])
 
+        # Forward event_id: prefer the mover's LIVE classifier id when it is a
+        # graph hash. The event's own min1 geometry is AV-relaxed pARTn output
+        # and can hash differently from the live full-system geometry (drift
+        # channel); keying by id_min1 there would store an event
+        # has_id_subset_table can never select. A coordination coarse-grain
+        # label is filtered upstream (is_valid_new_event); it is defensively
+        # ignored here so a label never lands in event_id. id_saddle/id_final
+        # and the backward row are left keyed by the re-derived hashes.
+        forward_event_id = id_min1
+        if live_id is not None and live_id not in _COORDINATION_LABELS:
+            forward_event_id = live_id
+
         dfevent_forward = pd.Series(
             {
                "idx_ref": -1, #unknown yet
-                "event_id": id_min1,
+                "event_id": forward_event_id,
                 "initial_positions": min1_positions[neighbor_list_forwward],
                 "initial_types": initial_types_forward,
                 "saddle_positions": saddle_positions[neighbor_list_forwward],

@@ -600,7 +600,9 @@ class KMC:
 
         """
         results_is_valid_events = self.reference_table.add_events(
-            events, types=list(self.system.types)
+            events,
+            types=list(self.system.types),
+            atomic_environment_list=self.atomic_environment.atomic_environment_list,
         )
         self.loggers.info(
             "log",
@@ -740,7 +742,11 @@ class KMC:
                     active_table.remove(idx_selected_event)
             else :
                 self.loggers.error("log", "All event reconstuctions failed.")
-                self._close()
+                # Non-silent death: every active event this step failed to
+                # reconstruct, so there is no move to apply. Exit NONZERO (via
+                # the same close/teardown path) so a truncated campaign is not
+                # mistaken for a completed run (production rc=0 at half-steps).
+                self._close(exit_code=1)
             return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
@@ -976,9 +982,22 @@ class KMC:
                      last_time = last_time)
 
 
-    def _close(self) -> None:
-        """Close the simulation."""
+    def _close(self, exit_code: int = 0) -> None:
+        """Close the simulation.
+
+        Parameters
+        ----------
+        exit_code : int, optional
+            Process exit status passed to ``sys.exit`` (default 0, a healthy
+            finish). The reconstruction-exhausted failure path passes a nonzero
+            code so a truncated campaign is not silently reported as success.
+            ``manager.close_all()`` (the MPI/engine-pool teardown) runs first
+            regardless -- exactly as the healthy path already does -- so only the
+            exit status differs; ``run()`` catches ``Exception`` but not the
+            resulting ``SystemExit``, so the pool is still closed exactly once.
+
+        """
         self.loggers.info("log", ":=> End of simulation")
         self.manager.close_all()
-        sys.exit()
+        sys.exit(exit_code)
 
