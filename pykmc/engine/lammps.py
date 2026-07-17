@@ -165,6 +165,17 @@ class LammpsEngine(Engine):
     def _is_rank0(self) -> bool:
         return self.comm is None or self.comm.Get_rank() == 0
 
+    # NOTE: rank and command are exposed publicly to support the active volume
+    # helpers (partn_search_AV / partn_refine_AV) until #60 is resolved.
+    @property
+    def rank(self) -> int:
+        """MPI rank of this process (0 in serial)."""
+        return 0 if self.comm is None else self.comm.Get_rank()
+
+    def command(self, cmd: str) -> None:
+        """Run a LAMMPS command string."""
+        self.lmp.command(cmd)
+
     def _positions_to_lammps(self, positions: np.ndarray) -> np.ndarray:
         return positions @ self.Q.T if not self._is_orthorhombic else positions
 
