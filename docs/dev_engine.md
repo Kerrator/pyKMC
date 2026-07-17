@@ -82,7 +82,7 @@ class MyEngineConfig(Protocol):
 
 ### EngineExtension
 
-`EngineExtension` allows attaching engine-specific operations to an engine instance without modifying the `Engine` ABC. An extension registers itself at construction time by calling `super().__init__(engine)`, which calls `engine.register(self)` and stores the engine reference as `self.engine`. The engine then exposes the extension's public methods directly through `__getattr__` delegation, so callers access them as if they were native engine methods.
+`EngineExtension` allows attaching engine-specific operations to an engine instance without modifying the `Engine` ABC. An extension registers itself at construction time by calling `super().__init__(engine)`, which calls `engine.register(self)` and stores the engine reference as `self.engine`. The engine then exposes the extension's public methods directly through `__getattr__` delegation, so callers access them as if they were native engine methods. Extension methods are also fully discoverable: they appear in `dir(engine)` and in `inspect.getmembers(engine, callable)` alongside the core methods.
 
 ```python
 from pykmc.engine import EngineExtension, Engine

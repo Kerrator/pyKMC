@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import abstractmethod
+from typing import Any
 import numpy as np
 from ase.cell import Cell
 from pykmc._core import Registrable
@@ -100,7 +101,13 @@ class Engine(Registrable, root=True):
                 )
         self._extensions[ext_name] = ext
 
-    def __getattr__(self, name: str):
+    def __dir__(self) -> list[str]:
+        names = list(super().__dir__())
+        for ext in self._extensions.values():
+            names.extend(m for m in dir(ext) if not m.startswith("_"))
+        return names
+
+    def __getattr__(self, name: str) -> Any:
         # Called only when `name` is not found through normal attribute lookup.
         # Protects against RecursionError if _extensions is not yet set.
         extensions = object.__getattribute__(self, "_extensions")

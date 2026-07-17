@@ -1,4 +1,5 @@
 from pykmc.engine import Engine, EngineExtension
+import inspect
 import numpy as np
 import pytest
 
@@ -126,6 +127,32 @@ class EngineContractTests:
         ext = self.make_test_extension(engine)
         public = [m for m in dir(ext) if not m.startswith("_")]
         assert all(hasattr(engine, m) for m in public)
+        engine.close()
+
+    def test_extension_methods_visible_in_dir(self):
+        """Extension methods appear in dir(engine) after registration."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+        ext = self.make_test_extension(engine)
+        public = [m for m in dir(ext) if not m.startswith("_")]
+        engine_dir = dir(engine)
+        assert all(m in engine_dir for m in public)
+        engine.close()
+
+    def test_extension_methods_visible_to_inspect(self):
+        """inspect.getmembers(engine, callable) includes extension methods."""
+        engine = self.make_engine()
+        engine.start()
+        self.initialize(engine)
+        ext = self.make_test_extension(engine)
+        public_callables = [
+            m
+            for m in dir(ext)
+            if not m.startswith("_") and callable(getattr(ext, m, None))
+        ]
+        discovered = {name for name, _ in inspect.getmembers(engine, callable)}
+        assert all(m in discovered for m in public_callables)
         engine.close()
 
     def test_extension_conflict_raises(self):
