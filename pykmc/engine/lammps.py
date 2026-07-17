@@ -359,13 +359,21 @@ class LammpsEngine(Engine):
             raise NotImplementedError(
                 "frozen_atoms by type requires types — get_types is disabled"
             )
-        frozen_ae = AtomicEnvironment(
-            style="region",
-            region=config.frozen_atoms,
-            positions=positions,
-            atom_types=types,
-        )
-        frozen_indices = frozen_ae.get_atoms_with_id("in")
+        # Compute frozen indices on rank 0 only (positions is None on other ranks
+        # when falling back to get_positions()), then broadcast before the
+        # collective lmp.command so all ranks participate.
+        if self._is_rank0:
+            frozen_ae = AtomicEnvironment(
+                style="region",
+                region=config.frozen_atoms,
+                positions=positions,
+                atom_types=types,
+            )
+            frozen_indices = frozen_ae.get_atoms_with_id("in")
+        else:
+            frozen_indices = None
+        if self.comm is not None:
+            frozen_indices = self.comm.bcast(frozen_indices, root=0)
         if not frozen_indices:
             return False
         lammps_ids = " ".join(str(i + 1) for i in frozen_indices)
