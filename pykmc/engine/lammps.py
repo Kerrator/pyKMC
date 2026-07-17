@@ -525,9 +525,15 @@ class LammpsEngine(Engine):
                             position_results_AV(config, artn, atom_map, positions)
                         )
                     else:
-                        min1positions = artn.extract("tau_min1")
-                        min2positions = artn.extract("tau_min2")
-                        saddlepositions = artn.extract("tau_sad")
+                        min1positions = self._positions_from_lammps(
+                            artn.extract("tau_min1")
+                        )
+                        min2positions = self._positions_from_lammps(
+                            artn.extract("tau_min2")
+                        )
+                        saddlepositions = self._positions_from_lammps(
+                            artn.extract("tau_sad")
+                        )
                         dist = (min1positions - saddlepositions) ** 2
                         dist = dist.sum(axis=-1)
                         dist = np.sqrt(dist)
@@ -666,7 +672,9 @@ class LammpsEngine(Engine):
                     if delr_sad < config.partn.r_delr_sad_thr:
                         E_sad = artn.extract("etot_sad")
                         E_result = E_sad - E_init
-                        saddlepositions = artn.extract("tau_sad")
+                        saddlepositions = self._positions_from_lammps(
+                            artn.extract("tau_sad")
+                        )
                         if config.control.active_volume:
                             saddlepositions_results = positions.copy()
                             for i, atom_idx in enumerate(atom_map):
