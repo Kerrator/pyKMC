@@ -1078,6 +1078,16 @@ class DissolutionConfig(BaseModel):
         "Default 6: kinks and worse dissolve; a vacancy-ring atom (7) rearranges but "
         "does not dissolve.",
     )
+    phi: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Electrochemical driving force (overpotential) in eV, entering "
+        "the rate as k = nu_d * exp((phi - n*E_b)/(kb*T)) -- the canonical "
+        "Erlebacher form. Default 0.0 recovers pure bond counting. The intrinsic "
+        "critical potential sits near phi ~ coord_max * E_b: below it eligible "
+        "sites dissolve slower than nu_d (passivation-like), above it faster "
+        "(driven dealloying).",
+    )
 
     @field_validator("elements", mode="before")
     @classmethod

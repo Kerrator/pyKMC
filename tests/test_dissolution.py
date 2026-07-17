@@ -7,10 +7,11 @@ under-coordinated (coordination <= coord_max, default 6: kinks and worse;
 vacancy-ring atoms at 7 rearrange but do not dissolve), a synthetic
 dissolution event competes in the BKL selection with rate
 
-    k_diss(n) = nu_d * exp(-n * E_b / (kb * T))        [Erlebacher bond-counting]
+    k_diss(n) = nu_d * exp((phi - n * E_b) / (kb * T))  [Erlebacher bond-counting]
 
 with n the atom's current first-shell (rnei) coordination, E_b the effective
-bond energy (eV), nu_d the attempt frequency in ps^-1 (same unit contract as
+bond energy (eV), phi the electrochemical driving force (eV, default 0 = pure
+bond counting), nu_d the attempt frequency in ps^-1 (same unit contract as
 k0/nu0 -- a Hz-scale value must be rejected, cf. the k0 clock-freeze bug).
 Executing the event deletes the atom (dealloying: the surface recedes as
 less-noble atoms dissolve).
@@ -93,6 +94,36 @@ def test_bond_counting_rate_formula() -> None:
     assert np.allclose(k, expected, rtol=1e-12)
     # fewer bonds -> faster dissolution (monotone decreasing in n)
     assert k[0] > k[1] > k[2]
+
+
+def test_overpotential_enters_exponent_additively() -> None:
+    """A positive phi lowers the effective barrier: k(phi) = k(0) * exp(phi/kT).
+
+    Canonical Erlebacher form (Nature 410, 450 (2001)):
+    k_E,N = nu_E * exp(-(N*eps - phi)/kBT). phi=0 must reproduce the pure
+    bond-counting rate exactly (backward compatibility).
+    """
+    from pykmc.dissolution import dissolution_rates
+
+    nu_d, E_b, T, phi = 10.0, 0.15, 500.0, 0.45
+    coords = np.array([3, 5, 6])
+    k0 = dissolution_rates(coords, nu_d=nu_d, E_b=E_b, T=T)
+    k_phi = dissolution_rates(coords, nu_d=nu_d, E_b=E_b, T=T, phi=phi)
+    assert np.allclose(k_phi, k0 * np.exp(phi / (KB * T)), rtol=1e-12)
+    # default phi=0.0 keeps the original values
+    assert np.allclose(
+        dissolution_rates(coords, nu_d=nu_d, E_b=E_b, T=T, phi=0.0), k0, rtol=0.0
+    )
+
+
+def test_phi_config_default_and_sign() -> None:
+    """The phi field defaults to 0.0 (pure bond counting) and rejects < 0."""
+    d = DissolutionConfig(elements="Cr", nu_d=10.0, E_b=0.15)
+    assert d.phi == 0.0
+    d2 = DissolutionConfig(elements="Cr", nu_d=10.0, E_b=0.15, phi=1.5)
+    assert d2.phi == 1.5
+    with pytest.raises(ValidationError):
+        DissolutionConfig(elements="Cr", nu_d=10.0, E_b=0.15, phi=-0.1)
 
 
 # ----------------------------------------------------------- eligibility ----

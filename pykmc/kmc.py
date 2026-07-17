@@ -447,11 +447,15 @@ class KMC:
             elapsed_cpu = time.process_time() - start_cpu
 
             # Dissolution steps have no reference event / active row to read; log
-            # honest surrogate columns (ref = -1, Ea = n*E_b, k = the bond-counting
-            # rate) so the output table stays parseable.
+            # honest surrogate columns (ref = -1, Ea = the effective barrier
+            # n*E_b - phi, k = the bond-counting rate) so the output table stays
+            # parseable.
             if is_dissolution :
                 ref_event_col = -1
-                ea_col = result_reconstruction.coordination * self.config.dissolution.E_b
+                ea_col = (
+                    result_reconstruction.coordination * self.config.dissolution.E_b
+                    - self.config.dissolution.phi
+                )
                 k_evt_col = result_reconstruction.rate
             else :
                 ref_event_col = active_table.table.loc[idx_selected_event].at["num_reference_event"]
@@ -820,7 +824,7 @@ class KMC:
             idx = np.array([i for i in idx if int(i) not in excluded], dtype=int)
         coords = coordination[idx]
         rates = dissolution_rates(
-            coords, diss.nu_d, diss.E_b, self.config.rateconstant.T
+            coords, diss.nu_d, diss.E_b, self.config.rateconstant.T, phi=diss.phi
         )
         self._dissolution_candidates = (idx, rates, coords)
 

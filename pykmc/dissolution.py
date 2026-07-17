@@ -4,11 +4,16 @@ Physics (user-specified): an atom of a configured dissolvable element whose
 first-shell (rnei) coordination is ``<= coord_max`` can dissolve, competing in
 the BKL selection with the Erlebacher bond-counting rate
 
-    k_diss(n) = nu_d * exp(-n * E_b / (kb * T))
+    k_diss(n) = nu_d * exp((phi - n * E_b) / (kb * T))
 
 where ``n`` is the atom's current coordination, ``E_b`` the effective bond
-energy (eV) and ``nu_d`` the attempt frequency (ps^-1). Selecting the event
-deletes the atom (the surface recedes as less-noble atoms dissolve).
+energy (eV), ``phi`` the electrochemical driving force (overpotential, eV;
+0 recovers pure bond counting) and ``nu_d`` the attempt frequency (ps^-1).
+This is the canonical Erlebacher form (Nature 410, 450 (2001):
+``k_E,N = nu_E * exp(-(N*eps - phi)/kBT)``); the intrinsic critical potential
+sits near ``phi ~ coord_max * E_b``, separating passivation (below) from
+sustained dissolution (above). Selecting the event deletes the atom (the
+surface recedes as less-noble atoms dissolve).
 
 This module holds only the pure scan/rate helpers and the selection record; the
 KMC integration (BKL competition, deletion, engine rebuild) lives in
@@ -83,11 +88,14 @@ def dissolution_rates(
     nu_d: float,
     E_b: float,
     T: float,
+    phi: float = 0.0,
 ) -> np.ndarray:
     """Compute the Erlebacher bond-counting dissolution rates.
 
-    ``k_diss(n) = nu_d * exp(-n * E_b / (kb * T))`` elementwise over the
-    coordination array; fewer bonds dissolve faster (monotone decreasing in n).
+    ``k_diss(n) = nu_d * exp((phi - n * E_b) / (kb * T))`` elementwise over the
+    coordination array; fewer bonds dissolve faster (monotone decreasing in n),
+    and a positive ``phi`` uniformly lowers the effective barrier ``n*E_b - phi``
+    (the electrochemical driving force of the canonical Erlebacher rate).
 
     Parameters
     ----------
@@ -99,6 +107,9 @@ def dissolution_rates(
         Effective bond energy (eV).
     T : float
         Temperature (K).
+    phi : float
+        Electrochemical driving force / overpotential (eV). Default 0.0
+        recovers the pure bond-counting rate.
 
     Returns
     -------
@@ -108,4 +119,4 @@ def dissolution_rates(
     """
     kb = PhysicalConstants().kb
     n = np.asarray(coordination, dtype=float)
-    return nu_d * np.exp(-n * E_b / (kb * T))
+    return nu_d * np.exp((phi - n * E_b) / (kb * T))
