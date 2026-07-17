@@ -187,6 +187,28 @@ class Refinement:
 
             output_psr = result_psr.ok_value()
 
+            # IRA can score-match point sets of unequal cardinality, but a
+            # reference event whose stored cluster differs in size from this
+            # atom's current rcut neighbourhood cannot be transplanted
+            # atom-for-atom -- update_positions(new_positions, atom_idx=neighbors)
+            # would raise a shape mismatch. This happens e.g. after a dissolution
+            # deletion shrinks a nearby neighbourhood below the captured cluster
+            # size. Treat it as a non-match and skip this (atom, event) pair.
+            neighbors_at = self.neighbors_list.get_neighbors("rcut", at_idx)
+            if len(dfevent.at["initial_positions"]) != len(neighbors_at):
+                f = concurrent.futures.Future()
+                f.set_result(Err(ErrorInfo(
+                    type=ErrorType.PSR_NO_MATCH_FOUND,
+                    message="Reference event cluster size ({}) != target rcut "
+                    "neighbours ({}); cannot transplant onto atom {}.".format(
+                        len(dfevent.at["initial_positions"]),
+                        len(neighbors_at),
+                        at_idx,
+                    ),
+                )))
+                future_context[f] = {"num_reference_event": dfevent["idx_ref"]}
+                return f
+
             displacement_saddle = dfevent.at["saddle_positions"].copy() - dfevent.at["initial_positions"].copy()
             displacement_final = dfevent.at["final_positions"].copy() - dfevent.at["initial_positions"].copy()
 
