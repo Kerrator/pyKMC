@@ -56,7 +56,7 @@ class Engine(Registrable, root=True):
     def __init__(self):
         self._extensions: dict[str, object] = {}
 
-    def register(self, ext: object) -> None:
+    def register(self, ext: EngineExtension) -> None:
         """
         Register an extension on this engine.
 
@@ -65,22 +65,25 @@ class Engine(Registrable, root=True):
 
         Parameters
         ----------
-        ext : object
-            Extension instance to register. Should be a subclass of
-            :class:`EngineExtension`.
+        ext : EngineExtension
+            Extension instance to register.
 
         Raises
         ------
         ValueError
-            If an extension with the same class name is already registered,
-            or if any public method of `ext` conflicts with a method already
-            provided by a registered extension.
+            If an extension with the same class name is already registered
+            (class names must be unique across all extensions, even across
+            modules), if any public method of `ext` shadows a native engine
+            method, or if any public method of `ext` conflicts with a method
+            already provided by a registered extension.
         """
 
-        # Name of the extension, ie class name
         ext_name = type(ext).__name__
         if ext_name in self._extensions:
-            raise ValueError(f"Extension '{ext_name}' already registered.")
+            raise ValueError(
+                f"An extension named '{ext_name}' is already registered. "
+                "Extension class names must be unique across all modules."
+            )
 
         # Discover methods statically from the class to avoid executing @property getters,
         # which would crash if called before the subclass __init__ body has run.
