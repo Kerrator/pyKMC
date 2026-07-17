@@ -120,13 +120,16 @@ class _ComputeKineticEnergy(EngineExtension):
 
     def get_kinetic_energy(self) -> float | None:
         compute_id = "test_ke"
+        reduce_id = "test_ke_reduce"
         if not self.engine._has_compute(compute_id):
             self.engine.lmp.command(f"compute {compute_id} all ke/atom")
+            self.engine.lmp.command(
+                f"compute {reduce_id} all reduce sum c_{compute_id}"
+            )
         self.engine.lmp.command("run 0 post no")
-        result = self.engine.lmp.extract_compute(compute_id, 1, 1)
+        result = self.engine.lmp.extract_compute(reduce_id, 0, 0)
         if self.engine._is_rank0:
-            n = self.engine.lmp.get_natoms()
-            return float(sum(result[i] for i in range(n)))
+            return float(result)
         return None
 
 
