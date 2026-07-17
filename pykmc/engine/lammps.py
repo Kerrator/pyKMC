@@ -318,7 +318,7 @@ class LammpsEngine(Engine):
         if positions is not None:
             self.set_positions(positions=positions)
 
-        # Check if compute exists 
+        # Check if compute exists
         define_compute = self._has_compute("c_pe")
 
         if not define_compute:
@@ -438,6 +438,7 @@ class LammpsEngine(Engine):
     # pARTn search and refinement
     # ------------------------------------------------------------------
 
+    @lammps_error_handler
     def partn_search(
         self, config, central_atom_idx: int, positions=None, cell=None, types=None
     ):
@@ -586,6 +587,7 @@ class LammpsEngine(Engine):
                     )
                 )
 
+    @lammps_error_handler
     def partn_refine(
         self,
         config,
