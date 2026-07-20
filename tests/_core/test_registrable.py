@@ -73,6 +73,27 @@ class TestRegistration:
         with pytest.raises(ValueError, match="alpha"):
             FakeRoot.create("nonexistent")
 
+    def test_failed_import_raises_import_error(self):
+        """create() surfaces a stored ImportError when the module failed to load."""
+        original_error = ImportError("No module named 'some_lib'")
+        FakeRoot._import_errors["unavailable"] = original_error
+        try:
+            with pytest.raises(ImportError, match="unavailable"):
+                FakeRoot.create("unavailable")
+        finally:
+            del FakeRoot._import_errors["unavailable"]
+
+    def test_import_errors_isolated_between_roots(self):
+        class OtherRoot2(Registrable, root=True):
+            @abstractmethod
+            def run(self): ...
+
+        FakeRoot._import_errors["isolated"] = ImportError("missing")
+        try:
+            assert "isolated" not in OtherRoot2._import_errors
+        finally:
+            del FakeRoot._import_errors["isolated"]
+
     def test_create_on_registrable_base_raises_type_error(self):
         """Registrable itself has no _registry, create() must reject it."""
         with pytest.raises(TypeError):

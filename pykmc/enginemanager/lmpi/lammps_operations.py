@@ -34,7 +34,6 @@ def initialize_parameters(engine):
 
 
 def initialize_system(engine, system):
-
     # system parameters
     natoms = len(system.types)
     cell = system.cell
@@ -389,7 +388,6 @@ def partn_refine(
     saddle_positions=None,
     minimize_outer_atoms: bool = True,
 ):
-
     # Set positions
     if config.control.active_volume == True:
         E_init, atom_map, central_lammps_id = partn_refine_AV(
