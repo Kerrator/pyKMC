@@ -47,9 +47,9 @@ nav:
       - Overview: developer_guide/index.md
       - Architecture: developer_guide/architecture.md
       - MPI & Parallel Execution: developer_guide/mpi.md
-      - Strategy pattern: dev_strategy_pattern.md
-      - Engine: dev_engine.md
-      - Code formatting: dev_code_formatting.md
+      - Strategy pattern: developer_guide/strategy_pattern.md
+      - Engine: developer_guide/engine.md
+      - Code formatting: developer_guide/code_formatting.md
   - API Reference:
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md

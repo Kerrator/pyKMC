@@ -14,9 +14,10 @@ pyKMC/
 │   ├── system.py         # atomic configuration
 │   ├── eventsearch.py    # saddle-point search (pARTn)
 │   ├── reconstruction.py # event reconstruction (IRA)
+│   ├── engine/           # engine abstraction + LAMMPS implementation
 │   ├── enginemanager/    # LAMMPS engine session pool (MPI)
 │   ├── basins/           # basin acceleration
-│   ├── activevolume.py   # active-volume restriction
+│   ├── activevolume/     # active-volume restriction
 │   ├── config.py         # typed (pydantic) configuration model
 │   └── ...
 ├── docs/                 # mkdocs documentation sources
