@@ -1,105 +1,160 @@
-from mpi4py import MPI 
+from mpi4py import MPI
 import numpy as np
 from .manager import Manager
-from pykmc import Engine
 from .worker import Worker
 from .session import Session
-from typing import Any
+from typing import Any, Callable
 
 
-class ManagerFactory: 
+class ManagerFactory:
 
-    """ 
-    Responsible for splitting ranks and instantiating Sessions, Workers, Engines, 
-    and returning a configured Manager
+    """
+    Splits MPI ranks and instantiates Workers, Sessions, and a Manager.
+
+    Object creation is fully delegated to ``obj_factory``, a plain callable
+    with signature::
+
+        obj_factory(comm: MPI.Comm, mode: str) -> Any | None
+
+    This keeps the factory independent of any specific class or framework.
+    The returned object is registered in the Worker's registry; it is expected
+    to be initialised with the provided communicator if it relies on MPI.
+
+    Example
+    -------
+    ::
+
+        factory = ManagerFactory(
+            obj_factory=lambda comm, mode: MyEngine(config=cfg, comm=comm),
+            n_workers=4,
+            comm=MPI.COMM_WORLD,
+        )
+        manager = factory.launch()   # returns Manager on rank 0, None elsewhere
+
+    Parameters
+    ----------
+    obj_factory  : Callable[[MPI.Comm, str], Any | None]
+        Called once per (worker × mode) with the communicator and the mode name
+        (``"local"``, ``"group"``, or ``"global"``).  Return None to skip object
+        creation for that mode — the worker's registry will then only hold
+        extra_ops for that mode.
+    n_workers    : int
+    comm         : MPI.Comm
+    has_global   : bool          Enable global communicator (all workers).
+    group_size   : int | None    Number of ranks sharing the group communicator.
+                                 None disables group mode.
+    extra_ops    : dict[str, Callable] | None
+                                 MPI-aware callables ``fn(comm, **kwargs)``
+                                 registered in every worker registry.
     """
 
-    def __init__(self, engine_style:str, n_workers: int, comm: MPI.Comm, has_global:bool = True, global_size:int = None, engine_config: Any | None = None) -> None : 
+    def __init__(self,
+                 obj_factory: Callable[[MPI.Comm, str], Any | None],
+                 n_workers:   int,
+                 comm:        MPI.Comm,
+                 has_global:  bool = True,
+                 group_size:  int | None = None,
+                 extra_ops:   dict[str, Callable] | None = None) -> None:
 
-        self.engine_style = engine_style
-        self.engine_config = engine_config
-        self.comm = comm 
-        self.n_workers = n_workers 
-        self.has_global = has_global 
+        self.obj_factory = obj_factory
+        self.comm        = comm
+        self.n_workers   = n_workers
+        self.has_global  = has_global
+        self.group_size  = group_size
+        self.extra_ops   = extra_ops
 
-        self.start_rank = 1 #we don't use rank 0 for workers
-        self.size = self.comm.Get_size() 
-        self.rank = self.comm.Get_rank() 
-        self.global_size = global_size if global_size is not None else  self.size-self.start_rank
+        self.start_rank  = 1
+        self.size        = self.comm.Get_size()
+        self.rank        = self.comm.Get_rank()
 
-        
+        if self.size < self.n_workers + self.start_rank:
+            raise ValueError("Not enough MPI ranks to allocate workers.")
 
-
-        if self.size < self.n_workers + self.start_rank : 
-            raise ValueError("Not enough MPI ranks to allocates workers")
-        
         self.available_ranks = list(range(self.start_rank, self.size))
+        self.chunks = self._split_ranks()
 
-        self.chunks = self._split_ranks() 
+        if group_size is not None:
+            if group_size > len(self.available_ranks):
+                raise ValueError(
+                    f"group_size ({group_size}) cannot exceed the number of available ranks ({len(self.available_ranks)})."
+                )
+            ranks_per_worker = len(self.chunks[0])
+            if group_size % ranks_per_worker != 0:
+                raise ValueError(
+                    f"group_size ({group_size}) must be a multiple of the per-worker rank count ({ranks_per_worker})."
+                )
+            self.group_ranks: list[int] = self.available_ranks[:group_size]
+        else:
+            self.group_ranks = []
 
-        if self.global_size is not None and self.global_size % len(self.chunks[0]) != 0 : 
-            raise ValueError("The global engine must run on a mulitple of local engine size.")
+    def _split_ranks(self) -> list[list[int]]:
+        return [arr.tolist() for arr in np.array_split(self.available_ranks, self.n_workers)]
 
-    def _split_ranks(self) -> list[list[int]] : 
-        split_arrays = np.array_split(self.available_ranks, self.n_workers) 
-        chunks = [arr.tolist() for arr in split_arrays] 
+    def launch(self) -> Manager | None:
 
-        return chunks 
-    
-    def launch(self) -> Manager | None : 
-
-        my_color = MPI.UNDEFINED 
-        worker_id = None 
-        for session_id, chunk in enumerate(self.chunks) : 
-            if self.rank in chunk : 
-                my_color = session_id+1 
-                worker_id = session_id 
+        my_color  = MPI.UNDEFINED
+        worker_id = None
+        for sid, chunk in enumerate(self.chunks):
+            if self.rank in chunk:
+                my_color  = sid + 1
+                worker_id = sid
                 break
 
-        #split communicator 
-        worker_comm = self.comm.Split(color=my_color, key=self.rank)
+        local_comm = self.comm.Split(color=my_color, key=self.rank)
 
         global_comm = None
-        if self.has_global : 
-                if self.rank < self.start_rank or self.rank >= self.start_rank + self.global_size :
-                    global_comm = self.comm.Split(color=MPI.UNDEFINED, key=self.rank)
-                else : 
-                    global_comm = self.comm.Split(color=1, key=self.rank)
-                if global_comm == MPI.COMM_NULL : 
-                    global_comm = None
+        if self.has_global:
+            in_global = self.rank in self.available_ranks
+            gc = self.comm.Split(color=1 if in_global else MPI.UNDEFINED, key=self.rank)
+            if gc != MPI.COMM_NULL:
+                global_comm = gc
 
+        group_comm = None
+        if self.group_ranks:
+            gc = self.comm.Split(color=1 if self.rank in self.group_ranks else MPI.UNDEFINED, key=self.rank)
+            if gc != MPI.COMM_NULL:
+                group_comm = gc
 
-        if worker_id is not None : #rank is in a chunk 
-            worker = self._create_worker(engine_style = self.engine_style, local_comm=worker_comm, engine_id = worker_id, global_comm = global_comm, engine_config = self.engine_config)
+        if worker_id is not None:
+            worker = self._create_worker(local_comm, worker_id, global_comm, group_comm)
             worker.start()
+            return None
 
-        else : #On rank 0 
-            manager = Manager(local_sessions=[Session(engine_master_rank=self.chunks[i][0], world_comm=self.comm,  session_id=i+1) for i in range(self.n_workers)], 
-                              global_session=Session(engine_master_rank=self.available_ranks[0], session_id=0, world_comm=self.comm))
-            manager.start() 
-            return manager
-            
+        # rank 0 — manager
+        local_sessions = [
+            Session(engine_master_rank=self.chunks[i][0], world_comm=self.comm, session_id=i + 1)
+            for i in range(self.n_workers)
+        ]
+        global_session = Session(
+            engine_master_rank=self.available_ranks[0], session_id=0, world_comm=self.comm
+        ) if self.has_global else None
 
+        group_session = Session(
+            engine_master_rank=self.group_ranks[0], session_id=-1, world_comm=self.comm
+        ) if self.group_ranks else None
 
-    def _create_worker(self, engine_style: str, local_comm: MPI.Comm, engine_id: int, global_comm: MPI.Comm | None, engine_config: Any | None = None) -> Worker:
-        local_engine = Engine.create(engine_style, config=engine_config, comm=local_comm, engine_id=engine_id)
-        local_engine.start()
-        local_engine.initialize_parameters()
+        manager = Manager(
+            local_sessions=local_sessions,
+            global_session=global_session,
+            group_session=group_session,
+        )
+        manager.start()
+        return manager
 
-        global_engine = None
-        if global_comm is not None:
-            global_engine = Engine.create(engine_style, config=engine_config, comm=global_comm, engine_id=0)
-            global_engine.start()
-            global_engine.initialize_parameters()
+    def _create_worker(self,
+                       local_comm:  MPI.Comm,
+                       worker_id:   int,
+                       global_comm: MPI.Comm | None,
+                       group_comm:  MPI.Comm | None) -> Worker:
 
         return Worker(
-            local_engine=local_engine,
+            local_obj=self.obj_factory(local_comm, "local"),
             local_comm=local_comm,
-            engine_id=engine_id,
-            global_engine=global_engine,
+            worker_id=worker_id,
+            global_obj=self.obj_factory(global_comm, "global") if global_comm is not None else None,
             global_comm=global_comm,
-            world_comm=self.comm
+            group_obj=self.obj_factory(group_comm, "group") if group_comm is not None else None,
+            group_comm=group_comm,
+            extra_ops=self.extra_ops,
+            world_comm=self.comm,
         )
-            
-
-        

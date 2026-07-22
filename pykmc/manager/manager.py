@@ -24,15 +24,19 @@ class Job:
 
 class Manager:
 
-    def __init__(self, local_sessions: list[Session], global_session: Session|None = None) -> None:
+    def __init__(self,
+                 local_sessions: list[Session],
+                 global_session: Session | None = None,
+                 group_session:  Session | None = None) -> None:
 
         self.local_sessions = local_sessions
         self.global_session = global_session
+        self.group_session  = group_session
 
         self._local_queue: queue.Queue[Job] = queue.Queue()
-        self._local_threads = []
+        self._local_threads: list[threading.Thread] = []
 
-        self.using_global = False
+        self.mode = "local"  # "local" | "group" | "global"
 
     def start(self) -> None:
         for session in self.local_sessions:
@@ -40,37 +44,69 @@ class Manager:
             t.start()
             self._local_threads.append(t)
 
-    def close(self) -> None:
-        """Stop all thread workers and close sessions."""
+    def shutdown(self) -> None:
+        """Stop all thread workers and shut down sessions."""
+        if self.mode != "local":
+            self._use_local()
         for _ in self._local_threads:
             self._local_queue.put(None)
         for t in self._local_threads:
             t.join()
-
         for session in self.local_sessions:
-            session.close()
+            session.shutdown()
 
-        if self.global_session is not None:
-            self.global_session.close()
+    def list_ops(self, mode: str = "local") -> list[str]:
+        """Return the list of available operations for the given mode."""
+        return self.submit("list_ops", mode=mode).result()
 
     def broadcast(self, op_name: str, **kwargs) -> None:
         """Send the same op to all local sessions sequentially.
 
-        Useful when initializing and mode switching."""
+        Useful for initialisation steps that every worker must run.
+        Switches to local mode automatically if needed.
+        """
+        if self.mode != "local":
+            self._use_local()
         for session in self.local_sessions:
             session.call(op_name, **kwargs)
 
+    # ------------------------------------------------------------------
+    # Mode transitions
+    # ------------------------------------------------------------------
+
     def _use_local(self) -> None:
-        """Switch all workers to local mode."""
-        self.global_session.use_local()
-        self.using_global = False
+        """Switch all workers back to local mode."""
+        if self.mode == "global":
+            self.global_session.use_local()
+        elif self.mode == "group":
+            self.group_session.use_local()
+        self.mode = "local"
 
     def _use_global(self) -> None:
-        """Wait for local queue to drain, then switch all workers to global."""
+        """Drain local queue then switch all workers to global mode."""
+        if self.mode != "local":
+            self._use_local()
         self._local_queue.join()
         for session in self.local_sessions:
             session.use_global()
-        self.using_global = True
+        self.mode = "global"
+
+    def _use_group(self) -> None:
+        """Drain local queue then switch workers to group mode.
+
+        Workers without a group_comm silently stay in local mode and become
+        idle for the duration of the group operation.
+        """
+        if self.mode != "local":
+            self._use_local()
+        self._local_queue.join()
+        for session in self.local_sessions:
+            session.use_group()
+        self.mode = "group"
+
+    # ------------------------------------------------------------------
+    # Job submission
+    # ------------------------------------------------------------------
 
     def _worker_loop(self, session: Session, job_queue: queue.Queue) -> None:
         """Pull jobs from the queue and execute via the session."""
@@ -87,40 +123,45 @@ class Manager:
                 job_queue.task_done()
 
     def submit(self, op_name: str, **kwargs) -> Future:
-        """Submit a job to the local worker pool.
-
-        Parameters
-        ----------
-        op_name : str
-            Operation name in the Worker registry.
-        **kwargs
-            Forwarded to the operation.
+        """Submit a job to the local worker pool (async).
 
         Returns
         -------
         Future
             Resolved when the job completes.
         """
-        if self.using_global:
+        if self.mode != "local":
             self._use_local()
         job = Job(op_name=op_name, kwargs=kwargs)
         self._local_queue.put(job)
         return job.future
 
+    def submit_group(self, op_name: str, **kwargs) -> Any:
+        """Submit a job to the group worker and block until it completes.
+
+        The group spans only the subset of workers configured at factory time.
+        All other workers are idle for the duration of the call.
+
+        Returns
+        -------
+        Any
+            Result of the operation, or None for void operations.
+
+        Raises
+        ------
+        RuntimeError
+            If no group session was configured.
+        """
+        if self.group_session is None:
+            raise RuntimeError("No group session configured.")
+        if self.mode != "group":
+            self._use_group()
+        return self.group_session.call(op_name, **kwargs)
+
     def submit_global(self, op_name: str, **kwargs) -> Any:
         """Submit a job to the global worker and block until it completes.
 
-        Unlike local submissions, global operations are synchronous — all MPI
-        ranks work collectively on a single job, so there is nothing to
-        parallelise while waiting. The result (or exception) is returned
-        directly.
-
-        Parameters
-        ----------
-        op_name : str
-            Operation name in the Worker registry.
-        **kwargs
-            Forwarded to the operation.
+        All MPI ranks work collectively, so the call is synchronous.
 
         Returns
         -------
@@ -134,17 +175,21 @@ class Manager:
         """
         if self.global_session is None:
             raise RuntimeError("No global session configured.")
-        if not self.using_global:
+        if self.mode != "global":
             self._use_global()
         return self.global_session.call(op_name, **kwargs)
 
     def __getattr__(self, name: str):
-        """Auto-generate submit/submit_global wrappers.
+        """Auto-generate submit wrappers from attribute access.
 
-        mgr.minimize(positions=pos)        → submit("minimize", positions=pos)  → Future
-        mgr.global_minimize(positions=pos) → submit_global("minimize", positions=pos)  → result
+        mgr.minimize(positions=pos)        → submit("minimize", positions=pos)        → Future
+        mgr.group_minimize(positions=pos)  → submit_group("minimize", positions=pos)  → result
+        mgr.global_minimize(positions=pos) → submit_global("minimize", positions=pos) → result
         """
         if name.startswith("global_"):
             op = name[len("global_"):]
             return lambda **kw: self.submit_global(op, **kw)
+        if name.startswith("group_"):
+            op = name[len("group_"):]
+            return lambda **kw: self.submit_group(op, **kw)
         return lambda **kw: self.submit(name, **kw)

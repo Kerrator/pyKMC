@@ -13,26 +13,29 @@ class Session:
 
     def __init__(self, engine_master_rank: int, session_id: int = 0, world_comm: "MPI.COMM"|None = None) -> None:
 
-        self.engine_master_rank = engine_master_rank 
+        self.engine_master_rank = engine_master_rank
         self.session_id = session_id
         self.world_comm = world_comm or MPI.COMM_WORLD
-        self._is_alive = False 
-        self._is_busy = False 
+        self._is_busy = False
 
-        if self.world_comm.Get_rank() != 0 : 
+        if self.world_comm.Get_rank() != 0 :
             raise RuntimeError("Session must be used from rank 0.")
         
-    def use_local(self) -> None : 
-        """Switch to local mode no waiting status."""
+    def use_local(self) -> None:
+        """Switch worker to local mode (fire-and-forget)."""
         self.world_comm.send({"type": "use_local"}, dest=self.engine_master_rank, tag=2)
 
-    def use_global(self) -> None : 
-        """Swithc to global mode no waiting status."""
+    def use_group(self) -> None:
+        """Switch worker to group mode (fire-and-forget). Workers without a group_comm ignore this."""
+        self.world_comm.send({"type": "use_group"}, dest=self.engine_master_rank, tag=2)
+
+    def use_global(self) -> None:
+        """Switch worker to global mode (fire-and-forget)."""
         self.world_comm.send({"type": "use_global"}, dest=self.engine_master_rank, tag=2)
 
-    def close(self) -> None : 
-        """Close no waiting status."""
-        self.world_comm.send({"type": "close"}, dest=self.engine_master_rank, tag=2)
+    def shutdown(self) -> None:
+        """Shut down the worker (fire-and-forget, no status reply)."""
+        self.world_comm.send({"type": "shutdown"}, dest=self.engine_master_rank, tag=2)
 
     def call(self, op_name: str, **kwargs) -> Any : 
         """Send an operation to the worker and optionally retrieve a result."""
@@ -55,7 +58,6 @@ class Session:
         if msg.get("type") != "status":
             raise RuntimeError(f"Expected 'status', got '{msg.get('type')}'")
         value = msg.get("value", {})
-        self._is_alive = value.get("alive", False)
         error = value.get("error")
         if error:
             raise RuntimeError(error)
@@ -67,10 +69,7 @@ class Session:
             raise RuntimeError(f"Expected 'result' got '{msg.get('type')}'")
         return msg["value"]
     
-    def is_alive(self) -> bool : 
-        return self._is_alive
-    
-    def is_busy(self) -> bool : 
+    def is_busy(self) -> bool :
         return self._is_busy
 
     
