@@ -141,3 +141,21 @@ print('All imports OK')
 
 A successful run prints `All imports OK`. If an import fails, see
 [Troubleshooting](../../troubleshooting.md).
+
+## Running
+
+pyKMC runs under MPI. Use at least `n_sessions + 1` ranks: rank 0 runs the
+main KMC loop and the remaining ranks are split among the `n_sessions` LAMMPS
+instances (`[Control]` section of the input file).
+
+```bash
+mpirun -n 8 python -m pykmc -in input.in
+```
+
+On a cluster, submit through your scheduler as usual — e.g. with Slurm,
+activate the venv in the job script and launch with `srun`:
+
+```bash
+source /path/to/pykmc_env/bin/activate
+srun --ntasks=$SLURM_NTASKS python -m pykmc -in input.in
+```
