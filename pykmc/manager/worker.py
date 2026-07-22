@@ -9,10 +9,6 @@ import inspect
 def build_registry(obj: object | list[object] | None = None) -> dict[str, Callable]:
     """Build an operation registry from one or more objects.
 
-    Only object methods are collected here.  Plain callables (extra_ops) are
-    kept separate and merged by the Worker, so that consistency checks can
-    distinguish between object-derived methods and extra_ops.
-
     Parameters
     ----------
     obj : object | list[object] | None
@@ -32,7 +28,7 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     objs = obj if isinstance(obj, list) else ([obj] if obj is not None else [])
     for o in objs:
         for name, method in inspect.getmembers(o, predicate=callable):
-            if name.startswith("_"):
+            if name.startswith("_"): #only collect public methods.
                 continue
             if name in registry:
                 raise ValueError(
@@ -42,11 +38,11 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     return registry
 
 
+#Convienient part to deal with worker operation that expect a result, or not, and errors.
 class DispatchStatus(Enum):
     SILENT  = "silent"
     SUCCESS = "success"
     ERROR   = "error"
-
 
 @dataclass
 class DispatchResult:
@@ -56,6 +52,11 @@ class DispatchResult:
 
 
 class Worker:
+
+    # Must match Session._TAG_*
+    _TAG_CMD    = 2
+    _TAG_STATUS = 0
+    _TAG_RESULT = 1
 
     def __init__(self,
                  local_obj:   object | list[object] | None,
@@ -67,29 +68,34 @@ class Worker:
                  group_comm:  "MPI.COMM" | None = None,
                  extra_ops:   dict[str, Callable] | None = None,
                  world_comm:  "MPI.COMM" | None = None) -> None:
-        """MPI worker. Runs on all ranks in its communicator.
+        """MPI worker. Each instance runs on all ranks in ``local_comm``.
 
-        Rank 0 reads incoming messages from ``world_comm``, broadcasts them to
-        all ranks in the active communicator, and dispatches to the registry.
-        Other ranks only participate in the collective broadcast and execute.
+        Rank 0 of the active communicator reads incoming messages from
+        ``world_comm``, broadcasts them to all ranks in the active communicator,
+        and dispatches to the registry. Other ranks only participate in the
+        collective broadcast and execute. In group/global mode the active
+        communicator spans multiple Worker instances; all of them must be
+        running their loop simultaneously for the collective to complete.
+
+        Designed to be used with Session/Manager.
 
         Three modes
         -----------
-        local  — one registry per worker (master-worker architecture).
-        group  — a subset of workers execute collectively via ``group_comm``.
+        local  - one registry per worker (master-worker architecture).
+        group  - a subset of workers execute collectively via ``group_comm``.
                  Workers without a ``group_comm`` silently stay in local mode
                  when a ``use_group`` message arrives.
-        global — all workers execute collectively via ``global_comm``.
+        global - all workers execute collectively via ``global_comm``.
 
         Registries
         ----------
         Each mode's registry = object methods (from ``*_obj``) merged with
-        ``extra_ops``.  ``build_registry`` handles only objects; the Worker
+        ``extra_ops``.  ``build_registry`` handles only objects, the Worker
         merges extra_ops separately so that consistency checks can distinguish
         between the two sources.
 
         Modes where ``obj=None`` have a registry that contains only extra_ops.
-        Their consistency is not checked against local — the caller accepts
+        Their consistency is not checked against local, the caller accepts
         that object methods are unavailable in those modes.
 
         Design note on objects
@@ -145,7 +151,7 @@ class Worker:
         }
 
         # extra_ops names tracked separately so dispatch can inject comm.
-        self._extra_op_names: frozenset[str] = frozenset(extra_ops) if extra_ops else frozenset()
+        self._extra_op_names = frozenset(extra_ops) if extra_ops else frozenset()
         _extra = extra_ops or {}
 
         # Build obj-only registries (used for consistency check), then merge extra_ops.
@@ -158,6 +164,11 @@ class Worker:
         self._check_obj_registries(_local_obj_reg, _global_obj_reg, _group_obj_reg)
 
         self.local_registry  = {**_local_obj_reg,  **_extra}
+        self.global_rank     = None
+        self.global_registry = {}
+        self.group_rank      = None
+        self.group_registry  = {}
+
         if global_comm is not None:
             self.global_rank     = global_comm.Get_rank()
             self.global_registry = {**_global_obj_reg, **_extra}
@@ -169,10 +180,7 @@ class Worker:
 
         self.use_local()
 
-    # ------------------------------------------------------------------
     # Registry validation
-    # ------------------------------------------------------------------
-
     def _check_obj_clash(self, extra_ops: dict) -> None:
         """Raise if any extra_ops key clashes with a local object method."""
         clashes = set(extra_ops) & set(build_registry(self.local_obj))
@@ -197,7 +205,7 @@ class Worker:
                                group_reg:  dict) -> None:
         """Raise if a mode with an object exposes different methods from local.
 
-        Modes where obj=None have an empty obj-registry and are not checked —
+        Modes where obj=None have an empty obj-registry and are not checked,
         they intentionally only expose extra_ops.
         """
         local_ops = set(local_reg)
@@ -214,60 +222,51 @@ class Worker:
                 f"Pass equivalent objects to all modes."
             )
 
-    # ------------------------------------------------------------------
     # Mode switching
-    # ------------------------------------------------------------------
+    def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict) -> None:
+        self.mode     = mode
+        self.comm     = comm
+        self.rank     = comm.Get_rank()
+        self.registry = registry
 
     def use_local(self) -> None:
         """Switch to local mode."""
-        self.mode     = "local"
-        self.comm     = self.local_comm
-        self.rank     = self.local_comm.Get_rank()
-        self.registry = self.local_registry
+        self._switch_mode("local", self.local_comm, self.local_registry)
 
     def use_global(self) -> None:
         """Switch to global mode. No-op if no global_comm."""
         if self.global_comm is None:
             return
-        self.mode     = "global"
-        self.comm     = self.global_comm
-        self.rank     = self.global_comm.Get_rank()
-        self.registry = self.global_registry
+        self._switch_mode("global", self.global_comm, self.global_registry)
 
     def use_group(self) -> None:
         """Switch to group mode. No-op if worker has no group_comm."""
         if self.group_comm is None:
             return
-        self.mode     = "group"
-        self.comm     = self.group_comm
-        self.rank     = self.group_comm.Get_rank()
-        self.registry = self.group_registry
+        self._switch_mode("group", self.group_comm, self.group_registry)
 
-    # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
-
     def start(self) -> None:
         """Enter the message loop. Blocks until ``shutdown`` is dispatched."""
         self._is_alive = True
         self._loop()
 
+    def _all_objs(self) -> list[object]:
+        """Flatten local, global, and group objects into a single list."""
+        def _to_list(o):
+            if o is None:       return []
+            if isinstance(o, list): return o
+            return [o]
+        return _to_list(self.local_obj) + _to_list(self.global_obj) + _to_list(self.group_obj)
+
     def shutdown(self) -> None:
         """Stop the message loop and call .close() on all objects that support it."""
         self._is_alive = False
-        all_objs = (
-            (self.local_obj  if isinstance(self.local_obj,  list) else ([self.local_obj]  if self.local_obj  is not None else [])) +
-            (self.global_obj if isinstance(self.global_obj, list) else ([self.global_obj] if self.global_obj is not None else [])) +
-            (self.group_obj  if isinstance(self.group_obj,  list) else ([self.group_obj]  if self.group_obj  is not None else []))
-        )
-        for o in all_objs:
+        for o in self._all_objs():
             if hasattr(o, "close"):
                 o.close()
 
-    # ------------------------------------------------------------------
-    # Internal loop / dispatch
-    # ------------------------------------------------------------------
-
+    # Internal loop and dispatch
     def _loop(self) -> None:
         """Main loop. All ranks run this until ``_is_alive`` is False."""
         while self._is_alive:
@@ -281,23 +280,44 @@ class Worker:
             r   = self._dispatch(msg)
 
             if self.rank == 0:
-                if r.status == DispatchStatus.SILENT:
-                    pass
-                elif r.status == DispatchStatus.SUCCESS:
-                    self.world_comm.send({"type": "status", "value": {"has_result": r.value is not None, "error": None}}, dest=0, tag=0)
-                    if r.value is not None:
-                        self.world_comm.send({"type": "result", "value": r.value}, dest=0, tag=1)
-                elif r.status == DispatchStatus.ERROR:
-                    self.world_comm.send({"type": "status", "value": {"has_result": False, "error": r.error}}, dest=0, tag=0)
+                self._send_result(r)
 
             if not self._is_alive:
                 break
 
+    def _send_result(self, r: DispatchResult) -> None:
+        """Send dispatch result back to world_comm rank 0. Called only on local rank 0."""
+        if r.status == DispatchStatus.SILENT:
+            return
+        if r.status == DispatchStatus.SUCCESS:
+            self.world_comm.send({"type": "status", "value": {"has_result": r.value is not None, "error": None}}, dest=0, tag=self._TAG_STATUS)
+            if r.value is not None:
+                self.world_comm.send({"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT)
+        elif r.status == DispatchStatus.ERROR:
+            self.world_comm.send({"type": "status", "value": {"has_result": False, "error": r.error}}, dest=0, tag=self._TAG_STATUS)
+
     def _read_messages(self) -> dict:
         """Read one message from world_comm on rank 0. Blocks until a message arrives."""
-        return self.world_comm.recv(source=MPI.ANY_SOURCE, tag=2)
+        return self.world_comm.recv(source=MPI.ANY_SOURCE, tag=self._TAG_CMD)
 
     def _dispatch(self, msg: dict) -> DispatchResult:
+        """Dispatch a message to the appropriate handler on all ranks.
+
+        Message format
+        --------------
+        {"type": <op_name>, "value": <payload>}
+
+        ``value`` is mapped to kwargs as follows:
+          - absent / None  → no kwargs
+          - dict           → used directly as kwargs
+          - scalar         → wrapped as {"value": scalar}
+
+        Builtins (use_local, use_group, use_global, shutdown, list_ops) are
+        dispatched without a barrier and return SILENT unless they produce a
+        result. Registry operations are bracketed by a comm.barrier() on all
+        ranks so that MPI collectives inside handlers are safe. extra_ops
+        receive ``self.comm`` as their first positional argument.
+        """
         op_type = msg.get("type")
 
         value = msg.get("value")
@@ -320,8 +340,6 @@ class Worker:
 
         self.comm.barrier()
         try:
-            # extra_ops receive the active comm as first arg so they can use
-            # MPI collectives appropriate to the current mode.
             if op_type in self._extra_op_names:
                 result = handler(self.comm, **kwargs)
             else:
@@ -335,8 +353,8 @@ class Worker:
     def list_ops(self, mode: str = "local") -> list[str]:
         registries = {
             "local":  self.local_registry,
-            "global": getattr(self, "global_registry", {}),
-            "group":  getattr(self, "group_registry",  {}),
+            "global": self.global_registry,
+            "group":  self.group_registry,
         }
         if mode not in registries:
             raise ValueError(f"Unknown mode '{mode}'. Expected one of: {list(registries)}")

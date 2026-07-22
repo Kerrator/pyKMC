@@ -3,7 +3,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 import queue
 import threading
-from typing import Any
+from typing import Any, Literal
 
 @dataclass
 class Job:
@@ -36,9 +36,18 @@ class Manager:
         self._local_queue: queue.Queue[Job] = queue.Queue()
         self._local_threads: list[threading.Thread] = []
 
-        self.mode = "local"  # "local" | "group" | "global"
+        self.mode: Literal["local", "group", "global"] = "local"
 
     def start(self) -> None:
+        """Start one thread per local session. Must be called before submit().
+
+        Raises
+        ------
+        RuntimeError
+            If start() has already been called.
+        """
+        if self._local_threads:
+            raise RuntimeError("Manager is already started.")
         for session in self.local_sessions:
             t = threading.Thread(target=self._worker_loop, args=(session, self._local_queue), daemon=True)
             t.start()
@@ -75,7 +84,12 @@ class Manager:
     # ------------------------------------------------------------------
 
     def _use_local(self) -> None:
-        """Switch all workers back to local mode."""
+        """Switch all workers back to local mode.
+
+        Only one message is sent (to the global or group session master rank).
+        All workers in that communicator receive it via the bcast in Worker._loop,
+        so a single send is enough to switch the entire collective back to local.
+        """
         if self.mode == "global":
             self.global_session.use_local()
         elif self.mode == "group":
@@ -125,11 +139,22 @@ class Manager:
     def submit(self, op_name: str, **kwargs) -> Future:
         """Submit a job to the local worker pool (async).
 
+        If the manager is currently in group or global mode, switches back to
+        local mode first. Similarly, submit_group() and submit_global() switch
+        to their respective modes automatically before dispatching.
+
         Returns
         -------
         Future
             Resolved when the job completes.
+
+        Raises
+        ------
+        RuntimeError
+            If start() has not been called.
         """
+        if not self._local_threads:
+            raise RuntimeError("Manager has not been started. Call start() first.")
         if self.mode != "local":
             self._use_local()
         job = Job(op_name=op_name, kwargs=kwargs)

@@ -7,9 +7,7 @@ from typing import Any, Callable
 
 
 class ManagerFactory:
-
-    """
-    Splits MPI ranks and instantiates Workers, Sessions, and a Manager.
+    """Splits MPI ranks and instantiates Workers, Sessions, and a Manager.
 
     Object creation is fully delegated to ``obj_factory``, a plain callable
     with signature::
@@ -48,6 +46,8 @@ class ManagerFactory:
                                  registered in every worker registry.
     """
 
+    _MANAGER_RANK = 0  # rank 0 is always the manager
+
     def __init__(self,
                  obj_factory: Callable[[MPI.Comm, str], Any | None],
                  n_workers:   int,
@@ -63,14 +63,13 @@ class ManagerFactory:
         self.group_size  = group_size
         self.extra_ops   = extra_ops
 
-        self.start_rank  = 1
         self.size        = self.comm.Get_size()
         self.rank        = self.comm.Get_rank()
 
-        if self.size < self.n_workers + self.start_rank:
+        if self.size < self.n_workers + self._MANAGER_RANK + 1:
             raise ValueError("Not enough MPI ranks to allocate workers.")
 
-        self.available_ranks = list(range(self.start_rank, self.size))
+        self.available_ranks = list(range(self._MANAGER_RANK + 1, self.size))
         self.chunks = self._split_ranks()
 
         if group_size is not None:
@@ -91,13 +90,17 @@ class ManagerFactory:
         return [arr.tolist() for arr in np.array_split(self.available_ranks, self.n_workers)]
 
     def launch(self) -> Manager | None:
+        """Split ranks, start workers, and return a Manager on rank 0.
 
+        All ranks must call this collectively. Workers block inside their loop;
+        only rank 0 returns a Manager instance. All other ranks return None.
+        """
         my_color  = MPI.UNDEFINED
         worker_id = None
-        for sid, chunk in enumerate(self.chunks):
+        for idx, chunk in enumerate(self.chunks):
             if self.rank in chunk:
-                my_color  = sid + 1
-                worker_id = sid
+                my_color  = idx + 1
+                worker_id = idx
                 break
 
         local_comm = self.comm.Split(color=my_color, key=self.rank)
@@ -105,15 +108,15 @@ class ManagerFactory:
         global_comm = None
         if self.has_global:
             in_global = self.rank in self.available_ranks
-            gc = self.comm.Split(color=1 if in_global else MPI.UNDEFINED, key=self.rank)
-            if gc != MPI.COMM_NULL:
-                global_comm = gc
+            global_split = self.comm.Split(color=1 if in_global else MPI.UNDEFINED, key=self.rank)
+            if global_split != MPI.COMM_NULL:
+                global_comm = global_split
 
         group_comm = None
         if self.group_ranks:
-            gc = self.comm.Split(color=1 if self.rank in self.group_ranks else MPI.UNDEFINED, key=self.rank)
-            if gc != MPI.COMM_NULL:
-                group_comm = gc
+            group_split = self.comm.Split(color=1 if self.rank in self.group_ranks else MPI.UNDEFINED, key=self.rank)
+            if group_split != MPI.COMM_NULL:
+                group_comm = group_split
 
         if worker_id is not None:
             worker = self._create_worker(local_comm, worker_id, global_comm, group_comm)

@@ -6,9 +6,7 @@ from pykmc.manager.worker import Worker
 
 
 class EngineManagerFactory(ManagerFactory):
-
-    """
-    Engine-specific subclass of ManagerFactory.
+    """Engine-specific subclass of ManagerFactory.
 
     Encodes the pyKMC convention: one Engine per worker for local and group
     modes, None for global (global mode is reserved for extra_ops).  The
@@ -51,9 +49,7 @@ class EngineManagerFactory(ManagerFactory):
             extra_ops=extra_ops,
         )
 
-    def _make_engine(self, engine_comm: MPI.Comm, mode: str, worker_id: int) -> Engine | None:
-        if mode == "global":
-            return None
+    def _make_engine(self, engine_comm: MPI.Comm, mode: str, worker_id: int) -> Engine:
         engine_id = 0 if mode == "group" else worker_id + 1
         return Engine.create(self._engine_style, config=self._engine_config, comm=engine_comm, engine_id=engine_id)
 
@@ -67,7 +63,7 @@ class EngineManagerFactory(ManagerFactory):
             local_obj=self._make_engine(local_comm, "local", worker_id),
             local_comm=local_comm,
             worker_id=worker_id,
-            global_obj=self._make_engine(global_comm, "global", worker_id) if global_comm is not None else None,
+            global_obj=None,  # global mode is reserved for extra_ops
             global_comm=global_comm,
             group_obj=self._make_engine(group_comm, "group", worker_id) if group_comm is not None else None,
             group_comm=group_comm,
