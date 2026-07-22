@@ -59,6 +59,8 @@ nav:
       - Algorithms: api/algorithms.md
       - KMC: api/kmc.md
       - Environments: api/environments.md
+      - Engine: api/engine.md
+      - LammpsEngine: api/lammpsengine.md
       - EventTable: api/event_table.md
       - EventSearch: api/eventsearch.md
       - Bias: api/bias.md
@@ -68,7 +70,7 @@ nav:
       - RateConstant: api/rate_constant.md
       - Basins: api/basins.md
       - ActiveVolume: api/active_volume.md
-      - Initialize: api/initialized.md
+      - Initializer: api/initializer.md
       - Result: api/result.md
       - Info: api/info_simulation.md
       - Utils: api/utils.md
