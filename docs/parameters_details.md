@@ -106,6 +106,10 @@
   <details><summary>Description</summary>
   When style is 'coordination' or 'coordination/graph', atoms with fewer neighbors (within rnei) than this value are classified as 'noncrystal'. Atoms with this many or more neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.
   </details>
+- **`atom_coloring_mode`** : `Literal['grey', 'full']`, default = `'full'`
+  <details><summary>Description</summary>
+  Controls whether element types are used in environment matching. Defaults to 'full' (species-resolved). 'grey': all atoms treated identically (grey alloy approximation). 'full': element types used in graph hashing, PSR matching, and symmetry detection.
+  </details>
 
 ---
 
@@ -214,6 +218,10 @@
 - **`minimize`** : `str`, default = `'1.0e-6 1.0e-8 1000 1000'`
   <details><summary>Description</summary>
   Lammps minimize command
+  </details>
+- **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
+  <details><summary>Description</summary>
+  Lammps minimize command with frozen core
   </details>
 
 ---
