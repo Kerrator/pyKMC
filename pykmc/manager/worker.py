@@ -28,7 +28,7 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     objs = obj if isinstance(obj, list) else ([obj] if obj is not None else [])
     for o in objs:
         for name, method in inspect.getmembers(o, predicate=callable):
-            if name.startswith("_"): #only collect public methods.
+            if name.startswith("_"):  # only collect public methods.
                 continue
             if name in registry:
                 raise ValueError(
@@ -38,11 +38,12 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     return registry
 
 
-#Convienient part to deal with worker operation that expect a result, or not, and errors.
+# Convienient part to deal with worker operation that expect a result, or not, and errors.
 class DispatchStatus(Enum):
-    SILENT  = "silent"
+    SILENT = "silent"
     SUCCESS = "success"
-    ERROR   = "error"
+    ERROR = "error"
+
 
 @dataclass
 class DispatchResult:
@@ -52,22 +53,23 @@ class DispatchResult:
 
 
 class Worker:
-
     # Must match Session._TAG_*
-    _TAG_CMD    = 2
+    _TAG_CMD = 2
     _TAG_STATUS = 0
     _TAG_RESULT = 1
 
-    def __init__(self,
-                 local_obj:   object | list[object] | None,
-                 local_comm:  "MPI.COMM",
-                 worker_id:   int,
-                 global_obj:  object | list[object] | None = None,
-                 global_comm: "MPI.COMM" | None = None,
-                 group_obj:   object | list[object] | None = None,
-                 group_comm:  "MPI.COMM" | None = None,
-                 extra_ops:   dict[str, Callable] | None = None,
-                 world_comm:  "MPI.COMM" | None = None) -> None:
+    def __init__(
+        self,
+        local_obj: object | list[object] | None,
+        local_comm: "MPI.COMM",
+        worker_id: int,
+        global_obj: object | list[object] | None = None,
+        global_comm: "MPI.COMM" | None = None,
+        group_obj: object | list[object] | None = None,
+        group_comm: "MPI.COMM" | None = None,
+        extra_ops: dict[str, Callable] | None = None,
+        world_comm: "MPI.COMM" | None = None,
+    ) -> None:
         """MPI worker. Each instance runs on all ranks in ``local_comm``.
 
         Rank 0 of the active communicator reads incoming messages from
@@ -130,24 +132,24 @@ class Worker:
             If obj-derived registries differ across modes that have objects,
             extra_ops clash with object methods, or a key clashes with a builtin.
         """
-        self.local_obj   = local_obj
-        self.local_comm  = local_comm
-        self.global_obj  = global_obj
+        self.local_obj = local_obj
+        self.local_comm = local_comm
+        self.global_obj = global_obj
         self.global_comm = global_comm
-        self.group_obj   = group_obj
-        self.group_comm  = group_comm
-        self.local_rank  = local_comm.Get_rank()
-        self.worker_id   = worker_id
-        self._is_alive   = False
+        self.group_obj = group_obj
+        self.group_comm = group_comm
+        self.local_rank = local_comm.Get_rank()
+        self.worker_id = worker_id
+        self._is_alive = False
 
         self.world_comm = world_comm or MPI.COMM_WORLD
 
         self._builtins_op = {
-            "use_local":  self.use_local,
-            "use_group":  self.use_group,
+            "use_local": self.use_local,
+            "use_group": self.use_group,
             "use_global": self.use_global,
-            "shutdown":   self.shutdown,
-            "list_ops":   self.list_ops,
+            "shutdown": self.shutdown,
+            "list_ops": self.list_ops,
         }
 
         # extra_ops names tracked separately so dispatch can inject comm.
@@ -155,26 +157,26 @@ class Worker:
         _extra = extra_ops or {}
 
         # Build obj-only registries (used for consistency check), then merge extra_ops.
-        _local_obj_reg  = build_registry(local_obj)
+        _local_obj_reg = build_registry(local_obj)
         _global_obj_reg = build_registry(global_obj) if global_comm is not None else {}
-        _group_obj_reg  = build_registry(group_obj)  if group_comm  is not None else {}
+        _group_obj_reg = build_registry(group_obj) if group_comm is not None else {}
 
         self._check_obj_clash(_extra)
-        self._check_builtin_clashes(_local_obj_reg,  _extra, "local")
+        self._check_builtin_clashes(_local_obj_reg, _extra, "local")
         self._check_obj_registries(_local_obj_reg, _global_obj_reg, _group_obj_reg)
 
-        self.local_registry  = {**_local_obj_reg,  **_extra}
-        self.global_rank     = None
+        self.local_registry = {**_local_obj_reg, **_extra}
+        self.global_rank = None
         self.global_registry = {}
-        self.group_rank      = None
-        self.group_registry  = {}
+        self.group_rank = None
+        self.group_registry = {}
 
         if global_comm is not None:
-            self.global_rank     = global_comm.Get_rank()
+            self.global_rank = global_comm.Get_rank()
             self.global_registry = {**_global_obj_reg, **_extra}
             self._check_builtin_clashes(_global_obj_reg, _extra, "global")
         if group_comm is not None:
-            self.group_rank     = group_comm.Get_rank()
+            self.group_rank = group_comm.Get_rank()
             self.group_registry = {**_group_obj_reg, **_extra}
             self._check_builtin_clashes(_group_obj_reg, _extra, "group")
 
@@ -190,7 +192,9 @@ class Worker:
                 f"Rename the extra_ops keys or remove the conflicting methods."
             )
 
-    def _check_builtin_clashes(self, obj_reg: dict, extra_ops: dict, mode_name: str) -> None:
+    def _check_builtin_clashes(
+        self, obj_reg: dict, extra_ops: dict, mode_name: str
+    ) -> None:
         """Raise if any operation name (obj or extra) shadows a builtin."""
         clashes = (set(obj_reg) | set(extra_ops)) & set(self._builtins_op)
         if clashes:
@@ -199,10 +203,9 @@ class Worker:
                 f"Rename the conflicting methods or extra_ops keys."
             )
 
-    def _check_obj_registries(self,
-                               local_reg:  dict,
-                               global_reg: dict,
-                               group_reg:  dict) -> None:
+    def _check_obj_registries(
+        self, local_reg: dict, global_reg: dict, group_reg: dict
+    ) -> None:
         """Raise if a mode with an object exposes different methods from local.
 
         Modes where obj=None have an empty obj-registry and are not checked,
@@ -224,9 +227,9 @@ class Worker:
 
     # Mode switching
     def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict) -> None:
-        self.mode     = mode
-        self.comm     = comm
-        self.rank     = comm.Get_rank()
+        self.mode = mode
+        self.comm = comm
+        self.rank = comm.Get_rank()
         self.registry = registry
 
     def use_local(self) -> None:
@@ -253,11 +256,19 @@ class Worker:
 
     def _all_objs(self) -> list[object]:
         """Flatten local, global, and group objects into a single list."""
+
         def _to_list(o):
-            if o is None:       return []
-            if isinstance(o, list): return o
+            if o is None:
+                return []
+            if isinstance(o, list):
+                return o
             return [o]
-        return _to_list(self.local_obj) + _to_list(self.global_obj) + _to_list(self.group_obj)
+
+        return (
+            _to_list(self.local_obj)
+            + _to_list(self.global_obj)
+            + _to_list(self.group_obj)
+        )
 
     def shutdown(self) -> None:
         """Stop the message loop and call .close() on all objects that support it."""
@@ -270,14 +281,13 @@ class Worker:
     def _loop(self) -> None:
         """Main loop. All ranks run this until ``_is_alive`` is False."""
         while self._is_alive:
-
             if self.rank == 0:
                 msg = self._read_messages()
             else:
                 msg = None
 
             msg = self.comm.bcast(msg, root=0)
-            r   = self._dispatch(msg)
+            r = self._dispatch(msg)
 
             if self.rank == 0:
                 self._send_result(r)
@@ -290,11 +300,24 @@ class Worker:
         if r.status == DispatchStatus.SILENT:
             return
         if r.status == DispatchStatus.SUCCESS:
-            self.world_comm.send({"type": "status", "value": {"has_result": r.value is not None, "error": None}}, dest=0, tag=self._TAG_STATUS)
+            self.world_comm.send(
+                {
+                    "type": "status",
+                    "value": {"has_result": r.value is not None, "error": None},
+                },
+                dest=0,
+                tag=self._TAG_STATUS,
+            )
             if r.value is not None:
-                self.world_comm.send({"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT)
+                self.world_comm.send(
+                    {"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT
+                )
         elif r.status == DispatchStatus.ERROR:
-            self.world_comm.send({"type": "status", "value": {"has_result": False, "error": r.error}}, dest=0, tag=self._TAG_STATUS)
+            self.world_comm.send(
+                {"type": "status", "value": {"has_result": False, "error": r.error}},
+                dest=0,
+                tag=self._TAG_STATUS,
+            )
 
     def _read_messages(self) -> dict:
         """Read one message from world_comm on rank 0. Blocks until a message arrives."""
@@ -336,7 +359,10 @@ class Worker:
 
         handler = self.registry.get(op_type)
         if handler is None:
-            return DispatchResult(DispatchStatus.ERROR, error=f"Unknown operation '{op_type}'. Available: {list(self._builtins_op) + list(self.registry)}")
+            return DispatchResult(
+                DispatchStatus.ERROR,
+                error=f"Unknown operation '{op_type}'. Available: {list(self._builtins_op) + list(self.registry)}",
+            )
 
         self.comm.barrier()
         try:
@@ -352,12 +378,14 @@ class Worker:
 
     def list_ops(self, mode: str = "local") -> list[str]:
         registries = {
-            "local":  self.local_registry,
+            "local": self.local_registry,
             "global": self.global_registry,
-            "group":  self.group_registry,
+            "group": self.group_registry,
         }
         if mode not in registries:
-            raise ValueError(f"Unknown mode '{mode}'. Expected one of: {list(registries)}")
+            raise ValueError(
+                f"Unknown mode '{mode}'. Expected one of: {list(registries)}"
+            )
         return list(registries[mode])
 
     def __repr__(self) -> str:

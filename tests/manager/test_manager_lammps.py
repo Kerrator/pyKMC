@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("lammps")
 import numpy as np
 from mpi4py import MPI
@@ -31,7 +32,6 @@ def lammps_config_Ni():
 
 
 class TestManagerLammps:
-
     @pytest.fixture(autouse=True)
     def setup(self, lammps_config_Ni, system):
         _require_8_ranks()

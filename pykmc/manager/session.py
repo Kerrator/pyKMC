@@ -1,6 +1,7 @@
 from __future__ import annotations
-from mpi4py import MPI 
+from mpi4py import MPI
 from typing import Any
+
 
 class Session:
     """Proxy for communicating with a Worker rank from rank 0.
@@ -11,11 +12,16 @@ class Session:
         _TAG_RESULT (1) — result  : Worker  → Session (return value, only if has_result)
     """
 
-    _TAG_CMD    = 2
+    _TAG_CMD = 2
     _TAG_STATUS = 0
     _TAG_RESULT = 1
 
-    def __init__(self, engine_master_rank: int, session_id: int = 0, world_comm: "MPI.COMM"|None = None) -> None:
+    def __init__(
+        self,
+        engine_master_rank: int,
+        session_id: int = 0,
+        world_comm: "MPI.COMM" | None = None,
+    ) -> None:
         world_comm = world_comm or MPI.COMM_WORLD
         if world_comm.Get_rank() != 0:
             raise RuntimeError("Session must be used from rank 0.")
@@ -23,13 +29,23 @@ class Session:
         self.engine_master_rank = engine_master_rank
         self.session_id = session_id
         self.world_comm = world_comm
-    def _send_command(self, op_type: str) -> None:
-        self.world_comm.send({"type": op_type}, dest=self.engine_master_rank, tag=self._TAG_CMD)
 
-    def use_local(self)  -> None: self._send_command("use_local")
-    def use_group(self)  -> None: self._send_command("use_group")
-    def use_global(self) -> None: self._send_command("use_global")
-    def shutdown(self)   -> None: self._send_command("shutdown")
+    def _send_command(self, op_type: str) -> None:
+        self.world_comm.send(
+            {"type": op_type}, dest=self.engine_master_rank, tag=self._TAG_CMD
+        )
+
+    def use_local(self) -> None:
+        self._send_command("use_local")
+
+    def use_group(self) -> None:
+        self._send_command("use_group")
+
+    def use_global(self) -> None:
+        self._send_command("use_global")
+
+    def shutdown(self) -> None:
+        self._send_command("shutdown")
 
     def call(self, op_name: str, **kwargs) -> Any:
         """Send an operation to the worker and optionally retrieve a result."""
@@ -56,4 +72,3 @@ class Session:
         if msg.get("type") != "result":
             raise RuntimeError(f"Expected 'result' got '{msg.get('type')}'")
         return msg["value"]
-

@@ -5,6 +5,7 @@ import queue
 import threading
 from typing import Any, Literal
 
+
 @dataclass
 class Job:
     """Unit of work dispatched to a thread worker.
@@ -18,20 +19,22 @@ class Job:
     future : Future
         Resolved with the result once the job completes.
     """
+
     op_name: str
     kwargs: dict = field(default_factory=dict)
     future: Future = field(default_factory=Future)
 
+
 class Manager:
-
-    def __init__(self,
-                 local_sessions: list[Session],
-                 global_session: Session | None = None,
-                 group_session:  Session | None = None) -> None:
-
+    def __init__(
+        self,
+        local_sessions: list[Session],
+        global_session: Session | None = None,
+        group_session: Session | None = None,
+    ) -> None:
         self.local_sessions = local_sessions
         self.global_session = global_session
-        self.group_session  = group_session
+        self.group_session = group_session
 
         self._local_queue: queue.Queue[Job] = queue.Queue()
         self._local_threads: list[threading.Thread] = []
@@ -49,7 +52,9 @@ class Manager:
         if self._local_threads:
             raise RuntimeError("Manager is already started.")
         for session in self.local_sessions:
-            t = threading.Thread(target=self._worker_loop, args=(session, self._local_queue), daemon=True)
+            t = threading.Thread(
+                target=self._worker_loop, args=(session, self._local_queue), daemon=True
+            )
             t.start()
             self._local_threads.append(t)
 
@@ -212,9 +217,9 @@ class Manager:
         mgr.global_minimize(positions=pos) → submit_global("minimize", positions=pos) → result
         """
         if name.startswith("global_"):
-            op = name[len("global_"):]
+            op = name[len("global_") :]
             return lambda **kw: self.submit_global(op, **kw)
         if name.startswith("group_"):
-            op = name[len("group_"):]
+            op = name[len("group_") :]
             return lambda **kw: self.submit_group(op, **kw)
         return lambda **kw: self.submit(name, **kw)

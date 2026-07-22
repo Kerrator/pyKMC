@@ -9,8 +9,7 @@ def _require_8_ranks():
 
 
 class Operations:
-
-    def __init__(self, comm) : 
+    def __init__(self, comm):
         self.comm = comm
 
     @property
@@ -24,20 +23,20 @@ class Operations:
             return result
 
     def parallel_multiplication(self, a, b):
-        local = a*b
+        local = a * b
         result = self.comm.gather(local, root=0)
         if self._is_rank0:
             return result
-    
+
+
 def division(comm, a, b):
-    local = a/b
+    local = a / b
     result = comm.gather(local, root=0)
     if comm.Get_rank() == 0:
         return result
 
 
 class TestsManager:
-
     @pytest.fixture(autouse=True)
     def setup(self):
         _require_8_ranks()
@@ -49,7 +48,7 @@ class TestsManager:
             comm=comm,
             has_global=True,
             group_size=6,
-            extra_ops={"division": division}
+            extra_ops={"division": division},
         ).launch()
         yield
         if self.manager is not None:
@@ -106,7 +105,6 @@ class TestsManager:
 
 
 class TestsManagerValidation:
-
     @pytest.fixture(autouse=True)
     def setup(self):
         _require_8_ranks()
@@ -130,5 +128,7 @@ class TestsManagerValidation:
     def test_group_size_not_multiple_of_local(self):
         if MPI.COMM_WORLD.Get_rank() != 0:
             return
-        with pytest.raises(ValueError, match="must be a multiple of the per-worker rank count"):
+        with pytest.raises(
+            ValueError, match="must be a multiple of the per-worker rank count"
+        ):
             ManagerFactory(**self._base_factory(group_size=3))
