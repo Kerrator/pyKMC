@@ -23,4 +23,5 @@ Finally, the symmetry matrices and the permutation matrices associated with the 
 
 These matrices will later be used during the refinement step to construct specific events.
 
-_Note: These operations are implemented in symmetries.py_
+_Note: These operations are implemented in
+[`pykmc.symmetries`](../api/symmetries.md)._

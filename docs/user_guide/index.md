@@ -81,8 +81,8 @@ The two main parameters are specified by the `rnei` and `rcut` keys. `rnei` defi
 You can select the method (or style) used to assign an atomic environment ID to each atom.
 The available styles are:
 - cna : 
-In this mode, pyKMC counts the number of neighbors around each atom and checks whether it matches a typical crystalline coordination number (6, 8, or 12).
-    - if the atom has one of these neighbor counts, it is labeled "crystal".
+In this mode, pyKMC performs a common neighbor analysis: for every neighbor pair it computes the CNA signature (number of shared neighbors and the bonds between them) and labels the atom "crystal" when the set of signatures matches a known crystalline fingerprint (FCC/HCP, BCC, or icosahedral).
+    - if the signatures match one of these fingerprints, the atom is labeled "crystal".
     - Otherwise, it is labeled "noncrystal".
 This style should be only use when setting in the `[Control]` section `reconstruction = False`. (_Not working anymore for the moment_).
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
@@ -118,6 +118,15 @@ This hybrid mode provides a compromise:
   <img src="../images/atomic_env_cnagraph.png" width="300" />
 </div>
 
+- coordination : 
+A simpler crystalline test based on the neighbor count alone: atoms with at least `coordination_threshold` neighbors (within `rnei`) are labeled "crystal", atoms with fewer are labeled "noncrystal". The `coordination_threshold` key is required with this style.
+
+- coordination/graph : 
+Same hybrid idea as cna/graph, but the crystalline filter is the coordination test above: "noncrystal" atoms (fewer than `coordination_threshold` neighbors) get a graph-based ID.
+
+- diamond/graph : 
+A cna/graph variant for diamond-lattice materials: the CNA fingerprint is evaluated on each atom's second-neighbor shell (which is FCC-like in the diamond structure), and graph IDs are computed for the remaining "noncrystal" atoms.
+
 When searching for an event around a "noncrystal" atom, it may happen that another atom ends up being the one that moves the most. In this case, the resulting event will be tagged with the graph ID of that other atom.
 If this ID corresponds to a "crystal" atom in the current system, that event will never be selected. 
 
@@ -128,6 +137,22 @@ For example, when looking at a vacancy with `neighbors_add = 1` it will gives :
 <div style="text-align: center;">
 <img src="../images/atomic_env_radd.png" width="400" />
 </div>
+
+### Chemical species in environment matching
+
+In alloys, the `atom_coloring_mode` key controls whether chemical species are
+part of the environment fingerprint:
+
+- `full` (**default**): element types enter the graph hashing, the point-set
+  registration, and the symmetry detection. Two sites with identical geometry
+  but different chemical decoration get different IDs, so events are only
+  reused between chemically identical environments.
+- `grey`: all atoms are treated as identical (the "grey alloy" approximation).
+  Environments and event reuse are purely geometric, which yields far fewer
+  unique environments (and thus fewer searches), at the cost of ignoring
+  species effects on barriers.
+
+For single-species systems the two modes are equivalent.
 
 Finally, the `[AtomicEnvironment]` section of the INI configuration file will look like this : 
 ```INI 
@@ -169,7 +194,9 @@ The event is added to the reference table only if it satisfies all the following
 - $dE_{forward}$ < `emax_event` 
 - $dE_{forward}$ > `emin_event` 
 - $dE_{backward}$ > `emin_event` 
-- $dE_{backward}$ < `energy_asymmetry`x`backward_min` and $dE_{backward}$ > `backward_min` 
+- the event is not highly asymmetric: an event is rejected when
+  $dE_{forward}$ > `energy_asymmetry` $\times$ `backward_emin_event` while
+  $dE_{backward}$ < `backward_emin_event` 
 
 Once a reference event is reused, it is refined to adapt to the current atomic configuration. The refinement is considered successful if:
 - The central atom moves less than `refined_minimum_delr_thr` between the current position and the refined minimum.
@@ -190,7 +217,7 @@ delr_thr = 0.1
 r_eigval_th = -0.02
 ```
 
-For a detailed explanation of the pARTn algorithm and its parameters, please refer to the official pARTn documentation.
+For a detailed explanation of the pARTn algorithm and its parameters, please refer to the [official pARTn documentation](https://mammasmias.gitlab.io/artn-plugin/).
 
 ## Rate Constant 
 
@@ -203,13 +230,16 @@ k = k_{0} e^{-\frac{dE_{forward}}{{k_{b}T}}}
 $$
 Where:
 - $k$ is the rate constant,
-- $k_{0}$ is a user-defined pre-exponential factor (typically $10^{13}s^{-1}=10ps^{-1}$),
-- $T$ is the system temperature, defined by the user.
-- $dE_{forward}$ is the forward energy barrier,
-- $k_{b}$​ is the Boltzmann constant,
-- $h$ is Planck’s constant.
+- $k_{0}$ is a user-defined pre-exponential factor,
+- $T$ is the system temperature (in Kelvin), defined by the user,
+- $dE_{forward}$ is the forward energy barrier (in eV),
+- $k_{b}$​ is the Boltzmann constant.
 
-All parameters must be provided in LAMMPS metal units.
+All parameters are in LAMMPS *metal* units, so **`k0` is given in
+$ps^{-1}$**: a typical attempt frequency of $10^{13}\,s^{-1}$ corresponds to
+`k0 = 10` (and the default `k0 = 1.0` to $10^{12}\,s^{-1}$). The physical
+background of this Arrhenius form is covered in
+[Transition State Theory](../theory/tst.md).
 
 Typically, it will gives : 
 
@@ -273,7 +303,7 @@ r_eigval_th = -0.02
 
 [RateConstant]
 style = constant 
-k0 = 1e12 
+k0 = 10 
 T = 300  
 
 [PSR]
