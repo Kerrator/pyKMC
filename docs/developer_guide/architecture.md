@@ -55,23 +55,27 @@ documents itself.
 into which concrete subclasses insert themselves at class-definition time
 under a declared `name`; `autodiscover()` imports every submodule of a package
 so implementations register simply by being defined. Two kinds of component
-build on this:
+are meant to build on this:
 
-- **Strategies** — interchangeable algorithm implementations behind a stable
-  facade (environment classification, event search, …). See
-  [Strategy pattern](strategy_pattern.md).
 - **Engines** — computational backends for energy/force operations, which are
-  fixed backends rather than interchangeable algorithms. See
+  fixed backends rather than interchangeable algorithms. The engine hierarchy
+  is currently the only production user of `Registrable`/autodiscovery. See
   [Engine](engine.md).
+- **Strategies** — interchangeable algorithm implementations behind a stable
+  facade (environment classification, event search, …). This is a *proposed*
+  architecture: no production KMC component has migrated to it yet. See
+  [Strategy pattern](strategy_pattern.md).
 
 ## Engine layer
 
 `pykmc/engine/` defines the abstract `Engine` (a `Registrable` root) plus the
 `EngineExtension` mechanism, and `LammpsEngine` as the concrete LAMMPS
-implementation — usable standalone (serial or on an MPI communicator) and
-designed as the backend for the session pool below. The
-[Engine](engine.md) page documents the interface, the rank-0 result
-convention, and how to add a new engine.
+implementation — usable standalone (serial or on an MPI communicator). It is
+designed as the future backend for the session pool below, but that
+integration has not happened yet: the current `python -m pykmc` production
+path still drives LAMMPS through `enginemanager.lmpi.engines.MpiApiEngine`
+and the `lammps_operations` functions. The [Engine](engine.md) page documents
+the interface, the rank-0 result convention, and how to add a new engine.
 
 ## Engine manager (LAMMPS session pool)
 
@@ -81,7 +85,8 @@ production run works through (`run.py` builds it via `ManagerFactory`):
 - `lmpi/pool/` — `ManagerFactory` splits `MPI.COMM_WORLD` into contiguous
   per-session communicators and wires the pool; `Manager` runs one worker
   thread per session on rank 0 and dispatches jobs to free sessions.
-- `lmpi/sessions/` — the rank-0-side session handles the manager talks to.
+- `lmpi/sessions/` — the rank-0-side session handles through which the
+  Manager sends commands and receives results.
 - `lmpi/engines/` — `MpiApiEngine`, the worker-side command loop executing on
   each session's ranks.
 - `lmpi/lammps_operations.py` — the LAMMPS/pARTn operations the workers run
@@ -92,10 +97,12 @@ production run works through (`run.py` builds it via `ManagerFactory`):
 
 The manager exposes the pool in two modes: **local** (each session works
 independently on its own communicator — used for concurrent event searches and
-refinements) and **global** (the engine ranks act together for whole-system
-operations such as reconstruction), switched with `use_local()` /
-`use_global()`. See [MPI & Parallel Execution](mpi.md) for rank layout and
-sizing rules.
+refinements) and **global** (all engine ranks act together for whole-system
+operations such as reconstruction). At launch every worker joins both a local
+session communicator and one global communicator and creates one LAMMPS
+instance for each; `use_local()` / `use_global()` switch which pre-created
+instance receives subsequent operations. See
+[MPI & Parallel Execution](mpi.md) for rank layout and sizing rules.
 
 > **Note:** `enginemanager` is currently a namespace package (no
 > `__init__.py`), which the documentation tooling cannot introspect — so it has
@@ -113,12 +120,16 @@ the current geometry, avoiding a new saddle-point search.
 
 - **New engine:** subclass `Engine` in `pykmc/engine/` and declare a `name` —
   see [Adding a new engine](engine.md#adding-a-new-engine).
-- **New strategy** for a pluggable operation: add it under the module's
-  `strategies/` package — see
-  [Adding a new strategy](strategy_pattern.md#adding-a-new-strategy).
-- **New rate-constant style:** extend `rate_constant.py` and register the
-  style in `config.py`.
-- **New basin algorithm:** add an explorer/selector under `pykmc/basins/`.
+- **New strategy** for a pluggable operation: the facade/strategy migration is
+  still a design proposal — see
+  [Strategy pattern](strategy_pattern.md) for the intended shape.
+- **New rate-constant style:** requires a new implementation, a new allowed
+  configuration literal, and dispatch at every rate-construction call site —
+  the call sites currently invoke `compute_rate_Eyring` directly, so there is
+  no style registry to hook into yet.
+- **New basin algorithm:** the explorer and selector are currently
+  hard-coded in `pykmc/basins/basin.py`; a pluggable builder is planned but
+  adding an algorithm today means editing that construction directly.
 
 See [CONTRIBUTING](https://github.com/hugomoison/pyKMC/blob/develop/CONTRIBUTING.md)
 for the docstring and documentation requirements that keep the API reference

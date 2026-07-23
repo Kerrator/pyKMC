@@ -14,18 +14,31 @@ below keeps the published docs complete and correct with no extra manual work.
 python3 -m venv pykmc_env
 source pykmc_env/bin/activate
 pip install -e ".[dev]"   # ruff, mkdocs, mkdocstrings, mike, ...
-pip install pytest         # not in the project dependencies; install separately
+pip install pytest pytest-lazy-fixtures   # not in the project dependencies; install separately
 ```
 
-To actually run simulations you also need LAMMPS, and optionally pARTn and IRA —
-see the [installation guide](docs/user_guide/install/installation.md).
+To actually run simulations you also need LAMMPS, pARTn, and IRA — all three
+are required by the current implementation; see the
+[installation guide](docs/user_guide/install/installation.md).
 
 ## Running the tests
 
+Some test modules exercise the MPI session pool and need a real `mpirun`
+launch; run the serial and MPI subsets separately:
+
 ```bash
-pytest                                   # whole suite
-pytest tests/test_system.py::test_fn -v  # a single test
-pytest -k "vacancy"                      # pattern match
+# serial subset (excludes the MPI-pool test modules)
+pytest --ignore=tests/manager/lmpi \
+       --ignore=tests/basins/test_basin.py \
+       --ignore=tests/test_lammps_engine_api_mpi.py
+
+# MPI-pool tests (n_sessions = 7 plus the rank-0 driver)
+mpirun -n 8 python -m pytest tests/basins/test_basin.py
+mpirun -n 8 python -m pytest tests/manager/lmpi/test_manager.py
+
+# a single test / pattern match
+pytest tests/test_system.py::TestSystem::test_create_from_file_xyz -v
+pytest -k "vacancy"
 ```
 
 ## Linting and type checking
@@ -158,7 +171,7 @@ Before opening a PR, confirm:
 
 - [ ] `ruff check .` and `ruff format .` pass
 - [ ] `mypy pykmc/` passes
-- [ ] `pytest` passes
+- [ ] the serial test subset passes (and the MPI-pool tests when touching MPI code)
 - [ ] New public functions/classes/modules have **NumPy-style docstrings**
 - [ ] New public module → added `docs/api/<module>.md` **and** a `mkdocs.yml` nav entry
 - [ ] New/changed `Config` fields verified via `python scripts/generate_parameters_doc.py`
