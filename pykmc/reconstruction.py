@@ -1,4 +1,11 @@
-"""Module to reconstruct an event from saddle positions"""
+"""Reconstruct an event from its saddle point and verify it connects two minima.
+
+Reconstruction is the final validation step before a selected event is applied:
+starting from the saddle positions mapped onto the current configuration, the
+system is pushed a fraction of the way toward each supposed minimum and
+re-minimised. The event is accepted only if both relaxations recover the
+expected minima within the matching threshold.
+"""
 
 from pykmc.enginemanager.lmpi.pool import Manager
 from pykmc import Config
@@ -13,6 +20,21 @@ import ase.geometry
 
 
 class Reconstruction:
+    """Validate a mapped event by relaxing from its saddle point.
+
+    Parameters
+    ----------
+    config : Config
+        The simulation configuration; ``config.reconstruction.push_fraction``
+        sets how far the system is pushed from the saddle toward each minimum
+        and ``config.psr.matching_score_thr`` is the acceptance threshold.
+    manager : Manager
+        Engine session pool used to minimise the pushed configurations
+        (global mode).
+    types : np.ndarray, optional
+        Atom types of the full system, forwarded to the minimisation engine.
+    """
+
     def __init__(self, config: Config, manager: Manager, types=None) -> None:
         self.config = config
         self.manager = manager  # Manager objet that can perform minimization and return minimized positions
@@ -27,34 +49,47 @@ class Reconstruction:
         delr_thr,
         neighbors=None,
     ):
-        """From a saddle point, try to reconstruct the event to see if it matches the
-        supposed min1 and min2 positions, and that the to minima are connected.
+        """Check that relaxing from the saddle recovers both expected minima.
 
-        Since we generaly save only the atomic environment of the central atom
-        we can specified neighbors which correspond to the list index of atoms in
-        saddle positions that we need to modifie to go toward min pos.
+        From the saddle positions, the system is pushed a fraction of the way
+        toward the first supposed minimum, minimised, and the result compared
+        with ``supposed_min1_positions``; the same is then done for the second
+        minimum. The event is valid only if both comparisons fall below
+        ``config.psr.matching_score_thr``.
 
-        The reconstruction procede as follow :
-        From the saddle positions
-        Move the system toward the first minimum (with fraction)
-        Minimize and compare minimized positions with supposed min1 positions
-        same for min2
-
+        Since generally only the atomic environment of the central atom is
+        stored, ``neighbors`` gives the indices in the full system of the atoms
+        described by the supposed minima.
 
         Parameters
         ----------
-        supposed_min1_positions : _type_
-            _description_
-        supposed_min2_positions : _type_
-            _description_
-        saddle_positions : _type_
-            _description_
-        central_atom : _type_
-            _description_
-        cell :
-        neighbors : _type_, optional
-            _description_, by default None
-            typically the neighors list of the in the atomic environment of the atom on which we apply the event
+        supposed_min1_positions : np.ndarray
+            Expected positions of the ``neighbors`` atoms at the initial
+            minimum.
+        supposed_min2_positions : np.ndarray
+            Expected positions of the ``neighbors`` atoms at the final
+            minimum.
+        saddle_positions : np.ndarray
+            Positions of the full system with the event's atoms at the saddle
+            point.
+        cell : np.ndarray
+            Simulation cell, used for periodic wrapping and minimum-image
+            distances.
+        delr_thr : float
+            Matching threshold argument (currently unread — the implementation
+            uses ``config.psr.matching_score_thr`` directly).
+        neighbors : np.ndarray, optional
+            Indices of the atoms described by the supposed minima, typically
+            the ``rcut`` neighbour list of the event's central atom. Defaults
+            to all atoms.
+
+        Returns
+        -------
+        Result[ReconstructionOutput, ErrorInfo]
+            ``Ok`` with the relaxed ``min1``/``min2`` positions, the saddle
+            positions, and the final minimum's total energy; ``Err`` with
+            ``RECONSTRUCTION_INVALID_MIN1`` / ``RECONSTRUCTION_INVALID_MIN2``
+            when the corresponding minimum is not recovered.
         """
 
         if neighbors is None:  # len min1 == len min2 == len saddle pos

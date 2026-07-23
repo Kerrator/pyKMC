@@ -63,8 +63,10 @@ nav:
       - LammpsEngine: api/lammpsengine.md
       - EventTable: api/event_table.md
       - EventSearch: api/eventsearch.md
+      - EventRecycling: api/event_recycling.md
       - Bias: api/bias.md
       - Refinement: api/refinement.md
+      - Reconstruction: api/reconstruction.md
       - PointSetRegistration: api/point_set_registration.md
       - Symmetries: api/symmetries.md
       - RateConstant: api/rate_constant.md
