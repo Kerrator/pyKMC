@@ -1,9 +1,10 @@
 # Active Volumes
 
-Active Volume (AV) settings are defined in the `[ActiveVolume]` section of the input file.
-The required parameters are ract and rmov for the total radius of the AV and the movable core radius, 
-respectively
-You must also enable AV mode in the `[Control]` section.
+Active Volume (AV) settings are defined in the `[ActiveVolume]` section of the input file,
+which must be present when AV mode is enabled in the `[Control]` section.
+The two main parameters are `ract` and `rmov` for the total radius of the AV and the
+movable core radius, respectively (both in Angstrom, with defaults of 6.0 and 4.0 —
+size them for your system, see the constraints below).
 
 Example:
 
@@ -56,9 +57,10 @@ If the movable radius `rmov` is less than the cut-off radius `rcut` for the loca
 will fail. Similarly, if the active volume radius `ract` is less than `rcut`, the Event Searches will fail.
 
 A debug mode to check if the AV is large enough can be toggled in `[ActiveVolume]` by setting `AV_debug = True`. This
-will minimize the AV during refinement before the event is applied, and compare the energy before and after. The system 
-being sent for refinement is already minimized, so there should be no difference after minimization within the AV, 
-within 10e-3 eV. If there is a difference, it means the settings for the AV need to be adjusted. This is caused by
-the buffer region being less than the cutoff of the potential being used, leading to movable atoms next to the buffer to
-experience improper forces. 
+will minimize the AV during refinement before the event is applied, and print the energy before and after together
+with their relative difference. The system being sent for refinement is already minimized, so there should be
+essentially no difference after minimization within the AV (more than $\sim 10^{-3}$ eV indicates a problem). If
+there is a difference, it means the settings for the AV need to be adjusted. This is caused by the buffer region
+being less than the cutoff of the potential being used, leading to movable atoms next to the buffer to experience
+improper forces. 
 

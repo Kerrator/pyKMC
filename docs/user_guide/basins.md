@@ -1,7 +1,7 @@
 # Basins
 
 Basin settings are defined in the `[Basin]` section of the input file.
-The only required parameter is the energy threshold below which a state is considered part of the basin.
+The only required parameter is the energy threshold (in eV) below which a state is considered part of the basin.
 You must also enable basin mode in the `[Control]` section.
 
 Example:
@@ -16,8 +16,17 @@ basin = True
 energy_thr = 0.1
 ```
 
-*Note: currently only one basin-handling strategy is implemented.
-The `[Basin]` section is intended for future extensions when multiple algorithms (e.g., FTPA, MRT, local basins, …) will be available.*
+The optional `style` key controls how the geometry of a newly connected state
+is built during exploration:
+
+- `style = global` (default): the mapped event's final positions are applied
+  and the whole system is re-minimised.
+- `style = global/reconstruction`: the full event reconstruction is used
+  instead (relaxation from the saddle towards both minima, with matching
+  verification) — stricter, at a higher cost per state.
+
+*Note: currently only one exit-selection algorithm (FPTA, below) is implemented.
+The `[Basin]` section is intended for future extensions when multiple algorithms (e.g., MRT, local basins, …) will be available.*
 
 ---
 
@@ -71,10 +80,14 @@ The `Basin` object uses two additional components:
       * build its connectivity table
    7. Merge with the global connectivity table
 3. **Refine** all transient → absorbing transitions (update dE and k)
-4. **Selector step**:
+4. **Selector step** (First Passage Time Analysis):
 
-   * build matrix ( M ), solve ( P = e^{-Mt} P_0 )
-   * use bisection to find ( t_{\text{exit}} ) and the exit state
+   * build the absorbing Markov-chain generator matrix $M$ from the
+     connectivity table, collapsing all absorbing states into one
+   * propagate the occupation vector $P(t) = e^{-Mt} P_0$ and use bisection to
+     find the time $t_\text{exit}$ at which the absorbing probability reaches
+     a random target, then draw the exit state from the distribution over the
+     original absorbing states
 5. Build the result and return it to the KMC loop
 6. Replace the initially chosen KMC event with the basin event
 
