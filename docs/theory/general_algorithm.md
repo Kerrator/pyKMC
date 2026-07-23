@@ -23,8 +23,12 @@ Before the main loop, pyKMC sets up the run:
 2. Start the logger and the LAMMPS engine session pool.
 3. Build the initial `System` and minimise it, updating atomic positions.
 4. Build the neighbour list and classify each atom's **atomic environment**
-   (e.g. by coordination/graph hashing).
-5. Initialise the event **catalog** and the set of already-visited environments.
+   (common-neighbor analysis and/or graph topology hashing, selected by the
+   `[AtomicEnvironment]` `style`).
+5. Initialise the event **catalog** and the set of already-visited
+   environments — either empty, or restored from a previous run's saved files
+   (`reference_table` / `visited_environments`), which lets a simulation chain
+   onto an existing catalog.
 6. Set `time = 0` and record the first trajectory snapshot.
 
 ## The KMC loop
@@ -47,24 +51,41 @@ Each step repeats the following:
         symmetry and permutation matrices alongside the event. See
         [Symmetries](../user_guide/symmetries.md).
 
-3. **Build specific events and select.** Generic events that contribute
-   significantly to the total rate are **refined** (and their symmetry-equivalent
-   variants generated) for every atom sharing the same environment, producing
-   the **specific** event list. An event is then chosen with the rejection-free
-   KMC algorithm, and the simulation clock is advanced by the corresponding
-   time increment.
+3. **Build the specific (active) event list.** Every generic event whose
+   environment ID occurs in the current configuration is instantiated for each
+   atom carrying that environment, including its stored symmetry-equivalent
+   variants. To bound the cost, only the instances whose rate would contribute
+   a significant fraction of the total rate (threshold controlled by
+   `refine_thr`) are individually **refined** — re-converged to the saddle with
+   pARTn at their actual site; the remaining instances inherit the generic
+   event's barrier unchanged. Duplicates are removed, and the surviving rows
+   form the **active** event table with a rate constant per event.
 
-4. **Basin handling (optional).** If the selected event has both its forward and
+4. **Select and reconstruct.** An event is chosen with the rejection-free
+   KMC algorithm, and the clock increment is drawn from the total rate (see
+   [Kinetic Monte Carlo](kmc.md)). The chosen event's stored saddle and final
+   geometries are then **reconstructed** onto the current configuration with
+   IRA, and relaxations from the saddle must recover both the initial and the
+   final minimum within the matching threshold. If reconstruction fails, the
+   active event is dropped, its reference event and topology are purged (so
+   the environment will be re-searched later), and selection repeats with the
+   remaining events.
+
+5. **Basin handling (optional).** If the selected event has both its forward and
    backward barriers below the basin threshold, the system has entered a
    metastable basin. The [basin algorithm](../user_guide/basins.md) explores the connected
    transient states, solves for the mean exit time, selects an exit state, and
    replaces the single hop with a super-event that bridges the whole basin.
 
-5. **Apply the event.** Update the atomic positions according to the selected
-   event's final state.
+6. **Apply the event.** Update the atomic positions to the reconstructed final
+   minimum and advance the simulation time.
 
-6. **Update state.** Rebuild the neighbour list and atomic environments, record a
-   trajectory snapshot, and return to step 1.
+7. **Update state.** Rebuild the neighbour list and atomic environments, record
+   a trajectory snapshot, and return to step 1. If every atom now classifies as
+   a crystalline environment (no defects left to move), the run ends. When
+   **event recycling** is enabled (`recycle = True`), active events whose
+   central atom did not move during the executed event and lies far from it
+   are carried over to the next step instead of being refined again.
 
 ## Accelerations
 

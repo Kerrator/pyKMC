@@ -5,9 +5,6 @@ events — transitions that cross an energy barrier much larger than the thermal
 energy $k_B T$. It is the physical basis for the rate constants pyKMC assigns
 to the events it discovers.
 
-*This page is an outline introduction; each section is a starting point to be
-expanded.*
-
 ## Potential energy surface and saddle points
 
 The configuration of an $N$-atom system is a point on a $3N$-dimensional
@@ -36,6 +33,12 @@ surface placed at the saddle, under these assumptions:
 - **Classical nuclei**: motion on the PES follows classical mechanics
   (no tunnelling).
 
+Because every crossing of the dividing surface is counted as a reactive
+event, recrossings can only make the true rate *smaller*: the TST rate is an
+upper bound, and dynamical corrections enter as a transmission coefficient
+$\kappa \le 1$. For diffusive barrier crossings in solids at moderate
+temperature, $\kappa$ is close to 1 and TST is an excellent approximation.
+
 ## Harmonic TST and the Vineyard prefactor
 
 Expanding the PES harmonically around the minimum and the saddle gives the
@@ -51,7 +54,13 @@ $$
 
 where $\nu_i^{\min}$ are the normal-mode frequencies at the minimum and
 $\nu_i^{\ddagger}$ the (real) frequencies at the saddle — the mode with the
-imaginary frequency, the reaction coordinate, is excluded.
+imaginary frequency, the reaction coordinate, is excluded. (In a periodic
+bulk system the three zero-frequency translation modes drop out of both
+products; the $3N$ / $3N-1$ counts above apply when all remaining modes are
+finite, e.g. with a frozen boundary.) The whole frequency ratio plays the
+role of an *effective attempt frequency*: it measures how often the system
+"tries" the barrier, weighted by the entropy narrowing or widening of the
+passage at the saddle.
 
 ## Arrhenius and Eyring forms
 
@@ -73,13 +82,26 @@ The Arrhenius form is what pyKMC's `style = constant` rate computes: the
 user-supplied `k0` is $\nu_0$ and the barrier comes from the event — see the
 [KMC Parameters](../parameters.md) page (`[RateConstant]` section).
 
+**Units.** pyKMC's rate layer works in inverse picoseconds: `k0` is given in
+$\text{ps}^{-1}$, so the default `k0 = 1.0` corresponds to
+$\nu_0 = 10^{12}\ \text{s}^{-1}$, in the middle of the typical attempt
+frequency range. Time increments are therefore in picoseconds, and the
+accumulated simulation time is converted to seconds in the output.
+
 ## From saddle searches to rates in pyKMC
 
 pyKMC does not assume a barrier — it finds saddle points directly with
 **pARTn** (ART nouveau): random activation away from a minimum, followed by
 convergence to a first-order saddle using the lowest curvature mode. Each
 discovered event records $\Delta E_\text{forward}$ and
-$\Delta E_\text{backward}$, which feed the rate constant above. See the
+$\Delta E_\text{backward}$, which feed the rate constant above.
+
+A discovered saddle is only accepted into the event catalog if it passes an
+energy window: the forward barrier must lie between `emin_event` and
+`emax_event`, and the backward barrier must also exceed `emin_event`. This
+screens out incompletely converged searches and numerically negligible
+barriers — see the `[EventSearch]` section of the
+[KMC Parameters](../parameters.md) page. See the
 [Algorithm Overview](general_algorithm.md) for where this sits in the KMC
 loop.
 
