@@ -8,9 +8,6 @@ reaches seconds and beyond by treating only the rare transitions — the
 vibrations in between are folded into the rate constants (see
 [Transition State Theory](tst.md)).
 
-*This page is an outline introduction; each section is a starting point to be
-expanded.*
-
 ## The master equation
 
 The probability $P_i(t)$ of finding the system in state $i$ obeys
@@ -23,7 +20,10 @@ $$
 where $k_{ij}$ is the rate constant of the transition $i \to j$. A KMC
 simulation generates stochastic trajectories whose ensemble samples this
 evolution exactly, provided the rate catalog is complete and the transitions
-are Markovian (memoryless).
+are Markovian (memoryless). The Markov assumption is inherited from
+transition state theory: because the system equilibrates in a basin long
+before it escapes, the escape probability per unit time is constant and the
+next transition is independent of how the state was reached.
 
 ## Rejection-free selection (BKL / n-fold way)
 
@@ -57,6 +57,12 @@ $$
 with mean $\langle \Delta t \rangle = 1 / k_\text{tot}$. Time steps are large
 when barriers are high (slow dynamics) and small when fast events dominate.
 
+This is exactly what pyKMC's selection does (`pykmc.algorithms.rejection_free`):
+one uniform draw picks the event from the cumulative rate sum, a second draws
+$\Delta t$. Rates are handled in $\text{ps}^{-1}$ (see the units note in
+[Transition State Theory](tst.md)), so $\Delta t$ is in picoseconds; the
+accumulated simulation time is reported in seconds.
+
 ## Lattice vs on-the-fly KMC
 
 - **Lattice KMC** maps states onto a fixed lattice with a precomputed event
@@ -67,6 +73,10 @@ when barriers are high (slow dynamics) and small when fast events dominate.
   searches. No lattice and no prior knowledge of the transitions is assumed,
   at the cost of the searches themselves; reuse across equivalent
   environments amortizes that cost.
+
+What makes the on-the-fly variant possible is that each KMC step needs only
+the rates *out of the current state* — the global catalog never has to be
+enumerated in advance, only the escape paths of the configuration at hand.
 
 ## pyKMC's loop
 
