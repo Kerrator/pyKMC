@@ -58,10 +58,15 @@ ok "All prerequisites found"
 step "Selecting Python interpreter"
 
 find_supported_python() {
-    for py in python3.13 python3.12 python3.11 python3.10 python3.9; do
+    local py major minor
+    for py in python3.13 python3.12 python3.11 python3.10 python3; do
         if command -v "$py" >/dev/null 2>&1; then
-            echo "$py"
-            return 0
+            major=$("$py" -c "import sys; print(sys.version_info.major)")
+            minor=$("$py" -c "import sys; print(sys.version_info.minor)")
+            if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ] && [ "$minor" -le 13 ]; then
+                echo "$py"
+                return 0
+            fi
         fi
     done
     return 1
@@ -70,7 +75,7 @@ find_supported_python() {
 PYTHON_BIN="${PYTHON_BIN:-$(find_supported_python || true)}"
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "No supported Python 3.9-3.13 found. Installing python@3.13 with Homebrew..."
+    echo "No supported Python 3.10-3.13 found. Installing python@3.13 with Homebrew..."
     brew install python@3.13
     PYTHON_BIN="$(brew --prefix python@3.13)/bin/python3.13"
 fi
@@ -79,8 +84,8 @@ PYTHON_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.
 PYTHON_MAJOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major)")
 PYTHON_MINOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.minor)")
 
-if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 9 ] || [ "$PYTHON_MINOR" -gt 13 ]; then
-    fail "Supported Python range is 3.9-3.13, found $PYTHON_VERSION at $PYTHON_BIN"
+if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 10 ] || [ "$PYTHON_MINOR" -gt 13 ]; then
+    fail "Supported Python range is 3.10-3.13, found $PYTHON_VERSION at $PYTHON_BIN"
 fi
 
 ok "Using Python $PYTHON_VERSION at $(command -v "$PYTHON_BIN")"
@@ -105,18 +110,8 @@ git clone https://github.com/mammasmias/IterativeRotationsAssignments.git
 git clone https://gitlab.com/mammasmias/artn-plugin.git
 ok "All repositories cloned"
 
-# ------------------------------------------
-# 2. Fix Python version constraint (3.13 only)
-# ------------------------------------------
-step "Fixing Python version constraint"
-
-if [ "$PYTHON_MINOR" -eq 13 ]; then
-    sed -i '' 's/<3.13,/<3.14,/' pyKMC/pyproject.toml
-    grep -q '<3.14,' pyKMC/pyproject.toml || fail "Failed to bump pyproject upper Python bound (sed pattern stale?)"
-    ok "Updated pyproject.toml for Python 3.13"
-else
-    ok "Python $PYTHON_VERSION is within range, no fix needed"
-fi
+# (pyKMC's pyproject.toml declares requires-python = ">=3.10" with no upper
+# bound, so no version-constraint edit is needed for Python 3.13.)
 
 # ------------------------------------------
 # 3. Create virtual environment and install pyKMC

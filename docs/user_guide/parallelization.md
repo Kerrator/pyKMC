@@ -35,6 +35,9 @@ $$
 \text{world\_size} \geq n\_\text{sessions} + 1
 $$
 
+With `engine_use_rank_0 = True`, rank 0 also hosts the first session, so
+$\text{world\_size} \geq n\_\text{sessions}$ suffices.
+
 If too few ranks are launched, the run aborts at start-up — see
 [Troubleshooting](../troubleshooting.md).
 
@@ -62,10 +65,12 @@ The available cores are split automatically: the LAMMPS instances run on ranks
   e.g.
 
   ```bash
-  srun --ntasks=$SLURM_NTASKS --distribution=block:block \
-       --cpu-bind=cores --mem-bind=local \
-       python -m pykmc -in input.in
+  srun --ntasks="$SLURM_NTASKS" python -m pykmc -in input.in
   ```
+
+  Scheduler topology and affinity options such as `--distribution`,
+  `--cpu-bind`, and `--mem-bind` are site-dependent; add the settings
+  recommended by your cluster.
 
 If the run crashes inside MPI collectives, check that `mpi4py` was built
 against the same MPI library as LAMMPS — see

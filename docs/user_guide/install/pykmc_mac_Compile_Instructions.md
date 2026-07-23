@@ -12,7 +12,7 @@
 
 `install_pykmc_mac.sh` creates a `pykmc/` directory **inside your current working directory** and installs everything there. Choose where you want the install to live before running it.
 
-Before running, make sure Xcode Command Line Tools and Homebrew are installed (the script checks for them and exits with a message if either is missing):
+Before running, install Xcode Command Line Tools and Homebrew. The script checks for Homebrew and `git` (exiting with a message if either is missing) and verifies `gfortran` plus the MPI compiler wrappers; it does not independently verify the Xcode Command Line Tools installation:
 
 ```bash
 xcode-select --install
@@ -55,7 +55,7 @@ To use a specific Python interpreter, set `PYTHON_BIN` before running:
 PYTHON_BIN=/opt/homebrew/bin/python3.12 /path/to/install_pykmc_mac.sh
 ```
 
-When it finishes you'll have `pykmc/pykmc_env/`, `pykmc/lammps/`, `pykmc/IterativeRotationsAssignments/`, `pykmc/artn-plugin/`, and `pykmc/activate.sh` under the folder you chose.
+When it finishes, you will have `pykmc/pykmc_env/`, `pykmc/lammps/`, `pykmc/IterativeRotationsAssignments/`, `pykmc/artn-plugin/`, and `pykmc/activate.sh` under the folder you chose.
 
 ---
 
@@ -142,7 +142,7 @@ python -m pip install --upgrade pip
 python -m pip install -e ./pyKMC
 ```
 
-Rebuild `mpi4py` from source to match your local OpenMPI (the pip binary wheel causes segfaults with `mpirun`):
+Rebuild `mpi4py` from source to match your local OpenMPI (a pre-built `mpi4py` wheel may use a different MPI implementation from local LAMMPS, which can cause crashes under `mpirun`):
 
 ```bash
 export CC=mpicc CXX=mpicxx FC=mpif90
@@ -173,9 +173,9 @@ cmake ../cmake \
   -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_C_COMPILER=mpicc \
   -DCMAKE_Fortran_COMPILER=mpif90 \
-  -DPython_EXECUTABLE=$(which python)
+  -DPython_EXECUTABLE="$(which python)"
 
-make -j$(sysctl -n hw.ncpu)
+make -j"$(sysctl -n hw.ncpu)"
 make install-python
 
 cd ../..
@@ -208,12 +208,17 @@ python -c "import ira_mod; print('IRA OK')"
 
 ## 6. Build pARTn plugin
 
-The following will directly install the `pypARTn` python module into the venv path. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
+The following commands install the `pypARTn` Python module into the active virtual environment. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
 ```bash
 cd artn-plugin
-cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH=$(pwd)/../lammps/build -DARTN_INSTALL_PYTHON=ON
+cmake -B build \
+    -DWITH_LAMMPS=ON \
+    -DLAMMPS_PATH="$(pwd)/../lammps/build" \
+    -DARTN_INSTALL_PYTHON=ON \
+    -DCMAKE_CXX_FLAGS_INIT="-std=c++17"
 cmake --build build
 cmake --install build
+cd ..
 ```
 
 Verify:
@@ -226,14 +231,26 @@ python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
 
 ## 7. Verify installation
 
+The full check also starts a LAMMPS instance and loads the pARTn plugin into
+it, which is what a real run requires:
+
 ```bash
 source pykmc_env/bin/activate
 
-python -c "
+python - <<'PY'
+import ase
+import ira_mod
+import pykmc
+import pypARTn
 from lammps import lammps
-import ase, pykmc, ira_mod, pypARTn
-print('All imports OK')
-"
+
+lmp = lammps()
+artn = pypARTn.artn(engine="lmp")
+lmp.command(f"plugin load {artn.lib._name}")
+print("Loaded liblammps:", lmp.lib._name)
+print("Loaded pARTn plugin:", artn.lib._name)
+print("All components OK")
+PY
 ```
 
 ---
@@ -244,18 +261,22 @@ Every time you run pyKMC, activate the environment and set these paths:
 
 ```bash
 source pykmc_env/bin/activate
-export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH:-}"
 ```
 
-Or simply source the activation script created by the installer:
+If the shared libraries are already discoverable, you may instead source the
+activation script created by the installer (it activates the venv and cleans
+`PYTHONPATH`, but sets no library path):
 
 ```bash
 source activate.sh
 ```
 
-Run with MPI — use at least `n_sessions + 1` ranks: rank 0 runs the main KMC loop and
-the remaining ranks are split among the `n_sessions` LAMMPS instances (`[Control]`
-section of the input file):
+Run with MPI. With the default `engine_use_rank_0 = False`, launch at least
+`n_sessions + 1` ranks: rank 0 runs the main KMC loop and the remaining ranks
+are split among the `n_sessions` LAMMPS instances (`[Control]` section of the
+input file). With `engine_use_rank_0 = True`, rank 0 also hosts the first
+engine session, so `n_sessions` ranks suffice:
 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in

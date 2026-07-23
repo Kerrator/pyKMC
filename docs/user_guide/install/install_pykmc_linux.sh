@@ -210,7 +210,8 @@ else
 fi
 
 # Build output goes to log files (tail -f them to watch progress).
-# PKG_PHONON provides the dynamical_matrix command needed by HTST rate prefactors.
+# PKG_PHONON provides the dynamical_matrix command; unused by the current
+# constant-prefactor rate style, kept for in-development HTST prefactor support.
 cmake ../cmake \
   -DBUILD_SHARED_LIBS=on \
   -DLAMMPS_EXCEPTIONS=on \
