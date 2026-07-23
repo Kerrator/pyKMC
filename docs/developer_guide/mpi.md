@@ -33,6 +33,16 @@ Ranks are partitioned contiguously across sessions. Example with
 `mpirun -n 8`, `n_sessions = 4`, `engine_use_rank_0 = False`: sessions occupy
 ranks 1–2, 3–4, 5–6, and 7; rank 0 orchestrates.
 
+## Local vs global pool mode
+
+The manager exposes the same pool in two modes. In **local** mode each session
+works independently on its own communicator — this is how concurrent event
+searches and refinements are farmed out. In **global** mode the engine ranks
+are joined so whole-system operations (e.g. reconstruction of the selected
+event) run on one large LAMMPS instance. The KMC loop switches between them
+with `manager.use_local()` / `manager.use_global()`; any driver code doing
+standalone searches must follow the same sequencing.
+
 ## Launching: `mpirun` vs `srun`
 
 - Local: `mpirun -n N python -m pykmc -in input.in`.

@@ -1,10 +1,8 @@
-# Developer Guide
-
-## Code Formatting
+# Code Formatting
 
 pyKMC uses [Ruff](https://docs.astral.sh/ruff/) for Python formatting. Formatting is enforced by CI on every push and pull request — the check runs `ruff format --check` and fails if any file is not formatted.
 
-### Installation
+## Installation
 
 ```bash
 pip install ruff
@@ -12,7 +10,7 @@ pip install ruff
 uv sync --extra dev
 ```
 
-### Formatting
+## Formatting
 
 ```bash
 # Format all files
@@ -24,7 +22,7 @@ ruff format --check .
 
 Configuration lives in `ruff.toml` at the repo root. Key settings: line length 88, Python 3.10 target, double quotes.
 
-### Editor Setup
+## Editor Setup
 
 === "VSCode"
 
