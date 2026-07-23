@@ -118,7 +118,10 @@ class AtomicEnvironmentConfig(BaseModel):
         ...,
         description="Method used to characterize and assign an ID to an atom's local atomic environment. "
         "'coordination' classifies atoms based on nearest-neighbor count against a threshold. "
-        "'coordination/graph' first filters by coordination, then computes graph IDs for non-crystal atoms.",
+        "'coordination/graph' first filters by coordination, then computes graph IDs for non-crystal atoms. "
+        "The pure 'cna' and 'coordination' styles are rejected at validation: they label atoms only as "
+        "'crystal'/'noncrystal' while reference events are always identified by graph certificates, so "
+        "stored events could never be matched and reused. Use 'cna/graph' or 'coordination/graph' instead.",
     )
 
     rnei: float = Field(
@@ -142,6 +145,26 @@ class AtomicEnvironmentConfig(BaseModel):
         "(within rnei) than this value are classified as 'noncrystal'. Atoms with this many or more "
         "neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.",
     )
+
+    @field_validator("style")
+    @classmethod
+    def validate_style_supports_event_reuse(cls, v: str) -> str:
+        """Reject the pure categorical styles, which cannot reuse reference events.
+
+        'cna' and 'coordination' label atoms only as 'crystal'/'noncrystal',
+        while reference events are always identified by graph certificates
+        (see EventTable._build_event_series). Event matching is exact ID
+        membership, so under these styles a stored event can never match a
+        current environment and the simulation cannot advance.
+        """
+        if v in ("cna", "coordination"):
+            raise ValueError(
+                "style '{0}' labels atoms only as 'crystal'/'noncrystal', but "
+                "reference events are identified by graph certificates, so "
+                "stored events can never be matched and reused. "
+                "Use '{0}/graph' instead.".format(v)
+            )
+        return v
 
     @model_validator(mode="after")
     def validate_coordination_threshold(self) -> "AtomicEnvironmentConfig":

@@ -84,7 +84,7 @@ The available styles are:
 In this mode, pyKMC counts the number of neighbors around each atom and checks whether it matches a typical crystalline coordination number (6, 8, or 12).
     - if the atom has one of these neighbor counts, it is labeled "crystal".
     - Otherwise, it is labeled "noncrystal".
-This style should be only use when setting in the `[Control]` section `reconstruction = False`. (_Not working anymore for the moment_).
+This style cannot be used on its own: reference events are always identified by graph certificates (see below), so with only `crystal`/`noncrystal` labels a stored event can never be matched and reused. pyKMC therefore rejects `style = cna` (and the analogous pure `coordination` style) when the configuration is validated — use `cna/graph` (or `coordination/graph`) instead.
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
   <img src="images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">

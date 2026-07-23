@@ -88,7 +88,7 @@
 
 - **`style`** : `Literal['cna', 'graph', 'cna/graph', 'diamond/graph', 'coordination', 'coordination/graph']`, mandatory
   <details><summary>Description</summary>
-  Method used to characterize and assign an ID to an atom's local atomic environment. 'coordination' classifies atoms based on nearest-neighbor count against a threshold. 'coordination/graph' first filters by coordination, then computes graph IDs for non-crystal atoms.
+  Method used to characterize and assign an ID to an atom's local atomic environment. 'coordination' classifies atoms based on nearest-neighbor count against a threshold. 'coordination/graph' first filters by coordination, then computes graph IDs for non-crystal atoms. The pure 'cna' and 'coordination' styles are rejected at validation: they label atoms only as 'crystal'/'noncrystal' while reference events are always identified by graph certificates, so stored events could never be matched and reused. Use 'cna/graph' or 'coordination/graph' instead.
   </details>
 - **`rnei`** : `float`, mandatory
   <details><summary>Description</summary>
@@ -105,6 +105,10 @@
 - **`coordination_threshold`** : `int`, optional
   <details><summary>Description</summary>
   When style is 'coordination' or 'coordination/graph', atoms with fewer neighbors (within rnei) than this value are classified as 'noncrystal'. Atoms with this many or more neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.
+  </details>
+- **`atom_coloring_mode`** : `Literal['grey', 'full']`, default = `'full'`
+  <details><summary>Description</summary>
+  Controls whether element types are used in environment matching. Defaults to 'full' (species-resolved). 'grey': all atoms treated identically (grey alloy approximation). 'full': element types used in graph hashing, PSR matching, and symmetry detection.
   </details>
 
 ---
@@ -214,6 +218,10 @@
 - **`minimize`** : `str`, default = `'1.0e-6 1.0e-8 1000 1000'`
   <details><summary>Description</summary>
   Lammps minimize command
+  </details>
+- **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
+  <details><summary>Description</summary>
+  Lammps minimize command with frozen core
   </details>
 
 ---
@@ -435,9 +443,26 @@
   Basin parameters
 </details>
 
+- **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
+  <details><summary>Description</summary>
+  Basin style used.
+  </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
+  </details>
+
+---
+
+## `Reconstruction` Section (mandatory)
+
+<details><summary>Section Overview</summary>
+  Reconstruction parameters.
+</details>
+
+- **`push_fraction`** : `float`, default = `0.15`
+  <details><summary>Description</summary>
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
 
 ---
