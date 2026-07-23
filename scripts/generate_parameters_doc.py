@@ -45,6 +45,49 @@ def format_type(field_type: Any) -> str:
         return str(field_type)
 
 
+# Canonical INI spellings for the section headings (the Config attribute names
+# are lowercase; the site and user guide use these spellings).
+SECTION_DISPLAY_NAMES = {
+    "control": "Control",
+    "atomicenvironment": "AtomicEnvironment",
+    "eventsearch": "EventSearch",
+    "rateconstant": "RateConstant",
+    "psr": "PSR",
+    "lammps": "LAMMPS",
+    "partn": "pARTn",
+    "ira": "IRA",
+    "reconstruction": "Reconstruction",
+    "basin": "Basin",
+    "activevolume": "ActiveVolume",
+    "eventrecycling": "EventRecycling",
+    "inactive_atoms": "Inactive_Atoms",
+    "frozen_atoms": "Frozen_Atoms",
+    "bias": "Bias",
+}
+
+# Sections whose mere presence is enforced when the INI file is parsed
+# (Config.from_ini_file).
+ALWAYS_REQUIRED_SECTIONS = {
+    "control",
+    "atomicenvironment",
+    "eventsearch",
+    "rateconstant",
+    "psr",
+}
+
+# Sections enforced by Config.validate_dependencies when the controlling
+# field takes the given value.
+CONDITIONALLY_REQUIRED_SECTIONS = {
+    "lammps": "required when `[Control]` `engine = lammps`",
+    "partn": "required when `[EventSearch]` `style = partn`",
+    "ira": "required when `[PSR]` `style = ira`",
+    "basin": "required when `[Control]` `basin = True`",
+    "activevolume": "required when `[Control]` `active_volume = True`",
+    "eventrecycling": "required when `[Control]` `recycle = True`",
+    "bias": "required when `[Control]` `bias = True`",
+}
+
+
 def is_required_pydantic_field(field: Field) -> bool:
     """Checks if a Pydantic field is mandatory."""
     return field.is_required()
@@ -56,8 +99,22 @@ def is_optional_pydantic_field(field_type: Any) -> bool:
     return origin is Union and type(None) in get_args(field_type)
 
 
+def section_status(section_name: str) -> str:
+    """Return the requirement status string for a top-level section."""
+    if section_name in ALWAYS_REQUIRED_SECTIONS:
+        return "mandatory"
+    if section_name in CONDITIONALLY_REQUIRED_SECTIONS:
+        return (
+            f"conditionally required — {CONDITIONALLY_REQUIRED_SECTIONS[section_name]}"
+        )
+    return "optional"
+
+
 def document_model(
-    model_class: type[BaseModel], section_name: str, is_top_level_optional: bool
+    model_class: type[BaseModel],
+    section_name: str,
+    status: str,
+    parent_description: str | None = None,
 ) -> str:
     """
     Generates Markdown documentation for a Pydantic BaseModel section.
@@ -67,9 +124,14 @@ def document_model(
     model_class : type[BaseModel]
         The Pydantic BaseModel class to document.
     section_name : str
-        The name of the section (e.g., 'control', 'lammps').
-    is_top_level_optional : bool
-        True if this entire section (BaseModel) is optional in its parent Config.
+        The Config attribute name of the section (e.g., 'control', 'lammps').
+    status : str
+        Requirement status of the section (mandatory / conditionally
+        required / optional).
+    parent_description : str, optional
+        The description of the section's field on the parent Config model,
+        shown before the model's own docstring (distinguishes sections that
+        share a model class, e.g. the two Region sections).
 
     Returns
     -------
@@ -78,20 +140,24 @@ def document_model(
     """
     lines = []
 
-    # Determine if the section itself is mandatory or optional
-    section_status = "optional" if is_top_level_optional else "mandatory"
+    display_name = SECTION_DISPLAY_NAMES.get(section_name, section_name.capitalize())
 
-    # Section Heading
-    lines.append(f"## `{section_name.capitalize()}` Section ({section_status})\n")
+    # Section heading with a stable anchor for deep links
+    lines.append(f'<a id="section-{section_name}"></a>\n')
+    lines.append(f"## `{display_name}` Section ({status})\n")
 
-    # Add the class's own docstring as a description for the section
+    # Overview: the parent Config field description first (it distinguishes
+    # sections sharing a model class), then the class's own docstring.
+    overview_parts = []
     class_doc = inspect.getdoc(model_class)
+    if parent_description and parent_description.strip() != (class_doc or "").strip():
+        overview_parts.append(parent_description)
     if class_doc:
-        class_doc_indented = "\n  ".join(
-            class_doc.splitlines()
-        )  # Indent for details block
+        overview_parts.append(class_doc)
+    if overview_parts:
+        overview_indented = "\n  ".join("\n\n".join(overview_parts).splitlines())
         lines.append(
-            f"<details><summary>Section Overview</summary>\n  {class_doc_indented}\n</details>\n"
+            f"<details><summary>Section Overview</summary>\n  {overview_indented}\n</details>\n"
         )
     else:
         lines.append("No overview description provided for this section.\n")
@@ -103,15 +169,19 @@ def document_model(
         status_info = ""
         if is_required_pydantic_field(field):
             status_info = "mandatory"
+        elif field.default_factory is not None:
+            status_info = f"default = `{field.default_factory()!r}`"
         elif is_optional_pydantic_field(field.annotation) and field.default is None:
             status_info = "optional"
         elif field.default is not None:
             status_info = f"default = `{field.default!r}`"
-        else:  # Covers cases like Optional[str] but with a default_factory
-            status_info = "optional (default provided)"  # More explicit if default_factory is used
+        else:
+            status_info = "optional"
 
-        # Parameter line (bullet point)
-        lines.append(f"- **`{name}`** : `{typ}`, {status_info}")
+        # Parameter line (bullet point) with a stable anchor for deep links
+        lines.append(
+            f'- <a id="{section_name}-{name}"></a>**`{name}`** : `{typ}`, {status_info}'
+        )
 
         # Description as a clickable <details> block
         desc = field.description or "No description provided."
@@ -168,7 +238,14 @@ def generate_parameters_md(
             )
 
         if sub_model_class:
-            lines.append(document_model(sub_model_class, name, is_top_level_optional))
+            lines.append(
+                document_model(
+                    sub_model_class,
+                    name,
+                    section_status(name),
+                    parent_description=field.description,
+                )
+            )
         # If your top-level Config also has direct fields (not sub-models), you'd handle them here.
         # For example, if Config had a `version: str` field directly.
         # Otherwise, pass.

@@ -18,7 +18,8 @@ ranks for the requested number of sessions.
 mpirun -n 8 python -m pykmc -in input.in
 ```
 
-See [`n_sessions`](parameters.md) and `engine_use_rank_0` on the
+See [`n_sessions`](parameters.md#control-n_sessions) and
+[`engine_use_rank_0`](parameters.md#control-engine_use_rank_0) on the
 [KMC Parameters](parameters.md) page.
 
 ## Import errors for LAMMPS, IRA, or pARTn
