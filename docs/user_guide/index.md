@@ -23,10 +23,16 @@ Ni       0.00000000       0.00000000       0.00000000
 Ni       0.00000000       1.76000000       1.76000000       
 ... 
 ``` 
+The production `python -m pykmc` path currently assumes a diagonal, orthorhombic
+simulation cell and full three-dimensional periodicity (`pbc="T T T"`): the
+LAMMPS box is built from the three diagonal cell entries only, and the neighbor
+construction applies periodic wrapping on all axes. Triclinic cells and
+nonperiodic axes are not preserved.
+
 The path to this file should be provided using the `initial_config` key. 
-You must also specify : 
+You must also specify:
 - the number of KMC steps to run with `n_steps`
-- the simulation engine to use to compute energy, forces and perform event searches/refinements (e.g., lammps) with the `engine` key
+- the energy/force engine with `engine` (currently `lammps`); event search and refinement are configured separately
 
 A minimal example of a `[Control]` section would be:
 ```INI 
@@ -35,7 +41,7 @@ initial_config = myconfig.xyz
 n_steps = 100 
 engine = lammps
 ``` 
-Additional options in this section allow you to customize output filenames (see the full parameter documentation).
+Additional options in this section allow you to customize output filenames (see the [KMC Parameters](../parameters.md) reference).
 pyKMC also saves the reference event table and the list of visited environments as .pickle files. To reuse them in a new simulation, simply provide their paths:
 
 ```INI 
@@ -49,12 +55,12 @@ Alternatively, you may provide only a list of visited environments if you wish t
 The INI configuration file must also include a section specific to the engine you selected in the `[Control]` section.
 For example, if you set `engine = lammps`, your file should include a `[Lammps]` section.
 
-### Lammps 
+### LAMMPS 
 
 When using LAMMPS, you need to specify the potential parameters.
-Currently, only pair potentials are supported. You must provide the `pair_style` and `pair_coeff` keys
+Currently, only pair potentials are supported. You must provide the `pair_style` and `pair_coeff` keys.
 
-Additionally, you can change default parameters used during system minimization (see the full parameter documentation). 
+Additionally, you can change default parameters used during system minimization (see the [KMC Parameters](../parameters.md) reference). 
 
 A minimal `[Lammps]` section might look like:
 ```INI 
@@ -68,15 +74,15 @@ pair_coeff = * * my_file.eam Ni
 During the simulation, at each step, pyKMC assigns an atomic environment ID to every atom in the system.
 This ID serves as a unique fingerprint of the atom’s local environment, allowing pyKMC to identify recurring configurations.
 
-Each reference event is also tagged with an environment ID, corresponding to the initial local configuration of the event’s central atom—the atom that moves the most during the transition. For the event, their ID are always computed based on graph (see below).
+Each reference event is also tagged with an environment ID, corresponding to the initial local configuration of the event’s central atom—the atom that moves the most during the transition. Reference-event IDs are always graph certificates computed around the event's most-displaced atom (see the `graph` style below).
 
 To determine whether a stored reference event can be reused, pyKMC compares the event's environment ID with those computed in the current system.
 
 Different ID generation strategies (called styles) are available to define atomic environments. 
 
-To define parameters related to the generation of those IDs, the INI configuration file should contains a `[AtomicEnvironment]` section. 
+To define parameters related to the generation of those IDs, the INI configuration file must contain an `[AtomicEnvironment]` section. 
 
-The two main parameters are specified by the `rnei` and `rcut` keys. `rnei` defines the first nearest neighbors of an atom. Atoms within this distance are considered direct neighbors. `rcut`defines the atomic environment sphere, atoms in this sphere are part of the local atomic environment. 
+The two main parameters are specified by the `rnei` and `rcut` keys. `rnei` defines the first nearest neighbors of an atom. Atoms within this distance are considered direct neighbors. `rcut` defines the local-environment sphere; atoms inside that sphere are part of the atomic environment. 
 
 You can select the method (or style) used to assign an atomic environment ID to each atom.
 The available styles are:
@@ -95,7 +101,7 @@ This style should be only use when setting in the `[Control]` section `reconstru
 
 - graph : 
 In this style, pyKMC constructs a graph from each atom's environment using pyNauty. 
-A unique, canonical certificate (a binary) is then computed using pyNauty, serving as the atom’s environment ID.
+pyNauty computes a canonical certificate, which pyKMC stores as a hexadecimal string and uses as the atom’s environment ID.
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
   <img src="../images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">
@@ -130,9 +136,9 @@ A cna/graph variant for diamond-lattice materials: the CNA fingerprint is evalua
 When searching for an event around a "noncrystal" atom, it may happen that another atom ends up being the one that moves the most. In this case, the resulting event will be tagged with the graph ID of that other atom.
 If this ID corresponds to a "crystal" atom in the current system, that event will never be selected. 
 
-To avoid this issue, you can instruct pyKMC to expand the graph style to the nth neighbors of the "noncrystal" atom using the `neighbors_add` key. 
+To avoid this issue, you can instruct pyKMC to also compute graph IDs for the neighbors of "noncrystal" atoms using the `neighbors_add` key: `0` limits graph IDs to the noncrystalline atoms themselves, while any positive value additionally computes graph IDs for their immediate neighbors. (Values greater than one do not currently expand further shells.)
 
-For example, when looking at a vacancy with `neighbors_add = 1` it will gives : 
+For example, a vacancy with `neighbors_add = 1` gives:
 
 <div style="text-align: center;">
 <img src="../images/atomic_env_radd.png" width="400" />
@@ -154,7 +160,7 @@ part of the environment fingerprint:
 
 For single-species systems the two modes are equivalent.
 
-Finally, the `[AtomicEnvironment]` section of the INI configuration file will look like this : 
+A typical `[AtomicEnvironment]` section is:
 ```INI 
 [AtomicEnvironment] 
 style = cna/graph
@@ -162,26 +168,22 @@ rnei = 3.0
 rcut = 6.5 
 neighbors_add = 1 
 ``` 
-## Event Search : 
+## Event Search
 
-The `[EventSearch]` section lets you define:
-- the algorithm used to search for new events,
-- the criteria used to keep or discard events in the reference event table,
-- if a refinement is successful.
+The `[EventSearch]` section selects the saddle-search algorithm, sets the number of searches, defines catalog acceptance criteria, and configures post-refinement validation.
 
 This section requires two mandatory keys:
 - `style` : the algorithm used to perform event searches. _Currently, only partn is supported._
 - `nsearch` : number of event searches to perform per atomic environment.
 
-A minimal configuration looks like:
-A `[EventSearch]` section in the INI configuration file is typically : 
+A minimal `[EventSearch]` section is:
 ```INI 
 [EventSearch] 
 style = partn 
 nsearch = 50 
 ``` 
 
-When an event is found, it is characterized by two energy barriers, a forward energy barrier $dE_{forward}$ and an inverse energy barrier $dE_{backward}$ : 
+When an event is found, it is characterized by two energy barriers, a forward energy barrier $dE_{forward}$ and a backward energy barrier $dE_{backward}$ : 
 <div style="text-align: center;">
   <img src="../images/pesevent.png" width="400" />
   <div style="font-size: 0.9em; color: gray; margin-top: 5px;">
@@ -191,12 +193,14 @@ When an event is found, it is characterized by two energy barriers, a forward en
 
 The event is added to the reference table only if it satisfies all the following conditions:
 
-- $dE_{forward}$ < `emax_event` 
-- $dE_{forward}$ > `emin_event` 
-- $dE_{backward}$ > `emin_event` 
+- $dE_{forward} \le$ `emax_event` 
+- $dE_{forward} \ge$ `emin_event` 
+- $dE_{backward} \ge$ `emin_event` 
 - the event is not highly asymmetric: an event is rejected when
   $dE_{forward}$ > `energy_asymmetry` $\times$ `backward_emin_event` while
   $dE_{backward}$ < `backward_emin_event` 
+
+(Equality at the bounds is accepted; rejection uses strict comparisons.)
 
 Once a reference event is reused, it is refined to adapt to the current atomic configuration. The refinement is considered successful if:
 - The central atom moves less than `refined_minimum_delr_thr` between the current position and the refined minimum.
@@ -205,12 +209,12 @@ These thresholds ensure that the refined event remains consistent with the origi
 
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 
-### pARTn : 
+### pARTn
 
-All other parameters have default values (see the full parameter documentation), but depending on your system, you may need to adjust some of them for optimal performance.
-Parameters related to refinements are prefixed with r_
+All other parameters have default values (see the [KMC Parameters](../parameters.md) reference), but depending on your system, you may need to adjust some of them for optimal performance.
+Refinement-specific pARTn parameters use the `r_` prefix.
 
-A minimal `[pARTn]` section will look like this : 
+A minimal `[pARTn]` section is:
 ```INI 
 [pARTn] 
 delr_thr = 0.1
@@ -223,7 +227,7 @@ For a detailed explanation of the pARTn algorithm and its parameters, please ref
 
 Each time an event is added to either the reference or the active event table, a rate constant is computed. The method used to compute this rate is defined in the [RateConstant] section of the INI configuration file.
 
-Currently, the only implemented style is : `style = constant`. This method computes the rate constant using the following equation. 
+The only implemented rate style is currently `style = constant`. This method computes the rate constant using the following equation. 
 
 $$
 k = k_{0} e^{-\frac{dE_{forward}}{{k_{b}T}}}
@@ -241,7 +245,7 @@ $ps^{-1}$**: a typical attempt frequency of $10^{13}\,s^{-1}$ corresponds to
 background of this Arrhenius form is covered in
 [Transition State Theory](../theory/tst.md).
 
-Typically, it will gives : 
+A typical section is:
 
 ```INI 
 [RateConstant]
@@ -254,23 +258,23 @@ T = 300
 
 When applying a reference event to a system for refinement, pyKMC performs a point set registration (also known as shape matching) to align the atomic positions from the reference event with the local atomic environment of the atom currently targeted for refinement.
 
-You can define the algorithm to use with the `style` key. _Currently only 'ira' in implemented_.  This is the only mandatory parameter. 
+You can define the algorithm to use with the `style` key. Currently only `ira` is implemented; `style` is the only mandatory field in `[PSR]`. 
 
 You may also want to adjust the default value of matching_score_thr, which sets the maximum allowed matching score for a successful registration.
 For `style = ira`, the matching score corresponds to the Hausdorff distance between the two point sets.
 
-This will gives you : 
+For example:
 ```INI 
 [PSR]
 style = ira 
 matching_score_thr = 0.3 
 ``` 
 
-As with the Engine of EventSearch parts, you must also include a dedicated section for the selected point set registration method.
+As with the engine and event-search settings, you must also include a dedicated section for the selected point set registration method.
 
 ### IRA 
 
-When using, IRA, you can change default parameters that are being used, to have a full explaination please refer to the full parameters documentation and the IRA documentation. 
+When using IRA, you may override its defaults. See the [KMC Parameters](../parameters.md) reference and the [IRA documentation](https://mammasmias.github.io/IterativeRotationsAssignments/) for details. 
 To ensure access to default values, the section must be present in the configuration file, even if it's empty.
 
 ## Final configuration file 
@@ -318,23 +322,11 @@ matching_score_thr = 0.3
 Once both the input file and the initial configuration file are ready, launch the simulation by executing:
 
 ```bash 
-python -m pykmc -in <your_input_file_name> 
+mpirun -n 2 python -m pykmc -in <your_input_file_name> 
 ``` 
 
-To speed up event searches and refinements with multiple LAMMPS instances running
-in parallel, see [Parallelization](parallelization.md).
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+This is the minimum launch for the defaults (`n_sessions = 1`,
+`engine_use_rank_0 = False`): rank 0 orchestrates the run and each engine
+session needs its own rank, so pyKMC always requires an MPI launch. See
+[Parallelization](parallelization.md) before choosing a larger rank count to
+speed up event searches and refinements with multiple LAMMPS instances.
