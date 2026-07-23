@@ -31,7 +31,7 @@ pyKMC/
 python3 -m venv pykmc_env
 source pykmc_env/bin/activate
 pip install -e ".[dev]"   # ruff, mkdocs, mkdocstrings, mike, ...
-pip install pytest         # not in the project dependencies; install separately
+pip install pytest pytest-lazy-fixtures   # not in the project dependencies; install separately
 ```
 
 (See the [installation guide](../user_guide/install/installation.md) for the LAMMPS / pARTn /
@@ -39,10 +39,23 @@ IRA components needed to actually run simulations.)
 
 ## Running the tests
 
+Some test modules exercise the MPI session pool and cannot run in a plain
+single-process `pytest` invocation — they need a real `mpirun` launch with
+enough ranks. Run the serial subset and the MPI subset separately:
+
 ```bash
-pytest                                   # whole suite
-pytest tests/test_system.py::test_fn -v  # a single test
-pytest -k "vacancy"                      # pattern match
+# serial subset (excludes the MPI-pool test modules)
+pytest --ignore=tests/manager/lmpi \
+       --ignore=tests/basins/test_basin.py \
+       --ignore=tests/test_lammps_engine_api_mpi.py
+
+# MPI-pool tests (n_sessions = 7 plus the rank-0 driver)
+mpirun -n 8 python -m pytest tests/basins/test_basin.py
+mpirun -n 8 python -m pytest tests/manager/lmpi/test_manager.py
+
+# a single test / pattern match
+pytest tests/test_system.py::TestSystem::test_create_from_file_xyz -v
+pytest -k "vacancy"
 ```
 
 ## Code quality
@@ -75,11 +88,15 @@ API reference auto-generated from docstrings by
 pip install -e ".[doc]"                     # docs toolchain
 python scripts/generate_parameters_doc.py    # regenerate the parameters reference
 mkdocs serve                                 # live preview at http://127.0.0.1:8000
-mkdocs build --strict                        # fail on any broken nav entry or link
+mkdocs build                                 # site pass gate
+mkdocs build --strict                        # inspect the warning delta
 ```
 
-Run `mkdocs build --strict` before committing documentation changes — it catches
-broken navigation entries and dead internal links.
+Run `mkdocs build` before committing documentation changes — a clean
+non-strict build is the site pass gate. Also run `mkdocs build --strict` to
+inspect warnings: the repository has a known baseline of pre-existing
+mkdocstrings warnings, so the standard is a clean non-strict build plus no
+*new* strict warnings from the files you changed.
 
 The published site is deployed automatically by the
 `.github/workflows/deploy_docs.yml` GitHub Action: pushes to `main` publish the

@@ -2,7 +2,7 @@
 
 [TOC]
 
-Engines are computational backends responsible for operations that require energy and force evaluations (e.g. minimization or event searches). The `Engine` module is designed to be used as the computation backend in the master-worker MPI structure provided by the `Manager` module _(see [MPI & Parallel Execution](mpi.md) and the engine-manager section of [Architecture](architecture.md))_, and can also be used standalone. This primary use case within the Manager drives the key design choices of the module: `Engine` is a `Registrable` ABC with mandatory abstract methods, and data-extraction methods return results only on MPI rank 0 of the engine's communicator.
+Engines are computational backends responsible for operations that require energy and force evaluations (e.g. minimization or event searches). The `Engine` module is designed to become the computation backend in the master-worker MPI structure provided by the `Manager` module _(see [MPI & Parallel Execution](mpi.md) and the engine-manager section of [Architecture](architecture.md))_, and can also be used standalone. That integration is future work: the current `python -m pykmc` production path still drives LAMMPS through the Manager's own `MpiApiEngine` worker rather than this hierarchy. The intended Manager use case nevertheless drives the key design choices of the module: `Engine` is a `Registrable` ABC with mandatory abstract methods, and data-extraction methods return results only on MPI rank 0 of the engine's communicator.
 
 In addition to the mandatory interface, engines can be extended with operation-specific capabilities through the **extension mechanism** (see [EngineExtension](#engineextension)). This is the intended integration point when a higher-level algorithm needs to delegate a specific computation to the engine directly, for example, a CNA filter that uses a LAMMPS compute instead of the default Python implementation.
 
@@ -43,7 +43,7 @@ J -.->|extends| E
 
 ### Engine ABC
 
-`Engine` inherits from `Registrable` (with `root=True`), which provides the registry and the autodiscovery mechanism shared across pyKMC modules. All subclasses must declare a `name` attribute and implement every abstract method. They represent the minimal set of operations required for the simulation.
+`Engine` inherits from `Registrable` (with `root=True`), which provides the registry and the autodiscovery mechanism shared across pyKMC modules. Every concrete engine subclass must declare a nonempty `name` attribute and implement every abstract method; unnamed abstract intermediate subclasses are allowed. The abstract methods represent the minimal set of operations required for the simulation.
 
 ```python
 from pykmc._core import Registrable
@@ -63,7 +63,16 @@ class Engine(Registrable, root=True):
     ...
 ```
 
-**Rank 0 convention.** When running under MPI, all engine commands execute collectively across all ranks, but data-extraction methods return values only on rank 0 and all other ranks return `None`. Code calling these methods must account for this:
+**Rank 0 convention.** When running under MPI, all engine commands execute collectively across all ranks, but data-extraction methods return values only on rank 0 and all other ranks return `None`. Callers must branch on the engine communicator's rank when consuming data-extraction results — for `LammpsEngine`, which exposes a `rank` property:
+
+```python
+positions = engine.get_positions()
+if engine.rank == 0:
+    consume(positions)
+```
+
+(The generic `Engine` ABC does not define a `rank` accessor; how a backend
+exposes its communicator rank is currently engine-specific.)
 
 ### Config Protocol
 
@@ -88,28 +97,31 @@ class MyEngineConfig(Protocol):
 from pykmc.engine import EngineExtension, Engine
 
 class MyExtension(EngineExtension):
-    def __init__(self, engine: Engine, param: float):
+    def __init__(self, engine: Engine, scale: float):
         super().__init__(engine)   # required 
-        self.param = param
+        self.scale = scale
 
-    def new_compute(self, ...) -> list: ...
+    def new_compute(self, values: list[float]) -> list[float]:
         # self.engine gives full access to the engine 
+        return [self.scale * value for value in values]
 ```
 
 Once attached, the method is accessible directly on the engine instance:
 
 ```python
-engine = LammpsEngine(config=cfg)  # any concrete Engine subclass
-MyExtension(engine, param=...)     # attaches on construction
+from pykmc.engine.lammps import LammpsEngine
 
-result = engine.new_compute(...)   # delegates to the extension
+engine = LammpsEngine(config=cfg)   # any concrete Engine subclass
+MyExtension(engine, scale=2.0)      # attaches on construction
+
+result = engine.new_compute(values) # delegates to the extension
 ```
 
 Conflicts are caught at registration time: if two extensions expose a method with the same name, `register()` raises a `ValueError`.
 
 ### Distinction from strategies
 
-Although `Engine` uses the same `Registrable` autodiscovery mechanism as strategies, the two serve fundamentally different roles. Strategies are interchangeable algorithmic choices for a given operation; engines are fixed computational backends. An engine is not selected as one option among many equivalent alternatives.
+Although `Engine` uses the same `Registrable` autodiscovery mechanism as strategies — both are selected by name from a registry (`Engine.create(name, ...)`) — the two serve fundamentally different roles: engines represent computational backends for energy/force operations, whereas strategies represent interchangeable algorithms for one operation.
 
 ## Adding a new engine
 
