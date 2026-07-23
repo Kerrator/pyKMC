@@ -19,30 +19,32 @@ ract = 21
 rmov = 15
 ```
 
-*Note: ract must be larger than or equal to rmov to work. The difference between the two is the buffer region of the AV*
+**Constraint:** `ract` must be greater than or equal to `rmov`; `ract - rmov` is the frozen buffer thickness.
+
+**Current limitation:** Active Volume mode supports single-element systems
+only. The temporary LAMMPS box used for each Active Volume operation is
+re-created with a single atom type, so do not enable it for alloys until the
+Active Volume reset path creates and assigns all species and masses.
 
 ---
 
 ## General Idea
 
 In very large systems with many defects, it can become memory intensive and slow to run event searches on the entire system. 
-AV's define a region around a defect where searches and refinements will be performed without needing to use the entire system.
-The AV has two parameters, the active radius `ract` and the movable radius `rmov`. The active radius encompasses all the atoms 
-that are included in the AV, and captures the state of the overall system. The movable radius is where atoms are allowed to 
-be moved during event searches and refinement. A frozen buffer region is made on the exterior of the AV in order to accurately model
-the forces between atoms near the boundary.
+Active Volumes define a region around the selected search or refinement center where the operation is performed without needing to use the entire system.
+The AV has two parameters, the active radius `ract` and the movable radius `rmov`: `ract` includes every atom copied into the temporary Active Volume, while atoms within `rmov` may move during event searches and refinement. Atoms between `rmov` and `ract` are frozen to provide accurate boundary forces.
 
 <!-- TODO: add a figure illustrating the active and movable radii and the buffer region. -->
 
 ## Algorithm
-1. **Reset LAMMPS Instance**: LAMMPS is cleared to prevent carry over of previous AV conditions
+1. **Reset LAMMPS Instance**: LAMMPS is cleared to prevent carryover of previous AV conditions
 2. **AV Definition**: Find which atoms are to be included in AV, and which are movable
-3. **Atom Map**: Create map between full system and AV system atom index's, types and positions
+3. **Atom Map**: Create map between full system and AV system atom indices, types and positions
 4. **AV Creation**: Atoms are created within AV
 
-This then branches depending on if it is an Event Search step or Refinement step
+This then branches depending on whether the operation is an event search or a refinement.
 
-**Event Search**: Event search continues the same as without AV's. Once results are obtained, the positions are mapped 
+**Event Search**: Event search continues the same as without Active Volumes. Once results are obtained, the positions are mapped 
 back to those of the full system.
 
 **Refinement**: Unlike a non-AV refinement, the positions sent for refinement are not at the saddle point. First, the 
@@ -53,14 +55,16 @@ saved in the local atomic environment, then the system is refined. The refined a
 `E_saddle - E_init` and the positions mapped back to the full system. 
 
 
-If the movable radius `rmov` is less than the cut-off radius `rcut` for the local atomic environment, the refinements 
-will fail. Similarly, if the active volume radius `ract` is less than `rcut`, the Event Searches will fail.
+`ract` must be strictly greater than `[AtomicEnvironment].rcut`, or event search
+raises an error. There is no equivalent automatic check on `rmov`, so also choose
+`ract >= rmov` and make `rmov` large enough to contain the reconstructed local
+environment. For reliable refinement, size the frozen buffer `ract - rmov` to be
+at least as thick as the interatomic potential's interaction cutoff.
 
 A debug mode to check if the AV is large enough can be toggled in `[ActiveVolume]` by setting `AV_debug = True`. This
 will minimize the AV during refinement before the event is applied, and print the energy before and after together
-with their relative difference. The system being sent for refinement is already minimized, so there should be
-essentially no difference after minimization within the AV (more than $\sim 10^{-3}$ eV indicates a problem). If
-there is a difference, it means the settings for the AV need to be adjusted. This is caused by the buffer region
-being less than the cutoff of the potential being used, leading to movable atoms next to the buffer to experience
-improper forces. 
+with their **percentage** difference. The system being sent for refinement is already minimized, so the difference
+should be essentially zero; pyKMC does not enforce an automatic pass/fail threshold, so inspect the printed values.
+A noticeable difference means the settings for the AV need to be adjusted — typically the buffer region is thinner
+than the cutoff of the potential being used, so movable atoms next to the buffer experience improper forces. 
 
