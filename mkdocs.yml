@@ -51,6 +51,7 @@ nav:
       - Engine: developer_guide/engine.md
       - Code formatting: developer_guide/code_formatting.md
   - API Reference:
+      - Overview: api/index.md
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
       - AtomicEnvironment: api/atomic_environment.md
