@@ -39,6 +39,11 @@
 
 The script will prompt **once** for your `sudo` password so it can `apt`/`dnf` install any missing system packages (`build-essential`, `gfortran`, `cmake`, `libopenmpi-dev`, `openmpi-bin`, `libfftw3-dev`, `liblapack-dev`, `python3-venv`, `python3-dev` on Debian/Ubuntu). After that it runs unattended for roughly 10–20 minutes while LAMMPS compiles.
 
+> **Prerequisites the script does not install:** `git` must already be present
+> (the script exits before the package-install stage without it), and on
+> RHEL-family systems make sure `make` is available — the script's RHEL
+> package list does not install it.
+
 > **DRAC/Alliance HPC clusters:** there is **no** `sudo` prompt — the script auto-detects the
 > cluster and skips the package-install stage entirely. Load the toolchain modules **before**
 > running it (see the [cluster notes](#drac-alliance-hpc-clusters)), run it on a **login node**
@@ -50,7 +55,7 @@ To use a specific Python interpreter, set `PYTHON_BIN` before running:
 PYTHON_BIN=/usr/bin/python3.12 /path/to/install_pykmc_linux.sh
 ```
 
-When it finishes you'll have `pykmc/pykmc_env/`, `pykmc/lammps/`, `pykmc/IterativeRotationsAssignments/`, `pykmc/artn-plugin/`, and `pykmc/activate.sh` under the folder you chose.
+When it finishes, you will have `pykmc/pykmc_env/`, `pykmc/lammps/`, `pykmc/IterativeRotationsAssignments/`, `pykmc/artn-plugin/`, and `pykmc/activate.sh` under the folder you chose.
 
 ---
 
@@ -218,8 +223,10 @@ make install-python
 cd ../..
 ```
 
-> `PKG_PHONON` provides the `dynamical_matrix` command required by the HTST rate-constant
-> prefactor — without it HTST silently falls back to the constant `k0`.
+> `PKG_PHONON` provides the `dynamical_matrix` command. pyKMC currently
+> implements only the constant-prefactor rate style, which does not use it —
+> the package is harmless to include and is kept here because in-development
+> HTST prefactor support will require it.
 
 > `pip install -e ./pyKMC` (step 3) pulls a generic `lammps` wheel from PyPI to satisfy the
 > `lammps>=…` dependency. That wheel has no PLUGIN/PHONON support — the `pip uninstall` above
@@ -261,13 +268,14 @@ python -c "import ira_mod; print('IRA OK')"
 
 ## 6. Build pARTn plugin
 
-The following will directly install the `pypARTn` python module into the venv path. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
+The following commands install the `pypARTn` Python module into the active virtual environment. If you need a custom location for the package, specify additional `-DCMAKE_INSTALL_PREFIX=<your/custom/path>`.
 ```bash
 cd artn-plugin
-cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH=$(pwd)/../lammps/build -DARTN_INSTALL_PYTHON=ON \
+cmake -B build -DWITH_LAMMPS=ON -DLAMMPS_PATH="$(pwd)/../lammps/build" -DARTN_INSTALL_PYTHON=ON \
       -DCMAKE_CXX_FLAGS_INIT="-std=c++17"
 cmake --build build
 cmake --install build
+cd ..
 ```
 
 > With `pypARTn` installed into the venv this way, pyKMC input files need **no `path_artnso`**
@@ -286,14 +294,26 @@ python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
 
 ## 7. Verify installation
 
+The full check also starts a LAMMPS instance and loads the pARTn plugin into
+it, which is what a real run requires:
+
 ```bash
 source pykmc_env/bin/activate
 
-python -c "
+python - <<'PY'
+import ase
+import ira_mod
+import pykmc
+import pypARTn
 from lammps import lammps
-import ase, pykmc, ira_mod, pypARTn
-print('All imports OK')
-"
+
+lmp = lammps()
+artn = pypARTn.artn(engine="lmp")
+lmp.command(f"plugin load {artn.lib._name}")
+print("Loaded liblammps:", lmp.lib._name)
+print("Loaded pARTn plugin:", artn.lib._name)
+print("All components OK")
+PY
 ```
 
 ---
@@ -304,12 +324,14 @@ print('All imports OK')
 
 ```bash
 source pykmc_env/bin/activate
-export LD_LIBRARY_PATH=$(pwd)/lammps/build:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH="$(pwd)/lammps/build:${LD_LIBRARY_PATH:-}"
 
 mpirun -n 8 python -m pykmc -in input.in
 ```
 
-Or source the activation script created by the installer:
+If the shared libraries are already discoverable, you may instead source the
+activation script created by the installer (it activates the venv and cleans
+`PYTHONPATH`, but sets no library path):
 
 ```bash
 source activate.sh
@@ -319,7 +341,9 @@ source activate.sh
 
 The Slurm geometry differs per cluster:
 
-**Trillium (whole-node scheduling — no partial nodes, no `--mem*` flags).**
+**Trillium (whole-node scheduling — no partial nodes, no memory-allocation
+request such as `--mem` or `--mem-per-cpu`; the `--mem-bind` below is an
+affinity option, not an allocation request).**
 The install was validated on Trillium (2026-06) with an 8-task smoke test
 (`srun --ntasks=8 --cpu-bind=cores python -m pykmc -in input.in` for `n_sessions = 7`);
 the template below scales the same pattern to a full node:
@@ -344,8 +368,10 @@ srun --ntasks=$SLURM_NTASKS --distribution=block:block \
 ```
 
 Set `n_sessions` (the number of parallel LAMMPS instances, `[Control]` section) to at
-most `ntasks − 1`: rank 0 runs the main KMC loop and the remaining ranks are split
-among the instances. With `n_sessions = ntasks − 1` each instance gets a single rank
+most `ntasks − 1` with the default `engine_use_rank_0 = False`: rank 0 runs the main
+KMC loop and the remaining ranks are split among the instances (with
+`engine_use_rank_0 = True`, rank 0 also hosts the first instance and `n_sessions =
+ntasks` is allowed). With `n_sessions = ntasks − 1` each instance gets a single rank
 (e.g. the example input with `n_sessions = 7` runs as `srun --ntasks=8`; a full
 Trillium node supports up to `n_sessions = 191`).
 

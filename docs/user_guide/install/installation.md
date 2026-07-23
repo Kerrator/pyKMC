@@ -1,9 +1,10 @@
 # Installation
 
-pyKMC is a Python package, but a working simulation also needs **LAMMPS** (the
-energy/force engine) and — depending on the options you enable — **pARTn**
-(saddle-point search) and **IRA** (point-set registration). The fastest way to
-get a complete, working install is the one-shot script for your platform.
+pyKMC is a Python package, but a working installation also requires **LAMMPS**
+(the energy/force engine), **pARTn** (saddle-point search), and **IRA**
+(point-set registration and symmetry detection) — all three are imported by
+the current implementation. The fastest way to get a complete, working install
+is the one-shot script for your platform.
 
 ## Platform support
 
@@ -22,9 +23,11 @@ install to live, then run the script from there.
 
 ### macOS
 
-Make sure Xcode Command Line Tools and [Homebrew](https://brew.sh) are
-installed first (the script checks and exits with a message if either is
-missing), then run the installer:
+Install Xcode Command Line Tools and [Homebrew](https://brew.sh) first. The
+script checks for Homebrew and `git`, installs missing Homebrew dependencies,
+and verifies `gfortran` plus the MPI compiler wrappers; it does not
+independently verify the Xcode Command Line Tools installation. Then run the
+installer:
 
 ```bash
 mkdir -p /path/to/your/install-folder && cd /path/to/your/install-folder
@@ -71,8 +74,11 @@ which also document the ground rules (login vs compute nodes, filesystems,
 sbatch templates).
 
 Both scripts accept `PYTHON_BIN=/path/to/python` to choose a specific
-interpreter (Python ≥ 3.10), and produce an `activate.sh` you can `source`
-before every run.
+interpreter. The package metadata requires Python 3.10 or newer, but the
+one-shot installers currently validate Python 3.10–3.13; for a newer Python
+release, use a tested interpreter in that range or update and validate the
+installer. Each script produces an `activate.sh` you can `source` before
+every run.
 
 ## What the scripts install
 
@@ -82,7 +88,10 @@ Under the `pykmc/` folder they create:
 - `lammps/` — LAMMPS (`stable_22Jul2025_update3`) built shared, with Python bindings
 - `artn-plugin/` — the pARTn plugin (`pypARTn` Python module)
 - `IterativeRotationsAssignments/` — IRA (`ira_mod` Python module)
-- `activate.sh` — sets the environment and library paths for running pyKMC
+- `activate.sh` — activates the pyKMC virtual environment and removes stale
+  pyKMC interface paths from `PYTHONPATH`. Set a shared-library search path
+  separately if your LAMMPS installation requires one; installed wheels or
+  embedded runtime paths may make that unnecessary.
 
 ## Manual / advanced installation
 
@@ -106,8 +115,8 @@ The essential sequence is:
 
 ### Minimal Python environment
 
-If you already have LAMMPS (and optionally pARTn/IRA) built, installing pyKMC
-itself is just:
+If you already have LAMMPS, pARTn, and IRA built, installing pyKMC itself is
+just:
 
 ```bash
 python3 -m venv /path_to_environment/pykmc_env
@@ -121,36 +130,54 @@ pip install -e .
 - **LAMMPS** — a recent release is required (tested with
   `stable_22Jul2025_update3`). It must be built as a shared library with Python
   bindings; see the platform guides for the exact cmake invocation.
-- **pARTn** — optional, used for event (saddle-point) search. Project page:
+- **pARTn** — required by the current implementation, used for event
+  (saddle-point) search. Project page:
   [pARTn](https://mammasmias.gitlab.io/artn-plugin/).
-- **IRA** — optional, used for point-set registration during event
-  reconstruction. Project page:
+- **IRA** — required by the current implementation, used for point-set
+  registration during event reconstruction and for symmetry detection.
+  Project page:
   [IRA](https://mammasmias.github.io/IterativeRotationsAssignments/).
 
 ## Verify the install
 
-With the environment active:
+With the environment active, run the full component check — it not only
+imports each module but also starts a LAMMPS instance and loads the pARTn
+plugin into it, which is what a real run requires:
 
 ```bash
-python -c "
+python - <<'PY'
+import ase
+import ira_mod
+import pykmc
+import pypARTn
 from lammps import lammps
-import ase, pykmc, ira_mod, pypARTn
-print('All imports OK')
-"
+
+lmp = lammps()
+artn = pypARTn.artn(engine="lmp")
+lmp.command(f"plugin load {artn.lib._name}")
+print("Loaded liblammps:", lmp.lib._name)
+print("Loaded pARTn plugin:", artn.lib._name)
+print("All components OK")
+PY
 ```
 
-A successful run prints `All imports OK`. If an import fails, see
+A successful run prints `All components OK`. If a step fails, see
 [Troubleshooting](../../troubleshooting.md).
 
 ## Running
 
-pyKMC runs under MPI. Use at least `n_sessions + 1` ranks: rank 0 runs the
-main KMC loop and the remaining ranks are split among the `n_sessions` LAMMPS
-instances (`[Control]` section of the input file).
+pyKMC runs under MPI. With the default `engine_use_rank_0 = False`, launch at
+least `n_sessions + 1` ranks: rank 0 runs the main KMC loop and the remaining
+ranks are split among the `n_sessions` LAMMPS instances (`[Control]` section
+of the input file). With `engine_use_rank_0 = True`, rank 0 also hosts the
+first engine session, so `n_sessions` ranks suffice.
 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in
 ```
+
+See [Parallelization](../parallelization.md) for `n_sessions`,
+`engine_use_rank_0`, world-size requirements, and rank splitting.
 
 On a cluster, submit through your scheduler as usual — e.g. with Slurm,
 activate the venv in the job script and launch with `srun`:
