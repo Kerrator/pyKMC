@@ -1,8 +1,10 @@
 # Basins
 
-Basin settings are defined in the `[Basin]` section of the input file.
-The only required parameter is the energy threshold (in eV) below which a state is considered part of the basin.
-You must also enable basin mode in the `[Control]` section.
+Enable basin mode with `basin = True` in the `[Control]` section; this makes a
+`[Basin]` section mandatory. The key parameter is `energy_thr`, the energy
+threshold (in eV) below which a state is considered part of the basin. It
+defaults to `0.0` eV, which effectively disables basin detection for
+nonnegative barriers, so set a positive threshold to use the feature.
 
 Example:
 
@@ -32,14 +34,14 @@ The `[Basin]` section is intended for future extensions when multiple algorithms
 
 ## General Idea
 
-During a KMC step, if the selected event has both forward and backward barriers lower than `energy_thr`, a `Basin` object is created.
+During a KMC step, a `Basin` object is created when the selected event's forward barrier is below `energy_thr` and at least one catalog event leaving the selected event's final topology also has a barrier below `energy_thr` (the reverse move at minimum).
 It explores the basin, computes the exit time, and determines the exit state.
 Once finished, the selected event in the KMC loop is replaced with the basin event.
 
 <!-- TODO: add a figure illustrating basin entry and the super-event replacement. -->
 
 While exploring, the main objective is to build a connectivity table containing all information required to apply the exit algorithm.
-This table is stored as a `pandas.DataFrame`, managed by a `Connectivity` object (merge, remove, search for connections, ...).
+This table is stored as a `pandas.DataFrame`, managed by a connectivity object that merges rows, removes transitions, and queries state connections.
 
 <!-- TODO: add a figure of the connectivity table / state-transition graph. -->
 
@@ -54,12 +56,12 @@ Column meaning:
 * **dE_forward / k_forward**: barrier and rate from `state` to `state_connexion`
 * **dE_backward / k_backward**: barrier and rate from `state_connexion` back to `state`
 
-_Note: Pandas Dataframe were choosen for fast querying and sorting, and it can easily be converted to a graph for analysis and characterization._
+_Note: a pandas `DataFrame` is used for efficient querying and sorting and can easily be converted to a graph for analysis and characterization._
 
 The `Basin` object uses two additional components:
 
-* **Explorer**: explores a given state by creating its connectivity table
-* **Selector**: use the connectivity table to compute the exit state and exit time
+* **Explorer**: explores a state and builds its connectivity rows
+* **Selector**: uses the connectivity table to compute the exit state and exit time
 
 *This structure is designed to support multiple future exploration/selection algorithms.*
 
@@ -73,7 +75,7 @@ The `Basin` object uses two additional components:
    2. If the state has an unknown atomic environment → mark as absorbing → stop
    3. If the state is absorbing, stop
    4. Find the connection (event) between a known state and this state
-   5. Apply the event (reconstruction using a generic event)
+   5. Build the connected state using the configured Basin style (`global` or `global/reconstruction`)
    6. Send the state to the Explorer:
 
       * detect applicable events
