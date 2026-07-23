@@ -44,4 +44,4 @@ It coordinates three computational components:
 | [KMC Parameters](parameters.md) | Every configuration field, auto-generated from the code |
 | [Troubleshooting](troubleshooting.md) | Common errors and fixes |
 | [Developer Guide](developer_guide/index.md) | Contributing, architecture, testing, and building the docs |
-| [API Reference](api/system.md) | Module-by-module API, generated from docstrings |
+| [API Reference](api/index.md) | Module-by-module API, generated from docstrings |

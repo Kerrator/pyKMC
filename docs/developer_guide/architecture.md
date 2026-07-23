@@ -1,7 +1,7 @@
 # Architecture
 
 This page sketches how the pyKMC package is organized and how the pieces fit
-together — see the [API Reference](../api/system.md) for the per-module details
+together — see the [API Reference](../api/index.md) for the per-module details
 rendered from docstrings, and the [Strategy pattern](strategy_pattern.md) and
 [Engine](engine.md) pages for deep dives into the two extension mechanisms.
 
