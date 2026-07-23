@@ -43,9 +43,10 @@ The ruff configuration (`ruff.toml`) selects the `D` (pydocstyle) and `ANN`
 (flake8-annotations) rule sets, so **docstrings and full type annotations are
 required** on public code, targeting Python 3.10.
 
-> **Note:** there is currently no CI workflow that gates these checks on pull
-> requests. Please run them locally — the PR checklist below is the enforcement
-> mechanism until a CI lint job is added.
+> **Note:** CI enforces formatting only — every push and pull request runs
+> `ruff format --check`. The lint rules (`ruff check`), `mypy`, and the test
+> suite are not gated by CI; please run them locally — the PR checklist below
+> is the enforcement mechanism until a CI lint job is added.
 
 ## Docstring standard
 

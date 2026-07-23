@@ -59,8 +59,10 @@ The ruff configuration (`ruff.toml`) requires **docstrings** (`D` rules) and
 **type annotations** (`ANN` rules), uses double quotes, and an 88-character line
 length, targeting Python 3.10.
 
-> **Note:** there is currently no CI workflow that gates these checks on pull
-> requests, so they must be run locally.
+> **Note:** CI enforces **formatting only** — every push and pull request runs
+> `ruff format --check` (see [Code formatting](code_formatting.md)). The lint
+> rules (`ruff check`), `mypy`, and the test suite are not gated by CI and must
+> be run locally.
 
 ## Building the documentation
 

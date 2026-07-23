@@ -123,7 +123,7 @@ XxxStrategy._import_errors = autodiscover(__name__, __path__)
 ```python
 from typing import Protocol
 from pykmc._core import Registrable
-from .base import XxxStrategy  # XxxStrategy(Registrable, root=True) défini dans base.py
+from .base import XxxStrategy  # XxxStrategy(Registrable, root=True) defined in base.py
 
 
 class MyStrategyConfig(Protocol):
