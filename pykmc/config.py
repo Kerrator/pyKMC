@@ -30,17 +30,17 @@ class ControlConfig(BaseModel):
 
     trajectory_output: Optional[str] = Field(
         default="./trajkmc.xyz",
-        description="File path where the simulation trajectory will be saved. The file should be writable by `ase.io.write` using `append=True `",
+        description="Trajectory path written by `ase.io.write(..., append=True)`.",
     )
 
     reference_table_output: Optional[str] = Field(
         default="./reference_table.pickle",
-        description="File path where the reference table will be store in pickle format.",
+        description="Reserved for a configurable reference-table output path; currently unused. The table is always written to `reference_table.pickle`.",
     )
 
     visited_environments_output: Optional[str] = Field(
         default="./visited_environments.pickle",
-        description="File path where the list of atomic environments that have been explored will be sore in pickle format.",
+        description="File path where the set of atomic environments that have been explored will be stored in pickle format.",
     )
 
     reference_table: Optional[str] = Field(
@@ -50,16 +50,16 @@ class ControlConfig(BaseModel):
 
     visited_environments: Optional[str] = Field(
         default=None,
-        description="Path to a list of visited environment generated from a previous simulation.",
+        description="Path to a set of visited environments generated from a previous simulation.",
     )
 
     restart_file: Optional[str] = Field(
-        default=None, description="File with restart informations."
+        default=None, description="Path to a pyKMC restart metadata file."
     )
 
     reconstruction: Optional[bool] = Field(
         default=True,
-        description="If at each KMC step we reconstruct generic events.\n NOT WORKING",
+        description="Reserved for optional reconstruction; currently unused by the main KMC loop. Selected events are always reconstructed.",
     )
 
     n_steps: int = Field(
@@ -68,13 +68,16 @@ class ControlConfig(BaseModel):
 
     engine: Literal["lammps"] = Field(
         default=...,
-        description="Which E/F Engine to use. Note : Only lammps is implemented.",
+        description="Energy/force engine. Currently only `lammps` is implemented.",
     )
 
-    n_sessions: Optional[int] = Field(default=1, description="Number of Sessions")
+    n_sessions: Optional[int] = Field(
+        default=1, description="Number of parallel LAMMPS engine sessions."
+    )
 
     engine_use_rank_0: Optional[bool] = Field(
-        default=False, description="Deprecated : If use mpi rank 0 or not."
+        default=False,
+        description="Deprecated: whether MPI rank 0 also hosts an engine session. When False, rank 0 is reserved for orchestration.",
     )
 
     verbosity: Optional[int] = Field(
@@ -90,7 +93,7 @@ class ControlConfig(BaseModel):
 
     active_volume: Optional[bool] = Field(
         default=False,
-        description="Incorporate AV's into simulations, recommended for large systems",
+        description="Enable Active Volume mode; recommended for large single-element systems.",
     )
 
     recycle: Optional[bool] = Field(
@@ -128,12 +131,12 @@ class AtomicEnvironmentConfig(BaseModel):
 
     rcut: Optional[float] = Field(
         default=None,
-        description="Radius cutoff (in Angstrom) for defining the local atomic environment.",
+        description="Radius cutoff (in Angstrom) for defining the local atomic environment. Required by the KMC event-matching, refinement, and reconstruction paths.",
     )
 
     neighbors_add: Optional[int] = Field(
         default=0,
-        description="When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.",
+        description="For the hybrid graph styles ('cna/graph', 'coordination/graph', 'diamond/graph'): 0 limits graph IDs to noncrystalline atoms; any positive value also computes graph IDs for their immediate neighbors. Values greater than one do not currently add further shells.",
     )
 
     coordination_threshold: Optional[int] = Field(
@@ -185,12 +188,11 @@ class EventSearchConfig(BaseModel):
     )
     backward_emin_event: float = Field(
         default=0.0,
-        description="To be used with `energy_assymetry`.",
+        description="Backward-barrier threshold used by the asymmetric-event rejection rule (see `energy_asymmetry`).",
     )
     energy_asymmetry: int = Field(
         default=5,
-        description="Prevent highly asymmetric event to be added to the reference table."
-        "The con",
+        description="Reject an event when its forward barrier exceeds `energy_asymmetry * backward_emin_event` and its backward barrier is below `backward_emin_event`.",
     )
     refined_minimum_delr_thr: float = Field(
         default=0.1,
@@ -198,12 +200,12 @@ class EventSearchConfig(BaseModel):
     )
     refined_energy_thr: float = Field(
         default=0.05,
-        description="Maximumallowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
+        description="Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.",
     )
 
     delr_thr: float = Field(
         default=0.5,
-        description="delr threshold between one minima and the intial configuration to consider the event valid.",
+        description="Maximum pARTn displacement between the initial configuration and at least one returned minimum for accepting an event-search result.",
     )
 
 
@@ -221,7 +223,7 @@ class PartnConfig(BaseModel):
     # Exploration
     zseed: int = Field(
         default=0,
-        description="The value of zseed is used to seed the random number generator. If the value equals 0, a new radom seed gets geenrated. The exact zseed value of each research is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs.",
+        description="The value of zseed is used to seed the random number generator. If the value equals 0, a new random seed is generated. The exact zseed value of each search is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs.",
     )
 
     # Initial push
@@ -247,7 +249,7 @@ class PartnConfig(BaseModel):
 
     ninit: int = Field(
         default=2,
-        description="Specify the minimal number of pushes with the initial push vector.",
+        description="Minimum number of pushes with the initial push vector.",
     )
 
     # Lanczos
@@ -288,7 +290,7 @@ class PartnConfig(BaseModel):
 
     neigen: int = Field(
         default=1,
-        description="Number of pushes along the eignevector before starting a perpendicular relax.",
+        description="Number of pushes along the eigenvector before starting a perpendicular relax.",
     )
 
     alpha_mix_cr: float = Field(
@@ -300,7 +302,7 @@ class PartnConfig(BaseModel):
 
     nnewchance: int = Field(
         default=0,
-        description="Number of times a research is allowed to cross a convex region (without counting the starting convex region).",
+        description="Number of times a search is allowed to cross a convex region (without counting the starting convex region).",
     )
 
     # Perpendicular relaxation
@@ -319,12 +321,12 @@ class PartnConfig(BaseModel):
 
     convergence_property: Literal["maxval", "norm"] = Field(
         default="maxval",
-        description="Specify how to test convergence of the forces. 'maxval': the convergence will be tested by MAXVAL( ABS( force ) ); 'norm' the convergence will be tested by NORM2( force ).",
+        description="Reserved for selecting the pARTn force-convergence norm ('maxval': MAXVAL(ABS(force)); 'norm': NORM2(force)); currently unused, so pARTn's default remains in effect.",
     )
 
     nevalf_max: int = Field(
         default=9999,
-        description="Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max",
+        description="Stop an artn search before end when the number of force evaluations by the force engine is greater than `nevalf_max`.",
     )
 
     # Final push
@@ -340,7 +342,7 @@ class PartnConfig(BaseModel):
     # Lammps
     dmax: float = Field(
         default=6.0,
-        description="dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
+        description="dmax parameter used in the `fix ID all artn dmax value` LAMMPS command. Should be greater than `push_step_size`.",
     )
 
     #################
@@ -349,13 +351,13 @@ class PartnConfig(BaseModel):
 
     r_nevalf_max: int = Field(
         default=300,
-        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max.",
+        description="Stop an artn refinement before end when the number of force evaluations by the force engine is greater than `r_nevalf_max`.",
     )
 
     # Max single refinement attempt
     r_max_attempts: int = Field(
         default=5,
-        description="When adjusting the saddle energy and positions, in some rare cases partn has trouble finding the saddle point and goes back to the minium."
+        description="When adjusting the saddle energy and positions, in some rare cases pARTn has trouble finding the saddle point and goes back to the minimum. "
         "In that case, we do another attempt with a different seed.",
     )
 
@@ -367,17 +369,17 @@ class PartnConfig(BaseModel):
     # Initial_push
     r_push_mode: Literal["list", "rad"] = Field(
         default="list",
-        description="Determines how the initial atomic displacement (push) is generated around the central atom "
+        description="Determines how the refinement's initial atomic displacement (push) is generated around the central atom "
         "of the currently explored environment:\n"
         "- **'list'**: The push is applied *only* to the central atom.\n"
-        "- **'rad'**: The push is applied to *all atoms* within a specified radial distance (`push_dist_thr`) "
+        "- **'rad'**: The push is applied to *all atoms* within a specified radial distance (`r_push_dist_thr`) "
         "from the central atom.",
     )
 
     r_push_dist_thr: float = Field(
         default=1.0,
-        description="If `push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom "
-        "within which all atoms receive an initial displacement.",
+        description="When `r_push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom "
+        "within which atoms receive the refinement's initial displacement.",
     )
 
     r_push_step_size: float = Field(
@@ -428,7 +430,7 @@ class PartnConfig(BaseModel):
 
     r_neigen: int = Field(
         default=1,
-        description="Refinement: Number of pushes along the eignevector before starting a perpendicular relax.",
+        description="Refinement: Number of pushes along the eigenvector before starting a perpendicular relax.",
     )
 
     r_alpha_mix_cr: float = Field(
@@ -440,7 +442,7 @@ class PartnConfig(BaseModel):
 
     r_nnewchance: int = Field(
         default=0,
-        description="Refinement: Number of times a research is allowed to cross a convex region (without counting the starting convex region).",
+        description="Refinement: Number of times a search is allowed to cross a convex region (without counting the starting convex region).",
     )
 
     # Perpendicular relaxation
@@ -461,7 +463,7 @@ class PartnConfig(BaseModel):
     # Lammps
     r_dmax: float = Field(
         default=1.0,
-        description="Refinement: dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.",
+        description="Refinement: dmax parameter used in the `fix ID all artn dmax value` LAMMPS command. Should be greater than `r_push_step_size`.",
     )
 
     # To deal with nperp None if only using nperp_limitation :
@@ -539,20 +541,20 @@ class ActiveVolume(BaseModel):
 
 
 class LammpsConfig(BaseModel):
-    """Lammps parameters."""
+    """LAMMPS parameters."""
 
-    pair_style: str = Field(default=..., description="Lammps pair_style command.")
-    pair_coeff: str = Field(default=..., description="Lammps pair_coeff command.")
+    pair_style: str = Field(default=..., description="LAMMPS pair_style command.")
+    pair_coeff: str = Field(default=..., description="LAMMPS pair_coeff command.")
     min_style: Optional[str] = Field(
-        default="cg", description="Lammps min_style command."
+        default="cg", description="LAMMPS min_style command."
     )
     minimize: Optional[str] = Field(
         default="1.0e-6 1.0e-8 1000 1000",
-        description="Lammps minimize command",
+        description="LAMMPS minimize command.",
     )
     frz_min: Optional[str] = Field(
         default="1.0e-6 1.0e-8 10 10",
-        description="Lammps minimize command with frozen core",
+        description="LAMMPS minimize command with frozen core.",
     )
 
 
@@ -616,7 +618,7 @@ class RegionConfig(BaseModel):
 
     Used for ``inactive_atoms`` and ``frozen_atoms`` config sections.
     Runtime geometric queries (e.g. ``contains(positions)``) live in
-    ``pykmc/region.py``.
+    ``pykmc/environments/region.py``.
     """
 
     region_type: Optional[Literal["sphere", "shell", "box", "plane"]] = Field(
