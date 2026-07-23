@@ -5,9 +5,9 @@ powers auto-registration and lookup across pyKMC for algorithm strategies,
 engine backends, and any other pluggable hierarchy.
 
 Concrete implementations live in their respective modules. See the
-`architecture documentation <../docs/dev_strategy_pattern.md>`_ for the strategy
-design usecase and :func:`pykmc._core.discovery.autodiscover` for how implementation
-modules are loaded.
+`architecture documentation <../docs/developer_guide/strategy_pattern.md>`_ for
+the strategy design usecase and :func:`pykmc._core.discovery.autodiscover` for
+how implementation modules are loaded.
 """
 
 from __future__ import annotations
