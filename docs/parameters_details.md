@@ -10,15 +10,15 @@
   </details>
 - **`trajectory_output`** : `str`, default = `'./trajkmc.xyz'`
   <details><summary>Description</summary>
-  File path where the simulation trajectory will be saved. The file should be writable by `ase.io.write` using `append=True `
+  Trajectory path written by `ase.io.write(..., append=True)`.
   </details>
 - **`reference_table_output`** : `str`, default = `'./reference_table.pickle'`
   <details><summary>Description</summary>
-  File path where the reference table will be store in pickle format.
+  Reserved for a configurable reference-table output path; currently unused. The table is always written to `reference_table.pickle`.
   </details>
 - **`visited_environments_output`** : `str`, default = `'./visited_environments.pickle'`
   <details><summary>Description</summary>
-  File path where the list of atomic environments that have been explored will be sore in pickle format.
+  File path where the set of atomic environments that have been explored will be stored in pickle format.
   </details>
 - **`reference_table`** : `str`, optional
   <details><summary>Description</summary>
@@ -26,16 +26,15 @@
   </details>
 - **`visited_environments`** : `str`, optional
   <details><summary>Description</summary>
-  Path to a list of visited environment generated from a previous simulation.
+  Path to a set of visited environments generated from a previous simulation.
   </details>
 - **`restart_file`** : `str`, optional
   <details><summary>Description</summary>
-  File with restart informations.
+  Path to a pyKMC restart metadata file.
   </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
-  If at each KMC step we reconstruct generic events.
-   NOT WORKING
+  Reserved for optional reconstruction; currently unused by the main KMC loop. Selected events are always reconstructed.
   </details>
 - **`n_steps`** : `int`, mandatory
   <details><summary>Description</summary>
@@ -43,15 +42,15 @@
   </details>
 - **`engine`** : `Literal['lammps']`, mandatory
   <details><summary>Description</summary>
-  Which E/F Engine to use. Note : Only lammps is implemented.
+  Energy/force engine. Currently only `lammps` is implemented.
   </details>
 - **`n_sessions`** : `int`, default = `1`
   <details><summary>Description</summary>
-  Number of Sessions
+  Number of parallel LAMMPS engine sessions.
   </details>
 - **`engine_use_rank_0`** : `bool`, default = `False`
   <details><summary>Description</summary>
-  Deprecated : If use mpi rank 0 or not.
+  Deprecated: whether MPI rank 0 also hosts an engine session. When False, rank 0 is reserved for orchestration.
   </details>
 - **`verbosity`** : `int`, default = `1`
   <details><summary>Description</summary>
@@ -67,7 +66,7 @@
   </details>
 - **`active_volume`** : `bool`, default = `False`
   <details><summary>Description</summary>
-  Incorporate AV's into simulations, recommended for large systems
+  Enable Active Volume mode; recommended for large single-element systems.
   </details>
 - **`recycle`** : `bool`, default = `False`
   <details><summary>Description</summary>
@@ -96,11 +95,11 @@
   </details>
 - **`rcut`** : `float`, optional
   <details><summary>Description</summary>
-  Radius cutoff (in Angstrom) for defining the local atomic environment.
+  Radius cutoff (in Angstrom) for defining the local atomic environment. Required by the KMC event-matching, refinement, and reconstruction paths.
   </details>
 - **`neighbors_add`** : `int`, default = `0`
   <details><summary>Description</summary>
-  When `style` is 'cna/graph', specifies the N-th shell of neighbors whose graph IDs should also be computed.
+  For the hybrid graph styles ('cna/graph', 'coordination/graph', 'diamond/graph'): 0 limits graph IDs to noncrystalline atoms; any positive value also computes graph IDs for their immediate neighbors. Values greater than one do not currently add further shells.
   </details>
 - **`coordination_threshold`** : `int`, optional
   <details><summary>Description</summary>
@@ -137,11 +136,11 @@
   </details>
 - **`backward_emin_event`** : `float`, default = `0.0`
   <details><summary>Description</summary>
-  To be used with `energy_assymetry`.
+  Backward-barrier threshold used by the asymmetric-event rejection rule (see `energy_asymmetry`).
   </details>
 - **`energy_asymmetry`** : `int`, default = `5`
   <details><summary>Description</summary>
-  Prevent highly asymmetric event to be added to the reference table.The con
+  Reject an event when its forward barrier exceeds `energy_asymmetry * backward_emin_event` and its backward barrier is below `backward_emin_event`.
   </details>
 - **`refined_minimum_delr_thr`** : `float`, default = `0.1`
   <details><summary>Description</summary>
@@ -149,11 +148,11 @@
   </details>
 - **`refined_energy_thr`** : `float`, default = `0.05`
   <details><summary>Description</summary>
-  Maximumallowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.
+  Maximum allowed difference (in eV) between a reference event's initial barrier energy and its refined barrier energy.
   </details>
 - **`delr_thr`** : `float`, default = `0.5`
   <details><summary>Description</summary>
-  delr threshold between one minima and the intial configuration to consider the event valid.
+  Maximum pARTn displacement between the initial configuration and at least one returned minimum for accepting an event-search result.
   </details>
 
 ---
@@ -200,28 +199,28 @@
 ## `Lammps` Section (optional)
 
 <details><summary>Section Overview</summary>
-  Lammps parameters.
+  LAMMPS parameters.
 </details>
 
 - **`pair_style`** : `str`, mandatory
   <details><summary>Description</summary>
-  Lammps pair_style command.
+  LAMMPS pair_style command.
   </details>
 - **`pair_coeff`** : `str`, mandatory
   <details><summary>Description</summary>
-  Lammps pair_coeff command.
+  LAMMPS pair_coeff command.
   </details>
 - **`min_style`** : `str`, default = `'cg'`
   <details><summary>Description</summary>
-  Lammps min_style command.
+  LAMMPS min_style command.
   </details>
 - **`minimize`** : `str`, default = `'1.0e-6 1.0e-8 1000 1000'`
   <details><summary>Description</summary>
-  Lammps minimize command
+  LAMMPS minimize command.
   </details>
 - **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
   <details><summary>Description</summary>
-  Lammps minimize command with frozen core
+  LAMMPS minimize command with frozen core.
   </details>
 
 ---
@@ -242,7 +241,7 @@
   </details>
 - **`zseed`** : `int`, default = `0`
   <details><summary>Description</summary>
-  The value of zseed is used to seed the random number generator. If the value equals 0, a new radom seed gets geenrated. The exact zseed value of each research is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs.
+  The value of zseed is used to seed the random number generator. If the value equals 0, a new random seed is generated. The exact zseed value of each search is written in file zseed.dat, which can be useful for debugging, or re-running exact same pARTn runs.
   </details>
 - **`push_mode`** : `Literal['list', 'rad']`, default = `'rad'`
   <details><summary>Description</summary>
@@ -260,7 +259,7 @@
   </details>
 - **`ninit`** : `int`, default = `2`
   <details><summary>Description</summary>
-  Specify the minimal number of pushes with the initial push vector.
+  Minimum number of pushes with the initial push vector.
   </details>
 - **`lanczos_min_size`** : `int`, default = `10`
   <details><summary>Description</summary>
@@ -292,7 +291,7 @@
   </details>
 - **`neigen`** : `int`, default = `1`
   <details><summary>Description</summary>
-  Number of pushes along the eignevector before starting a perpendicular relax.
+  Number of pushes along the eigenvector before starting a perpendicular relax.
   </details>
 - **`alpha_mix_cr`** : `float`, default = `0.2`
   <details><summary>Description</summary>
@@ -300,7 +299,7 @@
   </details>
 - **`nnewchance`** : `int`, default = `0`
   <details><summary>Description</summary>
-  Number of times a research is allowed to cross a convex region (without counting the starting convex region).
+  Number of times a search is allowed to cross a convex region (without counting the starting convex region).
   </details>
 - **`nperp`** : `int`, default = `3`
   <details><summary>Description</summary>
@@ -316,11 +315,11 @@
   </details>
 - **`convergence_property`** : `Literal['maxval', 'norm']`, default = `'maxval'`
   <details><summary>Description</summary>
-  Specify how to test convergence of the forces. 'maxval': the convergence will be tested by MAXVAL( ABS( force ) ); 'norm' the convergence will be tested by NORM2( force ).
+  Reserved for selecting the pARTn force-convergence norm ('maxval': MAXVAL(ABS(force)); 'norm': NORM2(force)); currently unused, so pARTn's default remains in effect.
   </details>
 - **`nevalf_max`** : `int`, default = `9999`
   <details><summary>Description</summary>
-  Stop an artn search before end when the number of force evaluations by the force engine is greater to nevalf_max
+  Stop an artn search before end when the number of force evaluations by the force engine is greater than `nevalf_max`.
   </details>
 - **`push_over`** : `float`, default = `1.0`
   <details><summary>Description</summary>
@@ -329,15 +328,15 @@
   </details>
 - **`dmax`** : `float`, default = `6.0`
   <details><summary>Description</summary>
-  dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.
+  dmax parameter used in the `fix ID all artn dmax value` LAMMPS command. Should be greater than `push_step_size`.
   </details>
 - **`r_nevalf_max`** : `int`, default = `300`
   <details><summary>Description</summary>
-  Stop an artn refinement before end when the number of force evaluations by the force engine is greater to nevalf_max.
+  Stop an artn refinement before end when the number of force evaluations by the force engine is greater than `r_nevalf_max`.
   </details>
 - **`r_max_attempts`** : `int`, default = `5`
   <details><summary>Description</summary>
-  When adjusting the saddle energy and positions, in some rare cases partn has trouble finding the saddle point and goes back to the minium.In that case, we do another attempt with a different seed.
+  When adjusting the saddle energy and positions, in some rare cases pARTn has trouble finding the saddle point and goes back to the minimum. In that case, we do another attempt with a different seed.
   </details>
 - **`r_delr_sad_thr`** : `float`, default = `0.4`
   <details><summary>Description</summary>
@@ -345,13 +344,13 @@
   </details>
 - **`r_push_mode`** : `Literal['list', 'rad']`, default = `'list'`
   <details><summary>Description</summary>
-  Determines how the initial atomic displacement (push) is generated around the central atom of the currently explored environment:
+  Determines how the refinement's initial atomic displacement (push) is generated around the central atom of the currently explored environment:
   - **'list'**: The push is applied *only* to the central atom.
-  - **'rad'**: The push is applied to *all atoms* within a specified radial distance (`push_dist_thr`) from the central atom.
+  - **'rad'**: The push is applied to *all atoms* within a specified radial distance (`r_push_dist_thr`) from the central atom.
   </details>
 - **`r_push_dist_thr`** : `float`, default = `1.0`
   <details><summary>Description</summary>
-  If `push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom within which all atoms receive an initial displacement.
+  When `r_push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom within which atoms receive the refinement's initial displacement.
   </details>
 - **`r_push_step_size`** : `float`, default = `0.0001`
   <details><summary>Description</summary>
@@ -391,7 +390,7 @@
   </details>
 - **`r_neigen`** : `int`, default = `1`
   <details><summary>Description</summary>
-  Refinement: Number of pushes along the eignevector before starting a perpendicular relax.
+  Refinement: Number of pushes along the eigenvector before starting a perpendicular relax.
   </details>
 - **`r_alpha_mix_cr`** : `float`, default = `0.2`
   <details><summary>Description</summary>
@@ -399,7 +398,7 @@
   </details>
 - **`r_nnewchance`** : `int`, default = `0`
   <details><summary>Description</summary>
-  Refinement: Number of times a research is allowed to cross a convex region (without counting the starting convex region).
+  Refinement: Number of times a search is allowed to cross a convex region (without counting the starting convex region).
   </details>
 - **`r_nperp`** : `int`, default = `3`
   <details><summary>Description</summary>
@@ -415,7 +414,7 @@
   </details>
 - **`r_dmax`** : `float`, default = `1.0`
   <details><summary>Description</summary>
-  Refinement: dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.
+  Refinement: dmax parameter used in the `fix ID all artn dmax value` LAMMPS command. Should be greater than `r_push_step_size`.
   </details>
 
 ---
@@ -516,7 +515,7 @@
   
   Used for ``inactive_atoms`` and ``frozen_atoms`` config sections.
   Runtime geometric queries (e.g. ``contains(positions)``) live in
-  ``pykmc/region.py``.
+  ``pykmc/environments/region.py``.
 </details>
 
 - **`region_type`** : `Literal['sphere', 'shell', 'box', 'plane']`, optional
@@ -573,7 +572,7 @@
   
   Used for ``inactive_atoms`` and ``frozen_atoms`` config sections.
   Runtime geometric queries (e.g. ``contains(positions)``) live in
-  ``pykmc/region.py``.
+  ``pykmc/environments/region.py``.
 </details>
 
 - **`region_type`** : `Literal['sphere', 'shell', 'box', 'plane']`, optional
