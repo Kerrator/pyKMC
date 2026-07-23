@@ -23,12 +23,13 @@ Before the main loop, pyKMC sets up the run:
 2. Start the logger and the LAMMPS engine session pool.
 3. Build the initial `System` and minimise it, updating atomic positions.
 4. Build the neighbour list and classify each atom's **atomic environment**
-   (common-neighbor analysis and/or graph topology hashing, selected by the
-   `[AtomicEnvironment]` `style`).
-5. Initialise the event **catalog** and the set of already-visited
-   environments — either empty, or restored from a previous run's saved files
-   (`reference_table` / `visited_environments`), which lets a simulation chain
-   onto an existing catalog.
+   (selected from CNA, coordination-number, graph, and hybrid classifiers by
+   the `[AtomicEnvironment]` `style`).
+5. Initialise the event **catalog**, loading it if `reference_table` is set.
+   Initialise the set of visited environments independently, loading
+   `visited_environments` if set or otherwise starting from the crystalline
+   label alone. Restoring either file lets a simulation chain onto an
+   existing catalog.
 6. Set `time = 0` and record the first trajectory snapshot.
 
 ## The KMC loop
@@ -71,11 +72,13 @@ Each step repeats the following:
    the environment will be re-searched later), and selection repeats with the
    remaining events.
 
-5. **Basin handling (optional).** If the selected event has both its forward and
-   backward barriers below the basin threshold, the system has entered a
+5. **Basin handling (optional).** If the selected event's forward barrier is
+   below the basin threshold and at least one catalog event leaving the
+   selected event's final topology is too, the system has entered a
    metastable basin. The [basin algorithm](../user_guide/basins.md) explores the connected
-   transient states, solves for the mean exit time, selects an exit state, and
-   replaces the single hop with a super-event that bridges the whole basin.
+   transient states, samples a first-passage exit time and exit state from the
+   absorbing Markov chain, and replaces the single hop with a super-event that
+   bridges the whole basin.
 
 6. **Apply the event.** Update the atomic positions to the reconstructed final
    minimum and advance the simulation time.

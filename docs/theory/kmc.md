@@ -59,9 +59,12 @@ when barriers are high (slow dynamics) and small when fast events dominate.
 
 This is exactly what pyKMC's selection does (`pykmc.algorithms.rejection_free`):
 one uniform draw picks the event from the cumulative rate sum, a second draws
-$\Delta t$. Rates are handled in $\text{ps}^{-1}$ (see the units note in
-[Transition State Theory](tst.md)), so $\Delta t$ is in picoseconds; the
-accumulated simulation time is reported in seconds.
+$\Delta t$. (The implementation draws both numbers with Python's
+`random.random()`, whose range is $[0, 1)$ rather than the $(0, 1]$ written
+above; the zero draw that would break the logarithm has probability zero and
+is not explicitly guarded.) Rates are handled in $\text{ps}^{-1}$ (see the
+units note in [Transition State Theory](tst.md)), so $\Delta t$ is in
+picoseconds; the accumulated simulation time is reported in seconds.
 
 ## Lattice vs on-the-fly KMC
 
@@ -81,8 +84,9 @@ enumerated in advance, only the escape paths of the configuration at hand.
 ## pyKMC's loop
 
 Each pyKMC step classifies atomic environments, searches for events at new
-environments (pARTn), reconstructs and refines known events at recurring
-environments (IRA), selects with the BKL algorithm above, advances
+environments (pARTn), uses IRA to map known event geometries onto recurring
+equivalent environments and refines their saddles with pARTn, selects with
+the BKL algorithm above, reconstructs the selected transition, advances
 $\Delta t$, and applies the chosen event — see the
 [Algorithm Overview](general_algorithm.md).
 
