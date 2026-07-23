@@ -36,8 +36,9 @@ surface placed at the saddle, under these assumptions:
 Because every crossing of the dividing surface is counted as a reactive
 event, recrossings can only make the true rate *smaller*: the TST rate is an
 upper bound, and dynamical corrections enter as a transmission coefficient
-$\kappa \le 1$. For diffusive barrier crossings in solids at moderate
-temperature, $\kappa$ is close to 1 and TST is an excellent approximation.
+$\kappa \le 1$. Whether $\kappa$ is close to one is system- and
+dividing-surface-dependent; pyKMC's constant-prefactor model applies no
+explicit dynamical recrossing correction.
 
 ## Harmonic TST and the Vineyard prefactor
 
@@ -54,9 +55,11 @@ $$
 
 where $\nu_i^{\min}$ are the normal-mode frequencies at the minimum and
 $\nu_i^{\ddagger}$ the (real) frequencies at the saddle — the mode with the
-imaginary frequency, the reaction coordinate, is excluded. (In a periodic
-bulk system the three zero-frequency translation modes drop out of both
-products; the $3N$ / $3N-1$ counts above apply when all remaining modes are
+imaginary frequency, the reaction coordinate, is excluded, and $\nu$ denotes
+ordinary frequency, not angular frequency. (Translational or otherwise
+constrained zero modes must be removed from *both* products consistently — in
+a periodic bulk system the three zero-frequency translation modes drop out of
+each; the $3N$ / $3N-1$ counts above apply when all remaining modes are
 finite, e.g. with a frozen boundary.) The whole frequency ratio plays the
 role of an *effective attempt frequency*: it measures how often the system
 "tries" the barrier, weighted by the entropy narrowing or widening of the
@@ -90,17 +93,20 @@ accumulated simulation time is converted to seconds in the output.
 
 ## From saddle searches to rates in pyKMC
 
-pyKMC does not assume a barrier — it finds saddle points directly with
+pyKMC does not require a prescribed barrier catalog — it finds saddle points directly with
 **pARTn** (ART nouveau): random activation away from a minimum, followed by
 convergence to a first-order saddle using the lowest curvature mode. Each
 discovered event records $\Delta E_\text{forward}$ and
 $\Delta E_\text{backward}$, which feed the rate constant above.
 
-A discovered saddle is only accepted into the event catalog if it passes an
-energy window: the forward barrier must lie between `emin_event` and
-`emax_event`, and the backward barrier must also exceed `emin_event`. This
-screens out incompletely converged searches and numerically negligible
-barriers — see the `[EventSearch]` section of the
+A discovered event is retained in the catalog when
+`emin_event` $\le \Delta E_\text{forward} \le$ `emax_event` and
+$\Delta E_\text{backward} \ge$ `emin_event` (equality is accepted). It is
+additionally rejected when
+$\Delta E_\text{forward} >$ `energy_asymmetry` $\times$ `backward_emin_event`
+**and** $\Delta E_\text{backward} <$ `backward_emin_event`. pARTn search
+failures and minimum-matching problems are screened before these
+catalog-level energy tests — see the `[EventSearch]` section of the
 [KMC Parameters](../parameters.md) page. See the
 [Algorithm Overview](general_algorithm.md) for where this sits in the KMC
 loop.
