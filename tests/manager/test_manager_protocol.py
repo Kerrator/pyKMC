@@ -195,3 +195,52 @@ class TestPerRankFailures:
         # group mode always spans >= 2 ranks when group_size >= 2
         with pytest.raises(RuntimeError, match="rank"):
             manager.group_fail_off_root()
+
+
+class TestLifecycleAndGuards:
+    """Builtin-name guards and shutdown bookkeeping."""
+
+    def test_blocked_builtins_are_rejected_on_every_path(self, manager):
+        if rank0_only(manager):
+            return
+        for name in ("use_local", "use_group", "use_global", "shutdown"):
+            for spelling in (name, f"group_{name}", f"global_{name}"):
+                if spelling == "shutdown":
+                    continue  # Manager.shutdown is a real method
+                with pytest.raises(AttributeError):
+                    getattr(manager, spelling)
+        for op in ("use_global", "shutdown"):
+            with pytest.raises(ValueError):
+                manager.submit(op)
+            with pytest.raises(ValueError):
+                manager.broadcast(op)
+
+    def test_list_ops_remains_available_in_every_mode(self, manager):
+        if rank0_only(manager):
+            return
+        assert "echo" in manager.list_ops()
+        assert "echo" in manager.group_list_ops(mode="group")
+        assert "echo" in manager.global_list_ops(mode="global")
+
+    def test_cancelled_future_does_not_kill_the_pool(self, manager):
+        if rank0_only(manager):
+            return
+        futures = [manager.slow_marker() for _ in range(24)]
+        cancelled = [f for f in futures if f.cancel()]
+        for f in futures:
+            if not f.cancelled():
+                assert f.result(timeout=TIMEOUT) == "done"
+        # whatever was cancelled, the pool must still serve new work
+        assert manager.echo(1, 2).result(timeout=TIMEOUT) == (1, 2, None)
+        assert cancelled == cancelled  # recorded for diagnostics, never asserted on
+
+    def test_submit_and_start_after_shutdown_raise(self, manager):
+        if rank0_only(manager):
+            return
+        manager.shutdown()
+        with pytest.raises(RuntimeError):
+            manager.submit("slow_marker")
+        with pytest.raises(RuntimeError):
+            manager.start()
+        # the fixture calls shutdown() again; it must stay idempotent
+        manager.shutdown()

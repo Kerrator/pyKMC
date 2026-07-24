@@ -6,6 +6,24 @@ import threading
 from typing import Any, Literal
 
 
+# Worker builtins that must never be reached through Session.call: shutdown stops
+# the worker loop and the use_* switches desync it from Manager.mode (in group or
+# global mode only one worker is rank 0, so the others never reply at all).
+# `list_ops` is deliberately absent: it is read-only, returns a value, and is the
+# supported way to introspect a mode's registry.
+_BLOCKED_OPS = frozenset({"use_local", "use_group", "use_global", "shutdown"})
+
+
+def _reject_blocked(op_name: str) -> None:
+    """Raise if an operation must not be routed through a Session."""
+    if op_name in _BLOCKED_OPS:
+        raise ValueError(
+            f"'{op_name}' is a Worker builtin and cannot be submitted. Mode "
+            f"switching is handled automatically by submit/submit_group/"
+            f"submit_global; use Manager.shutdown() to stop the pool."
+        )
+
+
 @dataclass
 class Job:
     """Unit of work dispatched to a thread worker.
@@ -41,6 +59,7 @@ class Manager:
 
         self._local_queue: queue.Queue[Job] = queue.Queue()
         self._local_threads: list[threading.Thread] = []
+        self._closed = False
 
         self.mode: Literal["local", "group", "global"] = "local"
 
@@ -52,6 +71,11 @@ class Manager:
         RuntimeError
             If start() has already been called.
         """
+        if self._closed:
+            raise RuntimeError(
+                "Manager has been shut down; its workers have left their message "
+                "loop and cannot be restarted."
+            )
         if self._local_threads:
             raise RuntimeError("Manager is already started.")
         for session in self.local_sessions:
@@ -62,13 +86,23 @@ class Manager:
             self._local_threads.append(t)
 
     def shutdown(self) -> None:
-        """Stop all thread workers and shut down sessions."""
+        """Stop all thread workers and shut down sessions.
+
+        Idempotent: a second call is a no-op. Re-sending the shutdown command
+        would leave unconsumed messages addressed to workers that have already
+        left their loop, which the next Manager on the same communicator would
+        read as its first command.
+        """
+        if self._closed:
+            return
         if self.mode != "local":
             self._use_local()
         for _ in self._local_threads:
             self._local_queue.put(None)
         for t in self._local_threads:
             t.join()
+        self._local_threads.clear()
+        self._closed = True
         for session in self.local_sessions:
             session.shutdown()
 
@@ -82,8 +116,10 @@ class Manager:
         Useful for initialisation steps that every worker must run.
         Switches to local mode automatically if needed.
         """
+        _reject_blocked(op_name)
         if self.mode != "local":
             self._use_local()
+        self._local_queue.join()
         for session in self.local_sessions:
             session.call(op_name, *args, **kwargs)
 
@@ -135,7 +171,11 @@ class Manager:
         while True:
             job = job_queue.get()
             if job is None:  # sentinel — stop
+                job_queue.task_done()
                 break
+            if not job.future.set_running_or_notify_cancel():  # cancelled — skip
+                job_queue.task_done()
+                continue
             try:
                 result = session.call(job.op_name, *job.args, **job.kwargs)
                 job.future.set_result(result)
@@ -161,6 +201,7 @@ class Manager:
         RuntimeError
             If start() has not been called.
         """
+        _reject_blocked(op_name)
         if not self._local_threads:
             raise RuntimeError("Manager has not been started. Call start() first.")
         if self.mode != "local":
@@ -185,6 +226,7 @@ class Manager:
         RuntimeError
             If no group session was configured.
         """
+        _reject_blocked(op_name)
         if self.group_session is None:
             raise RuntimeError("No group session configured.")
         if self.mode != "group":
@@ -206,6 +248,7 @@ class Manager:
         RuntimeError
             If no global session was configured.
         """
+        _reject_blocked(op_name)
         if self.global_session is None:
             raise RuntimeError("No global session configured.")
         if self.mode != "global":
@@ -218,11 +261,33 @@ class Manager:
         mgr.minimize(positions=pos)        → submit("minimize", positions=pos)        → Future
         mgr.group_minimize(positions=pos)  → submit_group("minimize", positions=pos)  → result
         mgr.global_minimize(positions=pos) → submit_global("minimize", positions=pos) → result
+
+        Underscore-prefixed names (including dunders probed by copy/pickle) and
+        the Worker builtins (use_local/use_group/use_global/shutdown) raise
+        AttributeError instead of being forwarded — mode switching is handled
+        automatically by the submit methods. Manager's own attributes always win
+        over registry ops, and the group_/global_ prefixes are stripped before
+        lookup; reach a shadowed op, or an op whose real name starts with
+        group_/global_, via submit(op_name, ...) explicitly — which applies the
+        same builtin rejection.
         """
+        if name.startswith("_"):
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
         if name.startswith("global_"):
-            op = name[len("global_") :]
-            return lambda *a, **kw: self.submit_global(op, *a, **kw)
-        if name.startswith("group_"):
-            op = name[len("group_") :]
-            return lambda *a, **kw: self.submit_group(op, *a, **kw)
-        return lambda *a, **kw: self.submit(name, *a, **kw)
+            op, submit = name[len("global_") :], self.submit_global
+        elif name.startswith("group_"):
+            op, submit = name[len("group_") :], self.submit_group
+        else:
+            op, submit = name, self.submit
+        # Checked after prefix stripping: group_shutdown/global_use_local must be
+        # rejected too, since reaching a builtin over the reply-expecting path
+        # kills the worker loop (shutdown) or desyncs its mode (use_*).
+        if op in _BLOCKED_OPS:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}': "
+                f"'{op}' is a Worker builtin and is not callable through the "
+                f"submit wrappers."
+            )
+        return lambda *a, **kw: submit(op, *a, **kw)
