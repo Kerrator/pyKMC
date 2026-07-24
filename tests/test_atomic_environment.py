@@ -8,6 +8,11 @@ expected_results = {
     "system_single_type_fcc_vacancy": {"different": 2, "noncrystal": 12}
 }
 
+# The shared {2 distinct, 12 noncrystal} expectation requires the environment ball to
+# stop before the second FCC shell (a = 3.52): with a larger rcut every neighbour
+# shell around the vacancy gets its own graph certificate.
+RCUT_FIRST_SHELL = 3.5
+
 
 class TestAtomicEnvironment:
     @pytest.mark.parametrize(
@@ -21,11 +26,11 @@ class TestAtomicEnvironment:
         ],
     )
     def test_cna(self, system_name: str, system: System, config: Config):
-
-        config["AtomicEnvironment"]["style"] = "cna"
-        nl = NeighborsList(system, config)
+        nl = NeighborsList(system, config.atomicenvironment.rnei, RCUT_FIRST_SHELL)
         ae = AtomicEnvironment(
-            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+            "cna",
+            neighbors_list=nl.neighbors_list["rnei"],
+            environment_list=nl.neighbors_list["rcut"],
         )
 
         hash_count = Counter(ae.atomic_environment_list)
@@ -46,11 +51,11 @@ class TestAtomicEnvironment:
         ],
     )
     def test_graph(self, system_name: str, system: System, config: Config):
-
-        config["AtomicEnvironment"]["style"] = "graph"
-        nl = NeighborsList(system, config)
+        nl = NeighborsList(system, config.atomicenvironment.rnei, RCUT_FIRST_SHELL)
         ae = AtomicEnvironment(
-            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+            "graph",
+            neighbors_list=nl.neighbors_list["rnei"],
+            environment_list=nl.neighbors_list["rcut"],
         )
 
         hash_count = Counter(ae.atomic_environment_list)
@@ -71,11 +76,11 @@ class TestAtomicEnvironment:
         ],
     )
     def test_cna_graph(self, system_name: str, system: System, config: Config):
-
-        config["AtomicEnvironment"]["style"] = "cna/graph"
-        nl = NeighborsList(system, config)
+        nl = NeighborsList(system, config.atomicenvironment.rnei, RCUT_FIRST_SHELL)
         ae = AtomicEnvironment(
-            config, nl.neighbors_list["rnei"], nl.neighbors_list["rcut"]
+            "cna/graph",
+            neighbors_list=nl.neighbors_list["rnei"],
+            environment_list=nl.neighbors_list["rcut"],
         )
 
         hash_count = Counter(ae.atomic_environment_list)
