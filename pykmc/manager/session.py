@@ -47,9 +47,11 @@ class Session:
     def shutdown(self) -> None:
         self._send_command("shutdown")
 
-    def call(self, op_name: str, **kwargs) -> Any:
+    def call(self, op_name: str, *args: Any, **kwargs) -> Any:
         """Send an operation to the worker and optionally retrieve a result."""
         msg = {"type": op_name}
+        if args:
+            msg["args"] = args
         if kwargs:
             msg["value"] = kwargs
         self.world_comm.send(msg, dest=self.engine_master_rank, tag=self._TAG_CMD)

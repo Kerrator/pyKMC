@@ -107,8 +107,9 @@ The `Job` dataclass:
 @dataclass
 class Job:
     op_name: str
-    kwargs:  dict
-    future:  Future
+    kwargs: dict
+    args: tuple
+    future: Future
 ```
 
 #### Group mode
@@ -146,30 +147,30 @@ In addition to the user-defined registry, the `Worker` exposes a set of builtin 
 A `Worker`'s registry is assembled at construction from three sources:
 
 1. Object methods (`local_obj`, `global_obj`, `group_obj`): `build_registry` collects, via `inspect.getmembers`, all public methods. Passing a list of objects merges their methods, a duplicate name raises `ValueError`. Object methods are called with kwargs only (no communicator is injected) so each object must already hold its communicator as an attribute, set at construction.
-2. extra_ops: MPI-aware callables with signature `fn(comm, **kwargs)`. The `Worker` injects the active communicator at dispatch time, so the same function adapts automatically to whichever mode is current.
+2. extra_ops: MPI-aware callables with signature `fn(comm, *args, **kwargs)`. The `Worker` injects the active communicator at dispatch time, so the same function adapts automatically to whichever mode is current.
 3. Builtins: `use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`. Always available, handled separately from the registry.
 
 ## Message format and dispatch
 
 A message starts at the `Manager`: a submit call (or one of its group_ / global_ variants) hands the operation to a `Session`, the object that actually talks to the worker. From there the `Session`, on world rank 0, sends it point-to-point over `world_comm` to the worker's master rank, the local rank 0 of the active communicator. That rank is the only one reading world_comm, the other ranks are blocked in a collective, waiting. Once the master rank has the message, it broadcast it over the active communicator so that every rank holds the same message, and then all ranks dispatch it together. The operation is performed and the return value (or error) travels back the other way: only the master rank replies to the `Session`, over `world_comm`, which hands it back to the `Manager`.
 
-A message has the shape `{"type": <op_name>, "value": <payload>}`. The `value` field becomes kwargs by the following rule:
+A message has the shape `{"type": <op_name>, "args": <positional payload>, "value": <payload>}`. The `args` field (omitted when the caller passed no positional arguments) is forwarded as positional arguments, ahead of the kwargs. The `value` field becomes kwargs by the following rule:
 
 - absent or `None` → no kwargs;
 - `dict` → used as-is as kwargs;
 - scalar → wrapped as `{"value": scalar}`.
 
-In practice `Session.call(op, **kwargs)` always sends a `dict` (or nothing), but `_dispatch` handles the scalar case to stay robust against other senders.
+In practice `Session.call(op, *args, **kwargs)` always sends a `dict` (or nothing) as `value`, but `_dispatch` handles the scalar case to stay robust against other senders.
 
 Dispatch distinguishes two categories:
 
 - Builtins : executed without a barrier, since they only mutate the worker's local state (mode switch, shutdown). They return `SILENT` unless they produce a value (`list_ops` returns a list → `SUCCESS`). Mode switches therefore send no status back: they are fire-and-forget.
-- Registry operations : bracketed by a `comm.barrier()` before and after, so that internal MPI collectives are safe. `extra_ops` receive `self.comm` as their first positional argument, object methods are called with kwargs only. An unknown name returns `ERROR` with the list of available operations.
+- Registry operations : bracketed by a `comm.barrier()` before and after, so that internal MPI collectives are safe. `extra_ops` receive `self.comm` as their first positional argument, followed by the caller's `args`; object methods receive the caller's `args` directly. Both then receive the kwargs. An unknown name returns `ERROR` with the list of available operations.
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'step'}}}%%
 flowchart TD
-    A["msg = {type, value}"] --> B["value → kwargs<br/>(None / dict / scalar)"]
+    A["msg = {type, args, value}"] --> B["args → positional<br/>value → kwargs<br/>(None / dict / scalar)"]
     B --> C{"type in builtins?"}
     C -->|yes| D["direct call<br/>(no barrier)"]
     D --> E{"result?"}
@@ -179,8 +180,8 @@ flowchart TD
     H -->|no| I["ERROR<br/>unknown operation"]
     H -->|yes| J["comm.barrier()"]
     J --> K{"extra_op?"}
-    K -->|yes| L["handler(comm, **kwargs)"]
-    K -->|no| M["handler(**kwargs)"]
+    K -->|yes| L["handler(comm, *args, **kwargs)"]
+    K -->|no| M["handler(*args, **kwargs)"]
     L --> N["comm.barrier()"]
     M --> N
     N --> O["SUCCESS / ERROR"]
@@ -228,7 +229,7 @@ The numeric values are arbitrary, the only invariant is that both sides agree on
 
 Notes :
 - `return None` means "void" : the `has_result` flag is computed from `r.value is not None`. An operation that legitimately returns `None` is treated as having no result, and `Session.call` returns `None` without waiting for a `result` message.
-- `extra_ops` signature : they must accept the communicator as their first argument (`fn(comm, **kwargs)`), unlike object methods.
+- `extra_ops` signature : they must accept the communicator as their first argument (`fn(comm, *args, **kwargs)`), unlike object methods.
 - Reserved names : the builtins (`use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`) cannot be reused by a method or `extra_op`.
 - Cross-mode consistency : Objects passed to the different modes must expose the same public methods, otherwise construction fails.
 

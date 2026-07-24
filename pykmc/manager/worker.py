@@ -109,8 +109,8 @@ class Worker:
         Design note on extra_ops
         ------------------------
         ``extra_ops`` are MPI-aware callables with signature
-        ``fn(comm, **kwargs)``.  The Worker injects the *active* communicator
-        at dispatch time, so the same function adapts to every mode.
+        ``fn(comm, *args, **kwargs)``.  The Worker injects the *active*
+        communicator at dispatch time, so the same function adapts to every mode.
 
         Parameters
         ----------
@@ -328,7 +328,13 @@ class Worker:
 
         Message format
         --------------
-        {"type": <op_name>, "value": <payload>}
+        {"type": <op_name>, "args": <positional payload>, "value": <payload>}
+
+        ``args`` (absent when the caller passed none) is forwarded as positional
+        arguments, ahead of the kwargs built from ``value``:
+          - absent / None    → no positional arguments
+          - tuple / list     → used directly
+          - anything else    → wrapped as a single positional argument
 
         ``value`` is mapped to kwargs as follows:
           - absent / None  → no kwargs
@@ -339,9 +345,18 @@ class Worker:
         dispatched without a barrier and return SILENT unless they produce a
         result. Registry operations are bracketed by a comm.barrier() on all
         ranks so that MPI collectives inside handlers are safe. extra_ops
-        receive ``self.comm`` as their first positional argument.
+        receive ``self.comm`` as their first positional argument, followed by
+        ``args``.
         """
         op_type = msg.get("type")
+
+        raw_args = msg.get("args")
+        if raw_args is None:
+            args = ()
+        elif isinstance(raw_args, (tuple, list)):
+            args = tuple(raw_args)
+        else:
+            args = (raw_args,)
 
         value = msg.get("value")
         if value is None:
@@ -352,7 +367,7 @@ class Worker:
             kwargs = {"value": value}
 
         if op_type in self._builtins_op:
-            result = self._builtins_op[op_type](**kwargs)
+            result = self._builtins_op[op_type](*args, **kwargs)
             if result is not None:
                 return DispatchResult(DispatchStatus.SUCCESS, value=result)
             return DispatchResult(DispatchStatus.SILENT)
@@ -367,9 +382,9 @@ class Worker:
         self.comm.barrier()
         try:
             if op_type in self._extra_op_names:
-                result = handler(self.comm, **kwargs)
+                result = handler(self.comm, *args, **kwargs)
             else:
-                result = handler(**kwargs)
+                result = handler(*args, **kwargs)
             return DispatchResult(DispatchStatus.SUCCESS, value=result)
         except Exception as e:
             return DispatchResult(DispatchStatus.ERROR, error=str(e))

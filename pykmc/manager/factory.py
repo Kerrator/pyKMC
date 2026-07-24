@@ -42,7 +42,7 @@ class ManagerFactory:
     group_size   : int | None    Number of ranks sharing the group communicator.
                                  None disables group mode.
     extra_ops    : dict[str, Callable] | None
-                                 MPI-aware callables ``fn(comm, **kwargs)``
+                                 MPI-aware callables ``fn(comm, *args, **kwargs)``
                                  registered in every worker registry.
     """
 

@@ -25,7 +25,7 @@ class EngineManagerFactory(ManagerFactory):
     comm          : MPI.Comm
     group_size    : int | None
     extra_ops     : dict[str, Callable] | None
-                                  MPI-aware callables ``fn(comm, **kwargs)``
+                                  MPI-aware callables ``fn(comm, *args, **kwargs)``
                                   available in every mode.
     """
 

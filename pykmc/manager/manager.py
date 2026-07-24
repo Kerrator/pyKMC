@@ -16,12 +16,15 @@ class Job:
         Operation name in the Worker registry.
     kwargs : dict
         Keyword arguments forwarded to the operation.
+    args : tuple
+        Positional arguments forwarded to the operation, ahead of the kwargs.
     future : Future
         Resolved with the result once the job completes.
     """
 
     op_name: str
     kwargs: dict = field(default_factory=dict)
+    args: tuple = ()
     future: Future = field(default_factory=Future)
 
 
@@ -73,7 +76,7 @@ class Manager:
         """Return the list of available operations for the given mode."""
         return self.submit("list_ops", mode=mode).result()
 
-    def broadcast(self, op_name: str, **kwargs) -> None:
+    def broadcast(self, op_name: str, *args: Any, **kwargs) -> None:
         """Send the same op to all local sessions sequentially.
 
         Useful for initialisation steps that every worker must run.
@@ -82,7 +85,7 @@ class Manager:
         if self.mode != "local":
             self._use_local()
         for session in self.local_sessions:
-            session.call(op_name, **kwargs)
+            session.call(op_name, *args, **kwargs)
 
     # ------------------------------------------------------------------
     # Mode transitions
@@ -134,14 +137,14 @@ class Manager:
             if job is None:  # sentinel — stop
                 break
             try:
-                result = session.call(job.op_name, **job.kwargs)
+                result = session.call(job.op_name, *job.args, **job.kwargs)
                 job.future.set_result(result)
             except Exception as e:
                 job.future.set_exception(e)
             finally:
                 job_queue.task_done()
 
-    def submit(self, op_name: str, **kwargs) -> Future:
+    def submit(self, op_name: str, *args: Any, **kwargs) -> Future:
         """Submit a job to the local worker pool (async).
 
         If the manager is currently in group or global mode, switches back to
@@ -162,11 +165,11 @@ class Manager:
             raise RuntimeError("Manager has not been started. Call start() first.")
         if self.mode != "local":
             self._use_local()
-        job = Job(op_name=op_name, kwargs=kwargs)
+        job = Job(op_name=op_name, args=args, kwargs=kwargs)
         self._local_queue.put(job)
         return job.future
 
-    def submit_group(self, op_name: str, **kwargs) -> Any:
+    def submit_group(self, op_name: str, *args: Any, **kwargs) -> Any:
         """Submit a job to the group worker and block until it completes.
 
         The group spans only the subset of workers configured at factory time.
@@ -186,9 +189,9 @@ class Manager:
             raise RuntimeError("No group session configured.")
         if self.mode != "group":
             self._use_group()
-        return self.group_session.call(op_name, **kwargs)
+        return self.group_session.call(op_name, *args, **kwargs)
 
-    def submit_global(self, op_name: str, **kwargs) -> Any:
+    def submit_global(self, op_name: str, *args: Any, **kwargs) -> Any:
         """Submit a job to the global worker and block until it completes.
 
         All MPI ranks work collectively, so the call is synchronous.
@@ -207,7 +210,7 @@ class Manager:
             raise RuntimeError("No global session configured.")
         if self.mode != "global":
             self._use_global()
-        return self.global_session.call(op_name, **kwargs)
+        return self.global_session.call(op_name, *args, **kwargs)
 
     def __getattr__(self, name: str):
         """Auto-generate submit wrappers from attribute access.
@@ -218,8 +221,8 @@ class Manager:
         """
         if name.startswith("global_"):
             op = name[len("global_") :]
-            return lambda **kw: self.submit_global(op, **kw)
+            return lambda *a, **kw: self.submit_global(op, *a, **kw)
         if name.startswith("group_"):
             op = name[len("group_") :]
-            return lambda **kw: self.submit_group(op, **kw)
-        return lambda **kw: self.submit(name, **kw)
+            return lambda *a, **kw: self.submit_group(op, *a, **kw)
+        return lambda *a, **kw: self.submit(name, *a, **kw)
