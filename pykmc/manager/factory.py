@@ -73,17 +73,17 @@ class ManagerFactory:
         self.available_ranks = list(range(self._MANAGER_RANK + 1, self.size))
         self.chunks = self._split_ranks()
 
-        if group_size is not None:
-            if group_size > len(self.available_ranks):
+        if self.group_size is not None:
+            if self.group_size > len(self.available_ranks):
                 raise ValueError(
                     f"group_size ({group_size}) cannot exceed the number of available ranks ({len(self.available_ranks)})."
                 )
-            ranks_per_worker = len(self.chunks[0])
-            if group_size % ranks_per_worker != 0:
+            acceptable_group_size= np.cumsum([len(c) for c in self.chunks])
+            if self.group_size not in acceptable_group_size :
                 raise ValueError(
-                    f"group_size ({group_size}) must be a multiple of the per-worker rank count ({ranks_per_worker})."
+                    f"group_size ({group_size}) must be running on a subset of workers, available group_size=({acceptable_group_size})."
                 )
-            self.group_ranks: list[int] = self.available_ranks[:group_size]
+            self.group_ranks: list[int] = self.available_ranks[:self.group_size]
         else:
             self.group_ranks = []
 
