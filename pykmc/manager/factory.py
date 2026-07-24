@@ -48,23 +48,24 @@ class ManagerFactory:
 
     _MANAGER_RANK = 0  # rank 0 is always the manager
 
-    def __init__(self,
-                 obj_factory: Callable[[MPI.Comm, str], Any | None],
-                 n_workers:   int,
-                 comm:        MPI.Comm,
-                 has_global:  bool = True,
-                 group_size:  int | None = None,
-                 extra_ops:   dict[str, Callable] | None = None) -> None:
-
+    def __init__(
+        self,
+        obj_factory: Callable[[MPI.Comm, str], Any | None],
+        n_workers: int,
+        comm: MPI.Comm,
+        has_global: bool = True,
+        group_size: int | None = None,
+        extra_ops: dict[str, Callable] | None = None,
+    ) -> None:
         self.obj_factory = obj_factory
-        self.comm        = comm
-        self.n_workers   = n_workers
-        self.has_global  = has_global
-        self.group_size  = group_size
-        self.extra_ops   = extra_ops
+        self.comm = comm
+        self.n_workers = n_workers
+        self.has_global = has_global
+        self.group_size = group_size
+        self.extra_ops = extra_ops
 
-        self.size        = self.comm.Get_size()
-        self.rank        = self.comm.Get_rank()
+        self.size = self.comm.Get_size()
+        self.rank = self.comm.Get_rank()
 
         if self.size < self.n_workers + self._MANAGER_RANK + 1:
             raise ValueError("Not enough MPI ranks to allocate workers.")
@@ -87,7 +88,9 @@ class ManagerFactory:
             self.group_ranks = []
 
     def _split_ranks(self) -> list[list[int]]:
-        return [arr.tolist() for arr in np.array_split(self.available_ranks, self.n_workers)]
+        return [
+            arr.tolist() for arr in np.array_split(self.available_ranks, self.n_workers)
+        ]
 
     def launch(self) -> Manager | None:
         """Split ranks, start workers, and return a Manager on rank 0.
@@ -95,11 +98,11 @@ class ManagerFactory:
         All ranks must call this collectively. Workers block inside their loop;
         only rank 0 returns a Manager instance. All other ranks return None.
         """
-        my_color  = MPI.UNDEFINED
+        my_color = MPI.UNDEFINED
         worker_id = None
         for idx, chunk in enumerate(self.chunks):
             if self.rank in chunk:
-                my_color  = idx + 1
+                my_color = idx + 1
                 worker_id = idx
                 break
 
@@ -108,13 +111,18 @@ class ManagerFactory:
         global_comm = None
         if self.has_global:
             in_global = self.rank in self.available_ranks
-            global_split = self.comm.Split(color=1 if in_global else MPI.UNDEFINED, key=self.rank)
+            global_split = self.comm.Split(
+                color=1 if in_global else MPI.UNDEFINED, key=self.rank
+            )
             if global_split != MPI.COMM_NULL:
                 global_comm = global_split
 
         group_comm = None
         if self.group_ranks:
-            group_split = self.comm.Split(color=1 if self.rank in self.group_ranks else MPI.UNDEFINED, key=self.rank)
+            group_split = self.comm.Split(
+                color=1 if self.rank in self.group_ranks else MPI.UNDEFINED,
+                key=self.rank,
+            )
             if group_split != MPI.COMM_NULL:
                 group_comm = group_split
 
@@ -125,16 +133,32 @@ class ManagerFactory:
 
         # rank 0 — manager
         local_sessions = [
-            Session(engine_master_rank=self.chunks[i][0], world_comm=self.comm, session_id=i + 1)
+            Session(
+                engine_master_rank=self.chunks[i][0],
+                world_comm=self.comm,
+                session_id=i + 1,
+            )
             for i in range(self.n_workers)
         ]
-        global_session = Session(
-            engine_master_rank=self.available_ranks[0], session_id=0, world_comm=self.comm
-        ) if self.has_global else None
+        global_session = (
+            Session(
+                engine_master_rank=self.available_ranks[0],
+                session_id=0,
+                world_comm=self.comm,
+            )
+            if self.has_global
+            else None
+        )
 
-        group_session = Session(
-            engine_master_rank=self.group_ranks[0], session_id=-1, world_comm=self.comm
-        ) if self.group_ranks else None
+        group_session = (
+            Session(
+                engine_master_rank=self.group_ranks[0],
+                session_id=-1,
+                world_comm=self.comm,
+            )
+            if self.group_ranks
+            else None
+        )
 
         manager = Manager(
             local_sessions=local_sessions,
@@ -144,19 +168,24 @@ class ManagerFactory:
         manager.start()
         return manager
 
-    def _create_worker(self,
-                       local_comm:  MPI.Comm,
-                       worker_id:   int,
-                       global_comm: MPI.Comm | None,
-                       group_comm:  MPI.Comm | None) -> Worker:
-
+    def _create_worker(
+        self,
+        local_comm: MPI.Comm,
+        worker_id: int,
+        global_comm: MPI.Comm | None,
+        group_comm: MPI.Comm | None,
+    ) -> Worker:
         return Worker(
             local_obj=self.obj_factory(local_comm, "local"),
             local_comm=local_comm,
             worker_id=worker_id,
-            global_obj=self.obj_factory(global_comm, "global") if global_comm is not None else None,
+            global_obj=self.obj_factory(global_comm, "global")
+            if global_comm is not None
+            else None,
             global_comm=global_comm,
-            group_obj=self.obj_factory(group_comm, "group") if group_comm is not None else None,
+            group_obj=self.obj_factory(group_comm, "group")
+            if group_comm is not None
+            else None,
             group_comm=group_comm,
             extra_ops=self.extra_ops,
             world_comm=self.comm,
