@@ -30,7 +30,7 @@ pip install -e .
 
 ### LAMMPS
 
-A recent version of LAMMPS is recommended (tested with the 24 August 2024 version). Use the cmake method, the traditional make way does not support the plugin package anymore.
+A recent version of LAMMPS is recommended (tested with `stable_22Jul2025_update3`, which the install scripts clone). Use the cmake method, the traditional make way does not support the plugin package anymore.
 
 You should at least enable these options:
 
