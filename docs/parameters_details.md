@@ -106,6 +106,10 @@
   <details><summary>Description</summary>
   When style is 'coordination' or 'coordination/graph', atoms with fewer neighbors (within rnei) than this value are classified as 'noncrystal'. Atoms with this many or more neighbors are classified as 'crystal'. Required when style is 'coordination' or 'coordination/graph'.
   </details>
+- **`atom_coloring_mode`** : `Literal['grey', 'full']`, default = `'full'`
+  <details><summary>Description</summary>
+  Controls whether element types are used in environment matching. Defaults to 'full' (species-resolved). 'grey': all atoms treated identically (grey alloy approximation). 'full': element types used in graph hashing, PSR matching, and symmetry detection.
+  </details>
 
 ---
 
@@ -214,6 +218,10 @@
 - **`minimize`** : `str`, default = `'1.0e-6 1.0e-8 1000 1000'`
   <details><summary>Description</summary>
   Lammps minimize command
+  </details>
+- **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
+  <details><summary>Description</summary>
+  Lammps minimize command with frozen core
   </details>
 
 ---
@@ -333,7 +341,7 @@
   </details>
 - **`r_delr_sad_thr`** : `float`, default = `0.4`
   <details><summary>Description</summary>
-  When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt.
+  Acceptance threshold (in Angstrom) for a refined saddle point. A refinement run starts from the expected saddle position, and artn delr_sad measures how far the converged saddle has moved from that starting configuration. If delr_sad is strictly below this threshold (delr_sad < r_delr_sad_thr), the refined saddle stayed close to the expected saddle and is accepted; otherwise (e.g. the search fell back to the minimum), a new attempt is made, up to r_max_attempts.
   </details>
 - **`r_push_mode`** : `Literal['list', 'rad']`, default = `'list'`
   <details><summary>Description</summary>
@@ -435,9 +443,26 @@
   Basin parameters
 </details>
 
+- **`style`** : `Literal['global', 'global/reconstruction']`, default = `'global'`
+  <details><summary>Description</summary>
+  Basin style used.
+  </details>
 - **`energy_thr`** : `float`, default = `0.0`
   <details><summary>Description</summary>
   Energy threshold
+  </details>
+
+---
+
+## `Reconstruction` Section (mandatory)
+
+<details><summary>Section Overview</summary>
+  Reconstruction parameters.
+</details>
+
+- **`push_fraction`** : `float`, default = `0.15`
+  <details><summary>Description</summary>
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
 
 ---
