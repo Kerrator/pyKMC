@@ -5,7 +5,7 @@ import numpy as np
 import math as m
 
 
-def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float]:
+def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float, float]:
     """Select an event index and calculates time step using the rejection-free KMC algorithm.
 
     Parameters
@@ -15,11 +15,13 @@ def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float]:
 
     Returns
     -------
-    tuple[int, float]
+    tuple[int, float, float]
         - idx_selected_event : int
             The index of of l_k of the selected event.
         - delta_t : float
             The time step update
+        - ktot : float
+            The total rate constant (sum of l_k)
 
     """
     # compute cumulative rate constant
@@ -31,5 +33,7 @@ def rejection_free(l_k: list[float] | np.ndarray) -> tuple[int, float]:
     )
 
     # compute associated update time:
-    delta_t = -m.log(random.random()) / k_cumulative[-1]
+    # random.random() draws from [0, 1); use 1 - u to get (0, 1] so log() never
+    # receives 0 (an exact 0.0 draw would raise a math domain error)
+    delta_t = -m.log(1.0 - random.random()) / k_cumulative[-1]
     return idx_selected_event, delta_t, k_cumulative[-1]
