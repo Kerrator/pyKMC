@@ -212,7 +212,7 @@ These types never cross `world_comm`, they only tell the master rank whether to 
 - `SUCCESS` : send a `status` message, then a `result` message only if `value is not None`. 
 - `ERROR` : send a `status` message carrying the error string, no result follows.
 
-Every rank produces a `DispatchResult`, but only local rank 0 acts on it (in `_send_result`). 
+Every rank produces a `DispatchResult`. After a registry operation the ranks of the active communicator `gather` their error field, so a failure on any rank — not just the master — is reported to the caller; only local rank 0 then sends the reply (in `_send_result`), and only when the incoming message asked for one. 
 ### Reply and tags
 
 Only local rank 0 replies to the `Session`, over `world_comm`. It first sends the status message (`has_result` flag + optional `error`), then, if `has_result` is true, a second result message with the return value. On the `Session` side an `error` is re-raised as `RuntimeError`, otherwise the value is returned to the caller (or `None` when there is no result).

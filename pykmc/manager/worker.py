@@ -412,11 +412,21 @@ class Worker:
                 result = handler(self.comm, *args, **kwargs)
             else:
                 result = handler(*args, **kwargs)
-            return DispatchResult(DispatchStatus.SUCCESS, value=result)
+            r = DispatchResult(DispatchStatus.SUCCESS, value=result)
         except Exception as e:
-            return DispatchResult(DispatchStatus.ERROR, error=str(e))
+            r = DispatchResult(DispatchStatus.ERROR, error=str(e))
         finally:
             self.comm.barrier()
+        # Every rank reports its outcome so a non-root failure reaches the caller.
+        errors = self.comm.gather(r.error, root=0)
+        if self.rank == 0:
+            failed = {i: e for i, e in enumerate(errors) if e is not None}
+            if failed:
+                r = DispatchResult(
+                    DispatchStatus.ERROR,
+                    error="; ".join(f"rank {i}: {e}" for i, e in failed.items()),
+                )
+        return r
 
     def list_ops(self, mode: str = "local") -> list[str]:
         registries = {

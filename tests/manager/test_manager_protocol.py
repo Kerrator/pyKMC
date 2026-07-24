@@ -181,3 +181,17 @@ class TestTerminalResponse:
         # the status/result streams must still be in step
         assert manager.slow_marker().result(timeout=TIMEOUT) == "done"
         assert manager.echo(7, 8).result(timeout=TIMEOUT) == (7, 8, None)
+
+
+class TestPerRankFailures:
+    """A failure on a non-root rank must reach the caller."""
+
+    def test_non_root_failure_is_reported(self, manager):
+        if rank0_only(manager):
+            return
+        _n_workers, group_size, chunks, _ = topology()
+        if max(chunks) < 2 and group_size < 2:
+            pytest.skip("no active communicator holds more than one rank")
+        # group mode always spans >= 2 ranks when group_size >= 2
+        with pytest.raises(RuntimeError, match="rank"):
+            manager.group_fail_off_root()
