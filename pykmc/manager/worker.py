@@ -289,7 +289,8 @@ class Worker:
             msg = self.comm.bcast(msg, root=0)
             r = self._dispatch(msg)
 
-            if self.rank == 0:
+            # Fire-and-forget senders mark their message "reply": False.
+            if self.rank == 0 and msg.get("reply", True):
                 self._send_result(r)
 
             if not self._is_alive:
@@ -298,6 +299,12 @@ class Worker:
     def _send_result(self, r: DispatchResult) -> None:
         """Send dispatch result back to world_comm rank 0. Called only on local rank 0."""
         if r.status == DispatchStatus.SILENT:
+            # A reply was requested: unblock the caller with a void status.
+            self.world_comm.send(
+                {"type": "status", "value": {"has_result": False, "error": None}},
+                dest=0,
+                tag=self._TAG_STATUS,
+            )
             return
         if r.status == DispatchStatus.SUCCESS:
             self.world_comm.send(
@@ -309,9 +316,26 @@ class Worker:
                 tag=self._TAG_STATUS,
             )
             if r.value is not None:
-                self.world_comm.send(
-                    {"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT
-                )
+                # The status above already promised a result, so the receiver is
+                # committed to a tag-RESULT message: an unserialisable value must
+                # still produce one, or the Session blocks forever.
+                try:
+                    self.world_comm.send(
+                        {"type": "result", "value": r.value},
+                        dest=0,
+                        tag=self._TAG_RESULT,
+                    )
+                except Exception as e:
+                    self.world_comm.send(
+                        {
+                            "type": "result",
+                            "value": None,
+                            "error": f"operation succeeded but its result could not "
+                            f"be returned: {type(e).__name__}: {e}",
+                        },
+                        dest=0,
+                        tag=self._TAG_RESULT,
+                    )
         elif r.status == DispatchStatus.ERROR:
             self.world_comm.send(
                 {"type": "status", "value": {"has_result": False, "error": r.error}},
@@ -367,7 +391,10 @@ class Worker:
             kwargs = {"value": value}
 
         if op_type in self._builtins_op:
-            result = self._builtins_op[op_type](*args, **kwargs)
+            try:
+                result = self._builtins_op[op_type](*args, **kwargs)
+            except Exception as e:
+                return DispatchResult(DispatchStatus.ERROR, error=str(e))
             if result is not None:
                 return DispatchResult(DispatchStatus.SUCCESS, value=result)
             return DispatchResult(DispatchStatus.SILENT)

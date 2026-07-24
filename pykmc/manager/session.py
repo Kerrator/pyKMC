@@ -32,7 +32,9 @@ class Session:
 
     def _send_command(self, op_type: str) -> None:
         self.world_comm.send(
-            {"type": op_type}, dest=self.engine_master_rank, tag=self._TAG_CMD
+            {"type": op_type, "reply": False},
+            dest=self.engine_master_rank,
+            tag=self._TAG_CMD,
         )
 
     def use_local(self) -> None:
@@ -65,7 +67,7 @@ class Session:
             raise RuntimeError(f"Expected 'status', got '{msg.get('type')}'")
         value = msg.get("value", {})
         error = value.get("error")
-        if error:
+        if error is not None:
             raise RuntimeError(error)
         return value.get("has_result", False)
 
@@ -73,4 +75,7 @@ class Session:
         msg = self.world_comm.recv(source=self.engine_master_rank, tag=self._TAG_RESULT)
         if msg.get("type") != "result":
             raise RuntimeError(f"Expected 'result' got '{msg.get('type')}'")
+        error = msg.get("error")
+        if error is not None:
+            raise RuntimeError(error)
         return msg["value"]

@@ -154,3 +154,30 @@ class TestModeSelection:
         )
         assert len(manager.group_gather_rank()) == group_size
         assert len(manager.global_gather_rank()) == available
+
+
+class TestTerminalResponse:
+    """Every accepted request must produce exactly one terminal response."""
+
+    def test_exception_with_empty_str_is_reported(self, manager):
+        if rank0_only(manager):
+            return
+        with pytest.raises(RuntimeError):
+            manager.fail_empty().result(timeout=TIMEOUT)
+        assert manager.slow_marker().result(timeout=TIMEOUT) == "done"
+
+    def test_raising_builtin_does_not_kill_the_worker(self, manager):
+        if rank0_only(manager):
+            return
+        with pytest.raises(RuntimeError, match="Unknown mode"):
+            manager.submit("list_ops", mode="not-a-mode").result(timeout=TIMEOUT)
+        assert manager.slow_marker().result(timeout=TIMEOUT) == "done"
+
+    def test_unserialisable_result_reports_instead_of_stranding(self, manager):
+        if rank0_only(manager):
+            return
+        with pytest.raises(RuntimeError):
+            manager.unserialisable().result(timeout=TIMEOUT)
+        # the status/result streams must still be in step
+        assert manager.slow_marker().result(timeout=TIMEOUT) == "done"
+        assert manager.echo(7, 8).result(timeout=TIMEOUT) == (7, 8, None)

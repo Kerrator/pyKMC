@@ -154,7 +154,7 @@ A `Worker`'s registry is assembled at construction from three sources:
 
 A message starts at the `Manager`: a submit call (or one of its group_ / global_ variants) hands the operation to a `Session`, the object that actually talks to the worker. From there the `Session`, on world rank 0, sends it point-to-point over `world_comm` to the worker's master rank, the local rank 0 of the active communicator. That rank is the only one reading world_comm, the other ranks are blocked in a collective, waiting. Once the master rank has the message, it broadcast it over the active communicator so that every rank holds the same message, and then all ranks dispatch it together. The operation is performed and the return value (or error) travels back the other way: only the master rank replies to the `Session`, over `world_comm`, which hands it back to the `Manager`.
 
-A message has the shape `{"type": <op_name>, "args": <positional payload>, "value": <payload>}`. The `args` field (omitted when the caller passed no positional arguments) is forwarded as positional arguments, ahead of the kwargs. The `value` field becomes kwargs by the following rule:
+A message has the shape `{"type": <op_name>, "args": <positional payload>, "value": <payload>, "reply": <bool>}`. The `reply` field defaults to `True`; `Session._send_command` sets it to `False` for the fire-and-forget builtins (mode switches, shutdown) so that no status is emitted for a caller that is not waiting. The `args` field (omitted when the caller passed no positional arguments) is forwarded as positional arguments, ahead of the kwargs. The `value` field becomes kwargs by the following rule:
 
 - absent or `None` → no kwargs;
 - `dict` → used as-is as kwargs;
@@ -164,7 +164,7 @@ In practice `Session.call(op, *args, **kwargs)` always sends a `dict` (or nothin
 
 Dispatch distinguishes two categories:
 
-- Builtins : executed without a barrier, since they only mutate the worker's local state (mode switch, shutdown). They return `SILENT` unless they produce a value (`list_ops` returns a list → `SUCCESS`). Mode switches therefore send no status back: they are fire-and-forget.
+- Builtins : executed inside the same error boundary as registry operations but without a barrier, since they only mutate the worker's local state (mode switch, shutdown). They return `SILENT` unless they produce a value (`list_ops` returns a list → `SUCCESS`). Whether a reply is sent is decided by the sender, not by the return value: see the `reply` field above.
 - Registry operations : bracketed by a `comm.barrier()` before and after, so that internal MPI collectives are safe. `extra_ops` receive `self.comm` as their first positional argument, followed by the caller's `args`; object methods receive the caller's `args` directly. Both then receive the kwargs. An unknown name returns `ERROR` with the list of available operations.
 
 ```mermaid
@@ -208,7 +208,7 @@ class DispatchResult:
 
 These types never cross `world_comm`, they only tell the master rank whether to reply, and with what:
 
-- `SILENT` : no reply at all (builtins that only mutate local state, e.g. mode switches: fire-and-forget).
+- `SILENT` : the operation produced no value. A message sent fire-and-forget (`"reply": False`, used by `Session._send_command` for mode switches and shutdown) gets no reply at all; a message sent through `Session.call`, which always waits, still gets a void status so the caller is released.
 - `SUCCESS` : send a `status` message, then a `result` message only if `value is not None`. 
 - `ERROR` : send a `status` message carrying the error string, no result follows.
 
