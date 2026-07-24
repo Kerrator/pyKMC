@@ -244,3 +244,104 @@ class TestLifecycleAndGuards:
             manager.start()
         # the fixture calls shutdown() again; it must stay idempotent
         manager.shutdown()
+
+
+class Extension:
+    """Stands in for an EngineExtension: reachable only via __dir__/__getattr__."""
+
+    def extension_op(self):
+        return "from-extension"
+
+
+class ObjectWithExtension:
+    """Mimics Engine's dynamic surface and its unstarted-property hazard."""
+
+    def __init__(self, comm):
+        self.comm = comm
+        self._extensions = {"ext": Extension()}
+
+    def __dir__(self):
+        names = list(super().__dir__())
+        for ext in self._extensions.values():
+            names.extend(m for m in dir(ext) if not m.startswith("_"))
+        return names
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        for ext in object.__getattribute__(self, "_extensions").values():
+            attr = getattr(ext, name, None)
+            if callable(attr):
+                return attr
+        raise AttributeError(name)
+
+    @property
+    def not_started(self):
+        # An engine property that is invalid before start(); evaluating it during
+        # registry construction would abort the worker inside launch().
+        raise RuntimeError("property evaluated during registry construction")
+
+    def command(self, text):
+        return text
+
+    def close(self):
+        return "closed"
+
+    def real_op(self):
+        return "real"
+
+
+@pytest.fixture
+def extension_manager():
+    """Manager whose objects expose an extension method and a hostile property."""
+    n_workers, group_size, _, _ = topology()
+    MPI.COMM_WORLD.Barrier()
+    mgr = ManagerFactory(
+        obj_factory=lambda comm, _mode: ObjectWithExtension(comm),
+        n_workers=n_workers,
+        comm=MPI.COMM_WORLD,
+        has_global=True,
+        group_size=group_size,
+    ).launch()
+    try:
+        yield mgr
+    finally:
+        if mgr is not None:
+            mgr.shutdown()
+        MPI.COMM_WORLD.Barrier()
+
+
+class TestRegistryDiscovery:
+    """Registry construction must be property-safe without losing real ops."""
+
+    def test_extension_methods_are_dispatchable(self, extension_manager):
+        if rank0_only(extension_manager):
+            return
+        ops = extension_manager.list_ops()
+        assert "extension_op" in ops, (
+            "EngineExtension methods must stay dispatchable; discovering names "
+            "from the class instead of the instance silently drops them"
+        )
+        assert (
+            extension_manager.extension_op().result(timeout=TIMEOUT) == "from-extension"
+        )
+
+    def test_properties_are_never_evaluated(self, extension_manager):
+        if rank0_only(extension_manager):
+            return
+        # Reaching this point at all proves the getter did not run during
+        # Worker construction: it would have aborted launch() on every worker.
+        assert "not_started" not in extension_manager.list_ops()
+        assert extension_manager.real_op().result(timeout=TIMEOUT) == "real"
+
+    def test_lifecycle_names_excluded_but_command_kept(self, extension_manager):
+        if rank0_only(extension_manager):
+            return
+        ops = extension_manager.list_ops()
+        for excluded in ("close", "create", "register"):
+            assert excluded not in ops
+        assert "command" in ops, (
+            "LammpsEngine exposes `command` for the active-volume helpers; it "
+            "must remain reachable through the Manager"
+        )
+        assert extension_manager.command("run 0").result(timeout=TIMEOUT) == "run 0"

@@ -10,7 +10,7 @@ Beyond this basic use, the architecture addresses two problems specific to pyKMC
 
 (ii) Pure Python parallelism: some operations are worth parallelizing but do not require an Engine at all. The manager provides a mechanism for all workers to execute Python functions synchronously, communicating via MPI.
 
-We first describe the manager module and then how it is ment to be used in pyKMC with the `Engine` module. 
+We first describe the manager module and then how it is meant to be used in pyKMC with the `Engine` module. 
 
 ## Structure 
 
@@ -87,7 +87,7 @@ flowchart TB
 ``` 
 
 
-Setting up these communicators and wiring the components together is handled by a `ManagerFactory`, described bellow to facilitate its use. 
+Setting up these communicators and wiring the components together is handled by a `ManagerFactory`, described below to facilitate its use. 
 
 ## Modes 
 
@@ -97,9 +97,9 @@ The default mode. Operations are asynchronous and follow a standard master-worke
 
 Usage : 
 ```python
-future = manager.operation(parameter=a)   # non-blocking, returns immediately
+future = manager.operation(parameter=a)  # non-blocking, returns immediately
 # ... other work ...
-result = future.result()                   # blocks until the job completes
+result = future.result()  # blocks until the job completes
 ```
 
 The `Job` dataclass:
@@ -146,7 +146,7 @@ In addition to the user-defined registry, the `Worker` exposes a set of builtin 
 
 A `Worker`'s registry is assembled at construction from three sources:
 
-1. Object methods (`local_obj`, `global_obj`, `group_obj`): `build_registry` collects, via `inspect.getmembers`, all public methods. Passing a list of objects merges their methods, a duplicate name raises `ValueError`. Object methods are called with kwargs only (no communicator is injected) so each object must already hold its communicator as an attribute, set at construction.
+1. Object methods (`local_obj`, `global_obj`, `group_obj`): `build_registry` collects all public methods, taking names from the instance (so `EngineExtension` methods surfaced by `Engine.__dir__` are included) while screening each against the class so that `@property` getters are never executed. Lifecycle/framework names (`close`, `create`, `register`) are excluded. Passing a list of objects merges their methods, a duplicate name raises `ValueError`. Object methods are called with kwargs only (no communicator is injected) so each object must already hold its communicator as an attribute, set at construction.
 2. extra_ops: MPI-aware callables with signature `fn(comm, *args, **kwargs)`. The `Worker` injects the active communicator at dispatch time, so the same function adapts automatically to whichever mode is current.
 3. Builtins: `use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`. Always available, handled separately from the registry.
 
@@ -195,15 +195,16 @@ flowchart TD
 
 ```python
 class DispatchStatus(Enum):
-    SILENT  = "silent"
+    SILENT = "silent"
     SUCCESS = "success"
-    ERROR   = "error"
+    ERROR = "error"
+
 
 @dataclass
 class DispatchResult:
     status: DispatchStatus
-    value:  Any = None
-    error:  str | None = None
+    value: Any = None
+    error: str | None = None
 ```
 
 These types never cross `world_comm`, they only tell the master rank whether to reply, and with what:
@@ -220,9 +221,9 @@ Only local rank 0 replies to the `Session`, over `world_comm`. It first sends th
 The two directions use three tags to keep the flows from interleaving on `world_comm`:
 
 ```python
-_TAG_STATUS = 0   # Worker → Session : completion + error flag
-_TAG_RESULT = 1   # Worker → Session : return value (only if has_result)
-_TAG_CMD    = 2   # Session → Worker : operation request
+_TAG_STATUS = 0  # Worker → Session : completion + error flag
+_TAG_RESULT = 1  # Worker → Session : return value (only if has_result)
+_TAG_CMD = 2  # Session → Worker : operation request
 ```
 
 The numeric values are arbitrary, the only invariant is that both sides agree on them. A new message flow should get a new tag rather than overload an existing one.
@@ -235,24 +236,24 @@ Notes :
 
 ## Factory 
 
-A `ManagerFactory` is provided to facilite the use of the `Manager`. It is the collective entry point that wires the `manager` stack together. A single `launch()` call partitions the MPI ranks, builds the communicators, instantiates `Workers`, and assembles the `Session` objects and the `Manager`.
+A `ManagerFactory` is provided to facilitate the use of the `Manager`. It is the collective entry point that wires the `manager` stack together. A single `launch()` call partitions the MPI ranks, builds the communicators, instantiates `Workers`, and assembles the `Session` objects and the `Manager`.
 
 ```python 
 self.manager = ManagerFactory(
-            obj_factory=lambda comm, _: Object(comm),
-            n_workers=4,
-            comm=comm,
-            has_global=True,
-            group_size=6,
-            extra_ops={"extra_operation": extra_operation},
-        ).launch()
+    obj_factory=lambda comm, _: Object(comm),
+    n_workers=4,
+    comm=comm,
+    has_global=True,
+    group_size=6,
+    extra_ops={"extra_operation": extra_operation},
+).launch()
 ``` 
 
 Rank 0 is always the `Manager` and runs no worker. Ranks `1 … size-1` are split into `n_workers`.  Then, the provided comm is split, with `comm.Split`, so :
 
 - `local_comm` : one per worker;
 - `global_comm` : all worker ranks (if `has_global`);
-- `group_comm` : subset of workers (if `group_size` is set), `group_size` must be a multiple of the per-worker rank count, checked at construction.
+- `group_comm` : subset of workers (if `group_size` is set), `group_size` must land on a whole-worker boundary — i.e. it must be one of the cumulative worker-chunk sizes — checked at construction.
 
 Object creation is delegated to `obj_factory(comm, mode) -> Any | None`, called once per (worker × mode), the result is registered in the worker's registry for that mode. Returning `None` leaves the mode holding only `extra_ops`. An MPI-aware object must be initialized with the communicator it is handed. `extra_ops` pass through to every worker unchanged.
 
@@ -267,9 +268,9 @@ factory = EngineManagerFactory(
     engine_style="lammps",
     engine_config=cfg,
     n_workers=4,
-    group_size=8,        
+    group_size=8,
     comm=MPI.COMM_WORLD,
-).launch() 
+).launch()
 ```
 
 The subclass overrides `_create_worker` to attach engines by mode: local gets one engine per worker on its `local_comm`, the asynchronous path, each worker running an independent engine on a small active volume, group gets a single engine built collectively on `group_comm` and shared across the group's workers, the synchronous path for whole-system operations, global gets no engine (`None`) and is reserved for `extra_ops`.

@@ -20,9 +20,9 @@ class Session:
         self,
         engine_master_rank: int,
         session_id: int = 0,
-        world_comm: "MPI.COMM" | None = None,
+        world_comm: MPI.Comm | None = None,
     ) -> None:
-        world_comm = world_comm or MPI.COMM_WORLD
+        world_comm = MPI.COMM_WORLD if world_comm is None else world_comm
         if world_comm.Get_rank() != 0:
             raise RuntimeError("Session must be used from rank 0.")
 

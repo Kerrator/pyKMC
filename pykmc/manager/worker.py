@@ -3,7 +3,13 @@ from typing import Callable, Any
 from dataclasses import dataclass
 from enum import Enum
 from mpi4py import MPI
-import inspect
+
+
+# Lifecycle/framework methods that must not be remotely invocable
+# (shutdown owns close; create/register belong to Registrable/Engine wiring).
+# NOTE: `command` is deliberately NOT excluded — LammpsEngine exposes it for the
+# active-volume helpers, so it stays reachable through the Manager.
+_EXCLUDED_OPS = frozenset({"close", "create", "register"})
 
 
 def build_registry(obj: object | list[object] | None = None) -> dict[str, Callable]:
@@ -13,7 +19,11 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     ----------
     obj : object | list[object] | None
         One object or a list of objects whose public methods are collected.
-        Returns an empty dict if None.
+        Names are taken from the instance so that dynamically exposed methods
+        (e.g. EngineExtension methods surfaced by ``Engine.__dir__``) are seen,
+        but each name is screened against the class so ``@property`` getters are
+        never evaluated.  Lifecycle/framework names in ``_EXCLUDED_OPS`` are
+        skipped.  Returns an empty dict if None.
 
     Returns
     -------
@@ -27,18 +37,30 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     registry: dict[str, Callable] = {}
     objs = obj if isinstance(obj, list) else ([obj] if obj is not None else [])
     for o in objs:
-        for name, method in inspect.getmembers(o, predicate=callable):
+        # Names come from the *instance* so that dynamically exposed methods are
+        # seen (Engine.__dir__ advertises EngineExtension methods this way), but
+        # each name is screened against the *class* first so that @property
+        # getters are never executed during construction (cf. Engine.register).
+        for name in dir(o):
             if name.startswith("_"):  # only collect public methods.
+                continue
+            if name in _EXCLUDED_OPS:
+                continue
+            class_attr = getattr(type(o), name, None)
+            if class_attr is not None and not callable(class_attr):
+                continue  # property / descriptor / plain attribute, not an operation
+            member = getattr(o, name, None)
+            if not callable(member):
                 continue
             if name in registry:
                 raise ValueError(
                     f"Operation '{name}' is defined on multiple objects passed to build_registry."
                 )
-            registry[name] = method
+            registry[name] = member
     return registry
 
 
-# Convienient part to deal with worker operation that expect a result, or not, and errors.
+# Convenient part to deal with worker operation that expect a result, or not, and errors.
 class DispatchStatus(Enum):
     SILENT = "silent"
     SUCCESS = "success"
@@ -61,14 +83,14 @@ class Worker:
     def __init__(
         self,
         local_obj: object | list[object] | None,
-        local_comm: "MPI.COMM",
+        local_comm: MPI.Comm,
         worker_id: int,
         global_obj: object | list[object] | None = None,
-        global_comm: "MPI.COMM" | None = None,
+        global_comm: MPI.Comm | None = None,
         group_obj: object | list[object] | None = None,
-        group_comm: "MPI.COMM" | None = None,
+        group_comm: MPI.Comm | None = None,
         extra_ops: dict[str, Callable] | None = None,
-        world_comm: "MPI.COMM" | None = None,
+        world_comm: MPI.Comm | None = None,
     ) -> None:
         """MPI worker. Each instance runs on all ranks in ``local_comm``.
 
@@ -123,7 +145,7 @@ class Worker:
         group_comm  : MPI.Comm | None
         extra_ops   : dict[str, Callable] | None
             Keys must not clash with object method names, nor with builtin
-            names (use_local, use_group, use_global, close).
+            names (use_local, use_group, use_global, shutdown, list_ops).
         world_comm  : MPI.Comm | None  Defaults to MPI.COMM_WORLD.
 
         Raises
@@ -142,7 +164,7 @@ class Worker:
         self.worker_id = worker_id
         self._is_alive = False
 
-        self.world_comm = world_comm or MPI.COMM_WORLD
+        self.world_comm = MPI.COMM_WORLD if world_comm is None else world_comm
 
         self._builtins_op = {
             "use_local": self.use_local,
@@ -226,7 +248,7 @@ class Worker:
             )
 
     # Mode switching
-    def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict) -> None:
+    def _switch_mode(self, mode: str, comm: MPI.Comm, registry: dict) -> None:
         self.mode = mode
         self.comm = comm
         self.rank = comm.Get_rank()
