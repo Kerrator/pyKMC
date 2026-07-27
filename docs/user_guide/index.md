@@ -90,7 +90,7 @@ The available styles are:
 In this mode, pyKMC performs a common neighbor analysis: for every neighbor pair it computes the CNA signature (number of shared neighbors and the bonds between them) and labels the atom "crystal" when the set of signatures matches a known crystalline fingerprint (FCC/HCP, BCC, or icosahedral).
     - if the signatures match one of these fingerprints, the atom is labeled "crystal".
     - Otherwise, it is labeled "noncrystal".
-This style should be only use when setting in the `[Control]` section `reconstruction = False`. (_Not working anymore for the moment_).
+On its own this style is not usable for a production run: reference events are identified by graph certificates, so with only `crystal`/`noncrystal` labels a stored event can never be matched against a current environment. Refinement then finds no candidates and the simulation cannot advance. pyKMC does not currently reject the configuration, so the failure shows up at run time — use the hybrid `cna/graph` style below instead, which exists for exactly this reason. (Earlier versions of this guide suggested pairing pure `cna` with `reconstruction = False` in `[Control]`; that flag is unused by the main KMC loop and does not make this style work.)
 <div style="display: flex; align-items: center; justify-content: center; gap: 20px;">
   <img src="../images/atomic_env_base.png" width="220" />
   <div style="text-align: center; font-weight: bold;">
