@@ -50,6 +50,7 @@ The facade itself never contains computation logic. It only stores the data it n
 ```python 
 from typing import Any
 
+
 class Facade:
     def __init__(self, params, strategy: XxxStrategy) -> None:
         self.params = params

@@ -97,13 +97,14 @@ class MyEngineConfig(Protocol):
 ```python
 from pykmc.engine import EngineExtension, Engine
 
+
 class MyExtension(EngineExtension):
     def __init__(self, engine: Engine, scale: float):
-        super().__init__(engine)   # required 
+        super().__init__(engine)  # required
         self.scale = scale
 
     def new_compute(self, values: list[float]) -> list[float]:
-        # self.engine gives full access to the engine 
+        # self.engine gives full access to the engine
         return [self.scale * value for value in values]
 ```
 
