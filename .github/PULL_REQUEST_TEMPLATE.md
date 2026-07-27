@@ -7,7 +7,7 @@
 <!-- See CONTRIBUTING.md for details. There is no CI gate yet, so please run these locally. -->
 
 - [ ] `ruff check .` and `ruff format .` pass
-- [ ] `mypy pykmc/` passes
+- [ ] `ty check pykmc/` adds no new diagnostics
 - [ ] `pytest` passes
 - [ ] New public functions/classes/modules have **NumPy-style docstrings**
 - [ ] New public module → added `docs/api/<module>.md` **and** a nav entry in `mkdocs.yml`

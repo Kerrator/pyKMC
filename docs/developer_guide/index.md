@@ -65,7 +65,7 @@ pyKMC enforces strict linting and typing. Run all three before opening a PR:
 ```bash
 ruff check . --fix    # lint (auto-fix)
 ruff format .         # format
-mypy pykmc/           # strict type checking
+ty check pykmc/       # type checking
 ```
 
 The ruff configuration (`ruff.toml`) requires **docstrings** (`D` rules) and
@@ -74,7 +74,7 @@ length, targeting Python 3.10.
 
 > **Note:** CI enforces **formatting only** — every push and pull request runs
 > `ruff format --check` (see [Code formatting](code_formatting.md)). The lint
-> rules (`ruff check`), `mypy`, and the test suite are not gated by CI and must
+> rules (`ruff check`), `ty`, and the test suite are not gated by CI and must
 > be run locally.
 
 ## Building the documentation

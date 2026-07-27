@@ -4,9 +4,11 @@ Thanks for your interest in pyKMC. Bug reports, focused pull requests, and
 documentation improvements are all welcome.
 
 This guide also defines the **documentation standard** for the project. The API
-reference on the [documentation site](https://hugomoison.github.io/pyKMC/) is
-generated automatically from the code's docstrings, so following the standard
-below keeps the published docs complete and correct with no extra manual work.
+reference on the [documentation site](https://hugomoison.github.io/pyKMC/) renders
+each module's page from its docstrings, so following the standard below keeps the
+published content complete and correct. Adding a **new** public module still takes
+two manual steps — a `docs/api/<module>.md` stub and a `mkdocs.yml` nav entry (see
+the [checklist](#pull-request-checklist)); only the page *contents* are automatic.
 
 ## Development setup
 
@@ -44,20 +46,27 @@ pytest -k "vacancy"
 ## Linting and type checking
 
 pyKMC enforces strict linting and typing via [ruff](https://docs.astral.sh/ruff/)
-and [mypy](https://mypy-lang.org/). Run all three before opening a PR:
+and [ty](https://docs.astral.sh/ty/). Run all three before opening a PR:
 
 ```bash
 ruff check . --fix    # lint + simple bug-finding (auto-fix)
 ruff format .         # auto-format (double quotes, 88-col)
-mypy pykmc/           # strict type checking
+ty check pykmc/       # type checking
 ```
+
+Both tools come from the `dev` extra (`pip install -e ".[dev]"`); `ty` is
+configured in `pyproject.toml` under `[tool.ty.environment]`.
+
+> **Note:** `ty` does not yet run clean on the existing tree, so read its output
+> as a diff against the current baseline rather than as a zero-diagnostic gate:
+> your change should not add diagnostics.
 
 The ruff configuration (`ruff.toml`) selects the `D` (pydocstyle) and `ANN`
 (flake8-annotations) rule sets, so **docstrings and full type annotations are
 required** on public code, targeting Python 3.10.
 
 > **Note:** CI enforces formatting only — every push and pull request runs
-> `ruff format --check`. The lint rules (`ruff check`), `mypy`, and the test
+> `ruff format --check`. The lint rules (`ruff check`), `ty`, and the test
 > suite are not gated by CI; please run them locally — the PR checklist below
 > is the enforcement mechanism until a CI lint job is added.
 
@@ -170,7 +179,7 @@ do not normally run `mike` — the GitHub Action does the deploy.
 Before opening a PR, confirm:
 
 - [ ] `ruff check .` and `ruff format .` pass
-- [ ] `mypy pykmc/` passes
+- [ ] `ty check pykmc/` adds no new diagnostics
 - [ ] the serial test subset passes (and the MPI-pool tests when touching MPI code)
 - [ ] New public functions/classes/modules have **NumPy-style docstrings**
 - [ ] New public module → added `docs/api/<module>.md` **and** a `mkdocs.yml` nav entry
