@@ -115,7 +115,7 @@ def _select_event_generic(self):
         ]
     )
     # Apply algorithm select event :
-    idx_selected_event, delta_t = rejection_free(l_k)
+    idx_selected_event, delta_t, _ = rejection_free(l_k)
     return l_reference_table[idx_selected_event], delta_t
 
 
