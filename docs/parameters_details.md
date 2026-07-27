@@ -341,7 +341,7 @@
   </details>
 - <a id="partn-convergence_property"></a>**`convergence_property`** : `Literal['maxval', 'norm']`, default = `'maxval'`
   <details><summary>Description</summary>
-  Reserved for selecting the pARTn force-convergence norm ('maxval': MAXVAL(ABS(force)); 'norm': NORM2(force)); currently unused, so pARTn's default remains in effect.
+  Specify how to test convergence of the forces. 'maxval': the convergence will be tested by MAXVAL( ABS( force ) ); 'norm' the convergence will be tested by NORM2( force ).
   </details>
 - <a id="partn-nevalf_max"></a>**`nevalf_max`** : `int`, default = `9999`
   <details><summary>Description</summary>
