@@ -61,8 +61,9 @@ This is exactly what pyKMC's selection does (`pykmc.algorithms.rejection_free`):
 one uniform draw picks the event from the cumulative rate sum, a second draws
 $\Delta t$. (The implementation draws both numbers with Python's
 `random.random()`, whose range is $[0, 1)$ rather than the $(0, 1]$ written
-above; the zero draw that would break the logarithm has probability zero and
-is not explicitly guarded.) Rates are handled in $\text{ps}^{-1}$ (see the
+above; for the time step it therefore takes $-\ln(1 - u) / k_\text{tot}$, which
+maps the draw back onto $(0, 1]$ so the logarithm never receives zero.) Rates
+are handled in $\text{ps}^{-1}$ (see the
 units note in [Transition State Theory](tst.md)), so $\Delta t$ is in
 picoseconds; the accumulated simulation time is reported in seconds.
 
