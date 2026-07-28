@@ -10,7 +10,7 @@
 
 ## Automated install (recommended)
 
-`install_pykmc_mac.sh` creates a `pykmc/` directory **inside your current working directory** and installs everything there. Choose where you want the install to live before running it.
+`install_pykmc_mac.sh` creates a `pykmc_install/` directory **inside your current working directory** and installs everything there. Choose where you want the install to live before running it.
 
 Before running, make sure Xcode Command Line Tools and Homebrew are installed (the script checks for them and exits with a message if either is missing):
 
@@ -22,7 +22,7 @@ eval "$(/opt/homebrew/bin/brew shellenv)"   # Apple Silicon
 
 Then:
 
-1. Create (or choose) the folder where the install should live, and `cd` into it. Replace `/path/to/your/install-folder` with wherever you want the install to live (the script will create a `pykmc/` subfolder inside it):
+1. Create (or choose) the folder where the install should live, and `cd` into it. Replace `/path/to/your/install-folder` with wherever you want the install to live (the script will create a `pykmc_install/` subfolder inside it):
 
    ```bash
    mkdir -p /path/to/your/install-folder
@@ -55,7 +55,12 @@ To use a specific Python interpreter, set `PYTHON_BIN` before running:
 PYTHON_BIN=/opt/homebrew/bin/python3.12 /path/to/install_pykmc_mac.sh
 ```
 
-When it finishes you'll have `pykmc/pykmc_env/`, `pykmc/lammps/`, `pykmc/IterativeRotationsAssignments/`, `pykmc/artn-plugin/`, and `pykmc/activate.sh` under the folder you chose.
+When it finishes you'll have `pykmc_install/pykmc_env/`, `pykmc_install/lammps/`, `pykmc_install/IterativeRotationsAssignments/`, `pykmc_install/artn-plugin/`, and `pykmc_install/activate.sh` under the folder you chose.
+
+> The install root is **not** called `pykmc`: a directory of that name makes `import pykmc` resolve
+> to it as an empty namespace package whenever Python runs from its parent, which fails later and
+> misleadingly (`ImportError: cannot import name 'NeighborsList' from 'pykmc' (unknown location)`).
+> The same applies if you follow the manual steps below — don't name your working directory `pykmc`.
 
 ---
 
@@ -105,7 +110,7 @@ cmake --version
 ## 1. Clone repositories
 
 ```bash
-mkdir pykmc && cd pykmc
+mkdir pykmc_install && cd pykmc_install   # any name but "pykmc" — see the namespace-package note above
 
 git clone -b develop https://github.com/hugomoison/pyKMC.git
 git clone -b stable_22Jul2025_update3 --depth 1 https://github.com/lammps/lammps.git

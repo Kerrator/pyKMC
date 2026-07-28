@@ -10,7 +10,7 @@
 # Override Python interpreter:
 #   PYTHON_BIN=/opt/homebrew/bin/python3.12 ./install_pykmc_mac.sh
 #
-# This script will create a "pykmc" directory in the current location
+# This script will create a "pykmc_install" directory in the current location
 # and install everything inside it.
 #
 set -euo pipefail
@@ -90,7 +90,11 @@ ok "Using Python $PYTHON_VERSION at $(command -v "$PYTHON_BIN")"
 # ------------------------------------------
 step "Cloning repositories"
 
-INSTALL_DIR="$(pwd)/pykmc"
+# Deliberately NOT named "pykmc": a directory of that name makes `import pykmc` resolve to it as an
+# empty namespace package whenever python runs from this directory's PARENT. The import succeeds,
+# __file__ is None, and the real failure surfaces later and misleadingly as
+#   ImportError: cannot import name 'NeighborsList' from 'pykmc' (unknown location)
+INSTALL_DIR="$(pwd)/pykmc_install"
 
 if [ -d "$INSTALL_DIR" ]; then
     fail "Directory $INSTALL_DIR already exists. Remove it or run from a different location."
@@ -231,7 +235,7 @@ ok "All components verified"
 cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 #!/bin/bash
 # Source this file to activate the pyKMC environment:
-#   source /path/to/pykmc/activate.sh
+#   source /path/to/pykmc_install/activate.sh
 
 PYKMC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PYKMC_DIR/pykmc_env/bin/activate"
