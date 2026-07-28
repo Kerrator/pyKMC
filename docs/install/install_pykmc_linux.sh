@@ -10,8 +10,11 @@
 # Override Python interpreter:
 #   PYTHON_BIN=/usr/bin/python3.12 ./install_pykmc_linux.sh
 #
-# This script will create a "pykmc" directory in the current location
+# This script will create a "pykmc_install" directory in the current location
 # and install everything inside it.
+#
+# Pin pARTn / IRA to other revisions (default: the SHAs validated on 2026-07-28):
+#   ARTN_REF=main IRA_REF=main ./install_pykmc_linux.sh
 #
 set -euo pipefail
 
@@ -129,7 +132,11 @@ ok "Using Python $PYTHON_VERSION at $(command -v "$PYTHON_BIN")"
 # ------------------------------------------
 step "Cloning repositories"
 
-INSTALL_DIR="$(pwd)/pykmc"
+# Deliberately NOT named "pykmc": a directory of that name makes `import pykmc` resolve to it as an
+# empty namespace package whenever python runs from this directory's PARENT. The import succeeds,
+# __file__ is None, and the real failure surfaces later and misleadingly as
+#   ImportError: cannot import name 'NeighborsList' from 'pykmc' (unknown location)
+INSTALL_DIR="$(pwd)/pykmc_install"
 
 if [ -d "$INSTALL_DIR" ]; then
     fail "Directory $INSTALL_DIR already exists. Remove it or run from a different location."
@@ -138,10 +145,29 @@ fi
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+# pARTn and IRA are pinned by SHA to the revisions validated on 2026-07-28. Neither has a usable
+# release tag: artn-plugin's only tag (v1.0.0) predates the LAMMPS plugin, and IRA's IRA_v2.2.0 tag
+# sits behind the 2.2.0 code. Unpinned, two runs of this script weeks apart install different
+# software — between 2026-06-10 and 2026-07-28, pARTn moved 8224be16 -> edea36ac and IRA
+# 7f011ba -> 3cb0c29. Override to track upstream HEAD deliberately: ARTN_REF=main IRA_REF=main.
+IRA_REF="${IRA_REF:-3cb0c299e2e664f8131948b90f9926869d42459c}"
+ARTN_REF="${ARTN_REF:-edea36aca8215a1d484b3b8695ecb9676fe56498}"
+
 git clone -b develop https://github.com/hugomoison/pyKMC.git
 git clone -b stable_22Jul2025_update3 --depth 1 https://github.com/lammps/lammps.git
 git clone https://github.com/mammasmias/IterativeRotationsAssignments.git
 git clone https://gitlab.com/mammasmias/artn-plugin.git
+
+git -C IterativeRotationsAssignments checkout --quiet "$IRA_REF" \
+    || fail "Could not check out IRA revision '$IRA_REF'"
+git -C artn-plugin checkout --quiet "$ARTN_REF" \
+    || fail "Could not check out pARTn revision '$ARTN_REF'"
+
+# Record what actually landed, so a simulation result can be attributed to a stack later.
+echo "Resolved source revisions:"
+for repo in pyKMC lammps IterativeRotationsAssignments artn-plugin; do
+    printf '  %-32s %s\n' "$repo" "$(git -C "$repo" rev-parse HEAD)"
+done
 
 ok "All repositories cloned"
 
@@ -250,11 +276,24 @@ ok "LAMMPS built and installed"
 step "Building IRA"
 
 cd "$INSTALL_DIR/IterativeRotationsAssignments"
-python -m pip install . --quiet
+
+# IRA builds via scikit-build-core, which does propagate a failed cmake build as a non-zero pip
+# exit code (the full CMake/compiler output is printed even under --quiet). It is not built
+# out-of-tree in a way that leaves a log behind, so there is no log file to point at — say so.
+python -m pip install . --quiet \
+    || fail "IRA build failed — the CMake/compiler output above is the full log (no log file is written)"
 
 cd "$INSTALL_DIR"
 
-python -c "import ira_mod" || fail "IRA not working"
+# Instantiate rather than just `import ira_mod`. At the pinned revision the bare import happens to
+# dlopen the library anyway (ira_mod.py runs `version, _ = IRA().get_version()` at module level),
+# but that is an incidental side effect to lean a build check on, and a bare `import ira_mod` is a
+# silent pass whenever a directory named ira_mod shadows the package as an empty namespace package.
+# Instantiating states the intent, and prints the version into the install log as provenance.
+python -c "
+import ira_mod
+print('IRA library OK:', ira_mod.IRA().get_version())
+" || fail "IRA shared library not loadable (libira.so missing, or unresolved symbols)"
 ok "IRA built and installed"
 
 # ------------------------------------------
@@ -310,7 +349,7 @@ ok "All components verified"
 cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 #!/bin/bash
 # Source this file to activate the pyKMC environment:
-#   source /path/to/pykmc/activate.sh
+#   source /path/to/pykmc_install/activate.sh
 
 PYKMC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PYKMC_DIR/pykmc_env/bin/activate"
