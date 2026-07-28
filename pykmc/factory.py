@@ -19,14 +19,16 @@ class EngineManagerFactory(ManagerFactory):
 
     Parameters
     ----------
-    engine_style  : str
-    engine_config : Any | None    Forwarded to Engine.create.
-    n_workers     : int
-    comm          : MPI.Comm
-    group_size    : int | None
-    extra_ops     : dict[str, Callable] | None
-                                  MPI-aware callables ``fn(comm, **kwargs)``
-                                  available in every mode.
+    engine_style      : str
+    engine_config     : Any | None    Forwarded to Engine.create.
+    n_workers         : int
+    comm              : MPI.Comm
+    group_size        : int | None
+    engine_extensions : list | None   EngineExtension subclasses to instantiate
+                                      on each engine after creation.
+    extra_ops         : dict[str, Callable] | None
+                                      MPI-aware callables ``fn(comm, **kwargs)``
+                                      available in every mode.
     """
 
     def __init__(
@@ -36,10 +38,12 @@ class EngineManagerFactory(ManagerFactory):
         comm: MPI.Comm,
         group_size: int | None = None,
         engine_config: Any | None = None,
+        engine_extensions: list | None = None,
         extra_ops: dict[str, Callable] | None = None,
     ) -> None:
         self._engine_style = engine_style
         self._engine_config = engine_config
+        self._engine_extensions = engine_extensions or []
 
         super().__init__(
             obj_factory=lambda *_: None,  # unused — overridden by _create_worker
@@ -52,12 +56,15 @@ class EngineManagerFactory(ManagerFactory):
 
     def _make_engine(self, engine_comm: MPI.Comm, mode: str, worker_id: int) -> Engine:
         engine_id = 0 if mode == "group" else worker_id + 1
-        return Engine.create(
+        engine = Engine.create(
             self._engine_style,
             config=self._engine_config,
             comm=engine_comm,
             engine_id=engine_id,
         )
+        for ext_cls in self._engine_extensions:
+            ext_cls(engine)
+        return engine
 
     def _create_worker(
         self,
