@@ -251,18 +251,23 @@ print('All imports OK')
 
 ## 8. Running pyKMC
 
-Every time you run pyKMC, activate the environment and set these paths:
+Every time you run pyKMC, activate the environment:
 
 ```bash
 source pykmc_env/bin/activate
-export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}"
 ```
 
-Or simply source the activation script created by the installer:
+Or simply source the activation script created by the installer, which does the same
+and also drops any inherited `PYTHONPATH`:
 
 ```bash
 source activate.sh
 ```
+
+> No `DYLD_LIBRARY_PATH` export is needed: on a clean Apple Silicon install both
+> `liblammps.dylib` and `libartn-lmp.dylib` resolve through their install names, and
+> `activate.sh` sets no such variable. If a dylib does fail to load on your machine,
+> fall back to `export DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}"`.
 
 Run with MPI — use at least `n_sessions + 1` ranks: rank 0 runs the main KMC loop and
 the remaining ranks are split among the `n_sessions` LAMMPS instances (`[Control]`
