@@ -234,27 +234,27 @@ class Worker:
             )
 
     # Mode switching
-    def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict) -> None:
+    def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict, rank: int) -> None:
         self.mode = mode
         self.comm = comm
-        self.rank = comm.Get_rank()
+        self.rank = rank
         self.registry = registry
 
     def use_local(self) -> None:
         """Switch to local mode."""
-        self._switch_mode("local", self.local_comm, self.local_registry)
+        self._switch_mode("local", self.local_comm, self.local_registry, self.local_rank)
 
     def use_global(self) -> None:
         """Switch to global mode. No-op if no global_comm."""
         if self.global_comm is None:
             return
-        self._switch_mode("global", self.global_comm, self.global_registry)
+        self._switch_mode("global", self.global_comm, self.global_registry, self.global_rank)
 
     def use_group(self) -> None:
         """Switch to group mode. No-op if worker has no group_comm."""
         if self.group_comm is None:
             return
-        self._switch_mode("group", self.group_comm, self.group_registry)
+        self._switch_mode("group", self.group_comm, self.group_registry, self.group_rank)
 
     # Lifecycle
     def start(self) -> None:
