@@ -27,14 +27,20 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     registry: dict[str, Callable] = {}
     objs = obj if isinstance(obj, list) else ([obj] if obj is not None else [])
     for o in objs:
-        for name, method in inspect.getmembers(o, predicate=callable):
-            if name.startswith("_"):  # only collect public methods.
+        for name in dir(o):
+            if name.startswith("_"):
+                continue
+            try:
+                attr = getattr(o, name)
+            except Exception:
+                continue
+            if not callable(attr):
                 continue
             if name in registry:
                 raise ValueError(
                     f"Operation '{name}' is defined on multiple objects passed to build_registry."
                 )
-            registry[name] = method
+            registry[name] = attr
     return registry
 
 
