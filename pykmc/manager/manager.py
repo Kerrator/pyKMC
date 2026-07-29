@@ -82,6 +82,7 @@ class Manager:
         """
         if self.mode != "local":
             self._use_local()
+        self._local_queue.join()
         for session in self.local_sessions:
             session.call(op_name, **kwargs)
 
