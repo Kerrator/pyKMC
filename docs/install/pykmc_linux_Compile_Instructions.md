@@ -10,9 +10,9 @@
 
 ## Automated install (recommended)
 
-`install_pykmc_linux.sh` creates a `pykmc/` directory **inside your current working directory** and installs everything there. Choose where you want the install to live before running it.
+`install_pykmc_linux.sh` creates a `pykmc_install/` directory **inside your current working directory** and installs everything there. Choose where you want the install to live before running it.
 
-1. Create (or choose) the folder where the install should live, and `cd` into it. Replace `/path/to/your/install-folder` with wherever you want the install to live (the script will create a `pykmc/` subfolder inside it):
+1. Create (or choose) the folder where the install should live, and `cd` into it. Replace `/path/to/your/install-folder` with wherever you want the install to live (the script will create a `pykmc_install/` subfolder inside it):
 
    ```bash
    mkdir -p /path/to/your/install-folder
@@ -338,8 +338,8 @@ the template below scales the same pattern to a full node:
 
 module purge
 module load StdEnv/2023 gcc/12.3 openmpi/4.1.5 python/3.12.4 mpi4py/4.1.0 cmake/3.31.0
-source "$SCRATCH/pykmc/pykmc_env/bin/activate"
-export LD_LIBRARY_PATH="$SCRATCH/pykmc/lammps/build:${LD_LIBRARY_PATH:-}"
+source "$SCRATCH/pykmc_install/pykmc_env/bin/activate"
+export LD_LIBRARY_PATH="$SCRATCH/pykmc_install/lammps/build:${LD_LIBRARY_PATH:-}"
 
 cd "$SCRATCH/your_run_dir"           # run from $SCRATCH — $HOME/$PROJECT are read-only in jobs
 
@@ -366,7 +366,7 @@ sbatch scripts (not re-exercised in the Trillium validation):
 #SBATCH --mem-per-cpu=2048M
 
 module load StdEnv/2023 python/3.12.4 openmpi mpi4py
-source /home/$USER/pykmc/pykmc_env/bin/activate
+source /home/$USER/pykmc_install/pykmc_env/bin/activate
 
 srun --ntasks=$SLURM_NTASKS --distribution=block:block \
      --cpu-bind=cores --mem-bind=local \
