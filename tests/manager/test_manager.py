@@ -36,6 +36,10 @@ def division(comm, a, b):
         return result
 
 
+def check_errhandler(comm):
+    return comm.Get_errhandler() == MPI.ERRORS_RETURN
+
+
 class TestsManager:
     @pytest.fixture(autouse=True)
     def setup(self):
@@ -102,6 +106,37 @@ class TestsManager:
 
         result = self.manager.global_division(a=10, b=2)
         assert result is not None and all(v == expected for v in result)
+
+    def test_worker_error_propagates_to_future(self):
+        if MPI.COMM_WORLD.Get_rank() != 0:
+            return
+        future = self.manager.division(a=1, b=0)
+        with pytest.raises(RuntimeError, match="division by zero"):
+            future.result()
+
+
+class TestsManagerFaultTolerance:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        _require_8_ranks()
+        MPI.COMM_WORLD.Barrier()
+        self.manager = ManagerFactory(
+            obj_factory=lambda *_: None,
+            n_workers=4,
+            comm=MPI.COMM_WORLD,
+            has_global=False,
+            extra_ops={"check_errhandler": check_errhandler},
+        ).launch()
+        yield
+        if self.manager is not None:
+            self.manager.shutdown()
+        MPI.COMM_WORLD.Barrier()
+
+    def test_errhandler_set_on_local_comm(self):
+        if MPI.COMM_WORLD.Get_rank() != 0:
+            return
+        result = self.manager.check_errhandler().result()
+        assert result is True
 
 
 class TestsManagerValidation:

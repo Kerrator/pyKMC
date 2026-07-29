@@ -143,6 +143,8 @@ class Worker:
         self._is_alive = False
 
         self.world_comm = world_comm or MPI.COMM_WORLD
+        for comm in filter(None, [self.world_comm, local_comm, global_comm, group_comm]):
+            comm.Set_errhandler(MPI.ERRORS_RETURN)
 
         self._builtins_op = {
             "use_local": self.use_local,
@@ -252,7 +254,20 @@ class Worker:
     def start(self) -> None:
         """Enter the message loop. Blocks until ``shutdown`` is dispatched."""
         self._is_alive = True
-        self._loop()
+        try:
+            self._loop()
+        except BaseException as e:
+            if self.local_rank == 0:
+                try:
+                    self.world_comm.send(
+                        {"type": "status", "value": {"has_result": False, "error": str(e)}},
+                        dest=0,
+                        tag=self._TAG_STATUS,
+                    )
+                except Exception:
+                    pass
+            MPI.COMM_WORLD.Abort(1)
+            raise
 
     def _all_objs(self) -> list[object]:
         """Flatten local, global, and group objects into a single list."""
