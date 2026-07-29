@@ -58,10 +58,14 @@ ok "All prerequisites found"
 step "Selecting Python interpreter"
 
 find_supported_python() {
-    for py in python3.13 python3.12 python3.11 python3.10 python3.9; do
+    for py in python3.13 python3.12 python3.11 python3.10 python3; do
         if command -v "$py" >/dev/null 2>&1; then
-            echo "$py"
-            return 0
+            local ver
+            ver=$("$py" -c "import sys; print(sys.version_info.minor)")
+            if [ "$ver" -ge 10 ] && [ "$ver" -le 13 ]; then
+                echo "$py"
+                return 0
+            fi
         fi
     done
     return 1
@@ -70,7 +74,7 @@ find_supported_python() {
 PYTHON_BIN="${PYTHON_BIN:-$(find_supported_python || true)}"
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "No supported Python 3.9-3.13 found. Installing python@3.13 with Homebrew..."
+    echo "No supported Python 3.10-3.13 found. Installing python@3.13 with Homebrew..."
     brew install python@3.13
     PYTHON_BIN="$(brew --prefix python@3.13)/bin/python3.13"
 fi
@@ -79,8 +83,8 @@ PYTHON_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.
 PYTHON_MAJOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major)")
 PYTHON_MINOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.minor)")
 
-if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 9 ] || [ "$PYTHON_MINOR" -gt 13 ]; then
-    fail "Supported Python range is 3.9-3.13, found $PYTHON_VERSION at $PYTHON_BIN"
+if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 10 ] || [ "$PYTHON_MINOR" -gt 13 ]; then
+    fail "Supported Python range is 3.10-3.13, found $PYTHON_VERSION at $PYTHON_BIN"
 fi
 
 ok "Using Python $PYTHON_VERSION at $(command -v "$PYTHON_BIN")"
@@ -114,7 +118,8 @@ ok "All repositories cloned"
 # ------------------------------------------
 step "Fixing Python version constraint"
 
-if [ "$PYTHON_MINOR" -eq 13 ]; then
+if [ "$PYTHON_MINOR" -eq 13 ] && grep -q '<3.13,' pyKMC/pyproject.toml; then
+    # only needed for older pyKMC checkouts whose pyproject still has an upper bound
     sed -i '' 's/<3.13,/<3.14,/' pyKMC/pyproject.toml
     grep -q '<3.14,' pyKMC/pyproject.toml || fail "Failed to bump pyproject upper Python bound (sed pattern stale?)"
     ok "Updated pyproject.toml for Python 3.13"
@@ -149,6 +154,11 @@ step "Building LAMMPS (this may take a few minutes)"
 cd "$INSTALL_DIR/lammps"
 mkdir build && cd build
 
+# Override build parallelism with MAKE_JOBS=N
+MAKE_JOBS="${MAKE_JOBS:-$(sysctl -n hw.ncpu)}"
+
+# PKG_PHONON provides the dynamical_matrix command needed by HTST rate prefactors.
+# Without it LAMMPS raises nothing and every HTST event silently degrades to k0.
 cmake ../cmake \
   -DBUILD_SHARED_LIBS=on \
   -DLAMMPS_EXCEPTIONS=on \
@@ -158,14 +168,22 @@ cmake ../cmake \
   -DPKG_RIGID=on \
   -DPKG_MOLECULE=on \
   -DPKG_EXTRA-COMPUTE=on \
+  -DPKG_PHONON=on \
   -DPKG_PLUGIN=on \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_C_COMPILER=mpicc \
   -DCMAKE_Fortran_COMPILER=mpif90 \
-  -DPython_EXECUTABLE="$(which python)" > /dev/null 2>&1
-make -j"$(sysctl -n hw.ncpu)"           > /dev/null 2>&1
-make install-python                     > /dev/null 2>&1
+  -DPython_EXECUTABLE="$(which python)" > cmake_config.log 2>&1 \
+    || fail "LAMMPS cmake configure failed — see $(pwd)/cmake_config.log"
+make -j"$MAKE_JOBS"                     > make.log 2>&1 \
+    || fail "LAMMPS build failed — see $(pwd)/make.log"
+
+# Drop any lammps wheel pip pulled from PyPI (pyKMC's pyproject lists `lammps` as a
+# dependency) so the wheel built from THIS LAMMPS is the one in the venv.
+python -m pip uninstall -y lammps >/dev/null 2>&1 || true
+make install-python                     > make_install.log 2>&1 \
+    || fail "LAMMPS install-python failed — see $(pwd)/make_install.log"
 
 cd "$INSTALL_DIR"
 
@@ -197,9 +215,12 @@ cmake -B build \
       -DWITH_LAMMPS=ON \
       -DLAMMPS_PATH="$INSTALL_DIR/lammps/build" \
       -DARTN_INSTALL_PYTHON=ON \
-      -DCMAKE_CXX_FLAGS_INIT="-std=c++17"             > /dev/null 2>&1
-cmake --build build --parallel "$(sysctl -n hw.ncpu)" > /dev/null 2>&1
-cmake --install build                                 > /dev/null 2>&1
+      -DCMAKE_CXX_FLAGS_INIT="-std=c++17" > artn_cmake.log 2>&1 \
+    || fail "pARTn cmake configure failed — see $(pwd)/artn_cmake.log"
+cmake --build build --parallel "$MAKE_JOBS" > artn_build.log 2>&1 \
+    || fail "pARTn build failed — see $(pwd)/artn_build.log"
+cmake --install build                       > artn_install.log 2>&1 \
+    || fail "pARTn install failed — see $(pwd)/artn_install.log"
 
 cd "$INSTALL_DIR"
 
