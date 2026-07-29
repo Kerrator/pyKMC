@@ -66,6 +66,7 @@ class Manager:
             self._local_queue.put(None)
         for t in self._local_threads:
             t.join()
+        self._local_threads.clear()
         for session in self.local_sessions:
             session.shutdown()
 
