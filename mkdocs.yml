@@ -35,6 +35,7 @@ nav:
   - Developer Guide: 
       - Strategy pattern : dev_strategy_pattern.md
       - Engine : dev_engine.md
+      - Manager and Parallelization : dev_parallelization_manager.md
       - Code formatting : dev_code_formatting.md
   - API Reference: 
       - System: api/system.md
