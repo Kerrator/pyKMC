@@ -149,7 +149,9 @@ class Worker:
         self._is_alive = False
 
         self.world_comm = world_comm or MPI.COMM_WORLD
-        for comm in filter(None, [self.world_comm, local_comm, global_comm, group_comm]):
+        for comm in filter(
+            None, [self.world_comm, local_comm, global_comm, group_comm]
+        ):
             comm.Set_errhandler(MPI.ERRORS_RETURN)
 
         self._builtins_op = {
@@ -234,7 +236,9 @@ class Worker:
             )
 
     # Mode switching
-    def _switch_mode(self, mode: str, comm: "MPI.COMM", registry: dict, rank: int) -> None:
+    def _switch_mode(
+        self, mode: str, comm: "MPI.COMM", registry: dict, rank: int
+    ) -> None:
         self.mode = mode
         self.comm = comm
         self.rank = rank
@@ -242,19 +246,25 @@ class Worker:
 
     def use_local(self) -> None:
         """Switch to local mode."""
-        self._switch_mode("local", self.local_comm, self.local_registry, self.local_rank)
+        self._switch_mode(
+            "local", self.local_comm, self.local_registry, self.local_rank
+        )
 
     def use_global(self) -> None:
         """Switch to global mode. No-op if no global_comm."""
         if self.global_comm is None:
             return
-        self._switch_mode("global", self.global_comm, self.global_registry, self.global_rank)
+        self._switch_mode(
+            "global", self.global_comm, self.global_registry, self.global_rank
+        )
 
     def use_group(self) -> None:
         """Switch to group mode. No-op if worker has no group_comm."""
         if self.group_comm is None:
             return
-        self._switch_mode("group", self.group_comm, self.group_registry, self.group_rank)
+        self._switch_mode(
+            "group", self.group_comm, self.group_registry, self.group_rank
+        )
 
     # Lifecycle
     def start(self) -> None:
@@ -266,7 +276,10 @@ class Worker:
             if self.local_rank == 0:
                 try:
                     self.world_comm.send(
-                        {"type": "status", "value": {"has_result": False, "error": str(e)}},
+                        {
+                            "type": "status",
+                            "value": {"has_result": False, "error": str(e)},
+                        },
                         dest=0,
                         tag=self._TAG_STATUS,
                     )

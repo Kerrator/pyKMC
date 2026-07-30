@@ -78,12 +78,12 @@ class ManagerFactory:
                 raise ValueError(
                     f"group_size ({group_size}) cannot exceed the number of available ranks ({len(self.available_ranks)})."
                 )
-            acceptable_group_size= np.cumsum([len(c) for c in self.chunks])
-            if self.group_size not in acceptable_group_size :
+            acceptable_group_size = np.cumsum([len(c) for c in self.chunks])
+            if self.group_size not in acceptable_group_size:
                 raise ValueError(
                     f"group_size ({group_size}) must be running on a subset of workers, available group_size=({acceptable_group_size})."
                 )
-            self.group_ranks: list[int] = self.available_ranks[:self.group_size]
+            self.group_ranks: list[int] = self.available_ranks[: self.group_size]
         else:
             self.group_ranks = []
 

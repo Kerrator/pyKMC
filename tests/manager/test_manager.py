@@ -164,6 +164,7 @@ class TestsManagerValidation:
         if MPI.COMM_WORLD.Get_rank() != 0:
             return
         with pytest.raises(
-            ValueError, match="must be running on a subset of workers, available group_size"
+            ValueError,
+            match="must be running on a subset of workers, available group_size",
         ):
             ManagerFactory(**self._base_factory(group_size=3))
