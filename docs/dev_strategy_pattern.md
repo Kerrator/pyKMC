@@ -50,11 +50,11 @@ class Facade:
         self._strategy = strategy
 
     def some_compute(self, **kwargs) -> ResultType:
-        return self._strategy.some_compute(**kwargs) 
-        
-    @classmethod 
-    def create(cls, params, strategy: str, **kwargs) -> "FacadeXxx": 
-	    return cls(param, strategy=StrategyXxx.create(strategy, **kwargs))
+        return self._strategy.some_compute(**kwargs)
+
+    @classmethod
+    def create(cls, params, strategy: str, **kwargs) -> "FacadeXxx":
+        return cls(param, strategy=StrategyXxx.create(strategy, **kwargs))
 ``` 
 
 This separation has two practical benefits. First, adding or modifying a strategy never risks breaking the user-facing interface. Second, the facade can be tested independently of any specific strategy implementation. A `create` classmethod is the convenience constructor that builds the strategy and wires it, in practice : 
@@ -75,23 +75,25 @@ from pykmc._core import Registrable
 from abc import abstractmethod
 from typing import Protocol
 
-class XxxStrategy(Registrable, root=True): 
+
+class XxxStrategy(Registrable, root=True):
     @abstractmethod
     def some_compute(self, **kwargs) -> T:
         pass
-        
-class MyStrategyConfig(Protocol): 
-    my_param1: float 
-    my_param2: str 
-	
-class Strategy1(XxxStrategy): 
-    name = "my_strategy" 
-	
-    def __init__(self, config: MyStrategyConfig) -> None: 
-        self.config = config 
-		
-    def some_compute(self, **kwargs) -> T: 
-        ...
+
+
+class MyStrategyConfig(Protocol):
+    my_param1: float
+    my_param2: str
+
+
+class Strategy1(XxxStrategy):
+    name = "my_strategy"
+
+    def __init__(self, config: MyStrategyConfig) -> None:
+        self.config = config
+
+    def some_compute(self, **kwargs) -> T: ...
 ```
 
 > **Naming convention**: the `XxxStrategy` suffix signals that a class's concrete subclasses are interchangeable algorithm implementations. It is a convention, not a base class, the technical plumbing comes entirely from `Registrable`. Non-algorithmic backends (e.g. `Engine`) also inherit from `Registrable` directly.
@@ -123,8 +125,10 @@ from typing import Protocol
 from pykmc._core import Registrable
 from .base import XxxStrategy  # XxxStrategy(Registrable, root=True) défini dans base.py
 
+
 class MyStrategyConfig(Protocol):
     my_param: float
+
 
 class MyStrategy(XxxStrategy):
     name = "my_strategy"
@@ -132,8 +136,7 @@ class MyStrategy(XxxStrategy):
     def __init__(self, config: MyStrategyConfig) -> None:
         self.config = config
 
-    def some_compute(self, **kwargs) -> float:
-        ...
+    def some_compute(self, **kwargs) -> float: ...
 ```
 
 No other steps, `autodiscover` imports the new module, `__init_subclass__` registers it under `"my_strategy"`, and `Facade.create(params, strategy="my_strategy", config=cfg)` works immediately.

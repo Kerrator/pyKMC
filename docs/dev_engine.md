@@ -49,16 +49,16 @@ J -.->|extends| E
 from pykmc._core import Registrable
 from abc import abstractmethod
 
+
 class Engine(Registrable, root=True):
+    @abstractmethod
+    def start(self) -> None: ...
 
     @abstractmethod
-    def start(self) -> None: ...           
+    def close(self) -> None: ...
 
     @abstractmethod
-    def close(self) -> None: ...           
-
-    @abstractmethod
-    def initialize_parameters(self) -> None: ...   
+    def initialize_parameters(self) -> None: ...
 
     ...
 ```
@@ -71,6 +71,7 @@ Each engine declares its own configuration interface as a `Protocol`. This keeps
 
 ```python
 from typing import Protocol
+
 
 class MyEngineConfig(Protocol):
     pair_style: str
@@ -99,10 +100,10 @@ class MyExtension(EngineExtension):
 Once attached, the method is accessible directly on the engine instance:
 
 ```python
-engine = Engine(name = "myengine", config=cfg)
-MyExtension(engine, param=...)   # attaches on construction
+engine = Engine(name="myengine", config=cfg)
+MyExtension(engine, param=...)  # attaches on construction
 
-result = engine.new_compute(...)   # delegates to the extension
+result = engine.new_compute(...)  # delegates to the extension
 ```
 
 Conflicts are caught at registration time: if two extensions expose a method with the same name, `register()` raises a `ValueError`.
@@ -122,8 +123,10 @@ from typing import Protocol
 import numpy as np
 from .base import Engine
 
+
 class MyEngineConfig(Protocol):
     my_param: str
+
 
 class MyEngine(Engine):
     name = "my_engine"
@@ -136,6 +139,7 @@ class MyEngine(Engine):
 
     def start(self) -> None: ...
     def close(self) -> None: ...
+
     ...
 ```
 
