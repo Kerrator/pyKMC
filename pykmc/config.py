@@ -361,7 +361,13 @@ class PartnConfig(BaseModel):
 
     r_delr_sad_thr: float = Field(
         default=0.4,
-        description="When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt.",
+        description="Acceptance threshold (in Angstrom) for a refined saddle point. "
+        "A refinement run starts from the expected saddle position, and artn delr_sad "
+        "measures how far the converged saddle has moved from that starting "
+        "configuration. If delr_sad is strictly below this threshold "
+        "(delr_sad < r_delr_sad_thr), the refined saddle stayed close to the expected "
+        "saddle and is accepted; otherwise (e.g. the search fell back to the minimum), "
+        "a new attempt is made, up to r_max_attempts.",
     )
 
     # Initial_push
