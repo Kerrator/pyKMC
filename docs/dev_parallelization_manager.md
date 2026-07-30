@@ -97,9 +97,9 @@ The default mode. Operations are asynchronous and follow a standard master-worke
 
 Usage : 
 ```python
-future = manager.operation(parameter=a)   # non-blocking, returns immediately
+future = manager.operation(parameter=a)  # non-blocking, returns immediately
 # ... other work ...
-result = future.result()                   # blocks until the job completes
+result = future.result()  # blocks until the job completes
 ```
 
 The `Job` dataclass:
@@ -107,8 +107,8 @@ The `Job` dataclass:
 @dataclass
 class Job:
     op_name: str
-    kwargs:  dict
-    future:  Future
+    kwargs: dict
+    future: Future
 ```
 
 #### Group mode
@@ -194,15 +194,16 @@ flowchart TD
 
 ```python
 class DispatchStatus(Enum):
-    SILENT  = "silent"
+    SILENT = "silent"
     SUCCESS = "success"
-    ERROR   = "error"
+    ERROR = "error"
+
 
 @dataclass
 class DispatchResult:
     status: DispatchStatus
-    value:  Any = None
-    error:  str | None = None
+    value: Any = None
+    error: str | None = None
 ```
 
 These types never cross `world_comm`, they only tell the master rank whether to reply, and with what:
@@ -219,9 +220,9 @@ Only local rank 0 replies to the `Session`, over `world_comm`. It first sends th
 The two directions use three tags to keep the flows from interleaving on `world_comm`:
 
 ```python
-_TAG_STATUS = 0   # Worker → Session : completion + error flag
-_TAG_RESULT = 1   # Worker → Session : return value (only if has_result)
-_TAG_CMD    = 2   # Session → Worker : operation request
+_TAG_STATUS = 0  # Worker → Session : completion + error flag
+_TAG_RESULT = 1  # Worker → Session : return value (only if has_result)
+_TAG_CMD = 2  # Session → Worker : operation request
 ```
 
 The numeric values are arbitrary, the only invariant is that both sides agree on them. A new message flow should get a new tag rather than overload an existing one.
@@ -238,13 +239,13 @@ A `ManagerFactory` is provided to facilite the use of the `Manager`. It is the c
 
 ```python 
 self.manager = ManagerFactory(
-            obj_factory=lambda comm, _: Object(comm),
-            n_workers=4,
-            comm=comm,
-            has_global=True,
-            group_size=6,
-            extra_ops={"extra_operation": extra_operation},
-        ).launch()
+    obj_factory=lambda comm, _: Object(comm),
+    n_workers=4,
+    comm=comm,
+    has_global=True,
+    group_size=6,
+    extra_ops={"extra_operation": extra_operation},
+).launch()
 ``` 
 
 Rank 0 is always the `Manager` and runs no worker. Ranks `1 … size-1` are split into `n_workers`.  Then, the provided comm is split, with `comm.Split`, so :
@@ -266,9 +267,9 @@ factory = EngineManagerFactory(
     engine_style="lammps",
     engine_config=cfg,
     n_workers=4,
-    group_size=8,        
+    group_size=8,
     comm=MPI.COMM_WORLD,
-).launch() 
+).launch()
 ```
 
 The subclass overrides `_create_worker` to attach engines by mode: local gets one engine per worker on its `local_comm`, the asynchronous path, each worker running an independent engine on a small active volume, group gets a single engine built collectively on `group_comm` and shared across the group's workers, the synchronous path for whole-system operations, global gets no engine (`None`) and is reserved for `extra_ops`.
