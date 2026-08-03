@@ -8,7 +8,7 @@ from .system import System
 from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
-from .enginemanager.lmpi.pool import Manager
+from .manager import Manager
 import ase.geometry
 import numpy as np
 import pandas as pd
@@ -272,20 +272,20 @@ class Refinement:
                     if self.config.control.active_volume == True:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
-                            self.config,
-                            at_idx,
-                            current_positions.copy(),
-                            self.system.cell,
-                            self.system.types.copy(),
-                            neighbors.copy(),
-                            self.system.positions.copy()[neighbors.copy()],
+                            config=self.config,
+                            central_atom_idx=at_idx,
+                            positions=current_positions.copy(),
+                            cell=self.system.cell,
+                            types=self.system.types.copy(),
+                            saddle_idx=neighbors.copy(),
+                            saddle_positions=self.system.positions.copy()[neighbors.copy()],
                         )  # send copy not reference !
                     else:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
-                            self.config,
-                            at_idx,
-                            self.system.positions.copy(),
+                            config=self.config,
+                            central_atom_idx=at_idx,
+                            positions=self.system.positions.copy(),
                             types=self.system.types.copy(),
                             saddle_idx=neighbors.copy(),
                         )  # send copy not reference !

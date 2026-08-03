@@ -73,6 +73,14 @@ class ControlConfig(BaseModel):
 
     n_sessions: Optional[int] = Field(default=1, description="Number of Sessions")
 
+    group_size: Optional[int] = Field(
+        default=-1,
+        description=(
+            "Number of MPI worker ranks in the group communicator (replaces old global mode). "
+            "-1 means all worker ranks."
+        ),
+    )
+
     engine_use_rank_0: Optional[bool] = Field(
         default=False, description="Deprecated : If use mpi rank 0 or not."
     )
@@ -560,6 +568,10 @@ class LammpsConfig(BaseModel):
         default="1.0e-6 1.0e-8 10 10",
         description="Lammps minimize command with frozen core",
     )
+    verbosity: Optional[int] = Field(
+        default=None,
+        description="LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.",
+    )
 
 
 class IraConfig(BaseModel):
@@ -973,6 +985,13 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        return self
+
+    @model_validator(mode="after")
+    def set_lammps_verbosity_default(self) -> "Config":
+        """Propagate control.verbosity to lammps.verbosity when not explicitly set."""
+        if self.lammps is not None and self.lammps.verbosity is None:
+            self.lammps.verbosity = self.control.verbosity
         return self
 
 

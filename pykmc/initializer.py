@@ -34,6 +34,7 @@ class Initializer:
         """Initialize the entire KMC object before starting the simulation."""
         self.initialize_loggers()
         self.initialize_system()
+        self.initialize_engine()
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()
@@ -74,6 +75,30 @@ class Initializer:
         self.kmc.system = System.create_from_file(
             self.kmc.config.control.initial_config
         )
+
+    def initialize_engine(self) -> None:
+        """Start and initialize the engine workers (local and group)."""
+        system = self.kmc.system
+        self.kmc.manager.broadcast("start")
+        self.kmc.manager.broadcast("initialize_parameters")
+        self.kmc.manager.broadcast(
+            "initialize_system",
+            types=system.types,
+            positions=system.positions,
+            cell=system.cell,
+            pbc=system.pbc,
+        )
+        self.kmc.manager.broadcast("initialize_potential")
+        self.kmc.manager.submit_group("start")
+        self.kmc.manager.submit_group("initialize_parameters")
+        self.kmc.manager.submit_group(
+            "initialize_system",
+            types=system.types,
+            positions=system.positions,
+            cell=system.cell,
+            pbc=system.pbc,
+        )
+        self.kmc.manager.submit_group("initialize_potential")
 
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""
