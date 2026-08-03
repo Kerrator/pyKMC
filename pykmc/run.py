@@ -25,7 +25,11 @@ def main() -> None:
     # Config
     config = Config.from_ini_file(args.input)
     comm = MPI.COMM_WORLD
-    group_size = (comm.Get_size() - 1) if config.control.group_size == -1 else config.control.group_size
+    group_size = (
+        (comm.Get_size() - 1)
+        if config.control.group_size == -1
+        else config.control.group_size
+    )
     # KMC
     factory = EngineManagerFactory(
         engine_style=config.control.engine,

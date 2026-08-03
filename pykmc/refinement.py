@@ -278,7 +278,9 @@ class Refinement:
                             cell=self.system.cell,
                             types=self.system.types.copy(),
                             saddle_idx=neighbors.copy(),
-                            saddle_positions=self.system.positions.copy()[neighbors.copy()],
+                            saddle_positions=self.system.positions.copy()[
+                                neighbors.copy()
+                            ],
                         )  # send copy not reference !
                     else:
                         # add a job to manager queue
