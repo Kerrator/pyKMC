@@ -118,7 +118,6 @@ class KMC:
         """Run the simulation."""
         # Initialize the simulation, KMC attributes and minimize the system
         # self._initialize()
-        self.manager.initialize_sessions(self.config, self.system)
         self.minimize_system()
         self.neighbors_list = NeighborsList(
             self.system,
@@ -155,8 +154,7 @@ class KMC:
             else None
         )
         # Set new positions to all sessions/engine :
-        self.manager.use_local()
-        self.manager.set_all_positions(self.system.positions)
+        self.manager.broadcast("set_positions", positions=self.system.positions)
 
         if self.config.control.restart_file is None:
             # Write initial step to file
@@ -268,7 +266,6 @@ class KMC:
             )
 
             # == Update System ==
-            self.manager.use_global()
             (
                 result_reconstruction,
                 delta_t,
@@ -346,7 +343,6 @@ class KMC:
                     neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
                     # reconstruct event
-                    self.manager.use_global()
                     result_basin_reconstruction = self._reconstruction_active_event(
                         0, tmp_active_table
                     )
@@ -410,8 +406,7 @@ class KMC:
             total_time += delta_t * 10**-12  # time is in seconds
 
             ###=> Synchronise all lammps instances with new positions
-            self.manager.use_local()
-            self.manager.set_all_positions(positions=self.system.positions)
+            self.manager.broadcast("set_positions", positions=self.system.positions)
             ##=>Minimize
 
             # == Log informations ==
@@ -838,8 +833,8 @@ class KMC:
             self.loggers.info("log", ":=> Minimizing the system")
         else:
             self.loggers.info("log", ":=> Computing energies")
-        new_positions, total_energy = self.manager.global_minimize_with_results(
-            self.config, positions=positions, types=self.system.types
+        new_positions, total_energy = self.manager.group_minimize_with_results(
+            config=self.config, positions=positions, types=self.system.types
         )
         # TEST
         # future = self.manager.minimize_with_results(self.config, positions=positions)
@@ -849,7 +844,7 @@ class KMC:
         if self.config.control.restart_file is None:
             self.system.update_positions(new_positions)
         self.total_energy = total_energy
-        self.potential_energy = self.manager.global_get_potential_energy()
+        self.potential_energy = self.manager.group_get_potential_energy()
 
     def get_info_atomic_environments(
         self, new_environments: list[str]
@@ -969,5 +964,5 @@ class KMC:
     def _close(self) -> None:
         """Close the simulation."""
         self.loggers.info("log", ":=> End of simulation")
-        self.manager.close_all()
+        self.manager.shutdown()
         sys.exit()

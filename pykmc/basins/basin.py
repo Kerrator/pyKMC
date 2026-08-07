@@ -100,7 +100,6 @@ class BasinsGenericEvents:
         mapping = self.connectivity_table.reorder_states_index()
         self.states = {mapping[old]: val for old, val in self.states.items()}
         # Refine absorbing states
-        self.manager.use_local()
         result = self.refine_absorbing(system)
         if not result.is_ok():
             return result
@@ -388,8 +387,8 @@ class BasinsGenericEvents:
 
         if self.config.basin.style == "global":
             new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
-            min2_pos, _ = self.manager.global_minimize_with_results(
-                self.config, positions=new_system.positions.copy()
+            min2_pos, _ = self.manager.group_minimize_with_results(
+                config=self.config, positions=new_system.positions.copy()
             )
             new_system.update_positions(min2_pos)
 
@@ -491,22 +490,22 @@ class BasinsGenericEvents:
                 if self.config.control.active_volume == True:
                     # add a job to manager queue
                     future2 = self.manager.partn_refine(
-                        self.config,
-                        row["central_atom"],
-                        tmp_system.positions.copy(),
-                        tmp_system.cell,
-                        tmp_system.types.copy(),
-                        neighbors.copy(),
-                        saddle_positions.copy(),
+                        config=self.config,
+                        central_atom_idx=row["central_atom"],
+                        positions=tmp_system.positions.copy(),
+                        cell=tmp_system.cell,
+                        types=tmp_system.types.copy(),
+                        saddle_idx=neighbors.copy(),
+                        saddle_positions=saddle_positions.copy(),
                     )
                 # Move system do saddle positions
                 else:
                     tmp_system.update_positions(saddle_positions, atom_idx=neighbors)
                     # refine
                     future2 = self.manager.partn_refine(
-                        self.config,
-                        row["central_atom"],
-                        tmp_system.positions.copy(),
+                        config=self.config,
+                        central_atom_idx=row["central_atom"],
+                        positions=tmp_system.positions.copy(),
                         saddle_idx=neighbors.copy(),
                     )  # send copy not reference !
 

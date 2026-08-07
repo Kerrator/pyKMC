@@ -2,7 +2,7 @@
 
 from .result import EventSearchOutput
 from .system import System
-from .enginemanager.lmpi.pool import Manager
+from .manager import Manager
 from .log import LogKMC
 from .utils.geometry import translate
 import numpy as np
@@ -54,20 +54,26 @@ class EventSearch:
                 raise ValueError(
                     "Active Volume radius is smaller than cutoff radius. Please increase ract or decrease rcut"
                 )
-            futures = self.manager.partn_search(
-                config=self.config,
-                central_atom=central_atom_research_list,
-                positions=self.system.positions.copy(),
-                cell=self.system.cell.copy(),
-                types=self.system.types.copy(),
-            )
+            futures = [
+                self.manager.partn_search(
+                    config=self.config,
+                    central_atom_idx=atom,
+                    positions=self.system.positions.copy(),
+                    cell=self.system.cell.copy(),
+                    types=self.system.types.copy(),
+                )
+                for atom in central_atom_research_list
+            ]
         else:
-            futures = self.manager.partn_search(
-                config=self.config,
-                central_atom=central_atom_research_list,
-                positions=self.system.positions.copy(),
-                types=self.system.types.copy(),
-            )
+            futures = [
+                self.manager.partn_search(
+                    config=self.config,
+                    central_atom_idx=atom,
+                    positions=self.system.positions.copy(),
+                    types=self.system.types.copy(),
+                )
+                for atom in central_atom_research_list
+            ]
         for f in futures:
             self.results.append(f.result())
 

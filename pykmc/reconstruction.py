@@ -1,6 +1,6 @@
 """Module to reconstruct an event from saddle positions"""
 
-from pykmc.enginemanager.lmpi.pool import Manager
+from pykmc.manager import Manager
 from pykmc import Config
 from pykmc.result import Result, Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
 import numpy as np
@@ -72,8 +72,8 @@ class Reconstruction:
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
         # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-        min1_pos, _ = self.manager.global_minimize_with_results(
-            self.config, positions=tmp_positions, types=self.types
+        min1_pos, _ = self.manager.group_minimize_with_results(
+            config=self.config, positions=tmp_positions, types=self.types
         )
         #        min1_pos, _ = future.result()
 
@@ -102,8 +102,8 @@ class Reconstruction:
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
             # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
-            min2_pos, min2_etot = self.manager.global_minimize_with_results(
-                self.config, positions=tmp_positions, types=self.types
+            min2_pos, min2_etot = self.manager.group_minimize_with_results(
+                config=self.config, positions=tmp_positions, types=self.types
             )
             #            min2_pos, _ = future.result()
 
