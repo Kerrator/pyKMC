@@ -112,8 +112,8 @@ class ControlConfig(BaseModel):
     )
 
     max_physical_time: Optional[float] = Field(
-        default=None, 
-        description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit)."
+        default=None,
+        description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).",
     )
 
 

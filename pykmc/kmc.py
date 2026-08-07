@@ -519,8 +519,16 @@ class KMC:
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
                 self._close()
-            if self.config.control.max_physical_time is not None and self.config.control.max_physical_time * 1e-12 <= total_time:
-                self.loggers.info("log", ":=> Maximum physical time reached ({} ps).".format(self.config.control.max_physical_time))
+            if (
+                self.config.control.max_physical_time is not None
+                and self.config.control.max_physical_time * 1e-12 <= total_time
+            ):
+                self.loggers.info(
+                    "log",
+                    ":=> Maximum physical time reached ({} ps).".format(
+                        self.config.control.max_physical_time
+                    ),
+                )
                 self._close()
         self._save_restart_file(step, total_time)
         self._close()
