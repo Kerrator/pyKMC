@@ -42,8 +42,12 @@ def main() -> None:
     if manager is not None:  # On rank 0
         kmc = KMC(config)
         kmc.manager = manager
-        kmc._initialize()
-        kmc.run()
+        try:
+            kmc._initialize()
+            kmc.run()
+        except BaseException:
+            comm.Abort(1)
+            raise
 
 
 if __name__ == "__main__":
