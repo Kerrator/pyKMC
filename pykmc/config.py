@@ -111,6 +111,11 @@ class ControlConfig(BaseModel):
         description="Enable event selection bias. Requires a [Bias] section.",
     )
 
+    max_physical_time: Optional[float] = Field(
+        default=None, 
+        description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit)."
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""

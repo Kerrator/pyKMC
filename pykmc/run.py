@@ -45,6 +45,8 @@ def main() -> None:
         try:
             kmc._initialize()
             kmc.run()
+        except SystemExit:
+            pass
         except BaseException:
             comm.Abort(1)
             raise
