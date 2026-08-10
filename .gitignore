@@ -36,5 +36,12 @@ __pycache__/
 *__pycache__
 .DS_Store
 
-# Run debris : per-rank LAMMPS logs written into the cwd
+# Run artifacts :
+# Dropped into the cwd by mpirun test suites and simulation runs
+artn.out.*
 lammps.log.*
+zseed.dat
+basin_connectivity_*.txt
+basin_timing_*.txt
+# LAMMPS parses the input line "log flush" as "log <file>", leaving a file named "flush"
+flush
