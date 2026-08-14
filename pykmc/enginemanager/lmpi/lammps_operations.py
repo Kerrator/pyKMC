@@ -1095,6 +1095,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                             kmax_factor: float, atom_coloring_mode: str) -> "dict | None":
     import ira_mod
     import ase.geometry
+    from ...atomic_environment import match_types
     from ...utils.geometry import (
         transform_positions,
         push_towards,
@@ -1114,12 +1115,22 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
         try:
             coords1 = np.array(from_positions[neighbor_indices], copy=True)
 
-            if atom_coloring_mode == "full":
-                typ1 = list(np.array(from_types)[neighbor_indices])
-                typ2 = list(ref_initial_types) if ref_initial_types is not None else typ1
-            else:
-                typ1 = ["X"] * len(coords1)
-                typ2 = typ1
+            # Same labelling rule as the serial PSR path: each structure is
+            # labelled from its own species and sized to its own atom count.
+            # A reference event with no stored types is an explicit error, not
+            # a silent re-use of the target's list.
+            typ1 = match_types(
+                atom_coloring_mode,
+                list(np.array(from_types)[neighbor_indices]),
+                len(coords1),
+            )
+            try:
+                typ2 = match_types(
+                    atom_coloring_mode, ref_initial_types, len(ref_initial_positions)
+                )
+            except ValueError as exc:
+                proceed = {"ok": False, "error_type": "PSR_REFERENCE_TYPES_MISSING",
+                           "message": str(exc)}
 
             # Unwrap coords near cell boundaries
             pbc_arr = pbc if pbc is not None else np.array([True, True, True])
@@ -1136,12 +1147,13 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
             nat1 = len(coords1)
             nat2 = len(coords2)
 
-            ira = ira_mod.IRA()
-            try:
-                rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
-            except Exception:
-                proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
-                           "message": "IRA did not find a match"}
+            if proceed is None:
+                ira = ira_mod.IRA()
+                try:
+                    rmat, tr, perm, dh = ira.match(nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor)
+                except Exception:
+                    proceed = {"ok": False, "error_type": "PSR_NO_MATCH_FOUND",
+                               "message": "IRA did not find a match"}
 
             if proceed is None and dh > matching_score_thr:
                 proceed = {"ok": False,

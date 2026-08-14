@@ -22,6 +22,7 @@ from .result import (
     EventRefinementOutput,
 )
 from .point_set_registration import simple_ira, check_match
+from .atomic_environment import effective_types, match_types
 from .utils.geometry import align_positions_by_neighbors, compute_delr
 
 logger = logging.getLogger(__name__)
@@ -287,9 +288,15 @@ class ReferenceEventTable:
                     if abs(dfevent_forward["energy_barrier"]-dfevent_backward["energy_barrier"]) < 0.25 : #maybe same event so IRA check
                         ref_saddle = dfevent_forward['saddle_positions'].copy()
                         nat_ref = len(ref_saddle)
-                        typ_event = nat_ref*['X']
-                        typ_ref = typ_event
-                        result = simple_ira(nat_ref, typ_event, dfevent_backward["saddle_positions"].copy(), nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
+                        event_saddle = dfevent_backward["saddle_positions"].copy()
+                        nat_event = len(event_saddle)
+                        # Each structure carries its OWN labels: the forward and
+                        # backward rows are cut from different neighbour lists, so
+                        # they need not even have the same atom count.
+                        mode = self.config.atomicenvironment.atom_coloring_mode
+                        typ_event = match_types(mode, dfevent_backward.get("initial_types"), nat_event)
+                        typ_ref = match_types(mode, dfevent_forward.get("initial_types"), nat_ref)
+                        result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
                         #if match 
                         if result.is_ok() : 
@@ -357,14 +364,17 @@ class ReferenceEventTable:
         #if all same, check PSR  saddle_initial
         event_saddle = dfevent['saddle_positions']
         nat_event = len(event_saddle)
-        #TODO I guess we should save atoms types in reference table
-        typ_event = nat_event*['X']
+        # Species are constant through an event, so the initial-state types
+        # label the saddle cloud too -- both are cut from the same neighbour
+        # list, so row k is the same atom in both.
+        mode = self.config.atomicenvironment.atom_coloring_mode
+        typ_event = match_types(mode, dfevent.get("initial_types"), nat_event)
 
         for _, ev in subset.iterrows() :
 
             ref_saddle = ev['saddle_positions']
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event
+            typ_ref = match_types(mode, ev.get("initial_types"), nat_ref)
             result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
 
             if not result.is_ok() : #no match
@@ -550,11 +560,13 @@ class ReferenceEventTable:
             initial_types_forward = None
             initial_types_backward = None
 
-        # Symmetries :
+        # Symmetries : coloured in full mode, so no operation maps one species
+        # onto another (the reconstruction reuses these to place events).
         sym_matrix, sym_perm = unique_symmetries(
             min1_positions[neighbor_list_forwward],
             min2_positions[neighbor_list_forwward],
             self.config.ira.sym_thr,
+            types=effective_types(self.config, initial_types_forward),
         )
 
         #dr :
@@ -588,6 +600,7 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_backward],
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
+            types=effective_types(self.config, initial_types_backward),
         )
         dfevent_backward = pd.Series(
             {
