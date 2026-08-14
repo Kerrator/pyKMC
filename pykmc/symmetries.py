@@ -5,7 +5,10 @@ import numpy as np
 
 
 def unique_symmetries(
-    initial_positions: np.ndarray, final_positions: np.ndarray, sym_thr: float
+    initial_positions: np.ndarray,
+    final_positions: np.ndarray,
+    sym_thr: float,
+    types: "list[str] | None" = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Identify the unique symmetry operations of an event based on atomic displacements.
 
@@ -20,6 +23,11 @@ def unique_symmetries(
         Final atomic positions (N, 3).
     sym_thr : float
         Symmetry tolerance threshold for the `ira_mod` symmetry detection.
+    types : list[str] | None, optional
+        Per-atom element symbols, in the same order as `initial_positions`.
+        When given, SOFI only returns operations that map each species onto
+        itself, so a symmetry copy of the event can never put Ni where Cr was.
+        None (the default) keeps the species-blind grey behaviour.
 
     Returns
     -------
@@ -29,10 +37,26 @@ def unique_symmetries(
         Arrays of corresponding atom index permutations for each symmetry. Shape: (M, N),
         where M is the number of unique symmetries and N the number of atoms.
 
+    Raises
+    ------
+    ValueError
+        If `types` is given but does not have one entry per position.
+
     """
     # Find all symmetries of initial_positions
     nat = len(initial_positions)
-    typ = nat * [1]
+    # SOFI accepts either integer or string labels; grey uses one dummy integer.
+    typ: "list[int] | list[str]"
+    if types is None:
+        typ = nat * [1]
+    elif len(types) != nat:
+        raise ValueError(
+            "unique_symmetries got {} element types for {} positions".format(
+                len(types), nat
+            )
+        )
+    else:
+        typ = list(types)
 
     sofi = ira_mod.SOFI()
     sym = sofi.compute(nat, typ, initial_positions, sym_thr)  # sym data ira object

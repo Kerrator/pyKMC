@@ -647,7 +647,13 @@ class BasinsGenericEvents() :
             state_data = self.states.get(state_index)
             if state_data is None or state_data.system is None:
                 continue
-            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell)
+            are_equivalent = self.are_structures_equivalent(
+                system.positions,
+                state_data.system.positions,
+                cell=system.cell,
+                types1=self._state_types(system),
+                types2=self._state_types(state_data.system),
+            )
             if are_equivalent :
                 return state_index
         return -1
@@ -658,8 +664,73 @@ class BasinsGenericEvents() :
         box = np.diag(cell)
         return np.mod(positions, box)
 
-    def are_structures_equivalent(self, pos1, pos2, cell, tol=0.3):
+    def _state_types(self, system: "System") -> "list[str] | None":
+        """Species labels for state identity: real symbols in full colour, else None.
 
+        Uses the same defensive ``getattr`` as the rest of this module: a config
+        without the switch (and the lightweight stand-ins the unit tests build)
+        falls back to grey, i.e. positions-only identity.
+        """
+        mode = getattr(
+            getattr(self.config, "atomicenvironment", None),
+            "atom_coloring_mode",
+            "grey",
+        )
+        return getattr(system, "types", None) if mode == "full" else None
+
+    def _species_agree(
+        self,
+        types1: "list[str] | None",
+        types2: "list[str] | None",
+        matched: np.ndarray,
+    ) -> bool:
+        """Check that every geometrically matched atom pair is the same element.
+
+        ``matched[i]`` is the atom of structure 2 sitting where atom ``i`` of
+        structure 1 sits. Two states can occupy an identical set of sites and
+        still be different states -- a Ni hop and a Cr hop into the same vacancy
+        give the same point cloud with different atoms at the moved site.
+
+        Grey mode passes None and this is a no-op, so state identity stays
+        positions-only exactly as before.
+        """
+        if types1 is None or types2 is None:
+            return True
+        labels1 = np.asarray(types1)
+        labels2 = np.asarray(types2)
+        if len(labels1) != len(matched) or len(labels2) < len(matched):
+            return False
+        return bool(np.all(labels1 == labels2[matched]))
+
+    def are_structures_equivalent(
+        self,
+        pos1: np.ndarray,
+        pos2: np.ndarray,
+        cell: np.ndarray,
+        tol: float = 0.3,
+        types1: "list[str] | None" = None,
+        types2: "list[str] | None" = None,
+    ) -> bool:
+        """Test whether two states occupy the same sites with the same species.
+
+        Parameters
+        ----------
+        pos1, pos2 : np.ndarray
+            Atomic positions of the two states.
+        cell : np.ndarray
+            Simulation cell, used for the periodic nearest-neighbour query.
+        tol : float
+            Maximum per-atom site displacement still counted as the same site.
+        types1, types2 : list[str] | None
+            Per-atom element symbols of each state. None (grey) compares
+            positions only, exactly as before.
+
+        Returns
+        -------
+        bool
+            True when the states are the same state.
+
+        """
         if len(pos1) != len(pos2):
             return False
 
@@ -669,9 +740,12 @@ class BasinsGenericEvents() :
         wrapped1 = self._wrap_positions(pos1, cell)
         wrapped2 = self._wrap_positions(pos2, cell)
         tree2 = cKDTree(wrapped2, boxsize=box)
-        distances, _ = tree2.query(wrapped1, k=1)
+        distances, matched = tree2.query(wrapped1, k=1)
 
-        return np.max(distances) < tol
+        if np.max(distances) >= tol:
+            return False
+        # Same sites occupied; in full colour the same SPECIES must occupy them.
+        return self._species_agree(types1, types2, matched)
 
     def is_states_has_unknown_environments(self, state: StateData) : 
         if set(state.environment.atomic_environment_list).difference(self.known_environments) != set() :
@@ -1101,14 +1175,24 @@ class BasinsGenericEvents() :
                 tree = existing_trees[existing_idx]
                 if tree is not None:
                     wrapped_query = self._wrap_positions(system.positions, system.cell)
-                    distances, _ = tree.query(wrapped_query, k=1)
-                    if np.max(distances) < 0.3:
+                    distances, matched = tree.query(wrapped_query, k=1)
+                    # Same sites AND (in full colour) the same species on them.
+                    if np.max(distances) < 0.3 and self._species_agree(
+                        self._state_types(system),
+                        self._state_types(self.states[existing_idx].system),
+                        matched,
+                    ):
                         match = existing_idx
                         break
                 else:
                     state_data = self.states[existing_idx]
-                    if self.are_structures_equivalent(system.positions, state_data.system.positions,
-                                                      cell=system.cell):
+                    if self.are_structures_equivalent(
+                        system.positions,
+                        state_data.system.positions,
+                        cell=system.cell,
+                        types1=self._state_types(system),
+                        types2=self._state_types(state_data.system),
+                    ):
                         match = existing_idx
                         break
 
@@ -1124,9 +1208,13 @@ class BasinsGenericEvents() :
                                 and len(fp_other) == len(fp_new)
                                 and np.max(np.abs(fp_other - fp_new)) > fp_tol):
                             continue
-                        if self.are_structures_equivalent(system.positions,
-                                                          new_systems[other_idx].positions,
-                                                          cell=system.cell):
+                        if self.are_structures_equivalent(
+                            system.positions,
+                            new_systems[other_idx].positions,
+                            cell=system.cell,
+                            types1=self._state_types(system),
+                            types2=self._state_types(new_systems[other_idx]),
+                        ):
                             match = other_idx
                             break
 

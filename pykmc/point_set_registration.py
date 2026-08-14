@@ -1,9 +1,12 @@
 """Manages Point Set Registration (shape matching) methods."""
 
+from typing import cast
+
 import ira_mod
 import numpy as np
 from .result import Result, ErrorInfo, PSROutput, Ok, Err, ErrorType
-from .config import Config 
+from .atomic_environment import match_types
+from .config import Config
 from .system import System 
 import pandas as pd 
 from .neighbors_list import NeighborsList
@@ -84,19 +87,31 @@ class PointSetRegistration:
         coords1 = self.system.positions[neighbor_list]
 
 
-        if self.config.atomicenvironment.atom_coloring_mode == "full":
-            # Full colour: match element types as well as geometry.
-            typ1 = list(np.array(self.system.types)[neighbor_list])
-            typ2 = (
-                list(self.dfevent.at["initial_types"])
-                if "initial_types" in self.dfevent.index
-                and self.dfevent.at["initial_types"] is not None
-                else typ1
+        mode = self.config.atomicenvironment.atom_coloring_mode
+        # Each structure is labelled from its OWN species, never from the
+        # other's: a reference event with no stored types cannot be coloured,
+        # and borrowing the target's list would invent its chemistry.
+        typ1 = match_types(
+            mode, list(np.array(self.system.types)[neighbor_list]), len(coords1)
+        )
+        # .at[] widens to the pandas scalar union; the column holds the event's
+        # per-atom symbols (or None), and match_types re-validates it anyway.
+        stored_types = cast(
+            "list[str] | None",
+            self.dfevent.at["initial_types"]
+            if "initial_types" in self.dfevent.index
+            else None,
+        )
+        try:
+            typ2 = match_types(mode, stored_types, nat2)
+        except ValueError as exc:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.PSR_REFERENCE_TYPES_MISSING,
+                    message="Reference event cannot be colour-matched",
+                    details=str(exc),
+                )
             )
-        else:
-            # GREY ALLOY: all atoms treated as identical
-            typ1 = ['X']*len(coords1)
-            typ2 = typ1
 
         # unwrap if close to cell limits :
         alat = self.system.cell[0][0]

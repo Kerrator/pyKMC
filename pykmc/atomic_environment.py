@@ -4,7 +4,85 @@ from __future__ import annotations
 
 import numpy as np
 from .environments import cna, coordination, graph, identify_diamond, region
-from .config import RegionConfig
+from .config import Config, RegionConfig
+
+
+def effective_types(
+    config: Config, types: list[str] | None
+) -> list[str] | None:
+    """Return ``types`` only when full-colour classification is enabled.
+
+    Centralises the grey/full gate so the species-blind default resolves to
+    None at every call site, leaving matching species-blind.
+
+    Parameters
+    ----------
+    config : Config
+        The parsed configuration tree.
+    types : list[str] | None
+        Per-atom element symbols (e.g. ``system.types`` or a local subset).
+
+    Returns
+    -------
+    list[str] | None
+        ``types`` in full-colour mode, otherwise None.
+
+    """
+    return types if config.atomicenvironment.atom_coloring_mode == "full" else None
+
+
+def match_types(
+    atom_coloring_mode: str, types: list[str] | None, nat: int
+) -> list[str]:
+    """Return the per-atom labels for one IRA/SOFI call, sized to its structure.
+
+    Grey mode labels every atom identically, so matching is species-blind. Full
+    colour hands IRA the real element symbols, so a match can never map one
+    species onto another. The labels are always sized to the structure they
+    describe: reusing the *other* structure's list relabels atoms with foreign
+    species in a foreign index order, which IRA accepts without complaint.
+
+    Takes the mode as a string rather than a `Config` so the engine-side
+    reconstruction worker -- which only receives the mode -- can share it.
+
+    Parameters
+    ----------
+    atom_coloring_mode : str
+        ``"grey"`` or ``"full"``.
+    types : list[str] | None
+        Element symbols of this structure's atoms, in its own index order.
+    nat : int
+        Number of atoms in the structure being labelled.
+
+    Returns
+    -------
+    list[str]
+        Per-atom labels of length ``nat``.
+
+    Raises
+    ------
+    ValueError
+        In full colour, when ``types`` is missing or the wrong length. Both
+        mean the caller cannot colour this structure, and guessing would
+        fabricate chemistry rather than fail.
+
+    """
+    if atom_coloring_mode != "full":
+        return ["X"] * nat
+    if types is None:
+        raise ValueError(
+            "atom_coloring_mode = 'full' needs per-atom element types, but none "
+            "are stored for this structure ({} atoms). A reference table built "
+            "under 'grey' stores no types: rebuild it under 'full', or run in "
+            "'grey'.".format(nat)
+        )
+    if len(types) != nat:
+        raise ValueError(
+            "atom_coloring_mode = 'full' got {} element types for a structure of "
+            "{} atoms. The types must belong to this structure, in its own index "
+            "order.".format(len(types), nat)
+        )
+    return list(types)
 
 
 class AtomicEnvironment:
@@ -197,7 +275,7 @@ class AtomicEnvironment:
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
 
-        # Compute graph topo for all non-crystal atoms
+        # Compute graph topo for all non-crystal atoms (coloured in full mode)
         list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx, types=self.types)
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
@@ -219,9 +297,11 @@ class AtomicEnvironment:
                     tmp += neighbors_list[idx]
             non_crystal_idx += tmp
             non_crystal_idx = list(set(non_crystal_idx))
-        # Compute graph topo for all non cristalline atoms
-        list_graphs_hash = graph(neighbors_list, environment_list, non_crystal_idx)
+        # Compute graph topo for all non cristalline atoms (coloured in full mode)
+        list_graphs_hash = graph(
+            neighbors_list, environment_list, non_crystal_idx, types=self.types
+        )
         for i, idx in enumerate(non_crystal_idx):
             list_hash[idx] = list_graphs_hash[i]
-        
+
         return list_hash
