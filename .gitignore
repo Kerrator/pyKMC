@@ -35,3 +35,6 @@ __pycache__/
 *requires.txt
 *__pycache__
 .DS_Store
+
+# Run debris : per-rank LAMMPS logs written into the cwd
+lammps.log.*
