@@ -70,7 +70,21 @@ class BasinsGenericEvents() :
         self.explored_states = None #List of state that we already explored
         self.states: dict[int, StateData] = {}  #Dictionnary of StateDate
         self.known_environments = known_environments 
-        self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
+        #Refined/fallback saddle per *transition row*, keyed by
+        #(from_state, exit_state, central_atom, event_idx, sym). Several rows can reach
+        #the same exit state after deduplication (the same hop catalogued from different
+        #central atoms); their saddles are ordered by *different* neighbour shells, so a
+        #(from_state, exit_state) key silently overwrote one with the other and the exit
+        #reconstruction then read scattered saddle rows (RECONSTRUCTION_EVENT_NOT_CONTAINED).
+        self.absorbing_saddle_positions: dict[tuple[int, int, int, int, int], np.ndarray] = {}
+        #state_index -> (from_state, central_atom, event_idx, sym) of the row whose reconstruction
+        #CREATED the stored geometry of that state; _select_exit_row prefers it so the saddle and
+        #final_positions handed to KMC come from the same reconstruction.
+        self._creating_row: dict[int, tuple[int, int, int, int]] = {}
+        #exit states excluded by _skip_refinement (no saddle for that row) as opposed to a failed
+        #reconstruction; reconciled at the end of refine_absorbing once every row has been refined.
+        self._refine_excluded: set[int] = set()
+        self._failed_exit_states: set[int] = set()
 
     def detection(self, params) -> bool : 
         """Utility method."""
@@ -109,6 +123,9 @@ class BasinsGenericEvents() :
         self._deferred_states = {mapping.get(s, s) for s in self._deferred_states}
         self._deferred_systems = {mapping.get(s, s): v for s, v in self._deferred_systems.items()}
         self._state_fingerprints = {mapping.get(s, s): fp for s, fp in self._state_fingerprints.items()}
+        self._creating_row = {mapping.get(s, s): (mapping.get(r[0], r[0]), r[1], r[2], r[3]) for s, r in self._creating_row.items()}
+        self._refine_excluded = {mapping.get(s, s) for s in self._refine_excluded}
+        self._failed_exit_states = {mapping.get(s, s) for s in self._failed_exit_states}
         #Normalize the transient flag by index range. reorder_states_index() numbers the
         #transient states first (0..n_transient-1) and absorbing states after, but the
         #per-row 'transient' flag set during exploration can be stale after change_state_index()
@@ -145,23 +162,87 @@ class BasinsGenericEvents() :
         n_transient, _ = self._connectivity_state_counts()
         self.connectivity_table.df["transient"] = self.connectivity_table.df["state_connexion"].apply(lambda x: x < n_transient)
 
-        from_state, event_idx, central_atom, sym_idx, is_transient = self.connectivity_table.get_transition_to_state(target_state=exit_state)
+        while True :
+            row_result = self._select_exit_row(exit_state)
+            if row_result.is_ok() :
+                break
+            #No row into this exit carries a saddle: condition the landing draw on it
+            #(like _resolve_exit_state does for a failed materialization) and redraw.
+            logger.warning("[Basin] exit state %d has no saddle (%s); redrawing exit", exit_state, row_result.err_value().message)
+            self._exit_excluded_states.add(exit_state)
+            redrawn = self.selector.select_absorbing_state(t_exit, excluded_states=self._exit_excluded_states)
+            if redrawn is None :
+                return Err(ErrorInfo(
+                    type=ErrorType.BASIN_NO_VIABLE_EXIT,
+                    message="all absorbing exits are excluded or carry no saddle"))
+            result = self._resolve_exit_state(t_exit, redrawn)
+            if not result.is_ok() :
+                return result
+            exit_state = result.ok_value()
+            n_transient, _ = self._connectivity_state_counts()
+            self.connectivity_table.df["transient"] = self.connectivity_table.df["state_connexion"] < n_transient
+        from_state, event_idx, central_atom, sym_idx, energy_barrier, saddle_positions = row_result.ok_value()
         #Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
 
         neighbors = self.states[from_state].neighbors_list.get_neighbors("rcut", central_atom)
         return Ok(BasinOutput(initial_system_positions=self.states[from_state].system.positions,
                               central_atom=central_atom,
-                              saddle_positions=self.absorbing_saddle_positions[(from_state, exit_state)],
+                              saddle_positions=saddle_positions,
                               final_positions=self.states[exit_state].system.positions[neighbors],
                               neighbors=neighbors,
-                              energy_barrier= self.connectivity_table.df[(self.connectivity_table.df["state"] == from_state) & (self.connectivity_table.df["state_connexion"] == exit_state)].iloc[0]["dE_forward"],
+                              energy_barrier=energy_barrier,
                               k_tot = k_tot,
                               t_exit = t_exit,
                               exit_state = exit_state,
                               from_state = from_state,
                               num_reference_event= event_idx))
         
+
+    @staticmethod
+    def _saddle_key(from_state: int, exit_state: int, central_atom: int, event_idx: int, sym: int) -> tuple[int, int, int, int, int] :
+        """Key of ``absorbing_saddle_positions`` for one connectivity row."""
+        return (int(from_state), int(exit_state), int(central_atom), int(event_idx), int(sym))
+
+    def _select_exit_row(self, exit_state: int) -> "Result[tuple[int, int, int, int, float, np.ndarray], ErrorInfo]" :
+        """Pick the transition row used to leave the basin into ``exit_state``, with its saddle.
+
+        Candidate rows are every ``state -> exit_state`` row of the connectivity table
+        (there can be several after deduplication), in table order with the smallest
+        from-state first -- the same preference ``get_transition_to_state`` applies. The
+        first row that has a stored saddle wins, so the from-state, central atom, event,
+        barrier, and saddle handed to the KMC exit reconstruction all describe the *same*
+        transition and the saddle rows are ordered by that row's neighbour shell.
+
+        Returns
+        -------
+        Result[tuple, ErrorInfo]
+            Ok((from_state, event_idx, central_atom, sym, dE_forward, saddle_positions)),
+            or Err(BASIN_NO_VIABLE_EXIT) when no row into ``exit_state`` has a saddle.
+
+        """
+        rows = self.connectivity_table.get_transition_to_state(target_state=exit_state, as_tuples=False, return_all=True)
+        rows = rows.sort_values("state", kind="stable")
+        #The row whose reconstruction produced the stored geometry of exit_state comes first:
+        #its saddle and the state's positions are the same relaxation. After a dedup merge the
+        #table-order-first row can be a grafted sibling whose min2 merely matched within tolerance.
+        creating = getattr(self, "_creating_row", {}).get(exit_state)
+        if creating is not None :
+            c_from, c_central, c_event, c_sym = creating
+            key = self._saddle_key(c_from, exit_state, c_central, c_event, c_sym)
+            saddle = self.absorbing_saddle_positions.get(key)
+            if saddle is not None :
+                own = rows[(rows["state"] == c_from) & (rows["central_atom"] == c_central) & (rows["event_connexion"] == c_event) & (rows["sym"] == c_sym)]
+                if len(own) > 0 :
+                    rows = pd.concat([own.iloc[[0]], rows.drop(own.index[[0]])])
+        for _, row in rows.iterrows() :
+            key = self._saddle_key(row["state"], exit_state, row["central_atom"], row["event_connexion"], row["sym"])
+            saddle = self.absorbing_saddle_positions.get(key)
+            if saddle is not None :
+                return Ok((int(row["state"]), int(row["event_connexion"]), int(row["central_atom"]), int(row["sym"]), float(row["dE_forward"]), saddle))
+        return Err(ErrorInfo(
+            type=ErrorType.BASIN_NO_VIABLE_EXIT,
+            message="no transition row into exit state {} carries a saddle".format(exit_state)))
 
     def _initialize(self, system) -> None: 
         """ 
@@ -249,7 +330,7 @@ class BasinsGenericEvents() :
                     continue #Skip the rest
 
                 #add state
-                self._add_state(state_index=to_explore, system=new_system, transient=is_transient)
+                self._add_state(state_index=to_explore, system=new_system, transient=is_transient, creating_row=(from_state, central_atom, event_idx, sym_idx))
 
                 #ENSURE FULL STATE TO EXPLORE
                 t0 = time.perf_counter()
@@ -486,12 +567,14 @@ class BasinsGenericEvents() :
         selectable exit (the exit event is re-reconstructed and validated by KMC
         after the basin anyway); without one the exit is excluded from the draw.
         """
-        state_connexion = int(self.connectivity_table.df.loc[idx].at["state_connexion"])
-        from_state = int(self.connectivity_table.df.loc[idx].at["state"])
+        row = self.connectivity_table.df.loc[idx]
+        state_connexion = int(row.at["state_connexion"])
+        from_state = int(row.at["state"])
         if ctx is not None and ctx.get("fallback_saddle") is not None:
-            self.absorbing_saddle_positions[(from_state, state_connexion)] = ctx["fallback_saddle"]
+            self.absorbing_saddle_positions[self._saddle_key(from_state, state_connexion, row.at["central_atom"], row.at["event_connexion"], row.at["sym"])] = ctx["fallback_saddle"]
         else:
             self._exit_excluded_states.add(state_connexion)
+            getattr(self, "_refine_excluded", set()).add(state_connexion)
         logger.warning(
             "[Basin] refine_absorbing: row %d (exit state %d) kept unrefined barrier (%s)",
             idx, state_connexion, reason,
@@ -595,15 +678,14 @@ class BasinsGenericEvents() :
             k = self._absorbing_rate(dE)
 
             #also save saddle positions refined 
-            idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
-            from_state_for_saddle = self.connectivity_table.df.loc[idx].at["state"]
-            central_atom = self.connectivity_table.df.loc[idx].at["central_atom"]
-            #self.absorbing_saddle_positions[idx_state] = result.ok_value().saddle_positions[self.states[idx_state].neighbors_list.get_neighbors("rcut", central_atom)]
-            self.absorbing_saddle_positions[(from_state_for_saddle, idx_state)] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
+            row = self.connectivity_table.df.loc[idx]
+            key = self._saddle_key(row.at["state"], row.at["state_connexion"], row.at["central_atom"], row.at["event_connexion"], row.at["sym"])
+            self.absorbing_saddle_positions[key] = result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             # update connectivity table row
             self.connectivity_table.df.loc[idx, "dE_forward"] = dE
             self.connectivity_table.df.loc[idx, "k_forward"] = k
 
+        self._reconcile_refine_exclusions()
         if n_skipped > 0:
             n_total = int((self.connectivity_table.df["transient"] == False).sum())  # noqa: E712
             logger.warning(
@@ -612,6 +694,20 @@ class BasinsGenericEvents() :
             )
         return Ok(None)
 
+
+    def _reconcile_refine_exclusions(self) -> None :
+        """Re-admit exit states that _skip_refinement excluded but another row supplied a saddle for.
+
+        Saddles are per row, so one row into E failing PSR must not make E unselectable when a
+        sibling row into E refined fine. States excluded because their reconstruction failed
+        (_mark_failed_absorbing) stay excluded.
+        """
+        have_saddle = {key[1] for key in self.absorbing_saddle_positions}
+        for state in list(self._refine_excluded) :
+            if state in have_saddle and state not in self._failed_exit_states :
+                self._exit_excluded_states.discard(state)
+                self._refine_excluded.discard(state)
+                logger.info("[Basin] refine_absorbing: exit state %d re-admitted (another row into it has a saddle)", state)
 
     def is_new_state(self, system) :
         """Return the index of an equivalent known state, or -1 if the state is new.
@@ -679,8 +775,14 @@ class BasinsGenericEvents() :
         else : 
             return False
 
-    def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False, full=False ) :
-        """Add a new state in the `self.states` dictionnary."""
+    def _add_state(self, state_index, system=None, transient=True, applicable_events=None, visited=False, full=False, creating_row: "tuple[int, int, int, int] | None" = None ) :
+        """Add a new state in the `self.states` dictionnary.
+
+        ``creating_row`` = (from_state, central_atom, event_idx, sym) of the connectivity row whose
+        reconstruction produced ``system`` (see ``_select_exit_row``).
+        """
+        if creating_row is not None :
+            self._creating_row[state_index] = (int(creating_row[0]), int(creating_row[1]), int(creating_row[2]), int(creating_row[3]))
         #to fit typing 
         neighbors_list  = []
         atomic_environment = []
@@ -807,7 +909,7 @@ class BasinsGenericEvents() :
             self.connectivity_table.change_state_index(current_index=state_idx, new_index=existing_state)
             return Ok(existing_state)
 
-        self._add_state(state_index=state_idx, system=new_system, transient=is_transient)
+        self._add_state(state_index=state_idx, system=new_system, transient=is_transient, creating_row=(from_state, central_atom, event_idx, sym_idx))
         self.states[from_state].release_heavy_objects()
         return Ok(state_idx)
 
@@ -870,6 +972,7 @@ class BasinsGenericEvents() :
         conditioned on 'not a failed state'."""
         self.connectivity_table.change_state_to_absorbing(state_idx)
         self._exit_excluded_states.add(state_idx)
+        getattr(self, "_failed_exit_states", set()).add(state_idx)
         self._n_failed += 1
         if state_idx in self.states_to_explore:
             self.states_to_explore.remove(state_idx)
@@ -880,6 +983,14 @@ class BasinsGenericEvents() :
             state_idx,
             err,
         )
+
+    def _transplant_saddles(self, old_state: int, new_state: int) -> None :
+        """Re-key the saddles of rows into ``old_state`` onto ``new_state`` (lazy merge), never overwriting."""
+        for key in list(self.absorbing_saddle_positions):
+            if key[1] == old_state :
+                new_key = (key[0], int(new_state), key[2], key[3], key[4])
+                if new_key not in self.absorbing_saddle_positions :
+                    self.absorbing_saddle_positions[new_key] = self.absorbing_saddle_positions[key]
 
     def _materialize_exit_state(self, exit_state: int) -> "Result[int, ErrorInfo]" :
         """Ensure the selected exit state has a System, materializing lazily if needed.
@@ -902,9 +1013,7 @@ class BasinsGenericEvents() :
                 #Never transplant a saddle onto an excluded state: its rows belong
                 #to a different transition geometry.
                 if existing not in self._exit_excluded_states:
-                    for (fs, es) in list(self.absorbing_saddle_positions):
-                        if es == exit_state and (fs, existing) not in self.absorbing_saddle_positions:
-                            self.absorbing_saddle_positions[(fs, existing)] = self.absorbing_saddle_positions[(fs, es)]
+                    self._transplant_saddles(exit_state, existing)
                 return Ok(existing)
             self._add_state(state_index=exit_state, system=new_system, transient=False)
             return Ok(exit_state)
@@ -917,9 +1026,7 @@ class BasinsGenericEvents() :
         materialized = result.ok_value()
         if materialized != exit_state:
             if materialized not in self._exit_excluded_states:
-                for (fs, es) in list(self.absorbing_saddle_positions):
-                    if es == exit_state and (fs, materialized) not in self.absorbing_saddle_positions:
-                        self.absorbing_saddle_positions[(fs, materialized)] = self.absorbing_saddle_positions[(fs, es)]
+                self._transplant_saddles(exit_state, materialized)
         else:
             self.connectivity_table.change_state_to_absorbing(exit_state)
             if exit_state in self.states:
@@ -1220,7 +1327,8 @@ class BasinsGenericEvents() :
                 continue
 
             is_transient = transition_info[state_idx][4]
-            self._add_state(state_index=state_idx, system=reconstructed[state_idx], transient=is_transient)
+            t_from, t_event, t_central, t_sym = transition_info[state_idx][:4]
+            self._add_state(state_index=state_idx, system=reconstructed[state_idx], transient=is_transient, creating_row=(t_from, t_central, t_event, t_sym))
 
             t0 = time.perf_counter()
             self.states[state_idx].ensure_full_state(self.config)
