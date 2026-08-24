@@ -19,7 +19,8 @@ from .result import (
     EventRefinementOutput,
     ReconstructionOutput,
     Err,
-    Ok
+    Ok,
+    BasinOutput
 )
 import numpy as np
 from ase.io import write
@@ -349,6 +350,7 @@ class KMC:
 
                     else :
                        self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
+                       self._dump_basin_exit_failure(step, basin, result_basin.ok_value(), result_basin_reconstruction.err_value())
                        self.system.update_positions(basin.states[0].system.positions)
                        self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                 else :
@@ -737,6 +739,54 @@ class KMC:
                 self.loggers.error("log", "All event reconstuctions failed.")
                 self._close()
             return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
+
+    def _dump_basin_exit_failure(self, step: int, basin: BasinsGenericEvents, out: BasinOutput, err: ErrorInfo) -> None :
+        """DEBUG (alloy-basin diagnosis 2026-08-24): dump the geometry behind a rejected basin exit.
+
+        Writes basin_exit_fail_<step>.npz (from/exit full positions, types, neighbors, saddle,
+        central atom) and logs every atom in the exit shell whose from->exit displacement exceeds
+        psr.matching_score_thr with its species and radius from the central atom, plus the
+        connectivity rows that point at the exit state.
+        """
+        try:
+            from pykmc.utils.geometry import per_atom_displacement, minimum_image_distance
+            from_state, exit_state, central = out.from_state, out.exit_state, out.central_atom
+            neighbors = np.asarray(out.neighbors, dtype=int)
+            pos_from = np.asarray(basin.states[from_state].system.positions)
+            pos_exit = np.asarray(basin.states[exit_state].system.positions)
+            types = np.asarray(self.system.types)
+            cell = self.system.cell
+            disp = per_atom_displacement(pos_from[neighbors], pos_exit[neighbors], cell, None)
+            thr = self.config.psr.matching_score_thr
+            cpos = pos_from[central]
+            rows = basin.connectivity_table.df
+            rows_exit = rows[rows["state_connexion"] == exit_state]
+            self.loggers.info("log", "[BasinExitDebug] step {} from_state {} exit_state {} central {} ({}) n_neighbors {} err {}".format(step, from_state, exit_state, central, types[central], len(neighbors), err.type))
+            self.loggers.info("log", "[BasinExitDebug] rows -> exit_state:\n{}".format(rows_exit[["state", "state_connexion", "event_connexion", "central_atom", "sym", "transient", "dE_forward", "k_forward"]].to_string()))
+            order = np.argsort(-disp)
+            for k in order[:12]:
+                if disp[k] <= thr and k != order[0]:
+                    break
+                aid = int(neighbors[k])
+                self.loggers.info("log", "[BasinExitDebug]   atom {:6d} {:2s} disp {:7.3f} A  r_from {:6.2f} r_exit {:6.2f} A".format(aid, types[aid], float(disp[k]), float(minimum_image_distance(cpos, pos_from[aid], cell)), float(minimum_image_distance(cpos, pos_exit[aid], cell))))
+            #saddle rows are shell-ordered like `neighbors`; a misordered saddle shows up as
+            #many atoms displaced from min1 and a large radius at the saddle
+            sad = np.asarray(out.saddle_positions)
+            if len(sad) == len(neighbors):
+                disp_sad = per_atom_displacement(pos_from[neighbors], sad, cell, None)
+                r_sad = np.array([minimum_image_distance(cpos, sad[k], cell) for k in range(len(neighbors))])
+                self.loggers.info("log", "[BasinExitDebug]   saddle shell: {} atoms displaced > thr from min1 (max {:.2f} A); max radius at saddle {:.2f} A; central row disp {:.2f}".format(int(np.sum(disp_sad > thr)), float(disp_sad.max()), float(r_sad.max()), float(disp_sad[np.where(neighbors == central)[0][0]]) if central in neighbors else -1.0))
+            else:
+                self.loggers.info("log", "[BasinExitDebug]   saddle array len {} != n_neighbors {}".format(len(sad), len(neighbors)))
+            #full-system displacement outside the shell (should be ~0 for a single event)
+            disp_all = per_atom_displacement(pos_from, pos_exit, cell, None)
+            outside = np.setdiff1d(np.where(disp_all > thr)[0], neighbors)
+            self.loggers.info("log", "[BasinExitDebug]   atoms moved > thr outside the shell: {} {}".format(len(outside), [(int(a), types[a], round(float(disp_all[a]), 2)) for a in outside[:10]]))
+            self._n_basin_exit_dumps = getattr(self, "_n_basin_exit_dumps", 0) + 1
+            if self._n_basin_exit_dumps <= 5 :  # bound the debris: ~2 MB per dump
+                np.savez("basin_exit_fail_{}.npz".format(step), pos_from=pos_from, pos_exit=pos_exit, types=types, neighbors=neighbors, central=central, saddle=np.asarray(out.saddle_positions), cell=cell, from_state=from_state, exit_state=exit_state)
+        except Exception as exc:  # debug only: never let the dump kill the run
+            self.loggers.info("log", "[BasinExitDebug] dump failed: {!r}".format(exc))
 
     def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
