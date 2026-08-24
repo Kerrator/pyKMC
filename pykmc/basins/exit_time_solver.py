@@ -63,7 +63,12 @@ class BisectionSolver() :
         self.t_min = 0
         self.t_exit = -1
 
-        #Compute only one time eigen values/vector of M when using spectral decomposition
+        #Compute only one time eigen values/vector of M when using spectral decomposition.
+        #The expm path must still carry the (unused) attributes: solve_master_equation_last_value
+        #receives them unconditionally, and a missing attribute crashed spectral_decomposition=False.
+        self.Valeig: "np.ndarray | None" = None
+        self.Veceig: "np.ndarray | None" = None
+        self.Veceiginv: "np.ndarray | None" = None
         if self.spectral_decomposition == True : 
             self.Valeig, self.Veceig = eig(self.M)
             self.Veceiginv = inv(self.Veceig)
@@ -176,16 +181,26 @@ class BisectionSolver() :
         self.t_exit = t_mid
         return Ok(None)
 class QSDSolver():
-    """Analytical exit time solver based on quasi-stationary distribution (QSD).
+    """Analytical exit time solver based on the mean first-passage time (MFPT).
 
     Used when the reduced generator matrix is stiff: transient mixing rates
     are many orders of magnitude larger than absorbing escape rates, making
     the numerical matrix exponential unreliable.
 
-    In this regime the system rapidly equilibrates among transient states
-    to a quasi-stationary distribution pi_qs, then escapes exponentially
-    with effective rate k_eff = pi_qs . gamma, where gamma[i] is the total
-    absorbing escape rate from transient state i.
+    With Q the transient block of M (columns = out-rates, dp/dt = -Q p), the
+    expected time spent in each transient state before absorption when starting
+    from p0 is tau = Q^-1 p0[:n], and the MFPT is sum(tau). The exit time is
+    drawn from an exponential of mean MFPT (exact in the stiff limit, where the
+    first-passage-time distribution is exponential), i.e. k_eff = 1 / MFPT.
+    ``qsd`` holds tau normalised to one: in the stiff limit it is the
+    quasi-stationary distribution, and in general weighting the absorbing
+    rates by it (as ``FPTASelector.select_absorbing_state`` does) gives the
+    exact absorption probabilities sum_i tau_i k_{i->j}.
+
+    This replaces the earlier closed-chain stationary distribution, which was
+    only valid when *every* transient state mixes faster than *any* escape:
+    a slow internal passage (fast 0<->1, slow 1<->2, escape only from 2) made
+    it underestimate the exit time by orders of magnitude.
 
     Parameters
     ----------
@@ -219,32 +234,30 @@ class QSDSolver():
         """
         n = len(self.M) - 1  # number of transient states
 
-        # Absorbing escape rates: gamma[i] = -M[-1, i] (positive)
-        gamma = -self.M[-1, :n]
+        # Open transient generator (diagonal keeps the absorbing leakage) and the
+        # transient part of the entry distribution.
+        Q = self.M[:n, :n]
+        p0_t = np.array(self.p0[:n], dtype=np.float64)
 
-        # Build closed transient generator Q_tt
-        # Start from the transient block, then adjust diagonal to remove
-        # the absorbing leakage (make columns sum to zero within transient block)
-        Q_tt = self.M[:n, :n].copy()
-        for i in range(n):
-            Q_tt[i, i] -= gamma[i]
-
-        # Find QSD: null vector of Q_tt via SVD (numerically stable)
-        U, s, Vh = np.linalg.svd(Q_tt)
-        null_vec = np.real(Vh[-1, :])  # last row = smallest singular value
-        null_vec = np.abs(null_vec)
-        self.qsd = null_vec / np.sum(null_vec)
-
-        # Effective escape rate
-        self.k_eff = float(np.dot(self.qsd, gamma))
-
-        logger.info("[FPTA] QSD solver: k_eff=%.6e, qsd_min=%.6e, qsd_max=%.6e",
-                    self.k_eff, np.min(self.qsd), np.max(self.qsd))
-
-        if self.k_eff <= 0:
+        # Mean occupation times tau = Q^-1 p0 ; a singular Q means no absorbing
+        # escape at all (or an unreachable escape), so report instead of guessing.
+        try:
+            tau = np.linalg.solve(Q.astype(np.float64), p0_t)
+        except np.linalg.LinAlgError:
+            tau = np.full(n, np.nan)
+        mfpt = float(np.sum(tau))
+        if not np.isfinite(mfpt) or mfpt <= 0 or np.any(tau < -1e-12 * abs(mfpt)):
+            self.qsd = None
+            self.k_eff = 0.0
             return Err(ErrorInfo(
                 type=ErrorType.BASIN_TEXIT_NOT_FOUND,
                 message="QSD solver: k_eff <= 0, no absorbing escape possible"))
+
+        self.qsd = np.maximum(tau, 0.0) / mfpt
+        self.k_eff = 1.0 / mfpt
+
+        logger.info("[FPTA] QSD solver: k_eff=%.6e (MFPT=%.6e), qsd_min=%.6e, qsd_max=%.6e",
+                    self.k_eff, mfpt, np.min(self.qsd), np.max(self.qsd))
 
         # Exit time from exponential distribution: P(t < T) = 1 - exp(-k_eff * T)
         # Solving for T: T = -ln(1 - r) / k_eff
