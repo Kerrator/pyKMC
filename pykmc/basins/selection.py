@@ -184,7 +184,7 @@ class FPTASelector():
             exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
             return exit_time_solver.solve()
 
-    def select_absorbing_state(self, t_exit: float) -> int:
+    def select_absorbing_state(self, t_exit: float, excluded_states: "set[int] | None" = None) -> "int | None":
         """
         Find which absorbing state is reached at the given exit time.
 
@@ -192,12 +192,16 @@ class FPTASelector():
         ----------
         t_exit : float
             Exit time.
+        excluded_states : set[int], optional
+            Absorbing state indices (full-matrix numbering) whose probability is
+            zeroed before the draw.
 
         Returns
         -------
-        int
+        int or None
             Index of the absorbing state selected (matching the original
-            numbering of the full matrix M_abs).
+            numbering of the full matrix M_abs), or None when exclusions leave
+            no probability mass to draw from.
         """
 
         n_transient = len(self.M_abs_reduced) - 1
@@ -223,9 +227,20 @@ class FPTASelector():
         #adjust so sum gives 1
         p_absorbing = np.real(p_absorbing)
         p_absorbing = np.maximum(p_absorbing, 0)  # clamp negatives from numerics
+
+        #Zero excluded exits before normalizing (their mass redistributes over the rest)
+        if excluded_states:
+            for j in excluded_states:
+                j_idx = j - n_transient
+                if 0 <= j_idx < len(p_absorbing):
+                    p_absorbing[j_idx] = 0.0
+
         total = np.sum(p_absorbing)
         if total > 0:
             p_absorbing = p_absorbing / total
+        elif excluded_states:
+            # The uniform fallback would resurrect excluded states; report instead.
+            return None
         else:
             # Uniform fallback (should not happen)
             p_absorbing = np.ones(len(p_absorbing)) / len(p_absorbing)

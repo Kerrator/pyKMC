@@ -1,6 +1,13 @@
 """Module containing function to apply geometric transformations."""
 
-__all__ = ["transform_positions", "translate", "push_towards", "compute_delr"]
+__all__ = [
+    "transform_positions",
+    "translate",
+    "push_towards",
+    "compute_delr",
+    "per_atom_displacement",
+    "minimum_image_distance",
+]
 import ase.geometry
 import numpy as np
 
@@ -115,3 +122,79 @@ def compute_delr(positions_1, positions_2, cell=None, pbc=None) :
     return delr
 
 
+def per_atom_displacement(
+    positions_pre: np.ndarray,
+    positions_post: np.ndarray,
+    cell: np.ndarray,
+    pbc: "np.ndarray | list[bool] | bool | None" = None,
+) -> np.ndarray:
+    """Per-atom PBC-aware displacement magnitude (orthorhombic minimum-image).
+
+    Same minimum-image trick as `compute_delr`, but returns the full per-atom
+    array of Euclidean distances instead of just the maximum.
+
+    Parameters
+    ----------
+    positions_pre : np.ndarray
+        Shape (N, 3) positions before the displacement.
+    positions_post : np.ndarray
+        Shape (N, 3) positions after the displacement.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+    pbc : np.ndarray or list[bool] or bool or None, optional
+        Per-axis periodicity. ``None`` (default) applies the minimum-image
+        wrap on all three axes, preserving the historical full-PBC behaviour.
+        On a non-periodic axis (e.g. the free-surface direction of a slab) the
+        wrap is skipped so an across-surface displacement is reported at its
+        true magnitude rather than folded back into the cell.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (N,) of per-atom displacement magnitudes in Angstroms.
+
+    """
+    disp = positions_post - positions_pre
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    if pbc is None:
+        pbc_arr = np.array([True, True, True])
+    else:
+        pbc_arr = np.asarray(pbc)
+        if pbc_arr.ndim == 0:  # scalar bool -> per-dimension vector
+            pbc_arr = np.full(3, bool(pbc_arr))
+    for i in range(3):
+        if pbc_arr[i]:
+            disp[:, i] -= cell_lengths[i] * np.round(disp[:, i] / cell_lengths[i])
+    return np.linalg.norm(disp, axis=1)
+
+
+def minimum_image_distance(
+    position_a: np.ndarray,
+    position_b: np.ndarray,
+    cell: np.ndarray,
+) -> float:
+    """PBC minimum-image Euclidean distance between two positions (orthorhombic).
+
+    Single-pair counterpart of `per_atom_displacement`: applies the same
+    per-axis minimum-image wrap to the separation vector and returns its norm.
+
+    Parameters
+    ----------
+    position_a : np.ndarray
+        Shape (3,) first position.
+    position_b : np.ndarray
+        Shape (3,) second position.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+
+    Returns
+    -------
+    float
+        Minimum-image distance in Angstroms.
+
+    """
+    dvec = position_b - position_a
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    for i in range(3):
+        dvec[i] -= cell_lengths[i] * np.round(dvec[i] / cell_lengths[i])
+    return float(np.linalg.norm(dvec))
