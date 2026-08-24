@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse.linalg import expm
 from numpy.linalg import eig, inv
 
-def solve_master_equation(M:np.ndarray, t:float, p0: np.ndarray, spectral_decomposition: bool = True, Valeig: np.ndarray = None, Veceig: np.ndarray = None, Veceiginv: np.ndarray = None) -> np.ndarray : 
+def solve_master_equation(M:np.ndarray, t:float, p0: np.ndarray, spectral_decomposition: bool = True, Valeig: "np.ndarray | None" = None, Veceig: "np.ndarray | None" = None, Veceiginv: "np.ndarray | None" = None) -> np.ndarray : 
     """
     Compute p(t) = exp(-M t) p0.
 
@@ -47,7 +47,7 @@ def solve_master_equation(M:np.ndarray, t:float, p0: np.ndarray, spectral_decomp
         p = expm(-M*t) @ p0
     return p
     
-def solve_master_equation_last_value(M:np.ndarray, t:float, p0: np.ndarray, spectral_decomposition: bool = True, Valeig: np.ndarray = None, Veceig: np.ndarray = None, Veceiginv: np.ndarray = None) -> np.ndarray : 
+def solve_master_equation_last_value(M:np.ndarray, t:float, p0: np.ndarray, spectral_decomposition: bool = True, Valeig: "np.ndarray | None" = None, Veceig: "np.ndarray | None" = None, Veceiginv: "np.ndarray | None" = None) -> np.ndarray : 
     """
     Compute only the absorbing probability p_abs(t),
     i.e. the last component of p(t).

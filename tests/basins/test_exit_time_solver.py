@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import numpy.testing as npt
 from pykmc.basins import solve_master_equation, BisectionSolver, QSDSolver
@@ -85,7 +86,8 @@ class TestSolver :
         solver = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0]), r=r)
         res = solver.solve()
         assert res.is_ok()
-        npt.assert_allclose(solver.qsd, [0.5, 0.5], atol=1e-9)
+        # occupation-time weights carry the O(g/w) = 1e-6 bias toward the entry state
+        npt.assert_allclose(solver.qsd, [0.5, 0.5], atol=1e-5)
         npt.assert_allclose(solver.k_eff, g, rtol=1e-6)
         npt.assert_allclose(res.ok_value().t_exit, -np.log(1.0 - r) / g, rtol=1e-6)
 
@@ -98,3 +100,51 @@ class TestSolver :
         ])
         res = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0]), r=0.9).solve()
         assert not res.is_ok()
+    def test_qsd_solver_slow_internal_passage(self, test_logger: logging.Logger) -> None :
+        """QSD (MFPT) solver on a stiff basin whose escape sits behind a slow internal step.
+
+        Fast 0<->1 mixing (w), slow 1<->2 passage (s), escape only from state 2 (g), entry in 0.
+        The stiffness heuristic (max transient / max absorbing rate = w/g = 1e7) routes
+        solver='auto' here. The old closed-chain stationary distribution was uniform and
+        predicted k_eff = g/3, i.e. an exit time ~1e3x too short; the MFPT-based solver
+        must match the exact expm quantile to well within the exponential-shape error.
+        """
+        from scipy.linalg import expm
+        from scipy.optimize import brentq
+        w, s, g = 1.0e4, 1.0e-6, 1.0e-3
+        M = np.array([
+            [w,    -w,     0.0,    0.0],
+            [-w,   w + s,  -s,     0.0],
+            [0.0,  -s,     s + g,  0.0],
+            [0.0,  0.0,    -g,     0.0],
+        ])
+        p0 = np.array([1.0, 0.0, 0.0, 0.0])
+        r = 0.9
+        Q = M[:3, :3]
+        e0 = p0[:3]
+        mfpt = float(np.sum(np.linalg.solve(Q, e0)))
+        p_abs = lambda t: 1.0 - float(np.sum(expm(-Q * t) @ e0))  # noqa: E731
+        t_exact = brentq(lambda t: p_abs(t) - r, 1e-3, 1e3 * mfpt)
+
+        solver = QSDSolver(M=M, p0=p0, r=r)
+        res = solver.solve()
+        assert res.is_ok()
+        npt.assert_allclose(1.0 / solver.k_eff, mfpt, rtol=1e-9)
+        npt.assert_allclose(res.ok_value().t_exit, t_exact, rtol=0.05)
+        # occupation-time weights sum to one and are non-negative
+        npt.assert_allclose(np.sum(solver.qsd), 1.0, rtol=1e-12)
+        assert np.all(solver.qsd >= 0)
+
+    def test_bisection_expm_path_matches_spectral(self, test_logger: logging.Logger) -> None :
+        """spectral_decomposition=False (scipy expm) must run and agree with the spectral path."""
+        M_abs_reduced = np.array([
+            [+0.17, -0.30, -0.20, 0.00],
+            [-0.05, +0.48, -0.25, 0.00],
+            [-0.10, -0.10, +0.45, 0.00],
+            [-0.02, -0.08, -0.00, 0.00]])
+        p0 = np.array([1.0, 0.0, 0.0, 0.0])
+        r = 0.7
+        res_spec = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=True, tolerance=1e-6).solve()
+        res_expm = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=False, tolerance=1e-6).solve()
+        assert res_spec.is_ok() and res_expm.is_ok()
+        npt.assert_allclose(res_expm.ok_value().t_exit, res_spec.ok_value().t_exit, rtol=1e-4)
