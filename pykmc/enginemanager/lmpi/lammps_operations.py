@@ -1118,6 +1118,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     from ...utils.geometry import (
         transform_positions,
         push_towards,
+        adaptive_push_fraction,
         per_atom_displacement,
         event_movers,
         reconstruction_matches,
@@ -1233,7 +1234,11 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                         # Push toward min1
                         saddle_toward_min1 = push_towards(
                             new_positions[neighbor_indices], supposed_initial,
-                            fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                            fraction=adaptive_push_fraction(
+                                new_positions[neighbor_indices], supposed_initial, supposed_final,
+                                config.reconstruction.push_fraction,
+                                config.reconstruction.mover_landing_fraction, cell, pbc),
+                            cell=cell, pbc=pbc)
                         tmp_positions = np.array(new_positions, copy=True)
                         tmp_positions[neighbor_indices] = saddle_toward_min1
                         proceed = _nonfinite_reconstruct_payload(tmp_positions, "min1")
@@ -1301,7 +1306,11 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 # Push toward min2
                 saddle_toward_min2 = push_towards(
                     saddle_positions[nbr_indices], supposed_final,
-                    fraction=config.reconstruction.push_fraction, cell=cell, pbc=pbc)
+                    fraction=adaptive_push_fraction(
+                        saddle_positions[nbr_indices], supposed_final, supposed_initial,
+                        config.reconstruction.push_fraction,
+                        config.reconstruction.mover_landing_fraction, cell, pbc),
+                    cell=cell, pbc=pbc)
                 tmp_positions2 = np.array(saddle_positions, copy=True)
                 tmp_positions2[nbr_indices] = saddle_toward_min2
                 proceed2 = _nonfinite_reconstruct_payload(tmp_positions2, "min2")

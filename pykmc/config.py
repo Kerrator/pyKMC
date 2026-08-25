@@ -698,7 +698,13 @@ class ReconstructionConfig(BaseModel):
 
     push_fraction: float = Field(
         default=0.15,
-        description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
+        description="Fraction used to push the system from the saddle point toward each minimum during reconstruction. When mover_landing_fraction is set this is only the FLOOR of the push actually applied.",
+    )
+    mover_landing_fraction: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        lt=1.0,
+        description="Opt-in adaptive push rule. When set, the saddle->minimum push is enlarged (never reduced) so that the event mover -- the atom with the largest min1->min2 displacement -- lands within this fraction of the min1<->min2 hop from the minimum being sought, instead of wherever the fixed push_fraction happens to leave it. A saddle sitting near the middle of the hop leaves the mover at ~0.5 of the hop under push_fraction = 0.15, close enough to the barrier top that the minimize can fall back the wrong way and the reconstruction is rejected as INVALID_MIN1/INVALID_MIN2 (measured on the 2026-08-24 alloy basin campaign: mover landings 0.50/0.36/0.36/0.49 of the hop). The push stays uniform over the rcut shell, so non-mover atoms keep a proportional share (1 - fraction) of their saddle relaxation and the minimize still has to find its way back to each minimum. Suggested value: 0.35. None (default) = the historical fixed push_fraction, bit-for-bit unchanged; production/campaign input files that want the new rule must set this key explicitly under [Reconstruction].",
     )
     n_movers: int = Field(
         default=3,

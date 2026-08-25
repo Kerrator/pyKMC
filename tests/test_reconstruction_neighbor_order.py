@@ -56,6 +56,9 @@ def _config() -> Mock:
     cfg = Mock()
     cfg.control.recycle = False
     cfg.reconstruction.push_fraction = 0.15
+    #None keeps the legacy fixed push_fraction (a Mock attribute would
+    #otherwise select the opt-in adaptive push rule).
+    cfg.reconstruction.mover_landing_fraction = None
     cfg.reconstruction.n_movers = 3
     cfg.reconstruction.containment_margin = 1.0
     cfg.atomicenvironment.rcut = 6.5

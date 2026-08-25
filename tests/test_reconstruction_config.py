@@ -65,3 +65,34 @@ def test_margin_at_or_above_rcut_rejected_names_both_fields() -> None:
     assert "containment_margin" in msg2
     assert "atomicenvironment.rcut" in msg2
     assert "10.0" in msg2 and "6.5" in msg2
+
+
+# ---------------------------------------------------------------------------
+# mover_landing_fraction: opt-in adaptive push rule (input-file syntax)
+# ---------------------------------------------------------------------------
+def test_mover_landing_fraction_absent_defaults_to_legacy_push() -> None:
+    """An input file without the key keeps the historical fixed push."""
+    cfg = Config.model_validate(_config_dict())
+    assert cfg.reconstruction.mover_landing_fraction is None
+    assert cfg.reconstruction.push_fraction == 0.15
+
+
+def test_mover_landing_fraction_parses_from_reconstruction_section() -> None:
+    """``mover_landing_fraction = 0.35`` under ``[Reconstruction]`` is accepted.
+
+    ``from_ini_file`` uses ``optionxform = str``, so the key is case-sensitive
+    and must be spelled exactly as the field name.
+    """
+    d = _config_dict()
+    d["reconstruction"] = {"mover_landing_fraction": "0.35"}
+    cfg = Config.model_validate(d)
+    assert cfg.reconstruction.mover_landing_fraction == 0.35
+
+
+@pytest.mark.parametrize("value", ["0.0", "1.0", "-0.2", "1.5"])
+def test_mover_landing_fraction_outside_zero_one_rejected(value: str) -> None:
+    """The landing fraction must lie strictly inside (0, 1)."""
+    d = _config_dict()
+    d["reconstruction"] = {"mover_landing_fraction": value}
+    with pytest.raises(ValidationError):
+        Config.model_validate(d)

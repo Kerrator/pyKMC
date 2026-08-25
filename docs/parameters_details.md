@@ -498,7 +498,23 @@
 
 - **`push_fraction`** : `float`, default = `0.15`
   <details><summary>Description</summary>
-  Fraction used to push the system from the saddle point toward each minimum during reconstruction.
+  Fraction used to push the system from the saddle point toward each minimum during reconstruction. When mover_landing_fraction is set this is only the FLOOR of the push actually applied.
+  </details>
+- **`mover_landing_fraction`** : `float`, optional
+  <details><summary>Description</summary>
+  Opt-in adaptive push rule. When set, the saddle->minimum push is enlarged (never reduced) so that the event mover -- the atom with the largest min1->min2 displacement -- lands within this fraction of the min1<->min2 hop from the minimum being sought, instead of wherever the fixed push_fraction happens to leave it. A saddle sitting near the middle of the hop leaves the mover at ~0.5 of the hop under push_fraction = 0.15, close enough to the barrier top that the minimize can fall back the wrong way and the reconstruction is rejected as INVALID_MIN1/INVALID_MIN2 (measured on the 2026-08-24 alloy basin campaign: mover landings 0.50/0.36/0.36/0.49 of the hop). The push stays uniform over the rcut shell, so non-mover atoms keep a proportional share (1 - fraction) of their saddle relaxation and the minimize still has to find its way back to each minimum. Suggested value: 0.35. None (default) = the historical fixed push_fraction, bit-for-bit unchanged; production/campaign input files that want the new rule must set this key explicitly under [Reconstruction].
+  </details>
+- **`n_movers`** : `int`, default = `3`
+  <details><summary>Description</summary>
+  Minimum number of most-displaced event atoms (min1->min2) whose reconstructed position must match within psr.matching_score_thr. This is a FLOOR, not a cap: EVERY atom whose event displacement exceeds psr.matching_score_thr is also tight-checked, so a genuine 4th+ participant of a collective event cannot be accepted onto a nearby-but-distinct site under the loose whole-shell bound alone. Peripheral atoms that did not move during the event do not veto the match.
+  </details>
+- **`containment_margin`** : `float`, default = `1.0`
+  <details><summary>Description</summary>
+  Radius margin (Angstrom): the event movers must sit within (atomicenvironment.rcut - containment_margin) of the central atom at min1, the saddle, AND min2, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained. Must be > 0 and < atomicenvironment.rcut.
+  </details>
+- **`shell_tolerance`** : `float`, default = `1.0`
+  <details><summary>Description</summary>
+  Looser whole-rcut-shell acceptance bound (Angstrom). On top of the tight n_movers check, EVERY atom in the rcut shell must land within shell_tolerance of its expected min1/min2 position. This catches a peripheral (non-mover) atom that relaxed into a distinct site (a large displacement) while tolerating the small wiggle of atoms that merely settled around the event; the movers-only check alone would accept such a wrong overall state. Set well above the expected peripheral relaxation (~tenths of an Angstrom) but below a nearest-neighbour site change.
   </details>
 
 ---

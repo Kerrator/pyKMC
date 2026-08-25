@@ -67,6 +67,9 @@ def _config(active_volume: bool = False, rmov: float = 3.0) -> Mock:
     """A Mock config sufficient for Reconstruction.reconstruct."""
     config = Mock()
     config.reconstruction.push_fraction = 0.15
+    #None keeps the legacy fixed push_fraction (a Mock attribute would
+    #otherwise select the opt-in adaptive push rule).
+    config.reconstruction.mover_landing_fraction = None
     config.reconstruction.n_movers = 3
     config.reconstruction.containment_margin = 1.0
     config.reconstruction.shell_tolerance = 1.0

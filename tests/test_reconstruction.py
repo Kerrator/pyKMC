@@ -10,6 +10,9 @@ from pykmc.result import ErrorType
 def _config() -> Mock:
     config = Mock()
     config.reconstruction.push_fraction = 0.15
+    #None keeps the legacy fixed push_fraction (a Mock attribute would
+    #otherwise select the opt-in adaptive push rule).
+    config.reconstruction.mover_landing_fraction = None
     config.reconstruction.n_movers = 3
     config.reconstruction.containment_margin = 1.0
     config.reconstruction.shell_tolerance = 1.0
