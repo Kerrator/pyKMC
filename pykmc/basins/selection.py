@@ -157,8 +157,13 @@ class FPTASelector():
         - ``'auto'`` (default): use the QSD solver when the reduced generator is stiff
           (max transient rate / max absorbing rate > 1e6), otherwise bisection. The
           numerical matrix-exponential bisection is unreliable for stiff generators.
+          Either solver failing falls back to the other, so a basin is only reported
+          as BASIN_TEXIT_NOT_FOUND when both fail.
         - ``'bisection'``: always use the bisection solver.
         - ``'qsd'``: always use the QSD solver.
+
+        Both forced modes stay strict - no fallback - because they exist for
+        benchmarking one solver against the other.
 
         Returns
         -------
@@ -170,6 +175,11 @@ class FPTASelector():
         #Initialize
         p0 = np.zeros(len(self.M_abs_reduced))
         p0[0] = 1 #we are always in state 0 when entering the basin
+
+        #Reset the exit-state weighting; every return path below sets it again,
+        #so select_absorbing_state can never read a previous call's vector.
+        self._use_qsd = False
+        self._qsd = None
 
         # Pick random number between [0,1) representing the probability of being in an absorbing states after time t
         r1 = np.random.random()
@@ -189,10 +199,18 @@ class FPTASelector():
             if result.is_ok():
                 self._use_qsd = True
                 self._qsd = exit_time_solver.qsd
+                return result
+            if self.solver == "auto":
+                #The QSD solver only fails when neither the direct MFPT solve nor
+                #its cancellation-free fallback finds a positive finite exit rate.
+                #Bisection is the independent backstop; forced 'qsd' stays strict.
+                logger.warning("[FPTA] QSD solver failed (%s); falling back to bisection",
+                               result.err_value())
+                bisection_result = BisectionSolver(self.M_abs_reduced, p0, r1).solve()
+                if bisection_result.is_ok():
+                    return bisection_result
             return result
 
-        self._use_qsd = False
-        self._qsd = None
         exit_time_solver = BisectionSolver(self.M_abs_reduced, p0, r1)
         result = exit_time_solver.solve()
         if not result.is_ok() and self.solver == "auto":

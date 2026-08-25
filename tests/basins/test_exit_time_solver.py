@@ -1,7 +1,65 @@
 import logging
 import numpy as np
 import numpy.testing as npt
+from fractions import Fraction
+
 from pykmc.basins import solve_master_equation, BisectionSolver, QSDSolver
+
+
+def _exact_mfpt_fraction(M: np.ndarray) -> float :
+    """Exact mean first-passage time of the chain defined by ``M``'s off-diagonals.
+
+    ``M`` is a reduced generator: ``M[j, i] = -k(i->j)`` off the diagonal,
+    ``M[-1, i] = -gamma_i`` the escape rate of transient state ``i``. Only those
+    off-diagonals are data; the stored diagonal is a derived float sum that can
+    round. The reference therefore rebuilds ``d_i = gamma_i + sum_j k(i->j)`` and
+    solves ``Q tau = e_0`` in exact rational arithmetic (``fractions.Fraction``),
+    which is what the solver under test is required to reproduce.
+    """
+    n = len(M) - 1
+    k = [[Fraction(0)] * n for _ in range(n)]
+    for i in range(n) :
+        for j in range(n) :
+            if i != j :
+                k[i][j] = Fraction(float(-M[j][i]))
+    gamma = [Fraction(float(-M[-1][i])) for i in range(n)]
+    d = [gamma[i] + sum(k[i][j] for j in range(n) if j != i) for i in range(n)]
+    Q = [[(d[i] if i == j else -k[j][i]) for j in range(n)] for i in range(n)]
+    b = [Fraction(0)] * n
+    b[0] = Fraction(1)
+    for c in range(n) :
+        piv = max(range(c, n), key=lambda rr: abs(Q[rr][c]))
+        Q[c], Q[piv] = Q[piv], Q[c]
+        b[c], b[piv] = b[piv], b[c]
+        for rr in range(c + 1, n) :
+            if Q[rr][c] == 0 :
+                continue
+            f = Q[rr][c] / Q[c][c]
+            for cc in range(c, n) :
+                Q[rr][cc] -= f * Q[c][cc]
+            b[rr] -= f * b[c]
+    x = [Fraction(0)] * n
+    for rr in range(n - 1, -1, -1) :
+        x[rr] = (b[rr] - sum(Q[rr][cc] * x[cc] for cc in range(rr + 1, n))) / Q[rr][rr]
+    return float(sum(x))
+
+
+def _closed_chain_keff(M: np.ndarray) -> float :
+    """Pre-MFPT stiff-limit asymptote: k_eff of the closed-chain stationary form.
+
+    Kept in the tests only, as the reference the hybrid solver had to beat
+    (git show af1a40d:pykmc/basins/exit_time_solver.py).
+    """
+    n = len(M) - 1
+    gamma = -M[-1, :n]
+    q_tt = M[:n, :n].copy()
+    for i in range(n) :
+        q_tt[i, i] -= gamma[i]
+    _, _, vh = np.linalg.svd(q_tt)
+    null_vec = np.abs(np.real(vh[-1, :]))
+    return float((null_vec / np.sum(null_vec)) @ gamma)
+
+
 
 class TestSolver :
 
@@ -148,3 +206,82 @@ class TestSolver :
         res_expm = BisectionSolver(M=M_abs_reduced, p0=p0, r=r, spectral_decomposition=False, tolerance=1e-6).solve()
         assert res_spec.is_ok() and res_expm.is_ok()
         npt.assert_allclose(res_expm.ok_value().t_exit, res_spec.ok_value().t_exit, rtol=1e-4)
+
+    def test_qsd_solver_slow_internal_passage_uses_direct_solve(self, test_logger: logging.Logger) -> None :
+        """The regime switch is on conditioning, not stiffness.
+
+        Same generator as ``test_qsd_solver_slow_internal_passage`` (stiffness
+        w/g = 1e7): the direct ``np.linalg.solve`` MFPT is accurate there
+        (relative residual ~6e-7, below the 1e-5 tolerance), so the solver must
+        stay on the direct path and reproduce ``np.linalg.solve`` bit for bit.
+        """
+        w, s, g = 1.0e4, 1.0e-6, 1.0e-3
+        M = np.array([
+            [w,    -w,     0.0,    0.0],
+            [-w,   w + s,  -s,     0.0],
+            [0.0,  -s,     s + g,  0.0],
+            [0.0,  0.0,    -g,     0.0],
+        ])
+        solver = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0, 0.0]), r=0.9)
+        assert solver.solve().is_ok()
+        assert solver.method == "mfpt-direct"
+        assert solver.residual < 1e-5
+
+    def test_qsd_solver_two_state_stiffness_sweep(self, test_logger: logging.Logger) -> None :
+        """k_eff must stay within 1e-3 of exact for w/g from 1e6 to 1e20.
+
+        Two-state chain 0<->1 at w with escape g from state 1 only; the exact
+        mean first-passage time from state 0 is 2/g + 1/w. At c4b8aea the direct
+        ``np.linalg.solve`` MFPT drifted from 1e13 (0.9995) through 1.95 at 1e16
+        and returned BASIN_TEXIT_NOT_FOUND from 1e17 on, because Q's diagonal
+        w + g rounds to w once g/w < eps.
+        """
+        g = 1.0e-3
+        worst = 0.0
+        for exponent in range(6, 21) :
+            w = g * 10.0 ** exponent
+            M = np.array([[w, -w, 0.0], [-w, w + g, 0.0], [0.0, -g, 0.0]])
+            solver = QSDSolver(M=M, p0=np.array([1.0, 0.0, 0.0]), r=0.5)
+            res = solver.solve()
+            assert res.is_ok(), "w/g=1e{} failed: {}".format(exponent, res.err_value())
+            exact = 1.0 / (2.0 / g + 1.0 / w)
+            ratio = solver.k_eff / exact
+            worst = max(worst, abs(ratio - 1.0))
+            test_logger.debug("w/g=1e%d k_eff/exact=%.12f method=%s", exponent, ratio, solver.method)
+            assert abs(ratio - 1.0) < 1.0e-3, "w/g=1e{}: k_eff/exact={}".format(exponent, ratio)
+        test_logger.debug("worst |k_eff/exact - 1| over the sweep: %.3e", worst)
+
+    def test_qsd_solver_slow_passage_extreme_stiffness(self, test_logger: logging.Logger) -> None :
+        """Separating test: slow internal passage at stiffness 1e20.
+
+        Fast 0<->1 at w = 1e17 g, slow 1<->2 at s = 1e-3 g, escape g from state 2.
+        The direct MFPT solve is dead here (Q's 0/1 block is numerically singular)
+        and the closed-chain stationary form - the stiff-limit asymptote of the
+        pre-MFPT solver - is ~2e3x wrong because it assumes every transient state
+        mixes faster than any escape. The cancellation-free GTH reduction must
+        match the exact rational MFPT of the same rates.
+        """
+        w, s, g = 1.0e14, 1.0e-6, 1.0e-3
+        M = np.array([
+            [w,    -w,     0.0,    0.0],
+            [-w,   w + s,  -s,     0.0],
+            [0.0,  -s,     s + g,  0.0],
+            [0.0,  0.0,    -g,     0.0],
+        ])
+        p0 = np.array([1.0, 0.0, 0.0, 0.0])
+
+        exact_mfpt = _exact_mfpt_fraction(M)
+        # the direct solve is unusable at this conditioning
+        Q = M[:3, :3]
+        direct = np.linalg.solve(Q, p0[:3])
+        assert not (np.all(direct > 0) and abs(float(np.sum(direct)) / exact_mfpt - 1.0) < 1.0e-3)
+        # so is the closed-chain stationary asymptote
+        assert abs(_closed_chain_keff(M) * exact_mfpt - 1.0) > 1.0e2
+
+        solver = QSDSolver(M=M, p0=p0, r=0.5)
+        res = solver.solve()
+        assert res.is_ok(), res.err_value() if not res.is_ok() else ""
+        assert solver.method == "mfpt-gth"
+        npt.assert_allclose(1.0 / solver.k_eff, exact_mfpt, rtol=1e-9)
+        npt.assert_allclose(np.sum(solver.qsd), 1.0, rtol=1e-12)
+        assert np.all(solver.qsd >= 0)
