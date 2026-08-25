@@ -137,6 +137,9 @@ class BasinsGenericEvents() :
         result =self.refine_absorbing(system)
         if not result.is_ok() : 
             return result
+        #Collapse rows that catalogue one hop twice before anything reads the rates: the
+        #generator matrix built below and the k_tot snapshot must see the same table.
+        self.collapse_duplicate_rows()
         #apply selector algorithm to find t_exit and exit_state
         result = self.selector.select_from_connectivity(self.connectivity_table, excluded_states=self._exit_excluded_states)
         if not result.is_ok() :
@@ -708,6 +711,174 @@ class BasinsGenericEvents() :
                 self._exit_excluded_states.discard(state)
                 self._refine_excluded.discard(state)
                 logger.info("[Basin] refine_absorbing: exit state %d re-admitted (another row into it has a saddle)", state)
+
+    def _map_reference_saddle(self, state: int, central_atom: int, event_idx: int, sym: int) -> "np.ndarray | None" :
+        """PSR-map a reference event's saddle onto the local environment of one connectivity row.
+
+        Mirrors the mapping refine_absorbing() performs before handing the saddle to the
+        engine, but stays host-side. It is the only saddle geometry available for a
+        transient -> transient row, which is never refined.
+
+        Parameters
+        ----------
+        state : int
+            From-state of the row (its stored System supplies the environment).
+        central_atom : int
+            Atom the generic event is applied to.
+        event_idx : int
+            ``idx_ref`` of the generic event in the reference table.
+        sym : int
+            Symmetry variant of the generic event.
+
+        Returns
+        -------
+        np.ndarray or None
+            Saddle positions ordered by the rcut shell of ``central_atom``, or None when
+            the mapping cannot be trusted (unknown event, PSR failure, matching score
+            above ``config.psr.matching_score_thr``) so the caller keeps both rows.
+
+        """
+        table = getattr(self.reference_table, "table", None)
+        if table is None :
+            return None
+        ref_event = table[table["idx_ref"] == event_idx]
+        if ref_event.empty :
+            return None
+        ref_event = ref_event.iloc[0].copy()
+        state_data = self.states[state]
+        #Same System copy refine_absorbing/system_from_state feed to PSR (pbc=True there too).
+        tmp_system = System(positions=state_data.system.positions.copy(), types=state_data.system.types, cell=state_data.system.cell, pbc=True, index=np.arange(len(state_data.system.types)))
+        result = PointSetRegistration(self.config, tmp_system, ref_event, state_data.neighbors_list, central_atom).match()
+        if not result.is_ok() :
+            return None
+        result = check_match(result, self.config.psr.matching_score_thr)
+        if not result.is_ok() :
+            return None
+        psr_output = result.ok_value()
+        saddle_positions = np.array(ref_event["saddle_positions"], copy=True)
+        if sym != 0 :
+            saddle_positions = geometry.transform_positions(saddle_positions, ref_event["sym_matrix"][sym], 0, ref_event["sym_perm"][sym])
+        return geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
+
+    def _row_saddle_configuration(self, row: pd.Series) -> "tuple[np.ndarray, str] | None" :
+        """Full-system saddle positions of one connectivity row, with their provenance.
+
+        The per-row saddles are stored in the neighbour-shell order of that row's central
+        atom, so two rows on different central atoms cannot be compared element-wise.
+        Scattering the shell back into a copy of the from-state positions gives an
+        absolute, system-indexed configuration that is directly comparable with
+        ``compute_delr`` (atoms outside the shell are identical in both rows and
+        contribute nothing to the maximum).
+
+        Parameters
+        ----------
+        row : pd.Series
+            One connectivity-table row.
+
+        Returns
+        -------
+        tuple of (np.ndarray, str) or None
+            ``(positions, provenance)`` with provenance ``'refined'`` (the pARTn saddle
+            stored by refine_absorbing) or ``'mapped'`` (the host-side PSR mapping), or
+            None when the row carries no comparable geometry.
+
+        """
+        state = int(row["state"])
+        central_atom = int(row["central_atom"])
+        state_data = self.states.get(state)
+        if state_data is None or state_data.system is None :
+            return None
+        if state_data.neighbors_list is None :
+            state_data.ensure_full_state(self.config)
+        if state_data.neighbors_list is None :
+            return None
+        neighbors = state_data.neighbors_list.get_neighbors("rcut", central_atom)
+        key = self._saddle_key(state, int(row["state_connexion"]), central_atom, int(row["event_connexion"]), int(row["sym"]))
+        saddle = self.absorbing_saddle_positions.get(key)
+        provenance = "refined"
+        if saddle is None :
+            saddle = self._map_reference_saddle(state, central_atom, int(row["event_connexion"]), int(row["sym"]))
+            provenance = "mapped"
+        if saddle is None or len(saddle) != len(neighbors) :
+            return None
+        positions = np.array(state_data.system.positions, copy=True)
+        positions[neighbors] = saddle
+        return positions, provenance
+
+    def collapse_duplicate_rows(self) -> int :
+        """Drop connectivity rows that catalogue the *same* physical hop more than once.
+
+        The explorer emits one row per (generic event, central atom, symmetry) with no
+        deduplication, so a hop catalogued under two neighbouring central atoms — the
+        collided pair of every unfixed alloy table — yields two rows with the same
+        ``(state, state_connexion)``. ``build_absorbing_matrix_from_connectivity`` sums
+        every row into ``M[j, i]`` and ``execute()`` sums the same rows into ``k_tot``,
+        so such a pair contributes twice that channel's rate: ``t_exit`` comes out too
+        short and the exit is over-drawn. The main KMC loop removes exactly these
+        duplicates from the active table (``ReferenceEventTable.remove_duplicates``).
+
+        Same ``(state, state_connexion)`` is *not* sufficient: two genuinely different
+        saddles into one product state are parallel channels whose rates must add. The
+        test is therefore geometric — ``compute_delr`` between the two rows' saddle
+        configurations, against ``config.psr.matching_score_thr``, the same rule and
+        threshold ``remove_duplicates`` applies to active events.
+
+        Called from execute() after refine_absorbing (the refined rates are the ones that
+        must not be double counted) and before the selector, so the generator matrix and
+        the ``k_tot`` snapshot both read the collapsed table.
+
+        Returns
+        -------
+        int
+            Number of rows dropped.
+
+        Notes
+        -----
+        Only like-for-like geometry is compared: a refined saddle is never matched
+        against a PSR-mapped one, and a row with no geometry at all is kept. Every
+        unresolved case therefore keeps both rows — the collapse can miss a duplicate,
+        it can never merge two distinct channels.
+
+        """
+        df = self.connectivity_table.df
+        if len(df) < 2 :
+            return 0
+        thr = self.config.psr.matching_score_thr
+        to_drop: list = []
+        for (state, target), labels in df.groupby(["state", "state_connexion"], sort=False).groups.items() :
+            labels = list(labels)
+            if len(labels) < 2 :
+                continue
+            state_data = self.states.get(int(state))
+            cell = state_data.system.cell if state_data is not None and state_data.system is not None else None
+            pbc = state_data.system.pbc if state_data is not None and state_data.system is not None else None
+            #Keep the row _select_exit_row would have used: the one whose reconstruction
+            #created the target's stored geometry, else one that carries a refined saddle.
+            creating = self._creating_row.get(int(target))
+            labels.sort(key=lambda label: self._duplicate_candidate_rank(df.loc[label], creating))
+            kept: list[tuple[np.ndarray, str]] = []
+            for label in labels :
+                geom = self._row_saddle_configuration(df.loc[label])
+                if geom is None :
+                    continue #not comparable -> keep the row, and nothing to match against
+                positions, provenance = geom
+                if any(prov == provenance and geometry.compute_delr(positions, kept_positions, cell, pbc) < thr
+                       for kept_positions, prov in kept) :
+                    to_drop.append(label)
+                else :
+                    kept.append((positions, provenance))
+        if not to_drop :
+            return 0
+        logger.info("[Basin] collapsed %d duplicate connectivity row(s): same hop catalogued under several central atoms", len(to_drop))
+        self.connectivity_table.df = df.drop(index=to_drop).reset_index(drop=True)
+        return len(to_drop)
+
+    def _duplicate_candidate_rank(self, row: pd.Series, creating: "tuple[int, int, int, int] | None") -> tuple[int, int] :
+        """Sort key deciding which row of a duplicate group survives the collapse."""
+        identity = (int(row["state"]), int(row["central_atom"]), int(row["event_connexion"]), int(row["sym"]))
+        is_creating = creating is not None and identity == tuple(int(v) for v in creating)
+        key = self._saddle_key(identity[0], int(row["state_connexion"]), identity[1], identity[2], identity[3])
+        return (0 if is_creating else 1, 0 if key in self.absorbing_saddle_positions else 1)
 
     def is_new_state(self, system) :
         """Return the index of an equivalent known state, or -1 if the state is new.
