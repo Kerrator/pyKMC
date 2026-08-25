@@ -4,6 +4,7 @@ __all__ = [
     "transform_positions",
     "translate",
     "push_towards",
+    "adaptive_push_fraction",
     "compute_delr",
     "per_atom_displacement",
     "minimum_image_distance",
@@ -100,6 +101,108 @@ def push_towards(current_positions, target_positions, fraction = 0.1, cell = Non
     if cell is not None :
         new_positions = ase.geometry.wrap_positions(positions=new_positions, cell=cell, pbc=pbc)
     return new_positions
+
+def adaptive_push_fraction(
+    saddle_positions: np.ndarray,
+    target_min_positions: np.ndarray,
+    other_min_positions: np.ndarray,
+    push_fraction: float,
+    mover_landing_fraction: "float | None",
+    cell: np.ndarray,
+    pbc: "np.ndarray | list[bool] | bool | None" = None,
+) -> float:
+    """Fraction for the reconstruction push from the saddle toward one minimum.
+
+    Shared by the serial (host) :meth:`Reconstruction.reconstruct` and the
+    engine (basin) ``_basin_reconstruct_impl`` so the two paths push -- and
+    therefore accept/reject -- identically; the rule must not drift between
+    them, which is why it lives here rather than inline at the four call sites.
+
+    Two rules, selected by ``mover_landing_fraction``:
+
+    * ``None`` (default) -- return ``push_fraction`` unchanged. This is the
+      historical fixed push and is bit-for-bit what every existing input file
+      already gets, on every reconstruction, main loop included.
+    * a fraction in (0, 1) -- keep the uniform "fraction of the saddle->minimum
+      displacement" semantics of :func:`push_towards`, but raise the fraction to
+      ``max(push_fraction, 1 - mover_landing_fraction / s)`` where ``s`` is the
+      event mover's saddle offset from the target minimum expressed as a share
+      of the min1<->min2 hop. The mover then lands exactly
+      ``mover_landing_fraction`` of the hop from the minimum being sought,
+      instead of the ~0.5 a fixed 0.15 push leaves on a saddle sitting near the
+      middle of the hop (from which the minimise can fall back the wrong way and
+      the reconstruction is rejected as INVALID_MIN1/INVALID_MIN2).
+
+    The fraction is uniform over the shell precisely so the non-mover atoms keep
+    a proportional share ``1 - fraction`` of their own saddle relaxation. Placing
+    every atom at a fixed fraction of *its own* min1->min2 segment would instead
+    drop the shell onto the minimum -- for a localized hop the shell's min1 and
+    min2 coincide to a few hundredths of an Angstrom -- and the minimise would no
+    longer have to find its way back, which is the connectivity evidence the
+    push+minimise exists to produce.
+
+    The mover is the atom with the largest min1->min2 displacement (the same
+    "event mover" notion as :func:`event_movers`); it carries the longest hop and
+    hence the tightest absolute landing requirement. Degenerate geometries fall
+    back to ``push_fraction``: a vanishing hop, or a saddle further from the
+    target minimum than the whole hop (``s > 1``), is not a saddle between two
+    minima, and the formula would otherwise demand a fraction approaching 1, i.e.
+    landing the whole shell on the minimum. Those events are rejected by the
+    containment / acceptance gates instead.
+
+    Parameters
+    ----------
+    saddle_positions : np.ndarray
+        Shape (N, 3) saddle positions over the rcut shell (shell row order).
+    target_min_positions : np.ndarray
+        Shape (N, 3) positions of the minimum being pushed toward.
+    other_min_positions : np.ndarray
+        Shape (N, 3) positions of the opposite minimum of the same event; only
+        the mover's hop length is read from it.
+    push_fraction : float
+        ``ReconstructionConfig.push_fraction`` -- the legacy fixed fraction, and
+        the floor of the adaptive one.
+    mover_landing_fraction : float or None
+        ``ReconstructionConfig.mover_landing_fraction``. ``None`` selects the
+        legacy rule.
+    cell : np.ndarray
+        3x3 simulation cell (orthorhombic; row-wise lattice vectors).
+    pbc : np.ndarray or list[bool] or bool or None, optional
+        Per-axis periodicity, threaded through to the minimum-image metric.
+
+    Returns
+    -------
+    float
+        Fraction to hand to :func:`push_towards`. Always >= ``push_fraction``
+        and, when the adaptive rule applies, <= ``1 - mover_landing_fraction``.
+
+    """
+    if mover_landing_fraction is None:
+        return float(push_fraction)
+
+    target = np.asarray(target_min_positions, dtype=float)
+    other = np.asarray(other_min_positions, dtype=float)
+    saddle = np.asarray(saddle_positions, dtype=float)
+    if target.size == 0:  # degenerate/empty shell: caller's gates reject it
+        return float(push_fraction)
+
+    hops = per_atom_displacement(target.copy(), other.copy(), cell, pbc)
+    mover = int(np.argmax(hops))
+    hop = float(hops[mover])
+    if hop <= 0.0:  # min1 == min2: no hop to land a fraction of
+        return float(push_fraction)
+
+    offset = float(
+        per_atom_displacement(
+            target[mover][None, :].copy(), saddle[mover][None, :].copy(), cell, pbc
+        )[0]
+    )
+    s = offset / hop
+    if s <= mover_landing_fraction or s > 1.0:
+        # Already close enough, or not a between-the-minima saddle at all.
+        return float(push_fraction)
+    return float(max(push_fraction, 1.0 - mover_landing_fraction / s))
+
 
 def compute_delr(positions_1, positions_2, cell=None, pbc=None) :
     displacements = positions_2 - positions_1

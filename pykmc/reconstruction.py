@@ -6,6 +6,7 @@ import numpy as np
 import copy 
 from pykmc.utils.geometry import (
     push_towards,
+    adaptive_push_fraction,
     per_atom_displacement,
     event_movers,
     reconstruction_matches,
@@ -150,7 +151,13 @@ class Reconstruction:
         tmp_positions = copy.deepcopy(saddle_positions)
 
         #Move toward min1 positions
-        saddle_toward_min1_pos = push_towards(saddle_positions[neighbors], supposed_min1_positions, fraction=self.config.reconstruction.push_fraction, cell = cell, pbc = pbc)
+        saddle_toward_min1_pos = push_towards(
+            saddle_positions[neighbors], supposed_min1_positions,
+            fraction=adaptive_push_fraction(
+                saddle_positions[neighbors], supposed_min1_positions, supposed_min2_positions,
+                self.config.reconstruction.push_fraction,
+                self.config.reconstruction.mover_landing_fraction, cell, pbc),
+            cell = cell, pbc = pbc)
         tmp_positions[neighbors] = saddle_toward_min1_pos
         #A LAMMPS error during the minimize (e.g. an unstable pushed geometry that loses
         #atoms) must drop this reconstruction, not crash the run. The engine ranks have
@@ -181,7 +188,13 @@ class Reconstruction:
                 )
         else :
             #positions towards min2 :
-            saddle_toward_min2_pos = push_towards(saddle_positions[neighbors],supposed_min2_positions, fraction=self.config.reconstruction.push_fraction, cell = cell, pbc = pbc)
+            saddle_toward_min2_pos = push_towards(
+                saddle_positions[neighbors], supposed_min2_positions,
+                fraction=adaptive_push_fraction(
+                    saddle_positions[neighbors], supposed_min2_positions, supposed_min1_positions,
+                    self.config.reconstruction.push_fraction,
+                    self.config.reconstruction.mover_landing_fraction, cell, pbc),
+                cell = cell, pbc = pbc)
             tmp_positions[neighbors] = saddle_toward_min2_pos
             try:
                 min2_pos, min2_etot = self._minimize(tmp_positions, freeze_positions, central_atom, av_rmov, cell, pbc)
