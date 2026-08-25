@@ -1,3 +1,6 @@
+import logging
+import typing
+
 from pykmc.basins import FPTASelector
 import numpy as np
 import pandas as pd
@@ -112,3 +115,81 @@ class TestSelector :
         result = selector.select_from_connectivity(connectivity_table_Cu, excluded_states=all_absorbing)
         assert not result.is_ok()
         assert result.err_value().type == ErrorType.BASIN_NO_VIABLE_EXIT
+
+    def test_auto_recovers_when_direct_mfpt_solve_fails(self, test_logger: logging.Logger) -> None :
+        """solver='auto' on a basin whose direct MFPT solve is numerically dead.
+
+        Fast 0<->1 at 1e14 g, slow 1<->2 at 1e-3 g, escape g from state 2 into two
+        absorbing states. ``np.linalg.solve`` on Q returns garbage there, so the
+        QSD solver must reach its cancellation-free fallback and still hand
+        ``select_absorbing_state`` a valid occupation-time weight vector.
+        """
+        from tests.basins.test_exit_time_solver import _exact_mfpt_fraction
+
+        w, s, g = 1.0e14, 1.0e-6, 1.0e-3
+        # 3 transient + 2 absorbing; state 2 escapes to both absorbers at g/2.
+        M_abs = np.array([
+            [w,    -w,     0.0,    0.0, 0.0],
+            [-w,   w + s,  -s,     0.0, 0.0],
+            [0.0,  -s,     s + g,  0.0, 0.0],
+            [0.0,  0.0,    -g / 2, 0.0, 0.0],
+            [0.0,  0.0,    -g / 2, 0.0, 0.0],
+        ])
+        sel = FPTASelector(solver="auto")
+        sel.M_abs = M_abs
+        sel.build_reduced_matrix(3)
+        exact_mfpt = _exact_mfpt_fraction(sel.M_abs_reduced)
+
+        np.random.seed(20260825)
+        r1 = np.random.random()
+        np.random.seed(20260825)
+        result = sel.get_exit_time()
+        assert result.is_ok(), result.err_value() if not result.is_ok() else ""
+        t_exit = result.ok_value().t_exit
+        assert np.isfinite(t_exit) and t_exit > 0
+        np.testing.assert_allclose(t_exit, -np.log(1.0 - r1) * exact_mfpt, rtol=1e-9)
+        assert sel._use_qsd is True
+        assert sel._qsd is not None
+        assert np.all(sel._qsd >= 0)
+        np.testing.assert_allclose(np.sum(sel._qsd), 1.0, rtol=1e-12)
+
+        exit_state = sel.select_absorbing_state(t_exit)
+        assert exit_state in (3, 4)
+
+    def test_auto_falls_back_when_qsd_fails(self, monkeypatch: typing.Any) -> None :
+        """solver='auto': a failed QSD is no longer returned as the basin error.
+
+        The stiff branch is forced to fail; 'auto' must fall back to bisection and
+        return Ok with _use_qsd/_qsd reset. Forced 'qsd' stays strict.
+        """
+        from pykmc.result import Err, ErrorInfo, ErrorType
+        from pykmc.basins import selection as selection_mod
+
+        stiff = np.array([
+            [1.0e3 + 1.0e-3, -1.0e3,          0.0],
+            [-1.0e3,          1.0e3 + 1.0e-3, 0.0],
+            [-1.0e-3,        -1.0e-3,         0.0],
+        ])
+
+        failing = Err(ErrorInfo(type=ErrorType.BASIN_TEXIT_NOT_FOUND, message="boom"))
+
+        class _FailingQSD:
+            def __init__(self, *a: typing.Any, **k: typing.Any) -> None:
+                self.qsd = None
+
+            def solve(self) -> typing.Any :
+                return failing
+
+        monkeypatch.setattr(selection_mod, "QSDSolver", _FailingQSD)
+
+        sel = FPTASelector(solver="auto")
+        sel.M_abs_reduced = stiff
+        result = sel.get_exit_time()
+        assert result.is_ok()
+        assert sel._use_qsd is False
+        assert sel._qsd is None
+
+        sel = FPTASelector(solver="qsd")
+        sel.M_abs_reduced = stiff
+        assert not sel.get_exit_time().is_ok()
+        assert sel._use_qsd is False

@@ -180,6 +180,107 @@ class BisectionSolver() :
 
         self.t_exit = t_mid
         return Ok(None)
+#Relative residual |Q tau - p0| / |p0| above which the direct MFPT solve is
+#considered untrustworthy and the cancellation-free reduction takes over. For an
+#M-matrix solved by LU the residual measured this way tracks the forward relative
+#error (it is ~eps * cond(Q) when p0 is a unit vector), so the threshold is a
+#conditioning test, not a stiffness test. Measured on the two-state chain of
+#tests/basins/test_exit_time_solver.py the direct error is 5e-5 at a residual of
+#7e-5 and 5.5e-4 at 7e-4, so 1e-5 keeps the direct path at least 20x inside the
+#1e-3 accuracy requirement while leaving well-conditioned generators - including
+#the stiffness-1e7 slow-passage case, residual 6e-7 - on the fast path.
+MFPT_RESIDUAL_TOL = 1.0e-5
+
+
+def occupation_times_gth(M: np.ndarray, p0: np.ndarray) -> "np.ndarray | None":
+    """Transient occupation times by GTH state reduction, without cancellation.
+
+    Solves the same system as ``tau = Q^-1 p0`` (expected time spent in each
+    transient state before absorption) but never forms a difference of two
+    positive numbers, so it is accurate to ~n*eps at *any* stiffness. Every step
+    is an addition, multiplication or division of non-negative quantities:
+
+    - the rates are read from the off-diagonals only, ``k(i->j) = -M[j, i]`` and
+      ``gamma_i = -M[-1, i]``, and each total out-rate is rebuilt as
+      ``d_i = gamma_i + sum_j k(i->j)`` - never from ``M[i, i]``, whose stored
+      value has already lost every escape rate smaller than ``eps * d_i``;
+    - eliminating state ``n`` folds the paths through it into the survivors,
+      ``k'(i->j) = k(i->j) + k(i->n) k(n->j) / d_n``,
+      ``gamma'_i = gamma_i + k(i->n) gamma_n / d_n``,
+      ``p0'_j = p0_j + k(n->j) p0_n / d_n``, and drops the resulting self-loop by
+      rebuilding ``d'_i`` as the sum of the surviving out-rates (Grassmann,
+      Taksar and Heyman; equal to ``d_i - k(i->n) k(n->i) / d_n`` but computed
+      additively);
+    - back-substitution recovers each eliminated ``tau_n`` from the level it was
+      removed at, ``tau_n = (p0_n + sum_i k(i->n) tau_i) / d_n``.
+
+    Cost is O(n^3) in a Python-level loop over the eliminations: 13-23 s at
+    n = 2000 (the basins `max_states` cap) against 0.2-0.5 s for
+    ``np.linalg.solve``, 7 ms at n = 100. Hence the fallback path, not the
+    default one.
+
+    Parameters
+    ----------
+    M : np.ndarray
+        Reduced generator matrix of shape (n_transient+1, n_transient+1); the
+        last row holds the (negated) escape rates into the merged absorbing state.
+    p0 : np.ndarray
+        Initial probability distribution; only the first n entries are used.
+
+    Returns
+    -------
+    np.ndarray or None
+        The occupation times ``tau``, or None when some state has no outgoing
+        rate at all (no absorbing escape is reachable, so no exit time exists).
+
+    """
+    n = len(M) - 1
+    if n < 1:
+        return None
+
+    #k[i, j] = rate i -> j. The generator invariant makes the off-diagonals <= 0;
+    #clamp so the reduction's non-negativity precondition holds by construction.
+    k = np.maximum(-np.asarray(M[:n, :n], dtype=np.float64).T, 0.0)
+    np.fill_diagonal(k, 0.0)
+    gamma = np.maximum(-np.asarray(M[-1, :n], dtype=np.float64), 0.0)
+    p = np.maximum(np.asarray(p0[:n], dtype=np.float64), 0.0).copy()
+    d = gamma + k.sum(axis=1)
+
+    #Values of the level each state is eliminated at, for the back-substitution.
+    kin_at: "list[np.ndarray | None]" = [None] * n
+    p_at = np.zeros(n)
+    d_at = np.zeros(n)
+
+    for m in range(n - 1, 0, -1):
+        d_m = d[m]
+        if not (d_m > 0.0) or not np.isfinite(d_m):
+            return None
+        kin = k[:m, m].copy()      #k(i -> m)
+        kout = k[m, :m].copy()     #k(m -> j)
+        kin_at[m], p_at[m], d_at[m] = kin, p[m], d_m
+
+        k = k[:m, :m] + np.outer(kin, kout) / d_m
+        np.fill_diagonal(k, 0.0)   #self-loops are absorbed by rebuilding d below
+        gamma = gamma[:m] + kin * (gamma[m] / d_m)
+        p = p[:m] + kout * (p[m] / d_m)
+        d = gamma + k.sum(axis=1)
+
+    if not (d[0] > 0.0) or not np.isfinite(d[0]):
+        return None
+
+    tau = np.empty(n)
+    tau[0] = p[0] / d[0]
+    for m in range(1, n):
+        kin_m = kin_at[m]
+        if kin_m is None:  #unreachable: every m in [1, n) was eliminated above
+            return None
+        tau[m] = (p_at[m] + float(kin_m @ tau[:m])) / d_at[m]
+
+    if not np.all(np.isfinite(tau)):
+        return None
+    return tau
+
+
 class QSDSolver():
     """Analytical exit time solver based on the mean first-passage time (MFPT).
 
@@ -202,6 +303,22 @@ class QSDSolver():
     a slow internal passage (fast 0<->1, slow 1<->2, escape only from 2) made
     it underestimate the exit time by orders of magnitude.
 
+    The MFPT itself is computed twice over: ``np.linalg.solve`` first, then, if
+    that solve is ill-conditioned, the cancellation-free GTH state reduction of
+    ``occupation_times_gth``. The direct solve carries the escape rate only
+    inside Q's diagonal ``d_i = (internal + escape)``; once ``escape / internal``
+    drops below eps that diagonal rounds to the internal rate alone, Q becomes
+    numerically singular and the solve returns garbage or raises. The reduction
+    never forms that sum-then-difference, so it is exact at any stiffness and,
+    unlike the closed-chain form, also correct when the escape sits behind a slow
+    internal passage. Which path ran is recorded in ``method``, the relative
+    residual of the direct solve in ``residual``.
+
+    The switch is a conditioning test on the direct solve (relative residual,
+    non-finite or negative occupation times, LinAlgError), never a stiffness
+    heuristic: a stiff generator whose direct solve is accurate stays on the
+    fast path.
+
     Parameters
     ----------
     M : np.ndarray
@@ -221,34 +338,68 @@ class QSDSolver():
         self.t_exit = -1.0
         self.qsd: np.ndarray | None = None
         self.k_eff: float | None = None
+        self.method: str = "none"     #'mfpt-direct' | 'mfpt-gth' | 'none'
+        self.residual: float = np.inf  #relative residual of the direct MFPT solve
 
     def solve(self) -> Result[BasinExitTimeSolverOutput, ErrorInfo]:
         """Compute the exit time using the QSD approach.
+
+        Runs the direct MFPT solve, tests its conditioning, and falls back to the
+        cancellation-free GTH reduction when the direct solve cannot be trusted.
 
         Returns
         -------
         Result[BasinExitTimeSolverOutput, ErrorInfo]
             - Ok(BasinExitTimeSolverOutput) on success
-            - Err(ErrorInfo) if k_eff <= 0
+            - Err(ErrorInfo) if neither path yields a positive finite MFPT
 
         """
         n = len(self.M) - 1  # number of transient states
 
         # Open transient generator (diagonal keeps the absorbing leakage) and the
         # transient part of the entry distribution.
-        Q = self.M[:n, :n]
+        Q = np.asarray(self.M[:n, :n], dtype=np.float64)
         p0_t = np.array(self.p0[:n], dtype=np.float64)
 
-        # Mean occupation times tau = Q^-1 p0 ; a singular Q means no absorbing
-        # escape at all (or an unreachable escape), so report instead of guessing.
+        # Mean occupation times tau = Q^-1 p0, fast path.
+        tau: "np.ndarray | None"
         try:
-            tau = np.linalg.solve(Q.astype(np.float64), p0_t)
+            tau = np.linalg.solve(Q, p0_t)
         except np.linalg.LinAlgError:
-            tau = np.full(n, np.nan)
-        mfpt = float(np.sum(tau))
-        if not np.isfinite(mfpt) or mfpt <= 0 or np.any(tau < -1e-12 * abs(mfpt)):
+            tau = None
+
+        # Conditioning test on that solve. |Q tau - p0| / |p0| is ~eps*cond(Q)
+        # here, so it estimates the forward relative error; a negative or
+        # non-finite occupation time is garbage outright.
+        if tau is not None:
+            norm_p0 = float(np.linalg.norm(p0_t))
+            self.residual = float(np.linalg.norm(Q @ tau - p0_t) / norm_p0) if norm_p0 > 0 else np.inf
+            mfpt = float(np.sum(tau))
+            trustworthy = (
+                np.all(np.isfinite(tau))
+                and np.isfinite(mfpt) and mfpt > 0
+                and not np.any(tau < -1e-12 * abs(mfpt))
+                and self.residual <= MFPT_RESIDUAL_TOL
+            )
+        else:
+            trustworthy = False
+
+        if trustworthy:
+            self.method = "mfpt-direct"
+        else:
+            # Ill-conditioned (typically Q's diagonal has rounded away the escape
+            # rates): redo the same MFPT without any cancellation.
+            logger.info("[FPTA] QSD solver: direct MFPT solve rejected "
+                        "(residual=%.3e > %.1e or non-positive tau); using GTH reduction",
+                        self.residual, MFPT_RESIDUAL_TOL)
+            tau = occupation_times_gth(self.M, self.p0)
+            self.method = "mfpt-gth"
+
+        mfpt = float(np.sum(tau)) if tau is not None else np.nan
+        if tau is None or not np.isfinite(mfpt) or mfpt <= 0 or np.any(tau < -1e-12 * abs(mfpt)):
             self.qsd = None
             self.k_eff = 0.0
+            self.method = "none"
             return Err(ErrorInfo(
                 type=ErrorType.BASIN_TEXIT_NOT_FOUND,
                 message="QSD solver: k_eff <= 0, no absorbing escape possible"))
@@ -256,8 +407,8 @@ class QSDSolver():
         self.qsd = np.maximum(tau, 0.0) / mfpt
         self.k_eff = 1.0 / mfpt
 
-        logger.info("[FPTA] QSD solver: k_eff=%.6e (MFPT=%.6e), qsd_min=%.6e, qsd_max=%.6e",
-                    self.k_eff, mfpt, np.min(self.qsd), np.max(self.qsd))
+        logger.info("[FPTA] QSD solver (%s): k_eff=%.6e (MFPT=%.6e), qsd_min=%.6e, qsd_max=%.6e",
+                    self.method, self.k_eff, mfpt, np.min(self.qsd), np.max(self.qsd))
 
         # Exit time from exponential distribution: P(t < T) = 1 - exp(-k_eff * T)
         # Solving for T: T = -ln(1 - r) / k_eff
