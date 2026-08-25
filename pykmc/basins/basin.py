@@ -908,13 +908,18 @@ class BasinsGenericEvents() :
             else:
                 candidates = list(self.states.keys())
 
+        #Normalize once: System.types is a list on the create_from_file path, and
+        #np.asarray() on a 32k list of symbols costs ~5 ms — not per candidate.
+        types_new = None if system.types is None else np.asarray(system.types)
+
         for state_index in candidates:
             #.get(): defense-in-depth — a cache/states keyspace desync must degrade
             #to a missed pre-filter hit, not kill a multi-day run with KeyError.
             state_data = self.states.get(state_index)
             if state_data is None or state_data.system is None:
                 continue
-            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell)
+            are_equivalent = self.are_structures_equivalent(system.positions, state_data.system.positions, cell = system.cell,
+                                                            types1 = types_new, types2 = state_data.system.types)
             if are_equivalent :
                 return state_index
         return -1
@@ -925,8 +930,56 @@ class BasinsGenericEvents() :
         box = np.diag(cell)
         return np.mod(positions, box)
 
-    def are_structures_equivalent(self, pos1, pos2, cell, tol=0.3):
+    def _matches_tree(self, tree: cKDTree, tree_types: "np.ndarray | list[str] | None",
+                      wrapped_query: np.ndarray, query_types: "np.ndarray | list[str] | None",
+                      tol: float = 0.3) -> bool:
+        """Match wrapped query positions against a prebuilt kd-tree, species included.
 
+        Shared by the serial comparison and the batch fast path so the two can never
+        disagree. Equivalent means: every queried atom has a partner within ``tol``
+        AND that partner carries the same species. With ``tol`` (0.3 A) far below the
+        nearest-neighbour spacing at most one atom of the reference can lie inside the
+        tolerance, so "the nearest partner is same-species" and "a same-species partner
+        exists within tol" only differ for physically degenerate overlaps.
+
+        Species are skipped when either side has no ``types`` (a System may carry
+        None), which reproduces the pre-fix positions-only decision exactly.
+        """
+        if tree.n != len(wrapped_query):
+            return False
+        distances, partners = tree.query(wrapped_query, k=1)
+        if not np.max(distances) < tol:
+            return False
+        if tree_types is None or query_types is None:
+            return True
+        ref = np.asarray(tree_types)
+        query = np.asarray(query_types)
+        if len(ref) != tree.n or len(query) != len(wrapped_query):
+            return False
+        return bool(np.all(query == ref[partners]))
+
+    def are_structures_equivalent(self, pos1: np.ndarray, pos2: np.ndarray, cell: np.ndarray,
+                                  types1: "np.ndarray | list[str] | None" = None,
+                                  types2: "np.ndarray | list[str] | None" = None,
+                                  tol: float = 0.3) -> bool:
+        """Return True when the two states are the same structure, species included.
+
+        Two states are equivalent only when every atom of ``pos1`` has a partner within
+        ``tol`` in ``pos2`` **of the same species**. Positions alone merged states that
+        differ only by a species swap between two sites — for a Cr-vacancy flicker
+        X <-> Y with a Ni common neighbour S catalogued into both, the two products
+        agree positionally to ~0.05 A and one silently absorbed both channels'
+        probability (review 2026-08-25, § 4b).
+
+        With a single species the species test is vacuously true, so the decision is
+        bit-identical to the pre-fix positions-only one (same tree, same tolerance,
+        same ``< tol`` comparison) — see tests/basins/test_species_dedup.py.
+
+        The fingerprint pre-filter in :func:`is_new_state` stays deliberately
+        species-blind: it can only *reject* candidates, so a species swap at worst lets
+        a candidate through to this comparison, which now decides. Adding a species term
+        there would cost work on every pure-Ni state for no change in the verdict.
+        """
         if len(pos1) != len(pos2):
             return False
 
@@ -936,9 +989,8 @@ class BasinsGenericEvents() :
         wrapped1 = self._wrap_positions(pos1, cell)
         wrapped2 = self._wrap_positions(pos2, cell)
         tree2 = cKDTree(wrapped2, boxsize=box)
-        distances, _ = tree2.query(wrapped1, k=1)
 
-        return np.max(distances) < tol
+        return self._matches_tree(tree2, types2, wrapped1, types1, tol=tol)
 
     def is_states_has_unknown_environments(self, state: StateData) : 
         if set(state.environment.atomic_environment_list).difference(self.known_environments) != set() :
@@ -1341,10 +1393,15 @@ class BasinsGenericEvents() :
             new_fingerprints[idx] = fingerprinting.compute_fingerprint(
                 self.config, system.positions, system.cell, system.pbc)
 
-        # Build kd-trees for existing states (None marks mixed-PBC fallback)
+        # Build kd-trees for existing states (None marks mixed-PBC fallback).
+        # The species of each tree's atoms travel with it: the fast path below is
+        # species-aware exactly like are_structures_equivalent().
         existing_trees = {}
+        existing_types = {}
         for idx, state_data in self.states.items():
             if state_data.system is not None:
+                existing_types[idx] = (None if state_data.system.types is None
+                                       else np.asarray(state_data.system.types))
                 if state_data.system.pbc is None or np.all(state_data.system.pbc):
                     box = np.diag(state_data.system.cell).tolist()
                     wrapped = self._wrap_positions(state_data.system.positions, state_data.system.cell)
@@ -1362,6 +1419,7 @@ class BasinsGenericEvents() :
 
             match = -1
             fp_new = new_fingerprints[new_idx]
+            types_new = None if system.types is None else np.asarray(system.types)
 
             # Fingerprint pre-filter against existing states
             # (fp_new None = fingerprint_mode 'off': compare against every state)
@@ -1379,14 +1437,16 @@ class BasinsGenericEvents() :
                 tree = existing_trees[existing_idx]
                 if tree is not None:
                     wrapped_query = self._wrap_positions(system.positions, system.cell)
-                    distances, _ = tree.query(wrapped_query, k=1)
-                    if np.max(distances) < 0.3:
+                    if self._matches_tree(tree, existing_types.get(existing_idx),
+                                          wrapped_query, types_new):
                         match = existing_idx
                         break
                 else:
                     state_data = self.states[existing_idx]
                     if self.are_structures_equivalent(system.positions, state_data.system.positions,
-                                                      cell=system.cell):
+                                                      cell=system.cell,
+                                                      types1=types_new,
+                                                      types2=state_data.system.types):
                         match = existing_idx
                         break
 
@@ -1404,7 +1464,9 @@ class BasinsGenericEvents() :
                             continue
                         if self.are_structures_equivalent(system.positions,
                                                           new_systems[other_idx].positions,
-                                                          cell=system.cell):
+                                                          cell=system.cell,
+                                                          types1=types_new,
+                                                          types2=new_systems[other_idx].types):
                             match = other_idx
                             break
 
