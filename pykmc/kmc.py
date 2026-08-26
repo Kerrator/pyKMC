@@ -3,13 +3,7 @@
 This module defines the `KMC` class.
 """
 
-from pykmc import (
-    NeighborsList,
-    AtomicEnvironment,
-    ActiveEventTable,
-    Config,
-    Reconstruction,
-)
+from pykmc import NeighborsList, AtomicEnvironment, ActiveEventTable, Config, Reconstruction
 import random
 from .result import (
     EventSearchOutput,
@@ -24,7 +18,7 @@ from .result import (
     EventRefinementOutput,
     ReconstructionOutput,
     Err,
-    Ok,
+    Ok
 )
 import numpy as np
 from ase.io import write
@@ -40,7 +34,7 @@ from .info_simulation import (
     info_is_valid_reference_events,
     info_refinements,
     info_active_events,
-    info_basin_events,
+    info_basin_events
 )
 from .eventsearch import EventSearch
 from .refinement import Refinement
@@ -50,13 +44,10 @@ from .utils import push_towards, compute_delr
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
-from .event_recycling import DistanceRecycling, Recycling
-from .bias import Bias
 
 
 # NOTE can maybe reimplment tries if empty catalog
-# TODO: Add reconstruction info
-
+#TODO: Add reconstruction info
 
 class KMC:
     """Manage and execute the Kinetic Monte Carlo (KMC) simulation.
@@ -100,91 +91,50 @@ class KMC:
         self.visited_environments = None
         self.total_energy = None
         self.potential_energy = None
-        self.active_table: ActiveEventTable | None = None
-        self._pre_exec_positions: np.ndarray | None = None
-        self.bias: Bias | None = None
-        # The recycler decides what to carry over between KMC steps at
-        # end-of-step; with no recycler the active table is cleared each
-        # step (same observable behavior as prior releases).
-        self.recycler: Recycling | None = None
-        if self.config.control.recycle:
-            if self.config.eventrecycling.style == "displacement":
-                self.recycler = DistanceRecycling(
-                    movement_thr=self.config.eventrecycling.movement_thr,
-                    distance_thr=self.config.eventrecycling.distance_thr,
-                )
 
     def run(self) -> None:
         """Run the simulation."""
         # Initialize the simulation, KMC attributes and minimize the system
-        # self._initialize()
+        #self._initialize()
+        self.manager.initialize_sessions(self.config, self.system)
         self.minimize_system()
         self.neighbors_list = NeighborsList(
-            self.system,
-            self.config.atomicenvironment.rnei,
-            self.config.atomicenvironment.rcut,
-        )
+                self.system,
+                self.config.atomicenvironment.rnei,
+                self.config.atomicenvironment.rcut,
+            )
         self.atomic_environment = AtomicEnvironment(
-            self.config.atomicenvironment.style,
-            self.neighbors_list.neighbors_list["rnei"],
-            self.neighbors_list.neighbors_list["rcut"],
-            self.config.atomicenvironment.neighbors_add,
-            coordination_threshold=self.config.atomicenvironment.coordination_threshold,
-            types=self.system.types,
-            coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
-        )
-        self.inactive_ae = (
-            AtomicEnvironment(
-                style="region",
-                region=self.config.inactive_atoms,
-                positions=self.system.positions,
-                atom_types=self.system.types,
+                self.config.atomicenvironment.style,
+                self.neighbors_list.neighbors_list["rnei"],
+                self.neighbors_list.neighbors_list["rcut"],
+                self.config.atomicenvironment.neighbors_add,
             )
-            if self.config.inactive_atoms is not None
-            else None
-        )
-        self.frozen_ae = (
-            AtomicEnvironment(
-                style="region",
-                region=self.config.frozen_atoms,
-                positions=self.system.positions,
-                atom_types=self.system.types,
-            )
-            if self.config.frozen_atoms is not None
-            else None
-        )
-        # Set new positions to all sessions/engine :
-        self.manager.broadcast("set_positions", positions=self.system.positions)
+        #Set new positions to all sessions/engine : 
+        self.manager.use_local()
+        self.manager.set_all_positions(self.system.positions)
 
-        if self.config.control.restart_file is None:
-            # Write initial step to file
+        if self.config.control.restart_file is None: 
+        # Write initial step to file
             self._append_snapshot_to_trajectory()
-            last_step = 0
+            last_step = 0 
             total_time = 0.0
 
-        else:  # read restart file
+        else : #read restart file
             self.loggers.info("log", ":=> Reading restart file")
-            restart_info = np.load(self.config.control.restart_file)
+            restart_info = np.load(self.config.control.restart_file) 
             last_step = restart_info["last_step"]
             total_time = restart_info["last_time"]
-            self.loggers.info(
-                "log",
-                ":=> last step = {}, last_end_time = {}ps".format(
-                    last_step, total_time
-                ),
-            )
+            self.loggers.info("log", ":=> last step = {}, last_end_time = {}ps".format(last_step, total_time))
 
         # LOOP KMC PARAMETERS
         nkmc_steps = self.config.control.n_steps
-        last_step += 1
+        last_step +=1 
         nsearch = self.config.eventsearch.nsearch
 
-        # Build the persistent active event table once, with the recycler
-        # plugin (built in __init__) attached.
-        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
+        
 
         # KMC LOOP
-        for step in range(last_step, nkmc_steps + last_step):
+        for step in range(last_step, nkmc_steps+last_step):
             start_real = time.time()
             start_cpu = time.process_time()
 
@@ -198,14 +148,6 @@ class KMC:
             # == Find Current atomic environments that has not been visited ==
             new_environments = self.get_new_environments()
 
-            if self.config.control.recycle and len(self.active_table.table) > 0:
-                self.loggers.info(
-                    "log",
-                    "\t :=> Recycling {} events from the previous step".format(
-                        len(self.active_table.table)
-                    ),
-                )
-
             # == FIND NEW GENERIC EVENTS ==
             ##=>List of atoms(central) on which we gonna perfom an event search
             central_atom_research_list = self.central_atoms_research(
@@ -217,13 +159,9 @@ class KMC:
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
-            search_results = event_search.get_successes_results()
-            if self.inactive_ae is not None:
-                inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
-                search_results = [
-                    r for r in search_results if r.move_atom_index not in inactive_set
-                ]
-            results_is_valid_events = self.add_reference_events(search_results)
+            results_is_valid_events = self.add_reference_events(
+                event_search.get_successes_results()
+            )
 
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
@@ -232,6 +170,7 @@ class KMC:
                     "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.",
                 )
                 self._close()
+
 
             # == Update variables ==
             l_ids = list(set(self.atomic_environment.atomic_environment_list))
@@ -243,170 +182,94 @@ class KMC:
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
             )
-            ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
-            refinement = self.execute_refinements(
-                subset_reference_event_table,
-                existing_pairs=self.active_table.existing_pairs(),
-            )
+            ##=>Refines all event in subset
+            refinement = self.execute_refinements(subset_reference_event_table)
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
-            # The persistent self.active_table is extended in place; recycled
-            # rows from the previous step are already present.
-            self.add_active_events(refinement.get_successes_results())
-            active_table = self.active_table
+            active_table = self.add_active_events(refinement.get_successes_results())
+            active_table.remove_duplicates(self.system.cell, self.neighbors_list)  #To be sure
+            self.loggers.info("log", "\t :=> {} active events after removing duplicates.".format(len(active_table.table)))
 
-            active_table.remove_duplicates(
-                self.system.cell, self.neighbors_list
-            )  # To be sure
-            self.loggers.info(
-                "log",
-                "\t :=> {} active events after removing duplicates.".format(
-                    len(active_table.table)
-                ),
-            )
 
             # == Update System ==
-            (
-                result_reconstruction,
-                delta_t,
-                ktot,
-                idx_selected_event,
-                err_reference,
-                err_ae,
-            ) = self.reconstruction(active_table)
-            events_info = info_active_events(
-                self.system.types, self.reference_table, active_table
-            )
-            if len(err_reference) != 0:
-                self.loggers.info(
-                    "log",
-                    "\t :=> Removing reference event from which reconstruction failed.",
-                )
+            self.manager.use_global()
+            result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae = self.reconstruction(active_table)
+            events_info = info_active_events(self.system.types, self.reference_table, active_table)
+            if len(err_reference) != 0 :
+                self.loggers.info("log", "\t :=> Removing reference event from which reconstruction failed.")
                 self.reference_table.remove(list(set(err_reference)))
-                self.loggers.info(
-                    "log",
-                    "\t :=> Removing topology from known environments from which reconstruction failed.",
-                )
-                self.visited_environments = self.visited_environments.difference(
-                    set(err_ae)
-                )
+                self.loggers.info("log", "\t :=> Removing topology from known environments from which reconstruction failed.")
+                self.visited_environments = self.visited_environments.difference(set(err_ae))
             events_info = events_info.output_msg()
 
-            # INFO :
+
+
+
+            #INFO :
             self.loggers.events_file_step_first_line("events", step)
             self.loggers.events_applicable_info_line("events", idx_selected_event)
             self.loggers.info("events", events_info)
 
-            # TODO: Temporary, need to unified kmc main loop and basin operations + ugly
+                #TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
-            # Pre-execution snapshot for event recycling (needed before update_positions below)
-            if self.config.control.recycle:
-                self._pre_exec_positions = self.system.positions.copy()
-                # IF selected event shows we are in a basin
-            if self.config.control.basin and detector.detect(
-                active_table.table.iloc[idx_selected_event],
-                self.reference_table.table,
-                self.config.basin.energy_thr,
-                True,
-            ):
-                self.loggers.info("log", "\t :=> System is in a Basin.")
-                self.loggers.info("log", "\t :=> Exploring the Basin.")
-                # get basin info/explore
-                basin = BasinsGenericEvents(
-                    self.config,
-                    self.reference_table,
-                    self.visited_environments,
-                    self.manager,
-                )
-                self.system.update_positions(
-                    result_reconstruction.ok_value().min1_positions
-                )
+                #IF selected event shows we are in a basin
+            if self.config.control.basin and detector.detect(active_table.table.iloc[idx_selected_event], self.reference_table.table, self.config.basin.energy_thr, True) :
+                self.loggers.info("log","\t :=> System is in a Basin." )
+                self.loggers.info("log","\t :=> Exploring the Basin." )
+                #get basin info/explore
+                basin = BasinsGenericEvents(self.config, self.reference_table, self.visited_environments, self.manager)
+                self.system.update_positions(result_reconstruction.ok_value().min1_positions)
                 result_basin = basin.execute(self.system)
-                if result_basin.is_ok():  # Basin did no fail
-                    # move system to a state connected to the exit_state
-                    self.system.update_positions(
-                        result_basin.ok_value().initial_system_positions
-                    )
-                    self.neighbors_list = basin.states[
-                        result_basin.ok_value().from_state
-                    ].neighbors_list
-                    # construct new active table with only event : new_actual_state - > exit_state
+                if result_basin.is_ok() : #Basin did no fail
+                #move system to a state connected to the exit_state
+                    self.system.update_positions(result_basin.ok_value().initial_system_positions)
+                    self.neighbors_list = basin.states[result_basin.ok_value().from_state].neighbors_list
+                #construct new active table with only event : new_actual_state - > exit_state
                     tmp_active_table = ActiveEventTable(self.config)
-                    tmp_event = EventRefinementOutput(
-                        central_atom_index=result_basin.ok_value().central_atom,
-                        saddle_positions=result_basin.ok_value().saddle_positions,
-                        E_saddle=-1,
-                        min2_positions=result_basin.ok_value().final_positions,
-                        dE_forward=result_basin.ok_value().energy_barrier,
-                        num_reference_event=result_basin.ok_value().num_reference_event,
-                    )
+                    tmp_event = EventRefinementOutput(central_atom_index=result_basin.ok_value().central_atom,
+                                                      saddle_positions=result_basin.ok_value().saddle_positions,
+                                                      E_saddle=-1,
+                                                      min2_positions=result_basin.ok_value().final_positions,
+                                                      dE_forward=result_basin.ok_value().energy_barrier,
+                                                      num_reference_event=result_basin.ok_value().num_reference_event)
                     neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
-                    # reconstruct event
-                    result_basin_reconstruction = self._reconstruction_active_event(
-                        0, tmp_active_table
-                    )
-                    if result_basin_reconstruction.is_ok():
-                        self.system.update_positions(
-                            result_basin_reconstruction.ok_value().min2_positions
-                        )
-                        self.total_energy = (
-                            result_basin_reconstruction.ok_value().min2_etot
-                        )
+                #reconstruct event
+                    self.manager.use_global()
+                    result_basin_reconstruction = self._reconstruction_active_event(0, tmp_active_table)
+                    if result_basin_reconstruction.is_ok() :
+                        self.system.update_positions(result_basin_reconstruction.ok_value().min2_positions)
+                        self.total_energy = result_basin_reconstruction.ok_value().min2_etot
                         delta_t = result_basin.ok_value().t_exit
                         ktot = result_basin.ok_value().k_tot
                         idx_selected_event = 0
                         active_table.table = tmp_active_table.table
 
-                        # INFO
-                        idx_exit_event, basin_info = info_basin_events(
-                            self.system.types,
-                            self.reference_table,
-                            basin.connectivity_table,
-                            result_basin.ok_value().exit_state,
-                        )
+                        #INFO
+                        idx_exit_event, basin_info = info_basin_events(self.system.types, self.reference_table, basin.connectivity_table, result_basin.ok_value().exit_state)
                         basin_info = basin_info.output_msg()
-                        self.loggers.events_basin_info_line("events", idx_exit_event)
+                        self.loggers.events_basin_info_line("events",idx_exit_event )
                         self.loggers.info("events", basin_info)
 
-                    else:
-                        self.loggers.info(
-                            "log",
-                            "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(
-                                result_basin_reconstruction.err_value()
-                            ),
-                        )
-                        self.system.update_positions(basin.states[0].system.positions)
-                        self.system.update_positions(
-                            result_reconstruction.ok_value().min2_positions
-                        )
-                else:
-                    self.loggers.info(
-                        "log",
-                        "\t :=> Basin fails with error : {}, back to original event".format(
-                            result_basin.err_value()
-                        ),
-                    )
-                    self.system.update_positions(
-                        result_reconstruction.ok_value().min2_positions
-                    )
-                if basin.connectivity_table is not None:
-                    basin.connectivity_table.save(
-                        "basin_connectivity_" + str(step) + ".pickle"
-                    )
-                # Basin super-event spans many atoms; recycling is deferred (the
-                # prune below runs with the recycler detached).
-                prune_detach_recycler = True
-            else:
-                self.system.update_positions(
-                    result_reconstruction.ok_value().min2_positions
-                )
+
+                    else :
+                       self.loggers.info("log", "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(result_basin_reconstruction.err_value()))
+                       self.system.update_positions(basin.states[0].system.positions)
+                       self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                else :
+                    self.loggers.info("log", "\t :=> Basin fails with error : {}, back to original event".format(result_basin.err_value()))
+                    self.system.update_positions(result_reconstruction.ok_value().min2_positions)
+                if basin.connectivity_table is not None :
+                    basin.connectivity_table.save('basin_connectivity_'+str(step)+'.pickle')
+                #update delta_t, ktot (use basin infos)
+            else :
+                self.system.update_positions(result_reconstruction.ok_value().min2_positions)
                 self.total_energy = result_reconstruction.ok_value().min2_etot
-                prune_detach_recycler = False
             total_time += delta_t * 10**-12  # time is in seconds
 
-            ###=> Synchronise all lammps instances with new positions
-            self.manager.broadcast("set_positions", positions=self.system.positions)
+            ###=> Synchronise all lammps instances with new positions 
+            self.manager.use_local()
+            self.manager.set_all_positions(positions=self.system.positions)
             ##=>Minimize
 
             # == Log informations ==
@@ -429,9 +292,10 @@ class KMC:
             )
             self.loggers.info("info", kmc_loop_info.output_msg())
 
+
             elapsed_real = time.time() - start_real
             elapsed_cpu = time.process_time() - start_cpu
-
+            
             self.loggers.table_line_info_kmc(
                 "output",
                 step,
@@ -442,36 +306,9 @@ class KMC:
                 active_table.table.loc[idx_selected_event].at["k"],
                 ktot,
                 self.total_energy,
-                elapsed_cpu,
-                elapsed_real,
+                elapsed_cpu, 
+                elapsed_real
             )
-
-            # == Event recycling: prune the active table for the next step ==
-            # Must run AFTER the step log above, which reads the executed event's
-            # row; with no recycler (recycle = False, the default) the prune clears
-            # the whole table and the lookup would raise KeyError.
-            if prune_detach_recycler:
-                saved_recycler = self.active_table.recycler
-                self.active_table.recycler = None
-                self.active_table.prune_for_recycling(
-                    idx_selected_event,
-                    self.system,
-                    self._pre_exec_positions,
-                )
-                self.active_table.recycler = saved_recycler
-            else:
-                self.active_table.prune_for_recycling(
-                    idx_selected_event,
-                    self.system,
-                    self._pre_exec_positions,
-                )
-                if self.config.control.recycle:
-                    self.loggers.info(
-                        "log",
-                        "\t :=> {} events flagged for recycling".format(
-                            len(self.active_table.table)
-                        ),
-                    )
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
@@ -484,29 +321,6 @@ class KMC:
                 self.neighbors_list.neighbors_list["rnei"],
                 self.neighbors_list.neighbors_list["rcut"],
                 self.config.atomicenvironment.neighbors_add,
-                coordination_threshold=self.config.atomicenvironment.coordination_threshold,
-                types=self.system.types,
-                coloring_mode=self.config.atomicenvironment.atom_coloring_mode,
-            )
-            self.inactive_ae = (
-                AtomicEnvironment(
-                    style="region",
-                    region=self.config.inactive_atoms,
-                    positions=self.system.positions,
-                    atom_types=self.system.types,
-                )
-                if self.config.inactive_atoms is not None
-                else None
-            )
-            self.frozen_ae = (
-                AtomicEnvironment(
-                    style="region",
-                    region=self.config.frozen_atoms,
-                    positions=self.system.positions,
-                    atom_types=self.system.types,
-                )
-                if self.config.frozen_atoms is not None
-                else None
             )
 
             # == Save Reference Table and List visited environment :
@@ -518,17 +332,6 @@ class KMC:
                 "crystal"
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
-                self._close()
-            if (
-                self.config.control.max_physical_time is not None
-                and self.config.control.max_physical_time * 1e-12 <= total_time
-            ):
-                self.loggers.info(
-                    "log",
-                    ":=> Maximum physical time reached ({} ps).".format(
-                        self.config.control.max_physical_time
-                    ),
-                )
                 self._close()
         self._save_restart_file(step, total_time)
         self._close()
@@ -577,11 +380,6 @@ class KMC:
 
         """
         central_atom_research_list = []
-        inactive_set = (
-            set(self.inactive_ae.get_atoms_with_id("in"))
-            if self.inactive_ae is not None
-            else set()
-        )
         # for each atomic environment hash in new_environment
         for env in new_environments:
             # find all index having that hash
@@ -590,10 +388,6 @@ class KMC:
                 for i, e in enumerate(self.atomic_environment.atomic_environment_list)
                 if e == env
             ]
-            if inactive_set:
-                tmp1 = [i for i in tmp1 if i not in inactive_set]
-            if not tmp1:
-                continue  # no eligible atoms for this environment
             # Randomly choose nsearch atoms that have that environment
             tmp2 = [random.choice(tmp1) for _i in range(nsearch)]
             central_atom_research_list += tmp2
@@ -644,21 +438,13 @@ class KMC:
         )
         return results_is_valid_events
 
-    def execute_refinements(
-        self,
-        df_reference_events: pd.DataFrame,
-        existing_pairs: set[tuple[int, int]] | None = None,
-    ) -> Refinement:
+    def execute_refinements(self, df_reference_events: pd.DataFrame) -> Refinement:
         """Refine all events in df_reference_events for all atoms on which they can be apply.
 
         Parameters
         ----------
         df_reference_events : pd.DataFrame
             Subset of the reference table with events that can be apply to the current system.
-        existing_pairs : set[tuple[int, int]] | None, optional
-            `(atom_index, num_reference_event)` pairs already present in the
-            persistent active table (carried over from the previous step).
-            These are skipped during refinement.
 
         Returns
         -------
@@ -674,10 +460,8 @@ class KMC:
             self.atomic_environment,
             self.manager,
         )
-        # refinement.execute(df_reference_events, self.potential_energy)
-        refinement.execute(
-            df_reference_events, self.total_energy, existing_pairs=existing_pairs
-        )
+        #refinement.execute(df_reference_events, self.potential_energy)
+        refinement.execute(df_reference_events, self.total_energy)
         return refinement
 
     def add_active_events(
@@ -696,21 +480,12 @@ class KMC:
             The active event table object.
 
         """
-        # Extend the persistent active table (initialised once in `run()`).
-        # Any rows surviving from the previous step are already present and
-        # are not re-added because Refinement skipped them via existing_pairs.
-        self.active_table.add_events(events)
-        return self.active_table
+        active_table = ActiveEventTable(self.config)
+        active_table.add_events(events)
+        return active_table
 
-    def _select_event(
-        self,
-        active_table: ActiveEventTable,
-    ) -> tuple[int, float, float]:
+    def _select_event(self, active_table: ActiveEventTable) -> tuple[int, float, float]:
         """Select an event in the active table based on the refection free algorithm.
-
-        Uses ``self.bias`` when set and enabled; otherwise performs a standard
-        unbiased rejection-free selection.  ``delta_t`` and ``ktot`` are always
-        derived from the rates of the pool at the moment of acceptance.
 
         Parameters
         ----------
@@ -726,100 +501,60 @@ class KMC:
             - float: total rate constant of the active events.
 
         """
+        # list of rate constant
         l_k = np.array(
             [active_table.table.loc[i].at["k"] for i in range(len(active_table.table))]
         )
-        if self.bias is None:
-            idx_selected_event, delta_t, ktot = rejection_free(l_k)
-        else:
-            idx_selected_event, delta_t, ktot = self.bias.select(
-                rejection_free,
-                l_k,
-                active_table,
-                self.system,
-                self.reference_table,
-                self.atomic_environment,
-            )
+        idx_selected_event, delta_t, ktot = rejection_free(l_k)
         return idx_selected_event, delta_t, ktot
 
-    def reconstruction(self, active_table):
-        # TODO make a Result
 
-        err_reference = []
-        err_ae = []
-        while len(active_table.table) > 0:
-            ##=>Select event
-            idx_selected_event, delta_t, ktot = self._select_event(active_table)
-            ##=>Reconstruct event
-            self.loggers.info("log", "\t :=> Event Reconstruction")
-            result_reconstruction = self._reconstruction_active_event(
-                idx_selected_event, active_table
-            )
-            if result_reconstruction.is_ok():
-                break
-            else:
-                num_ref_event = active_table.table.loc[idx_selected_event].at[
-                    "num_reference_event"
-                ]
-                self.loggers.info(
-                    "log",
-                    "\t :=> Reconstruction fails (reference event {}) :  {}".format(
-                        num_ref_event, result_reconstruction.err_value().message
-                    ),
-                )
-                ae_topo = self.reference_table.table[
-                    self.reference_table.table["idx_ref"] == num_ref_event
-                ]["event_id"].values[0]
-                err_reference.append(num_ref_event)
-                err_ae.append(ae_topo)
+    def reconstruction(self, active_table) : 
+            #TODO make a Result
 
-                self.loggers.info("log", "\t :=> Removing active event.")
-                active_table.remove(idx_selected_event)
-        else:
-            self.loggers.error("log", "All event reconstuctions failed.")
-            self._close()
-        return (
-            result_reconstruction,
-            delta_t,
-            ktot,
-            idx_selected_event,
-            err_reference,
-            err_ae,
-        )
+            err_reference = []
+            err_ae = []
+            while len(active_table.table) > 0 : 
+                ##=>Select event
+                idx_selected_event, delta_t, ktot = self._select_event(active_table)
+                ##=>Reconstruct event 
+                self.loggers.info("log", "\t :=> Event Reconstruction")
+                result_reconstruction = self._reconstruction_active_event(idx_selected_event, active_table)
+                if result_reconstruction.is_ok() : 
+                    break 
+                else : 
+                    num_ref_event = active_table.table.loc[idx_selected_event].at['num_reference_event']
+                    self.loggers.info("log", "\t :=> Reconstruction fails (reference event {}) :  {}".format(num_ref_event, result_reconstruction.err_value().message))
+                    ae_topo = self.reference_table.table[self.reference_table.table['idx_ref'] == num_ref_event]['event_id'].values[0]
+                    err_reference.append(num_ref_event)
+                    err_ae.append(ae_topo)
 
-    def _reconstruction_active_event(
-        self, idx_selected_event: int, active_table: AtomicEnvironment
-    ):
+                    self.loggers.info("log", "\t :=> Removing active event.")
+                    active_table.remove(idx_selected_event)
+            else : 
+                self.loggers.error("log", "All event reconstuctions failed.")
+                self._close()
+            return result_reconstruction, delta_t, ktot, idx_selected_event, err_reference, err_ae
+
+    def _reconstruction_active_event(self, idx_selected_event: int, active_table: AtomicEnvironment) :
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
         neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
-        saddle_positions = copy.deepcopy(
-            active_table.table.loc[idx_selected_event].at["saddle_positions"]
-        )
-        supposed_final_positions = copy.deepcopy(
-            active_table.table.loc[idx_selected_event].at["final_positions"]
-        )
+        saddle_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["saddle_positions"])
+        supposed_final_positions = copy.deepcopy(active_table.table.loc[idx_selected_event].at["final_positions"])
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
-        # Move the system to the saddle point
-        self.system.update_positions(new_positions=saddle_positions, atom_idx=neighbors)
 
-        # try to reconstruct
-        result = Reconstruction(
-            self.config, self.manager, types=self.system.types
-        ).reconstruct(
-            supposed_initial_positions,
-            supposed_final_positions,
-            self.system.positions,
-            self.system.cell,
-            self.config.psr.matching_score_thr,
-            neighbors,
-        )
-        # result with min1, saddle, min2 pos
 
-        # Back to original positions, in case reconstruction fails
-        self.system.update_positions(
-            new_positions=supposed_initial_positions, atom_idx=neighbors
-        )
+
+        #Move the system to the saddle point
+        self.system.update_positions(new_positions= saddle_positions, atom_idx = neighbors)
+
+        #try to reconstruct
+        result = Reconstruction(self.config, self.manager).reconstruct(supposed_initial_positions, supposed_final_positions, self.system.positions, self.system.cell, self.config.psr.matching_score_thr, neighbors)
+        #result with min1, saddle, min2 pos
+
+        #Back to original positions, in case reconstruction fails
+        self.system.update_positions(new_positions = supposed_initial_positions, atom_idx = neighbors)
         return result
 
     def _apply_event(
@@ -838,24 +573,22 @@ class KMC:
         new_positions = active_table.table.loc[idx_selected_event].at["final_positions"]
         self.system.update_positions(new_positions)
 
-    def minimize_system(self, positions=None) -> None:
+    def minimize_system(self, positions = None) -> None:
         """Minimize the system and update its positions."""
-        if self.config.control.restart_file is None:
+        if self.config.control.restart_file is None: 
             self.loggers.info("log", ":=> Minimizing the system")
-        else:
+        else : 
             self.loggers.info("log", ":=> Computing energies")
-        new_positions, total_energy = self.manager.group_minimize_with_results(
-            config=self.config, positions=positions, types=self.system.types
-        )
-        # TEST
-        # future = self.manager.minimize_with_results(self.config, positions=positions)
-        # new_positions, total_energy = future.result()
-        # np.savetxt('before_min.dat', self.system.positions)
-        # np.savetxt('after_min.dat', new_positions)
-        if self.config.control.restart_file is None:
+        new_positions, total_energy = self.manager.global_minimize_with_results(self.config, positions=positions)
+        #TEST
+        #future = self.manager.minimize_with_results(self.config, positions=positions)
+        #new_positions, total_energy = future.result()
+        #np.savetxt('before_min.dat', self.system.positions)
+        #np.savetxt('after_min.dat', new_positions)
+        if self.config.control.restart_file is None : 
             self.system.update_positions(new_positions)
         self.total_energy = total_energy
-        self.potential_energy = self.manager.group_get_potential_energy()
+        self.potential_energy = self.manager.global_get_potential_energy()
 
     def get_info_atomic_environments(
         self, new_environments: list[str]
@@ -962,18 +695,18 @@ class KMC:
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
 
-    def _save_restart_file(self, last_step, last_time):
-        """
+    def _save_restart_file(self, last_step, last_time) : 
+        """ 
         Save end simulation informations
         """
-        np.savez(
-            "restart_" + str(last_step) + ".npz",
-            last_step=last_step,
-            last_time=last_time,
-        )
+        np.savez("restart_"+str(last_step)+".npz", 
+                 last_step = last_step, 
+                 last_time = last_time)
+
 
     def _close(self) -> None:
         """Close the simulation."""
         self.loggers.info("log", ":=> End of simulation")
-        self.manager.shutdown()
+        self.manager.close_all()
         sys.exit()
+
