@@ -183,7 +183,7 @@ def partn_refine_AV(
     core_ids = []
     for i, atom_idx in enumerate(saddle_idx):
         index = int(
-            np.where(atom_map == atom_idx)[0]
+            np.where(atom_map == atom_idx)[0].item()
         )  # index in atom map where this value is true
         av_positions[index] = saddle_positions[i]
         core_idx.append(index)  # Atom id
