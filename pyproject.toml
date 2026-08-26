@@ -6,7 +6,7 @@ authors = [
 ]
 description = "test kmc and python"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -18,8 +18,6 @@ dependencies = ["ase>=3.24.0", "lammps>=2024.8.29.1.0", "mpi4py>=4.0.2", "numpy>
 
 [project.optional-dependencies]
 dev = [
-    "ruff",
-    "ty",
     "mkdocs",
     "mkdocs-material",
     "mdx_include",
@@ -33,10 +31,7 @@ doc = [
 ]
 
 
-[tool.ty.environment]
-python-version = "3.10"
-
-[build-system]
+[build-system] 
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 

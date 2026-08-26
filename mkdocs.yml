@@ -20,10 +20,9 @@ theme:
         name: Switch to light mode
   
   features:
-  - content.code.copy
-  - content.code.annotate
-  - content.code.highlight
-  - content.tabs.link
+  - content.code.copy  
+  - content.code.annotate  
+  - content.code.highlight  
 
 nav:
   - Home: index.md
@@ -32,11 +31,7 @@ nav:
       - User Guide: user_guide.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
-  - Developer Guide: 
-      - Strategy pattern : dev_strategy_pattern.md
-      - Engine : dev_engine.md
-      - Manager and Parallelization : dev_parallelization_manager.md
-      - Code formatting : dev_code_formatting.md
+  - Developer Guide: developer_guide.md
   - API Reference: 
       - System: api/system.md
       - NeighborsList: api/neighbors_list.md
@@ -68,13 +63,7 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
-  - pymdownx.tabbed:
-      alternate_style: true
+  - pymdownx.superfences
 
 extra:
   version:

@@ -253,9 +253,7 @@ Or simply source the activation script created by the installer:
 source activate.sh
 ```
 
-Run with MPI — use at least `n_sessions + 1` ranks: rank 0 runs the main KMC loop and
-the remaining ranks are split among the `n_sessions` LAMMPS instances (`[Control]`
-section of the input file):
+Run with MPI (`n = n_sessions + 1` when `engine_use_rank_0 = False`):
 
 ```bash
 mpirun -n 8 python -m pykmc -in input.in
