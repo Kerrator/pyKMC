@@ -5,8 +5,9 @@ from an input file, initializes the KMC simulation, and runs it.
 """
 
 import argparse
+from mpi4py import MPI
 from .kmc import KMC
-from pykmc.enginemanager.lmpi.pool import ManagerFactory
+from pykmc.factory import EngineManagerFactory
 from .config import Config
 
 
@@ -23,15 +24,32 @@ def main() -> None:
 
     # Config
     config = Config.from_ini_file(args.input)
+    comm = MPI.COMM_WORLD
+    group_size = (
+        (comm.Get_size() - 1)
+        if config.control.group_size == -1
+        else config.control.group_size
+    )
     # KMC
-    factory = ManagerFactory(n_sessions=config.control.n_sessions, use_rank_0=config.control.engine_use_rank_0, has_global=True)
+    factory = EngineManagerFactory(
+        engine_style=config.control.engine,
+        n_workers=config.control.n_sessions,
+        comm=comm,
+        engine_config=config.lammps,
+        group_size=group_size,
+    )
     manager = factory.launch()
-    if manager is not None: #On rank 0
-        kmc = KMC(config) 
-        kmc._initialize()
+    if manager is not None:  # On rank 0
+        kmc = KMC(config)
         kmc.manager = manager
-#        kmc = KMC(config)
-        kmc.run()
+        try:
+            kmc._initialize()
+            kmc.run()
+        except SystemExit:
+            pass
+        except BaseException:
+            comm.Abort(1)
+            raise
 
 
 if __name__ == "__main__":

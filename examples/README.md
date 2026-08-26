@@ -45,3 +45,15 @@ Vacancy-SIA recombination test.
 
 - `Cu_fc `: 
 Vacancy-SIA recombination test. Stronger elastic effects than in Nickel systems.
+
+# Nickel-Chromium alloy system : 
+
+- `./NiCr_fcc_447at_slab_monovacancy` : 
+First alloy example: an FCC(100) surface slab with 1 top-surface vacancy, ~15% random
+Cr, and an alternating Cr/Ni shell around the vacancy. A hands-on demonstration of
+`atom_coloring_mode`: with the default species-resolved `full` the run is clean, while
+species-blind `grey` mis-reconstructs catalogued events onto sites of the wrong species
+(`Reconstruction fails (reference event N)` in `pykmc.log`). The system is intentionally
+constructed to make this happen, so it doubles as a regression check for the coloring
+feature. Keep basin acceleration on for the contrast to appear -- the header of
+`input.in.template` walks you through it.

@@ -1,5 +1,9 @@
 """Module implementing Classes to manage reference events and active events."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pandas as pd
 from .rate_constant import compute_rate_Eyring
 from .config import Config
@@ -19,6 +23,9 @@ from .result import (
 )
 from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr
+
+if TYPE_CHECKING:
+    from .event_recycling import Recycling
 
 
 class ReferenceEventTable:
@@ -55,26 +62,23 @@ class ReferenceEventTable:
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self.is_valid_new_event(
-                    min1_positions=ev.min1_positions,
-                    saddle_positions=ev.saddle_positions,
-                    min2_positions=ev.min2_positions,
-                    move_atom_idx=ev.move_atom_index,
-                    dE_forward=ev.dE_forward,
-                    dE_backward=ev.dE_backward,
-                    cell=ev.cell,
-                )
+                min1_positions=ev.min1_positions,
+                saddle_positions=ev.saddle_positions,
+                min2_positions=ev.min2_positions,
+                move_atom_idx=ev.move_atom_index,
+                dE_forward=ev.dE_forward,
+                dE_backward=ev.dE_backward,
+                cell=ev.cell,
+                types=ev.types,
+            )
             results_is_valid_events.append(res)
-            if res.is_ok() : 
-                self.add(res.ok_value()) 
-        #df_valid_events = self.get_valid_events(results_is_valid_events)
+            if res.is_ok():
+                self.add(res.ok_value())
+        # df_valid_events = self.get_valid_events(results_is_valid_events)
 
+        # Check if events in results are not the same :
 
-        #Check if events in results are not the same : 
-
-
-
-
-        #for df in df_valid_events:
+        # for df in df_valid_events:
         #    self.add(df)
 
         return results_is_valid_events
@@ -88,6 +92,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -107,6 +112,8 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str]
+            Event's atom types.
 
         Returns
         -------
@@ -178,6 +185,7 @@ class ReferenceEventTable:
                 dE_forward=dE_forward,
                 dE_backward=dE_backward,
                 cell=cell,
+                types=types,
             )
             if self.is_new_event(
                 dfevent=dfevent_forward
@@ -185,50 +193,74 @@ class ReferenceEventTable:
                 if (
                     dfevent_forward["event_id"] == dfevent_forward["id_final"]
                 ):  # We are sure that the backward reaction same as forward
-                    #dfevent_forward["idx_backward"] = len(self.table)
+                    # dfevent_forward["idx_backward"] = len(self.table)
                     return Ok(dfevent_forward.to_frame().T)  # return only forward event
-                
 
+                # TODO : this is the same logic as is_new_event(), it is a quick fix but need to unify this
+                # TODO : will be easier when refacto ReferenceTable with Event dataclass
+                # backward event could still be the same as the forward one :
 
-                #TODO : this is the same logic as is_new_event(), it is a quick fix but need to unify this 
-                #TODO : will be easier when refacto ReferenceTable with Event dataclass
-                # backward event could still be the same as the forward one : 
-
-                elif dfevent_forward["event_id"] == dfevent_backward["event_id"] : #same topo 
-                    if abs(dfevent_forward["energy_barrier"]-dfevent_backward["energy_barrier"]) < 0.25 : #maybe same event so IRA check
-                        ref_saddle = dfevent_forward['saddle_positions'].copy()
+                elif (
+                    dfevent_forward["event_id"] == dfevent_backward["event_id"]
+                ):  # same topo
+                    if (
+                        abs(
+                            dfevent_forward["energy_barrier"]
+                            - dfevent_backward["energy_barrier"]
+                        )
+                        < 0.25
+                    ):  # maybe same event so IRA check
+                        ref_saddle = dfevent_forward["saddle_positions"].copy()
                         nat_ref = len(ref_saddle)
-                        typ_event = nat_ref*['X']
+                        typ_event = nat_ref * ["X"]
                         typ_ref = typ_event
-                        result = simple_ira(nat_ref, typ_event, dfevent_backward["saddle_positions"].copy(), nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
+                        result = simple_ira(
+                            nat_ref,
+                            typ_event,
+                            dfevent_backward["saddle_positions"].copy(),
+                            nat_ref,
+                            typ_ref,
+                            ref_saddle,
+                            self.config.ira.kmax_factor,
+                        )
 
-                        #if match 
-                        if result.is_ok() : 
-                            #if matching score 
-                            result = check_match(result, self.config.psr.matching_score_thr)
-                            if result.is_ok() : #same backward and forward event
+                        # if match
+                        if result.is_ok():
+                            # if matching score
+                            result = check_match(
+                                result, self.config.psr.matching_score_thr
+                            )
+                            if result.is_ok():  # same backward and forward event
                                 return Ok(dfevent_forward.to_frame().T)
-                        else : 
-                            if self.is_new_event(dfevent=dfevent_backward) : 
-                                dfevent = pd.concat([dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],ignore_index=True)
-                                return Ok(dfevent) #return both
-                            else : 
+                        else:
+                            if self.is_new_event(dfevent=dfevent_backward):
+                                dfevent = pd.concat(
+                                    [
+                                        dfevent_forward.to_frame().T,
+                                        dfevent_backward.to_frame().T,
+                                    ],
+                                    ignore_index=True,
+                                )
+                                return Ok(dfevent)  # return both
+                            else:
                                 return Ok(dfevent_forward.to_frame().T)
 
-
-                #we know they are different
+                # we know they are different
                 else:
-                    #to the atomic environment of the forward event
-                    if self.is_new_event(dfevent=dfevent_backward) : 
-                        #backward is also new
+                    # to the atomic environment of the forward event
+                    if self.is_new_event(dfevent=dfevent_backward):
+                        # backward is also new
                         dfevent = pd.concat(
-                            [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
+                            [
+                                dfevent_forward.to_frame().T,
+                                dfevent_backward.to_frame().T,
+                            ],
                             ignore_index=True,
                         )
                         return Ok(dfevent)  # return foward and backward event
-                    else : 
-                        #backard is already known 
-                        return Ok(dfevent_forward.to_frame().T) #return only forward
+                    else:
+                        # backard is already known
+                        return Ok(dfevent_forward.to_frame().T)  # return only forward
 
             else:
                 return Err(
@@ -255,34 +287,55 @@ class ReferenceEventTable:
         """
         # Only select rows with same event_id as dfenvent :
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
-        if len(subset) == 0 :
+        if len(subset) == 0:
             return True
 
-        #if same  id, chekc if same dE
+        # if same  id, chekc if same dE
         tol = 0.25
         dE = dfevent["energy_barrier"]
         subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
-        if len(subset) == 0 :
+        if len(subset) == 0:
             return True
 
-        #if all same, check PSR  saddle_initial
-        event_saddle = dfevent['saddle_positions']
+        # if all same, check PSR  saddle_initial
+        event_saddle = dfevent["saddle_positions"]
         nat_event = len(event_saddle)
-        #TODO I guess we should save atoms types in reference table
-        typ_event = nat_event*['X']
+        # Mirror the PSR / classification paths: only feed real element types to IRA
+        # in "full" coloring mode. In "grey" mode every atom is greyed to a single
+        # dummy label ('X'), so geometrically-identical species-swapped saddles
+        # de-duplicate as one event (grey-alloy approximation). The None-"types"
+        # fallback keeps list(None) from raising when a row stores no types.
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        typ_event = (
+            list(dfevent["types"])
+            if full and dfevent["types"] is not None
+            else nat_event * ["X"]
+        )
 
-        for _, ev in subset.iterrows() :
-
-            ref_saddle = ev['saddle_positions']
+        for _, ev in subset.iterrows():
+            ref_saddle = ev["saddle_positions"]
             nat_ref = len(ref_saddle)
-            typ_ref = typ_event
-            result = simple_ira(nat_event, typ_event, event_saddle, nat_ref, typ_ref, ref_saddle, self.config.ira.kmax_factor)
+            typ_ref = (
+                list(ev["types"])
+                if full and ev["types"] is not None
+                else nat_ref * ["X"]
+            )
 
-            if not result.is_ok() : #no match
+            result = simple_ira(
+                nat_event,
+                typ_event,
+                event_saddle,
+                nat_ref,
+                typ_ref,
+                ref_saddle,
+                self.config.ira.kmax_factor,
+            )
+
+            if not result.is_ok():  # no match
                 continue
 
             result = check_match(result, self.config.psr.matching_score_thr)
-            if not result.is_ok() : #matching score > thr
+            if not result.is_ok():  # matching score > thr
                 continue
 
             return False
@@ -315,12 +368,12 @@ class ReferenceEventTable:
             The event series.
 
         """
-        #Check if only one or two events (if event is its own backard or not)
+        # Check if only one or two events (if event is its own backard or not)
         ref = self.max_idx_ref()
-        if len(dfevent) == 1 : 
+        if len(dfevent) == 1:
             dfevent["idx_ref"] = ref
-            dfevent["idx_backward"] = ref 
-        else : 
+            dfevent["idx_backward"] = ref
+        else:
             dfevent.loc[0, "idx_ref"] = ref
             dfevent.loc[0, "idx_backward"] = ref + 1
             dfevent.loc[1, "idx_ref"] = ref + 1
@@ -353,6 +406,7 @@ class ReferenceEventTable:
         dE_forward: float,
         dE_backward: float,
         cell: np.ndarray,
+        types: list[str] = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -372,6 +426,11 @@ class ReferenceEventTable:
             Energy barrier of the backward event.
         cell : np.ndarray
             Simulation box cell.
+        types : list[str], optional
+            Element type of each atom. When provided, the per-event local types are
+            always stored in the ``types`` column (both coloring modes, so the schema
+            is mode-independent). Colouring is only *applied* to graph
+            hashing/symmetry detection when the configured coloring mode is 'full'.
 
         Returns
         -------
@@ -381,6 +440,10 @@ class ReferenceEventTable:
             - a pd.Series of the backward reaction.
 
         """
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        # Only use element types for graph/symmetry computation in full coloring mode
+        graph_types = types if full else None
+
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
         min1system = System()
         min1system.positions = min1_positions
@@ -415,50 +478,81 @@ class ReferenceEventTable:
             min1neighbors_list.neighbors_list["rnei"],
             min1neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_saddle = graph(
             saddleneighbors_list.neighbors_list["rnei"],
             saddleneighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
         id_min2 = graph(
             min2neighbors_list.neighbors_list["rnei"],
             min2neighbors_list.neighbors_list["rcut"],
             atom_idx=[index_move],
+            types=graph_types,
         )[0]
 
-        neighbor_list_forwward = min1neighbors_list.neighbors_list["rcut"][index_move]
-        neighbor_list_backward = min2neighbors_list.neighbors_list["rcut"][index_move]
+        # query_ball_point can hand back Python lists; coerce to arrays so the
+        # element-wise comparisons (np.where) and type indexing below behave.
+        neighbor_list_forward = np.asarray(
+            min1neighbors_list.neighbors_list["rcut"][index_move]
+        )
+        neighbor_list_backward = np.asarray(
+            min2neighbors_list.neighbors_list["rcut"][index_move]
+        )
+
+        # Element types of each neighbor. These are ALWAYS stored (both modes) so
+        # the reference-table schema is mode-independent; colouring is only *applied*
+        # in matching/symmetry, which is gated below.
+        local_types_forward = (
+            list(np.array(types)[neighbor_list_forward]) if types is not None else None
+        )
+        local_types_backward = (
+            list(np.array(types)[neighbor_list_backward]) if types is not None else None
+        )
+
+        # Colour symmetry detection only in full coloring mode (usage gate).
+        sym_types_forward = local_types_forward if full else None
+        sym_types_backward = local_types_backward if full else None
 
         # Symmetries :
         sym_matrix, sym_perm = unique_symmetries(
-            min1_positions[neighbor_list_forwward],
-            min2_positions[neighbor_list_forwward],
+            min1_positions[neighbor_list_forward],
+            min2_positions[neighbor_list_forward],
             self.config.ira.sym_thr,
+            types=sym_types_forward,
         )
 
-        #dr :
-        move_atom_idx_forward = np.where(neighbor_list_forwward == index_move)[0][0]
-        dra_forward = np.linalg.norm(min1_positions[neighbor_list_forwward][move_atom_idx_forward]-saddle_positions[neighbor_list_forwward][move_atom_idx_forward])
+        # dr :
+        move_atom_idx_forward = np.where(neighbor_list_forward == index_move)[0][0]
+        dra_forward = np.linalg.norm(
+            min1_positions[neighbor_list_forward][move_atom_idx_forward]
+            - saddle_positions[neighbor_list_forward][move_atom_idx_forward]
+        )
         move_atom_idx_backward = np.where(neighbor_list_backward == index_move)[0][0]
-        dra_backward = np.linalg.norm(min2_positions[neighbor_list_backward][move_atom_idx_backward]-saddle_positions[neighbor_list_backward][move_atom_idx_backward])
+        dra_backward = np.linalg.norm(
+            min2_positions[neighbor_list_backward][move_atom_idx_backward]
+            - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
+        )
 
         dfevent_forward = pd.Series(
             {
-               "idx_ref": -1, #unknown yet
+                "idx_ref": -1,  # unknown yet
                 "event_id": id_min1,
-                "initial_positions": min1_positions[neighbor_list_forwward],
-                "saddle_positions": saddle_positions[neighbor_list_forwward],
-                "final_positions": min2_positions[neighbor_list_forwward],
+                "initial_positions": min1_positions[neighbor_list_forward],
+                "saddle_positions": saddle_positions[neighbor_list_forward],
+                "final_positions": min2_positions[neighbor_list_forward],
+                "types": local_types_forward,
                 "energy_barrier": dE_forward,
                 "k": compute_rate_Eyring(dE_forward, self.config),
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
-                "move_atom_idx": np.where(neighbor_list_forwward == index_move)[0][0],
+                "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
-                "idx_backward" : -1, #unknown yet,
-                "dra": dra_forward
+                "idx_backward": -1,  # unknown yet,
+                "dra": dra_forward,
             }
         )
 
@@ -466,14 +560,16 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_backward],
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
+            types=sym_types_backward,
         )
         dfevent_backward = pd.Series(
             {
-                "idx_ref": -1, #unknown yet
+                "idx_ref": -1,  # unknown yet
                 "event_id": id_min2,
                 "initial_positions": min2_positions[neighbor_list_backward],
                 "saddle_positions": saddle_positions[neighbor_list_backward],
                 "final_positions": min1_positions[neighbor_list_backward],
+                "types": local_types_backward,
                 "energy_barrier": dE_backward,
                 "k": compute_rate_Eyring(dE_backward, self.config),
                 "id_saddle": id_saddle,
@@ -481,18 +577,18 @@ class ReferenceEventTable:
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
                 "sym_matrix": sym_matrix,
                 "sym_perm": sym_perm,
-                "idx_backward": -1, #unknown yet
+                "idx_backward": -1,  # unknown yet
                 "dra": dra_backward,
             }
         )
 
         return dfevent_forward, dfevent_backward
-    
-    def max_idx_ref(self) -> int : 
-        """ Return max value of idx_ref"""
-        if len(self.table) == 0 : 
-            return 0 
-        else :
+
+    def max_idx_ref(self) -> int:
+        """Return max value of idx_ref"""
+        if len(self.table) == 0:
+            return 0
+        else:
             return int(self.table["idx_ref"].max()) + 1
 
     def _initialize_table(self) -> None:
@@ -503,23 +599,27 @@ class ReferenceEventTable:
         if self.config.control.reference_table is not None:
             self.table = pd.read_pickle(self.config.control.reference_table)
         else:
-            self.table = pd.DataFrame({
+            self.table = pd.DataFrame(
+                {
                     "idx_ref": pd.Series(dtype="int64"),
                     "event_id": pd.Series(dtype="str"),
                     "initial_positions": pd.Series(dtype="object"),
-                     "saddle_positions": pd.Series(dtype="object"),
+                    "saddle_positions": pd.Series(dtype="object"),
                     "final_positions": pd.Series(dtype="object"),
+                    "types": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
-                    "k": pd.Series(dtype="float64"), 
+                    "k": pd.Series(dtype="float64"),
                     "id_saddle": pd.Series(dtype="str"),
                     "id_final": pd.Series(dtype="str"),
-                    "move_atom_idx": pd.Series(dtype='int64'),
-                    "sym_matrix": pd.Series(dtype="object"), 
+                    "move_atom_idx": pd.Series(dtype="int64"),
+                    "sym_matrix": pd.Series(dtype="object"),
                     "sym_perm": pd.Series(dtype="object"),
                     "idx_backward": pd.Series(dtype="int64"),
-                    "dra" : pd.Series(dtype="float64")})
+                    "dra": pd.Series(dtype="float64"),
+                }
+            )
 
-    def remove(self, idx_refs: list[int]) -> None : 
+    def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
 
         Parameters
@@ -528,13 +628,19 @@ class ReferenceEventTable:
             index of the event to be removed
         """
 
-        idx_refs = set(idx_refs) #make a set if there are doublons
+        idx_refs = set(idx_refs)  # make a set if there are doublons
 
-        backward_refs = set(self.table.loc[self.table["idx_ref"].isin(idx_refs), "idx_backward"].astype(int)) #find set idx backwards
+        backward_refs = set(
+            self.table.loc[self.table["idx_ref"].isin(idx_refs), "idx_backward"].astype(
+                int
+            )
+        )  # find set idx backwards
 
-        all_refs = idx_refs | backward_refs #all ref to remove
+        all_refs = idx_refs | backward_refs  # all ref to remove
 
-        self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(drop=True) #keep event not (~) in all refs
+        self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
+            drop=True
+        )  # keep event not (~) in all refs
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
@@ -560,8 +666,17 @@ class ActiveEventTable:
 
     """
 
-    def __init__(self, config: Config, event_dataframe: pd.DataFrame = None):
+    def __init__(
+        self,
+        config: Config,
+        event_dataframe: pd.DataFrame = None,
+        recycler: "Recycling | None" = None,
+    ):
         self.config = config
+        # Optional recycling plugin. If attached, `prune_for_recycling` keeps
+        # the rows the recycler selects between KMC steps. If None, the table
+        # is cleared at the end of each step (matching prior behavior).
+        self.recycler = recycler
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -575,11 +690,49 @@ class ActiveEventTable:
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
-                "refined": pd.Series(dtype="str")
+                "refined": pd.Series(dtype="str"),
             }
             self.table = pd.DataFrame(columns)
 
-    def add_events(self, events: EventRefinementOutput | list[EventRefinementOutput]) -> None:
+    def prune_for_recycling(
+        self,
+        executed_idx: int,
+        system: System,
+        positions_pre: np.ndarray,
+    ) -> None:
+        """Replace `self.table` with the rows that survive the recycler's filter.
+
+        If no recycler is attached, clear the table (matches the prior
+        end-of-step `del active_table` behavior).
+        """
+        if self.recycler is None:
+            self.table = self.table.iloc[0:0].reset_index(drop=True)
+        else:
+            self.table = self.recycler.select_recyclable(
+                self,
+                executed_idx,
+                system,
+                positions_pre,
+            )
+
+    def existing_pairs(self) -> set[tuple[int, int]]:
+        """Return `(atom_index, num_reference_event)` tuples already in the table.
+
+        Used by `Refinement.execute` to skip pairs that survived the last step
+        and don't need to be refined again.
+        """
+        if len(self.table) == 0:
+            return set()
+        return set(
+            zip(
+                self.table["atom_index"].astype(int).tolist(),
+                self.table["num_reference_event"].astype(int).tolist(),
+            )
+        )
+
+    def add_events(
+        self, events: EventRefinementOutput | list[EventRefinementOutput]
+    ) -> None:
         """Add active events to the table.
 
         Parameters
@@ -648,21 +801,23 @@ class ActiveEventTable:
             The pd.Series of the event.
 
         """
-        
+
         dfactive = pd.Series(
             {
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
                 "energy_barrier": event_refinement_output.dE_forward,
-                "k": compute_rate_Eyring(event_refinement_output.dE_forward, self.config),
+                "k": compute_rate_Eyring(
+                    event_refinement_output.dE_forward, self.config
+                ),
                 "num_reference_event": event_refinement_output.num_reference_event,
-                "refined": event_refinement_output.refined
+                "refined": event_refinement_output.refined,
             }
         )
         return dfactive
-    
-    def remove(self, ind: int|list[int]) -> None :
+
+    def remove(self, ind: int | list[int]) -> None:
         """Remove event at row = ind
 
         Parameters
@@ -673,13 +828,13 @@ class ActiveEventTable:
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
 
-    def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None :
+    def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
 
         duplicates = []
-        #1. Check duplicates on central atoms : to be sure
-        #Sub dataframes with events grouped by central_atom and dE
-        tol_energy = 0.1 #eV
+        # 1. Check duplicates on central atoms : to be sure
+        # Sub dataframes with events grouped by central_atom and dE
+        tol_energy = 0.1  # eV
         grouped = []
 
         for idx, row in self.table.iterrows():
@@ -692,7 +847,7 @@ class ActiveEventTable:
             ]
             grouped.append((idx, subset))
 
-        #For each group, check duplicated by computing delr
+        # For each group, check duplicated by computing delr
 
         for idx, subset in grouped:
             pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
@@ -700,60 +855,68 @@ class ActiveEventTable:
                 if jdx <= idx:
                     continue  # dont compute twice
                 pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
-                delr = compute_delr(pos_ref, pos_comp, cell )
-                if delr < self.config.psr.matching_score_thr :
-                    #print('Removing event with delr',delr)
+                delr = compute_delr(pos_ref, pos_comp, cell)
+                if delr < self.config.psr.matching_score_thr:
+                    # print('Removing event with delr',delr)
                     duplicates.append(jdx)
-        
-        #2. Check duplicates due to symmetric events applied on different central atoms. 
-        #Group by same generic event if generic event has symmetries meaning that the same generic event has been applied to same central atom
-        if neighbors_list is not None : #need neighbors list to remove symmetric duplicates 
 
-            counts = (self.table.groupby(["atom_index", "num_reference_event"]).size())
+        # 2. Check duplicates due to symmetric events applied on different central atoms.
+        # Group by same generic event if generic event has symmetries meaning that the same generic event has been applied to same central atom
+        if (
+            neighbors_list is not None
+        ):  # need neighbors list to remove symmetric duplicates
+            counts = self.table.groupby(["atom_index", "num_reference_event"]).size()
             symmetric_num_ref = counts[counts > 1].index.get_level_values(1).unique()
 
-            #Loop on all num_ref symmetric event 
+            # Loop on all num_ref symmetric event
             for num_ref in symmetric_num_ref:
-
                 subset = self.table[self.table["num_reference_event"] == num_ref]
-                indices = subset.index.to_list() 
+                indices = subset.index.to_list()
 
-                for i, idx in enumerate(indices) : #Loop over indice of subset 
+                for i, idx in enumerate(indices):  # Loop over indice of subset
                     central_atom1 = subset.loc[idx, "atom_index"]
-                    env1 = neighbors_list.get_neighbors('rcut', central_atom1) #list of atom in env1 
-                    
-                    for jdx in indices[i+1:] : #to not compare two times 
-                        central_atom2 = subset.loc[jdx, "atom_index"] 
-                        if central_atom1 != central_atom2 : #if yes already done in part 1. 
-                            env2 = neighbors_list.get_neighbors('rcut', central_atom2) 
-                            #intersection of atoms in atomic environments 
+                    env1 = neighbors_list.get_neighbors(
+                        "rcut", central_atom1
+                    )  # list of atom in env1
+
+                    for jdx in indices[i + 1 :]:  # to not compare two times
+                        central_atom2 = subset.loc[jdx, "atom_index"]
+                        if (
+                            central_atom1 != central_atom2
+                        ):  # if yes already done in part 1.
+                            env2 = neighbors_list.get_neighbors("rcut", central_atom2)
+                            # intersection of atoms in atomic environments
                             common = set(env1) & set(env2)
-                            
-                            if not common : #it's not a duplicate since they don't share atoms in their atomic environments
+
+                            if not common:  # it's not a duplicate since they don't share atoms in their atomic environments
                                 continue
 
-                            if central_atom1 not in env2 : #TODO : To check, but should not be a duplicate
+                            if (
+                                central_atom1 not in env2
+                            ):  # TODO : To check, but should not be a duplicate
                                 continue
 
-                            #extract saddle positions 
-                            sad_pos1 = subset.loc[idx, 'saddle_positions'] 
-                            sad_pos2 = subset.loc[jdx, 'saddle_positions']
+                            # extract saddle positions
+                            sad_pos1 = subset.loc[idx, "saddle_positions"]
+                            sad_pos2 = subset.loc[jdx, "saddle_positions"]
 
-                            #know we want to compare positions of share atoms, need to map. 
-                            map1 = {a:k for k, a in enumerate(env1)} #so we know that the first position is atom xxx, ect, eg {345:0, 439:1, ....}
-                            map2 = {a:k for k, a in enumerate(env2)} #same for env2 
+                            # know we want to compare positions of share atoms, need to map.
+                            map1 = {
+                                a: k for k, a in enumerate(env1)
+                            }  # so we know that the first position is atom xxx, ect, eg {345:0, 439:1, ....}
+                            map2 = {a: k for k, a in enumerate(env2)}  # same for env2
 
-                            #map atom when they are in common 
+                            # map atom when they are in common
                             index1 = [map1[a] for a in common]
                             index2 = [map2[a] for a in common]
 
-                            #get subarray of sad_pos 
+                            # get subarray of sad_pos
                             sad_pos1 = sad_pos1[index1]
                             sad_pos2 = sad_pos2[index2]
 
-                            #now we can compare 
-                            delr = compute_delr(sad_pos1, sad_pos2, cell )
-                            if delr < self.config.psr.matching_score_thr :
+                            # now we can compare
+                            delr = compute_delr(sad_pos1, sad_pos2, cell)
+                            if delr < self.config.psr.matching_score_thr:
                                 duplicates.append(jdx)
 
         self.remove(duplicates)
