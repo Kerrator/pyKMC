@@ -16,6 +16,9 @@
 # Pin pARTn / IRA to other revisions (default: the SHAs validated on 2026-07-28):
 #   ARTN_REF=main IRA_REF=main ./install_pykmc_linux.sh
 #
+# Install a different pyKMC branch (default: develop):
+#   PYKMC_BRANCH=main ./install_pykmc_linux.sh
+#
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -153,7 +156,13 @@ cd "$INSTALL_DIR"
 IRA_REF="${IRA_REF:-3cb0c299e2e664f8131948b90f9926869d42459c}"
 ARTN_REF="${ARTN_REF:-edea36aca8215a1d484b3b8695ecb9676fe56498}"
 
-git clone -b develop https://github.com/hugomoison/pyKMC.git
+# The pyKMC branch this script installs. Keep the default in sync with the branch the
+# script itself ships on (develop here, main on main), so downloading the script from a
+# branch installs that same branch. Override with PYKMC_BRANCH=<branch>.
+PYKMC_BRANCH="${PYKMC_BRANCH:-develop}"
+echo "Installing pyKMC branch: $PYKMC_BRANCH"
+
+git clone -b "$PYKMC_BRANCH" https://github.com/hugomoison/pyKMC.git
 git clone -b stable_22Jul2025_update3 --depth 1 https://github.com/lammps/lammps.git
 git clone https://github.com/mammasmias/IterativeRotationsAssignments.git
 git clone https://gitlab.com/mammasmias/artn-plugin.git
@@ -172,21 +181,7 @@ done
 ok "All repositories cloned"
 
 # ------------------------------------------
-# 2. Fix Python version constraint (3.13 only)
-# ------------------------------------------
-step "Fixing Python version constraint"
-
-if [ "$PYTHON_MINOR" -eq 13 ] && grep -q '<3.13,' pyKMC/pyproject.toml; then
-    # only needed for older pyKMC checkouts whose pyproject still has an upper bound
-    sed -i 's/<3.13,/<3.14,/' pyKMC/pyproject.toml
-    grep -q '<3.14,' pyKMC/pyproject.toml || fail "Failed to bump pyproject upper Python bound (sed pattern stale?)"
-    ok "Updated pyproject.toml for Python 3.13"
-else
-    ok "Python $PYTHON_VERSION is within range, no fix needed"
-fi
-
-# ------------------------------------------
-# 3. Create virtual environment and install pyKMC
+# 2. Create virtual environment and install pyKMC
 # ------------------------------------------
 step "Creating virtual environment and installing pyKMC"
 
@@ -221,7 +216,7 @@ else
 fi
 
 # ------------------------------------------
-# 4. Build LAMMPS
+# 3. Build LAMMPS
 # ------------------------------------------
 step "Building LAMMPS (this may take a few minutes)"
 
@@ -271,7 +266,7 @@ python -c "from lammps import lammps" || fail "LAMMPS Python bindings not workin
 ok "LAMMPS built and installed"
 
 # ------------------------------------------
-# 5. Build IRA
+# 4. Build IRA
 # ------------------------------------------
 step "Building IRA"
 
@@ -297,7 +292,7 @@ print('IRA library OK:', ira_mod.IRA().get_version())
 ok "IRA built and installed"
 
 # ------------------------------------------
-# 6. Build pARTn plugin
+# 5. Build pARTn plugin
 # ------------------------------------------
 step "Building pARTn plugin"
 
@@ -324,7 +319,7 @@ a=pypARTn.artn(engine='lmp')
 ok "pARTn built and installed"
 
 # ------------------------------------------
-# 7. Verify full installation
+# 6. Verify full installation
 # ------------------------------------------
 step "Verifying installation"
 
@@ -344,7 +339,7 @@ print('All imports OK')
 ok "All components verified"
 
 # ------------------------------------------
-# 8. Create activation script
+# 7. Create activation script
 # ------------------------------------------
 cat > "$INSTALL_DIR/activate.sh" << 'ACTIVATE'
 #!/bin/bash
