@@ -60,12 +60,27 @@ ok "All prerequisites found"
 # ------------------------------------------
 step "Selecting Python interpreter"
 
+# A candidate must be able to create a WORKING venv, not just report the right version:
+# uv-managed pythons reached through a ~/.local/bin symlink build venvs whose python
+# cannot locate its own stdlib (ModuleNotFoundError: No module named 'encodings').
+venv_works() {
+    local probe
+    probe=$(mktemp -d) || return 1
+    if "$1" -m venv --without-pip "$probe/v" >/dev/null 2>&1 \
+        && "$probe/v/bin/python" -c "import encodings, ensurepip" >/dev/null 2>&1; then
+        rm -rf "$probe"
+        return 0
+    fi
+    rm -rf "$probe"
+    return 1
+}
+
 find_supported_python() {
     for py in python3.13 python3.12 python3.11 python3.10 python3; do
         if command -v "$py" >/dev/null 2>&1; then
             local ver
             ver=$("$py" -c "import sys; print(sys.version_info.minor)")
-            if [ "$ver" -ge 10 ] && [ "$ver" -le 13 ]; then
+            if [ "$ver" -ge 10 ] && [ "$ver" -le 13 ] && venv_works "$py"; then
                 echo "$py"
                 return 0
             fi
@@ -77,10 +92,13 @@ find_supported_python() {
 PYTHON_BIN="${PYTHON_BIN:-$(find_supported_python || true)}"
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "No supported Python 3.10-3.13 found. Installing python@3.13 with Homebrew..."
+    echo "No Python 3.10-3.13 able to create a virtualenv found. Installing python@3.13 with Homebrew..."
     brew install python@3.13
     PYTHON_BIN="$(brew --prefix python@3.13)/bin/python3.13"
 fi
+
+venv_works "$PYTHON_BIN" \
+    || fail "$PYTHON_BIN cannot create a working virtualenv. For a uv-managed python pass the real interpreter path as PYTHON_BIN, not the ~/.local/bin shim."
 
 PYTHON_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
 PYTHON_MAJOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major)")
