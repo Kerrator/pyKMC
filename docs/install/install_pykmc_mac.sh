@@ -16,6 +16,9 @@
 # Install a different pyKMC branch (default: develop):
 #   PYKMC_BRANCH=main ./install_pykmc_mac.sh
 #
+# Pin pARTn / IRA to other revisions (default: the SHAs validated on 2026-07-28):
+#   ARTN_REF=main IRA_REF=main ./install_pykmc_mac.sh
+#
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -136,6 +139,14 @@ fi
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+# pARTn and IRA are pinned by SHA to the revisions validated on 2026-07-28. Neither has a usable
+# release tag: artn-plugin's only tag (v1.0.0) predates the LAMMPS plugin, and IRA's IRA_v2.2.0 tag
+# sits behind the 2.2.0 code. Unpinned, two runs of this script weeks apart install different
+# software — between 2026-06-10 and 2026-07-28, pARTn moved 8224be16 -> edea36ac and IRA
+# 7f011ba -> 3cb0c29. Override to track upstream HEAD deliberately: ARTN_REF=main IRA_REF=main.
+IRA_REF="${IRA_REF:-3cb0c299e2e664f8131948b90f9926869d42459c}"
+ARTN_REF="${ARTN_REF:-edea36aca8215a1d484b3b8695ecb9676fe56498}"
+
 # The pyKMC branch this script installs. Keep the default in sync with the branch the
 # script itself ships on (develop here, main on main), so downloading the script from a
 # branch installs that same branch. Override with PYKMC_BRANCH=<branch>.
@@ -146,6 +157,18 @@ git clone -b "$PYKMC_BRANCH" https://github.com/hugomoison/pyKMC.git
 git clone -b stable_22Jul2025_update3 --depth 1 https://github.com/lammps/lammps.git
 git clone https://github.com/mammasmias/IterativeRotationsAssignments.git
 git clone https://gitlab.com/mammasmias/artn-plugin.git
+
+git -C IterativeRotationsAssignments checkout --quiet "$IRA_REF" \
+    || fail "Could not check out IRA revision '$IRA_REF'"
+git -C artn-plugin checkout --quiet "$ARTN_REF" \
+    || fail "Could not check out pARTn revision '$ARTN_REF'"
+
+# Record what actually landed, so a simulation result can be attributed to a stack later.
+echo "Resolved source revisions:"
+for repo in pyKMC lammps IterativeRotationsAssignments artn-plugin; do
+    printf '  %-32s %s\n' "$repo" "$(git -C "$repo" rev-parse HEAD)"
+done
+
 ok "All repositories cloned"
 
 # ------------------------------------------
@@ -218,11 +241,21 @@ step "Building IRA"
 
 cd "$INSTALL_DIR/IterativeRotationsAssignments"
 
-python -m pip install . #--quiet
+# IRA builds via scikit-build-core, which does propagate a failed cmake build as a non-zero pip
+# exit code (the full CMake/compiler output is printed even under --quiet). It is not built
+# out-of-tree in a way that leaves a log behind, so there is no log file to point at — say so.
+python -m pip install . --quiet \
+    || fail "IRA build failed — the CMake/compiler output above is the full log (no log file is written)"
 
 cd "$INSTALL_DIR"
 
-python -c "import ira_mod" || fail "IRA not working"
+# Instantiate rather than just `import ira_mod`: a bare import is a silent pass whenever a
+# directory named ira_mod shadows the package, and instantiating dlopens the shared library,
+# printing the version into the install log as provenance.
+python -c "
+import ira_mod
+print('IRA library OK:', ira_mod.IRA().get_version())
+" || fail "IRA shared library not loadable (libira.so missing, or unresolved symbols)"
 ok "IRA built and installed"
 
 # ------------------------------------------

@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # pyKMC Linux Installation Script
-# Tested for: Ubuntu/Debian, RHEL/CentOS/Rocky
+# Tested for: Ubuntu/Debian, RHEL/CentOS/Rocky;
+#             Alliance/DRAC clusters (validated on Trillium login + compute, 2026-08-31)
 #
 # Usage:
 #   chmod +x install_pykmc_linux.sh
