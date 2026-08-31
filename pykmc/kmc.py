@@ -852,8 +852,8 @@ class KMC:
             supposed_final_positions,
             self.system.positions,
             self.system.cell,
-            self.config.psr.matching_score_thr,
             neighbors,
+            central_atom=central_atom,
         )
         # result with min1, saddle, min2 pos
 
