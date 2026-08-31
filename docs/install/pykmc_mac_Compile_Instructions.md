@@ -227,10 +227,11 @@ cmake --build build
 cmake --install build
 ```
 
-Verify:
+Verify (under `mpirun -np 1`: instantiating pARTn/LAMMPS from bare `python` uses MPI
+"singleton" init, which can crash the terminal on some OpenMPI 5 systems):
 
 ```bash
-python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
+mpirun -np 1 python -c "import pypARTn; a=pypARTn.artn(engine='lmp'); print('pypARTn OK')"
 ```
 
 ---

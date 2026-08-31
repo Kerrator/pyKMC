@@ -64,6 +64,17 @@ command -v gfortran >/dev/null 2>&1 || fail "gfortran not found. Install with: b
 command -v mpicc    >/dev/null 2>&1 || fail "mpicc not found. Install with: brew install open-mpi"
 command -v mpicxx   >/dev/null 2>&1 || fail "mpicxx not found. Install with: brew install open-mpi"
 command -v mpif90   >/dev/null 2>&1 || fail "mpif90 not found. Install with: brew install open-mpi"
+
+# LAMMPS + pARTn initialize MPI in "singleton" mode when verified with bare `python`; on
+# some OpenMPI 5 systems (seen on Ubuntu 26.04) that can crash hard enough to take the
+# whole terminal with it, while the same code under `mpirun -np 1` gets a proper PMIx
+# environment and works. Use mpirun for the MPI-touching verification steps.
+if command -v mpirun >/dev/null 2>&1; then
+    PYRUN="mpirun -np 1 python"
+else
+    PYRUN="python"
+fi
+
 ok "All prerequisites found"
 
 # ------------------------------------------
@@ -278,7 +289,7 @@ cmake --install build                       > artn_install.log 2>&1 \
 
 cd "$INSTALL_DIR"
 
-python -c "
+$PYRUN -c "
 import pypARTn
 a=pypARTn.artn(engine='lmp')
 " || fail "pypARTn not working"
@@ -289,7 +300,7 @@ ok "pARTn built and installed"
 # ------------------------------------------
 step "Verifying installation"
 
-python -c "
+$PYRUN -c "
 import ase, pykmc, ira_mod
 import lammps
 lmp=lammps.lammps()

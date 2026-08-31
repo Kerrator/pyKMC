@@ -110,6 +110,18 @@ command -v mpicc    >/dev/null 2>&1 || fail "mpicc not found"
 command -v mpicxx   >/dev/null 2>&1 || fail "mpicxx not found"
 command -v mpif90   >/dev/null 2>&1 || fail "mpif90 not found"
 command -v cmake    >/dev/null 2>&1 || fail "cmake not found"
+
+# LAMMPS + pARTn initialize MPI in "singleton" mode when verified with bare `python`; on
+# OpenMPI 5 systems (seen on Ubuntu 26.04) that can crash hard enough to take the whole
+# terminal with it, while the same code under `mpirun -np 1` gets a proper PMIx
+# environment and works. Alliance login nodes: keep bare python (validated on Trillium;
+# mpirun policy on login nodes varies by cluster).
+if ! $ON_ALLIANCE && command -v mpirun >/dev/null 2>&1; then
+    PYRUN="mpirun -np 1 python"
+else
+    PYRUN="python"
+fi
+
 ok "All prerequisites found"
 
 # ------------------------------------------
@@ -150,7 +162,12 @@ find_supported_python() {
 PYTHON_BIN="${PYTHON_BIN:-$(find_supported_python || true)}"
 
 if [ -z "$PYTHON_BIN" ]; then
-    fail "No Python 3.10-3.13 able to create a virtualenv found. Install one (with its pythonX.Y-venv package on Debian/Ubuntu)."
+    fail "No Python 3.10-3.13 able to create a virtualenv found. Install one with its
+       pythonX.Y-venv package. Distros already shipping a newer default (Ubuntu 26.04
+       ships 3.14) need a parallel 3.13, e.g. from the deadsnakes PPA:
+         sudo add-apt-repository ppa:deadsnakes/ppa
+         sudo apt install python3.13 python3.13-venv python3.13-dev
+       — or pass PYTHON_BIN=<path> explicitly to try an untested newer version."
 fi
 
 venv_works "$PYTHON_BIN" \
@@ -160,8 +177,13 @@ PYTHON_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.
 PYTHON_MAJOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major)")
 PYTHON_MINOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.minor)")
 
-if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 10 ] || [ "$PYTHON_MINOR" -gt 13 ]; then
-    fail "Supported Python range is 3.10-3.13, found $PYTHON_VERSION at $PYTHON_BIN"
+if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -lt 10 ]; then
+    fail "pyKMC needs Python >= 3.10, found $PYTHON_VERSION at $PYTHON_BIN"
+elif [ "$PYTHON_MINOR" -gt 13 ]; then
+    # Only reachable via an explicit PYTHON_BIN (auto-selection stops at 3.13).
+    echo "WARNING: Python $PYTHON_VERSION is newer than the tested range (3.10-3.13)."
+    echo "Proceeding because PYTHON_BIN was set explicitly. Some pinned dependencies may"
+    echo "not ship wheels for it yet (a from-source pydantic-core build needs Rust)."
 fi
 
 ok "Using Python $PYTHON_VERSION at $(command -v "$PYTHON_BIN")"
@@ -347,7 +369,7 @@ cmake --install build                     > artn_install.log 2>&1 \
 
 cd "$INSTALL_DIR"
 
-python -c "
+$PYRUN -c "
 import pypARTn
 a=pypARTn.artn(engine='lmp')
 " || fail "pypARTn not working"
@@ -359,7 +381,7 @@ ok "pARTn built and installed"
 # ------------------------------------------
 step "Verifying installation"
 
-python -c "
+$PYRUN -c "
 import ase, pykmc, ira_mod
 import lammps
 lmp=lammps.lammps()
