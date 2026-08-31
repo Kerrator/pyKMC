@@ -48,6 +48,14 @@ if [ -n "$MISSING" ]; then
     brew install $MISSING
 fi
 
+# An inherited PYTHONPATH (e.g. a developer shell exporting another checkout's
+# artn-plugin / IterativeRotationsAssignments interface dirs) shadows everything this
+# script installs into its venv, so the verification steps would test the WRONG copies.
+if [ -n "${PYTHONPATH:-}" ]; then
+    echo "Dropping inherited PYTHONPATH for the duration of the install: $PYTHONPATH"
+    unset PYTHONPATH
+fi
+
 # Verify compilers are available
 command -v gfortran >/dev/null 2>&1 || fail "gfortran not found. Install with: brew install gcc"
 command -v mpicc    >/dev/null 2>&1 || fail "mpicc not found. Install with: brew install open-mpi"

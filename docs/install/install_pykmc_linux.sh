@@ -87,6 +87,22 @@ else
     echo "  gcc, g++, gfortran, cmake, openmpi, fftw3, lapack, python3-dev"
 fi
 
+# An inherited PYTHONPATH (e.g. a developer shell exporting another checkout's
+# artn-plugin / IterativeRotationsAssignments interface dirs) shadows everything this
+# script installs into its venv, so the verification steps would test the WRONG copies.
+# Alliance clusters: keep the module system's entries (they carry the EBPYTHONPREFIXES
+# site customization that makes module-provided mpi4py visible) and strip only pyKMC
+# interface dirs. Everywhere else: drop it outright for the duration of the install.
+if [ -n "${PYTHONPATH:-}" ]; then
+    if $ON_ALLIANCE; then
+        PYTHONPATH=$(printf '%s' "$PYTHONPATH" | tr ':' '\n' | grep -vE 'artn-plugin/interface|IterativeRotationsAssignments/interface' | paste -sd: -)
+        if [ -n "$PYTHONPATH" ]; then export PYTHONPATH; else unset PYTHONPATH; fi
+    else
+        echo "Dropping inherited PYTHONPATH for the duration of the install: $PYTHONPATH"
+        unset PYTHONPATH
+    fi
+fi
+
 # Verify compilers are available
 command -v gfortran >/dev/null 2>&1 || fail "gfortran not found"
 command -v mpicc    >/dev/null 2>&1 || fail "mpicc not found"
