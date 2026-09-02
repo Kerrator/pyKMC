@@ -5,6 +5,7 @@ from ase.data import atomic_numbers, atomic_masses
 import pypARTn
 import numpy as np
 import ctypes
+from typing import Protocol, TypedDict
 from ase.geometry import find_mic
 from ..system import System
 from ..config import Config
@@ -71,17 +72,35 @@ def make_AV(engine, av_indices, buffer_indices):
     engine.command("run 0 post no")
 
 
+class TypeEntry(TypedDict):
+    """One LAMMPS atom type: its 1-based index and its mass."""
+
+    ref: int
+    mass: float
+
+
+class _CommandEngine(Protocol):
+    """Minimal engine surface the active-volume box rebuild drives."""
+
+    def command(self, cmd: str) -> None:
+        """Run one LAMMPS command string."""
+        ...
+
+
 def map_types(
     types: list[str] | np.ndarray,
-) -> tuple[np.ndarray, dict[str, dict[str, float]]]:
+) -> tuple[np.ndarray, dict[str, TypeEntry]]:
     """Map element symbols to LAMMPS integer types.
 
     Same rule as ``LammpsEngine.initialize_system`` (alphabetical
     ``sorted(set(types))``), so an integer type means the same species in the
-    active-volume engine as in the main engine. Returns the per-atom integer
-    types and the ``{symbol: {"ref": int, "mass": float}}`` map.
+    active-volume engine as in the main engine. ``types`` must be the
+    full-system species list: the box size and the integer refs follow its
+    species set, which ``pair_coeff`` was written against and which is
+    assumed fixed for the run. Returns the per-atom integer types and the
+    ``{symbol: {"ref": int, "mass": float}}`` map.
     """
-    map_type = {
+    map_type: dict[str, TypeEntry] = {
         atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
         for i, atom_type in enumerate(sorted(set(types)))
     }
@@ -90,30 +109,28 @@ def map_types(
 
 
 def reset(
-    engine: object,
+    engine: _CommandEngine,
     config: object,
     cell: np.ndarray,
-    map_type: dict[str, dict[str, float]] | None = None,
+    map_type: dict[str, TypeEntry],
 ) -> None:
     """Clear the LAMMPS instance and rebuild an empty box for the active volume.
 
-    ``map_type`` is the ``{symbol: {"ref", "mass"}}`` map from ``map_types``.
-    The box gets one LAMMPS atom type per species and one ``mass`` per type,
-    both before ``pair_coeff``: a multi-element ``pair_coeff`` (``eam/alloy``,
-    ``eam/fs``) needs the full type count to exist, and pair styles that do not
-    set masses themselves (``lj/cut``, ``mlip``, ``sw``) need them before the
-    first ``run 0``. ``None`` keeps the legacy single-type, mass-less box.
+    ``map_type`` is the ``{symbol: {"ref", "mass"}}`` map ``map_types`` built
+    from the full-system types. The box gets one LAMMPS atom type per species
+    and one ``mass`` per type, both before ``pair_coeff``: a multi-element
+    ``pair_coeff`` (``eam/alloy``, ``eam/fs``) needs the full type count to
+    exist, and pair styles that do not set masses themselves (``lj/cut``,
+    ``mlip``, ``sw``) need them before the first ``run 0``.
     """
     engine.command("clear")
     initialize_parameters(engine)
     # Create cell
     xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
     engine.command("region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi))
-    n_types = 1 if map_type is None else len(map_type)
-    engine.command("create_box {} box".format(n_types))
-    if map_type is not None:
-        for entry in map_type.values():
-            engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
+    engine.command("create_box {} box".format(len(map_type)))
+    for entry in map_type.values():
+        engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
     initialize_potential(engine, config)
 
 
