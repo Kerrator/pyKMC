@@ -194,17 +194,10 @@ def partn_refine_AV(
     Active Volumes.
     """
 
-    int_types, map_type = map_types(type)
-    reset(engine, config, cell, map_type=map_type)
-    av_positions, av_idx, buffer_idx = define_AV(
-        config, central_atom_idx, positions, cell
+    atom_map, central_lammps_id = partn_search_AV(
+        engine, config, central_atom_idx, positions, cell, type
     )
-
-    atom_map = np.array(av_idx, dtype=int)
-    av_type = int_types[atom_map]
-
-    redefine_atoms(engine, av_positions, av_type)
-    make_AV(engine, av_idx, buffer_idx)
+    av_positions = positions[atom_map]
 
     if config.activevolume.AV_debug == True:
         E_before = get_potential_energy(engine)
@@ -238,7 +231,7 @@ def partn_refine_AV(
     engine.command("minimize {}".format(config.lammps.frz_min))
     engine.command("unfix f_core")
 
-    return E_init, atom_map, (np.where(atom_map == central_atom_idx)[0] + 1)
+    return E_init, atom_map, central_lammps_id
 
 
 def position_results_AV(
