@@ -1,6 +1,7 @@
 """Module implementing Classes to manage reference events and active events."""
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -46,6 +47,9 @@ class ReferenceEventTable:
         # nu0 is an HTST/RPA-only diagnostic column; a constant run's schema stays
         # identical to the base. See gating below.
         self._htst_active = config.rateconstant.style in ("htst", "rpa")
+        # Full-geometry dump is independent of the rate style: the table rows keep only
+        # neighbour-subset positions, so this is the only route to offline prefactor work.
+        self._geometry_dump_dir = config.control.event_geometry_output
         self.rate_constant = create_rate_constant(
             T=config.rateconstant.T,
             prefactor_backend_name=config.rateconstant.style,
@@ -63,7 +67,9 @@ class ReferenceEventTable:
         htst/rpa styles the full-geometry payloads of ONLY the accepted events
         are then batched through ``rate_constant.compute_prefactors_batch``
         (one concurrent nu0 job per event) and the rows are patched in place.
-        Rejected and duplicate events never cost a Hessian.
+        Rejected and duplicate events never cost a Hessian. With
+        ``control.event_geometry_output`` set, the same full-geometry payload is
+        also dumped to disk, whatever the rate style.
 
         Parameters
         ----------
@@ -71,7 +77,8 @@ class ReferenceEventTable:
             list of EventSearchOutput dataclass with events to be added to the table dataframe.
         types : list[str] | None
             Per-atom chemical symbols of the full system (required for the
-            htst/rpa prefactor payloads; unused for the constant style).
+            htst/rpa prefactor payloads and for the geometry dump; unused
+            otherwise).
 
         Returns
         -------
@@ -97,34 +104,86 @@ class ReferenceEventTable:
             if res.is_ok():
                 df = res.ok_value()
                 self.add(df)  # assigns idx_ref/idx_backward in place
-                if self._htst_active:
+                if self._htst_active or self._geometry_dump_dir is not None:
                     if types is None:
                         raise RuntimeError(
-                            "htst/rpa add_events requires the system `types` to "
-                            "build the per-event prefactor payloads"
+                            "htst/rpa prefactors and event_geometry_output both "
+                            "require the system `types` to build the per-event "
+                            "full-geometry payloads"
                         )
                     fwd_ref = int(df.iloc[0]["idx_ref"])
                     bwd_ref = int(df.iloc[1]["idx_ref"]) if len(df) > 1 else None
-                    # Payload uses the FULL EventSearchOutput geometry (table rows
-                    # store neighbor-subset positions, unusable for the Hessian).
-                    backfill.append(
-                        (
-                            fwd_ref,
-                            bwd_ref,
-                            {
-                                "central_atom_idx": ev.move_atom_index,
-                                "min1_positions": ev.min1_positions,
-                                "saddle_positions": ev.saddle_positions,
-                                "min2_positions": ev.min2_positions,
-                                "types": list(types),
-                                "cell": ev.cell,
-                            },
+                    if self._htst_active:
+                        # Payload uses the FULL EventSearchOutput geometry (table rows
+                        # store neighbor-subset positions, unusable for the Hessian).
+                        backfill.append(
+                            (
+                                fwd_ref,
+                                bwd_ref,
+                                {
+                                    "central_atom_idx": ev.move_atom_index,
+                                    "min1_positions": ev.min1_positions,
+                                    "saddle_positions": ev.saddle_positions,
+                                    "min2_positions": ev.min2_positions,
+                                    "types": list(types),
+                                    "cell": ev.cell,
+                                },
+                            )
                         )
-                    )
+                    if self._geometry_dump_dir is not None:
+                        self._dump_event_geometry(fwd_ref, bwd_ref, ev, list(types))
         if self._htst_active and backfill:
             self._backfill_prefactors(backfill)
 
         return results_is_valid_events
+
+    def _dump_event_geometry(
+        self,
+        fwd_ref: int,
+        bwd_ref: "int | None",
+        event: EventSearchOutput,
+        types: list[str],
+    ) -> None:
+        """Write the full min1/saddle/min2 geometry of one accepted event to an ``.npz``.
+
+        Reference-table rows keep only neighbour-subset positions, so the full geometry
+        is otherwise discarded when the run ends. Dumping it makes offline prefactor work
+        (e.g. a ``free_radius`` / ``nu0_zone_radius`` convergence study) possible without
+        repeating the event search. A dump failure is logged, never raised.
+
+        Parameters
+        ----------
+        fwd_ref : int
+            Logical id (``idx_ref``) of the forward reference event.
+        bwd_ref : int | None
+            Logical id of the backward reference event, when one was added.
+        event : EventSearchOutput
+            The accepted event: full min1/saddle/min2 geometry, cell and barriers.
+        types : list[str]
+            Per-atom chemical symbols of the full system.
+
+        """
+        directory = self._geometry_dump_dir
+        if directory is None:
+            return
+        path = os.path.join(directory, f"event_{fwd_ref:06d}.npz")
+        try:
+            os.makedirs(directory, exist_ok=True)
+            np.savez_compressed(
+                path,
+                idx_ref_forward=fwd_ref,
+                idx_ref_backward=-1 if bwd_ref is None else bwd_ref,
+                central_atom_idx=event.move_atom_index,
+                min1_positions=event.min1_positions,
+                saddle_positions=event.saddle_positions,
+                min2_positions=event.min2_positions,
+                types=np.asarray(types),
+                cell=event.cell,
+                dE_forward=event.dE_forward,
+                dE_backward=event.dE_backward,
+            )
+        except OSError as exc:  # never let a diagnostic dump kill a running simulation
+            logger.warning("could not write event geometry dump %s: %s", path, exc)
 
     def _backfill_prefactors(
         self, backfill: "list[tuple[int, int | None, dict[str, object]]]"

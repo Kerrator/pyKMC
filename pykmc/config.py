@@ -41,6 +41,15 @@ class ControlConfig(BaseModel):
         description="File path where the reference table will be store in pickle format.",
     )
 
+    event_geometry_output: Optional[str] = Field(
+        default=None,
+        description="Optional directory in which to dump the FULL min1/saddle/min2 geometry of "
+        "each accepted reference event, as one .npz per event. The reference table itself stores "
+        "only neighbour-subset positions, which are unusable for a Hessian, so this is the only "
+        "way to recompute per-event prefactors offline. Disabled (None) by default; independent "
+        "of the rate-constant style.",
+    )
+
     visited_environments_output: Optional[str] = Field(
         default="./visited_environments.pickle", 
         description="File path where the list of atomic environments that have been explored will be sore in pickle format."
