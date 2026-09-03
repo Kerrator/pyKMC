@@ -5,7 +5,7 @@ from ase.data import atomic_numbers, atomic_masses
 import ctypes
 import pypARTn
 import os
-from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_zone, make_AV, redefine_atoms, reset
+from ...activevolume.active_volume import partn_search_AV, partn_refine_AV, position_results_AV, define_zone, make_AV, redefine_atoms, reset, map_types
 from ...atomic_environment import AtomicEnvironment
 
 from ...result import  (
@@ -369,15 +369,16 @@ def compute_event_prefactors(
             r_total, r_movable = rc.nu0_zone_radius, rc.free_radius
 
         serial = _get_serial_hessian_engine(engine)
-        reset(serial, config, cell)
+        # One LAMMPS type per species with an explicit mass (the main engine's
+        # rule): only EAM sets masses from the potential file, so SW/Tersoff/MTP
+        # otherwise abort the zone's first rebalance and every event silently
+        # falls back to k0.
+        int_types, map_type = map_types(types_used)
+        reset(serial, config, cell, map_type=map_type)
         av_positions, av_idx, buffer_idx = define_zone(
             central, min1, cell, r_total=r_total, r_movable=r_movable
         )
         atom_map = np.array(av_idx, dtype=int)
-        map_type = {
-            atom_type: i + 1 for i, atom_type in enumerate(sorted(set(types_used)))
-        }
-        int_types = np.array([map_type[t] for t in types_used])
         redefine_atoms(serial, av_positions, int_types[atom_map])
         make_AV(serial, atom_map, buffer_idx)
         # Crop geometries and remap indices to the zone-local frame.
