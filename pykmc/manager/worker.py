@@ -4,10 +4,84 @@ from dataclasses import dataclass
 from enum import Enum
 from mpi4py import MPI
 import inspect
+import logging
+import types
+
+logger = logging.getLogger(__name__)
+
+_MISSING = object()
+
+# Worker builtins, in dispatch order. The control builtins are *reserved*: the
+# Manager refuses to submit them (see ``RESERVED_OPS``); ``list_ops`` is the only
+# builtin that returns a value and stays reachable through ``Manager.list_ops``.
+# ``Worker._builtins_op`` is built from this tuple, so the two cannot diverge.
+BUILTIN_OPS: tuple[str, ...] = (
+    "use_local",
+    "use_group",
+    "use_global",
+    "shutdown",
+    "list_ops",
+)
+RESERVED_OPS: frozenset[str] = frozenset(BUILTIN_OPS) - {"list_ops"}
+
+# Routine types that are safe to bind with ``getattr``: binding applies the
+# descriptor protocol but computes nothing. Deliberately narrower than
+# ``inspect.isroutine``, which also accepts every ``__get__``-only descriptor
+# (``functools.cached_property``, ``partialmethod``, ``singledispatchmethod``,
+# custom lazy descriptors) and would let discovery evaluate them.
+_ROUTINE_TYPES: tuple[type, ...] = (
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodType,
+    types.MethodDescriptorType,
+    types.ClassMethodDescriptorType,
+    types.WrapperDescriptorType,
+    types.MethodWrapperType,
+)
+
+
+def is_static_callable(raw: Any) -> bool:
+    """Return True if a statically looked-up attribute denotes a callable operation.
+
+    ``raw`` is the object returned by :func:`inspect.getattr_static`, i.e. the
+    attribute exactly as stored on the class or instance, with no descriptor
+    protocol applied. Only an explicit allow-list qualifies: plain and builtin
+    functions, bound methods, the C-level method/wrapper descriptors, and
+    ``classmethod``/``staticmethod`` wrappers, plus callable objects whose type
+    has no ``__get__``. Every other descriptor (``property``,
+    ``functools.cached_property``, ``partialmethod``, custom ``__get__``
+    objects) computes a value on access and is rejected, so it is never
+    evaluated during discovery. ``inspect.isroutine`` is not used because it
+    accepts any ``__get__``-only descriptor.
+
+    Parameters
+    ----------
+    raw : Any
+        Attribute as returned by ``inspect.getattr_static``.
+
+    Returns
+    -------
+    bool
+
+    """
+    if isinstance(raw, (classmethod, staticmethod)):
+        return True
+    if isinstance(raw, _ROUTINE_TYPES):
+        return True
+    return callable(raw) and not hasattr(type(raw), "__get__")
 
 
 def build_registry(obj: object | list[object] | None = None) -> dict[str, Callable]:
     """Build an operation registry from one or more objects.
+
+    Names are taken from ``dir(o)`` so that dynamically exposed methods (e.g.
+    ``EngineExtension`` methods advertised by ``Engine.__dir__``) are seen, but
+    every name is first inspected statically with :func:`inspect.getattr_static`
+    so that ``@property`` getters and other value-computing descriptors are never
+    evaluated. Bound methods, classmethods, staticmethods and callables stored on
+    the instance are collected; a name that is neither on the class nor on the
+    instance is resolved through the object's own ``__getattr__`` (this is how
+    engine extension methods are reached).
 
     Parameters
     ----------
@@ -23,6 +97,7 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
     ------
     ValueError
         If two objects expose a method with the same name.
+
     """
     registry: dict[str, Callable] = {}
     objs = obj if isinstance(obj, list) else ([obj] if obj is not None else [])
@@ -30,11 +105,22 @@ def build_registry(obj: object | list[object] | None = None) -> dict[str, Callab
         for name in dir(o):
             if name.startswith("_"):
                 continue
-            try:
-                attr = getattr(o, name)
-            except Exception:
-                continue
-            if not callable(attr):
+            raw = inspect.getattr_static(o, name, _MISSING)
+            if raw is _MISSING:
+                # Advertised by __dir__ but stored neither on the class nor on the
+                # instance: delegated dynamically (Engine.__getattr__ screens the
+                # extension class itself, so no property is evaluated here).
+                try:
+                    attr = getattr(o, name)
+                except AttributeError:
+                    continue
+                if not callable(attr):
+                    continue
+            elif is_static_callable(raw):
+                attr = getattr(o, name)  # binds the method; evaluates nothing
+                if not callable(attr):
+                    continue  # defensive: a routine always binds to a callable
+            else:
                 continue
             if name in registry:
                 raise ValueError(
@@ -56,6 +142,11 @@ class DispatchResult:
     status: DispatchStatus
     value: Any = None
     error: str | None = None
+
+
+def _describe(e: BaseException) -> str:
+    """Format an exception as ``Type: message`` so an empty message stays visible."""
+    return f"{type(e).__name__}: {e}"
 
 
 class Worker:
@@ -129,7 +220,7 @@ class Worker:
         group_comm  : MPI.Comm | None
         extra_ops   : dict[str, Callable] | None
             Keys must not clash with object method names, nor with builtin
-            names (use_local, use_group, use_global, close).
+            names (use_local, use_group, use_global, shutdown, list_ops).
         world_comm  : MPI.Comm | None  Defaults to MPI.COMM_WORLD.
 
         Raises
@@ -137,6 +228,7 @@ class Worker:
         ValueError
             If obj-derived registries differ across modes that have objects,
             extra_ops clash with object methods, or a key clashes with a builtin.
+
         """
         self.local_obj = local_obj
         self.local_comm = local_comm
@@ -154,12 +246,10 @@ class Worker:
         ):
             comm.Set_errhandler(MPI.ERRORS_RETURN)
 
-        self._builtins_op = {
-            "use_local": self.use_local,
-            "use_group": self.use_group,
-            "use_global": self.use_global,
-            "shutdown": self.shutdown,
-            "list_ops": self.list_ops,
+        # Derived from BUILTIN_OPS so RESERVED_OPS (imported by the Manager)
+        # always matches the control builtins this Worker actually dispatches.
+        self._builtins_op: dict[str, Callable] = {
+            name: getattr(self, name) for name in BUILTIN_OPS
         }
 
         # extra_ops names tracked separately so dispatch can inject comm.
@@ -305,11 +395,33 @@ class Worker:
         )
 
     def shutdown(self) -> None:
-        """Stop the message loop and call .close() on all objects that support it."""
+        """Stop the message loop and call ``close()`` on every object that has one.
+
+        Every object is attempted even if an earlier ``close()`` raises: the
+        failures are collected and re-raised together once, so the dispatch
+        boundary reports (or logs, for the fire-and-forget control message)
+        every object that stayed open instead of only the first one.
+
+        Raises
+        ------
+        RuntimeError
+            Listing every ``close()`` that raised, after all were attempted.
+
+        """
         self._is_alive = False
+        failures: list[str] = []
         for o in self._all_objs():
-            if hasattr(o, "close"):
+            if not hasattr(o, "close"):
+                continue
+            try:
                 o.close()
+            except Exception as e:
+                failures.append(f"{type(o).__name__}.close(): {_describe(e)}")
+        if failures:
+            raise RuntimeError(
+                f"Worker {self.worker_id} shutdown: {len(failures)} close() "
+                "call(s) failed: " + "; ".join(failures)
+            )
 
     # Internal loop and dispatch
     def _loop(self) -> None:
@@ -324,34 +436,75 @@ class Worker:
             r = self._dispatch(msg)
 
             if self.rank == 0:
-                self._send_result(r)
+                # Fire-and-forget senders (Session._send_command) mark their
+                # message "reply": False; every other message gets one reply.
+                self._send_result(r, msg.get("type"), reply=msg.get("reply", True))
 
             if not self._is_alive:
                 break
 
-    def _send_result(self, r: DispatchResult) -> None:
-        """Send dispatch result back to world_comm rank 0. Called only on local rank 0."""
-        if r.status == DispatchStatus.SILENT:
-            return
-        if r.status == DispatchStatus.SUCCESS:
-            self.world_comm.send(
-                {
-                    "type": "status",
-                    "value": {"has_result": r.value is not None, "error": None},
-                },
-                dest=0,
-                tag=self._TAG_STATUS,
-            )
-            if r.value is not None:
-                self.world_comm.send(
-                    {"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT
+    def _send_status(self, has_result: bool, error: str | None) -> None:
+        """Send one status message to world_comm rank 0."""
+        self.world_comm.send(
+            {"type": "status", "value": {"has_result": has_result, "error": error}},
+            dest=0,
+            tag=self._TAG_STATUS,
+        )
+
+    def _send_result(
+        self, r: DispatchResult, op_type: str | None, reply: bool = True
+    ) -> None:
+        """Reply to world_comm rank 0 with exactly one terminal message.
+
+        Called only on rank 0 of the active communicator.
+
+        Parameters
+        ----------
+        r : DispatchResult
+            Outcome computed by ``_dispatch``.
+        op_type : str | None
+            Operation name, used in error messages.
+        reply : bool
+            False for fire-and-forget messages: nothing is sent, but an error is
+            logged so it is not dropped silently.
+
+        Notes
+        -----
+        A ``SUCCESS`` result is pickle-checked *before* any status is sent, so a
+        value that cannot be serialised turns into an ``ERROR`` status and the
+        caller is never left waiting for a result message that cannot follow.
+        A ``SILENT`` result (void builtin) still gets a void status when a reply
+        was requested.
+
+        """
+        if not reply:
+            if r.status == DispatchStatus.ERROR:
+                logger.error(
+                    "Fire-and-forget operation '%s' failed on worker %s: %s",
+                    op_type,
+                    self.worker_id,
+                    r.error,
                 )
-        elif r.status == DispatchStatus.ERROR:
-            self.world_comm.send(
-                {"type": "status", "value": {"has_result": False, "error": r.error}},
-                dest=0,
-                tag=self._TAG_STATUS,
+            return
+        if r.status == DispatchStatus.ERROR:
+            self._send_status(False, r.error)
+            return
+        if r.status == DispatchStatus.SILENT or r.value is None:
+            self._send_status(False, None)
+            return
+        try:
+            MPI.pickle.dumps(r.value)
+        except Exception as e:
+            self._send_status(
+                False,
+                f"Operation '{op_type}' succeeded but its result could not be "
+                f"pickled: {type(e).__name__}: {e}",
             )
+            return
+        self._send_status(True, None)
+        self.world_comm.send(
+            {"type": "result", "value": r.value}, dest=0, tag=self._TAG_RESULT
+        )
 
     def _read_messages(self) -> dict:
         """Read one message from world_comm on rank 0. Blocks until a message arrives."""
@@ -362,7 +515,12 @@ class Worker:
 
         Message format
         --------------
-        {"type": <op_name>, "value": <payload>}
+        {"type": <op_name>, "value": <payload>, "reply": <bool>}
+
+        ``reply`` is read by ``_loop`` (not here): ``False`` marks a
+        fire-and-forget control message (``Session._send_command``) and no
+        reply is sent; a message without the field is treated as
+        ``reply: True`` and always receives exactly one terminal reply.
 
         ``value`` is mapped to kwargs as follows:
           - absent / None  → no kwargs
@@ -370,9 +528,12 @@ class Worker:
           - scalar         → wrapped as {"value": scalar}
 
         Builtins (use_local, use_group, use_global, shutdown, list_ops) are
-        dispatched without a barrier and return SILENT unless they produce a
-        result. Registry operations are bracketed by a comm.barrier() on all
-        ranks so that MPI collectives inside handlers are safe. extra_ops
+        dispatched without a barrier, inside the same error boundary as registry
+        operations, and return SILENT unless they produce a result. Registry
+        operations are bracketed by a comm.barrier() on all ranks so that MPI
+        collectives inside handlers are safe; inside that bracket every rank
+        gathers its error string on rank 0, so a failure on a non-root rank is
+        reported to the caller (the value returned is still rank 0's). extra_ops
         receive ``self.comm`` as their first positional argument.
         """
         op_type = msg.get("type")
@@ -386,7 +547,10 @@ class Worker:
             kwargs = {"value": value}
 
         if op_type in self._builtins_op:
-            result = self._builtins_op[op_type](**kwargs)
+            try:
+                result = self._builtins_op[op_type](**kwargs)
+            except Exception as e:
+                return DispatchResult(DispatchStatus.ERROR, error=_describe(e))
             if result is not None:
                 return DispatchResult(DispatchStatus.SUCCESS, value=result)
             return DispatchResult(DispatchStatus.SILENT)
@@ -404,11 +568,26 @@ class Worker:
                 result = handler(self.comm, **kwargs)
             else:
                 result = handler(**kwargs)
-            return DispatchResult(DispatchStatus.SUCCESS, value=result)
+            r = DispatchResult(DispatchStatus.SUCCESS, value=result)
         except Exception as e:
-            return DispatchResult(DispatchStatus.ERROR, error=str(e))
-        finally:
-            self.comm.barrier()
+            r = DispatchResult(DispatchStatus.ERROR, error=_describe(e))
+        # Collective reached by every rank on both paths: the root learns about
+        # failures on the other participating ranks before anyone replies.
+        errors = self.comm.gather(r.error, root=0)
+        if self.rank == 0:
+            failed = [(i, e) for i, e in enumerate(errors) if e is not None]
+            if failed:
+                ranks = ", ".join(str(i) for i, _ in failed)
+                details = "; ".join(f"rank {i}: {e}" for i, e in failed)
+                r = DispatchResult(
+                    DispatchStatus.ERROR,
+                    error=(
+                        f"Operation '{op_type}' failed on rank(s) {ranks} of the "
+                        f"{self.mode} communicator: {details}"
+                    ),
+                )
+        self.comm.barrier()
+        return r
 
     def list_ops(self, mode: str = "local") -> list[str]:
         registries = {

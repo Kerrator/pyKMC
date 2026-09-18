@@ -1,9 +1,59 @@
 from __future__ import annotations
 from abc import abstractmethod
+import inspect
 from typing import Any
 import numpy as np
 from ase.cell import Cell
 from pykmc._core import Registrable
+from pykmc.manager.worker import is_static_callable
+
+_MISSING = object()
+
+
+def _is_class_operation(cls: type, name: str) -> bool:
+    """Return True if ``cls`` defines ``name`` as a callable operation.
+
+    Inspection is static (:func:`inspect.getattr_static` on the class) and the
+    classification is the one rule shared with ``build_registry``
+    (:func:`pykmc.manager.worker.is_static_callable`): plain functions, builtin
+    routines, classmethods and staticmethods qualify; ``property``,
+    ``functools.cached_property`` and any other value-computing descriptor do
+    not, so nothing is evaluated. Instance attributes are not consulted.
+
+    Parameters
+    ----------
+    cls : type
+        Class to inspect.
+    name : str
+        Attribute name.
+
+    Returns
+    -------
+    bool
+
+    """
+    raw = inspect.getattr_static(cls, name, _MISSING)
+    if raw is _MISSING:
+        return False
+    return is_static_callable(raw)
+
+
+def _class_operations(cls: type) -> set[str]:
+    """Return the public operation names ``cls`` defines, without evaluating any.
+
+    Parameters
+    ----------
+    cls : type
+        Class to inspect.
+
+    Returns
+    -------
+    set[str]
+
+    """
+    return {
+        m for m in dir(cls) if not m.startswith("_") and _is_class_operation(cls, m)
+    }
 
 
 class EngineExtension:
@@ -87,11 +137,7 @@ class Engine(Registrable, root=True):
 
         # Discover methods statically from the class to avoid executing @property getters,
         # which would crash if called before the subclass __init__ body has run.
-        new_methods = {
-            m
-            for m in dir(type(ext))
-            if not m.startswith("_") and callable(getattr(type(ext), m, None))
-        }
+        new_methods = _class_operations(type(ext))
 
         # Check against native engine methods
         native = {
@@ -109,12 +155,7 @@ class Engine(Registrable, root=True):
 
         # Check against already registered extensions
         for registered_name, registered_ext in self._extensions.items():
-            clash = new_methods & {
-                m
-                for m in dir(type(registered_ext))
-                if not m.startswith("_")
-                and callable(getattr(type(registered_ext), m, None))
-            }
+            clash = new_methods & _class_operations(type(registered_ext))
             if clash:
                 raise ValueError(
                     f"Extension '{ext_name}' has conflicting methods with '{registered_name}' :\n"
@@ -123,13 +164,11 @@ class Engine(Registrable, root=True):
         self._extensions[ext_name] = ext
 
     def __dir__(self) -> list[str]:
+        # Extension operations are discovered on the extension *class*, so no
+        # extension property is evaluated by dir(engine) (cf. build_registry).
         names = list(super().__dir__())
-        for ext in self._extensions.values():
-            names.extend(
-                m
-                for m in dir(ext)
-                if not m.startswith("_") and callable(getattr(ext, m, None))
-            )
+        for ext in self.__dict__.get("_extensions", {}).values():
+            names.extend(sorted(_class_operations(type(ext))))
         return names
 
     def __getattr__(self, name: str) -> Any:
@@ -139,9 +178,10 @@ class Engine(Registrable, root=True):
             raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
         extensions = object.__getattribute__(self, "_extensions")
         for ext in extensions.values():
-            attr = getattr(ext, name, None)
-            if callable(attr):
-                return attr
+            # Only class-level callables are delegated; the static check means a
+            # property on the extension is neither evaluated nor exposed.
+            if _is_class_operation(type(ext), name):
+                return getattr(ext, name)
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     @abstractmethod

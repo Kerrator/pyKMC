@@ -31,8 +31,11 @@ class Session:
         self.world_comm = world_comm
 
     def _send_command(self, op_type: str) -> None:
+        """Send a fire-and-forget control message: the worker sends no reply."""
         self.world_comm.send(
-            {"type": op_type}, dest=self.engine_master_rank, tag=self._TAG_CMD
+            {"type": op_type, "reply": False},
+            dest=self.engine_master_rank,
+            tag=self._TAG_CMD,
         )
 
     def use_local(self) -> None:
@@ -48,8 +51,12 @@ class Session:
         self._send_command("shutdown")
 
     def call(self, op_name: str, **kwargs) -> Any:
-        """Send an operation to the worker and optionally retrieve a result."""
-        msg = {"type": op_name}
+        """Send an operation to the worker and wait for its single terminal reply.
+
+        Every call receives exactly one status message (``reply: True``); a
+        result message follows only when the status announces one.
+        """
+        msg = {"type": op_name, "reply": True}
         if kwargs:
             msg["value"] = kwargs
         self.world_comm.send(msg, dest=self.engine_master_rank, tag=self._TAG_CMD)
@@ -63,7 +70,8 @@ class Session:
             raise RuntimeError(f"Expected 'status', got '{msg.get('type')}'")
         value = msg.get("value", {})
         error = value.get("error")
-        if error:
+        # `is not None`, not truthiness: an empty error string is still a failure.
+        if error is not None:
             raise RuntimeError(error)
         return value.get("has_result", False)
 

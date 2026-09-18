@@ -111,6 +111,10 @@ class Job:
     future: Future
 ```
 
+A `Future` can be cancelled before its job is dispatched (`future.cancel()` returns `True`): the pool thread skips it and the queue bookkeeping stays balanced, so a later `queue.join()` (used by the mode switches and `broadcast`) still returns. Once a job is running, `cancel()` returns `False` and the result is delivered normally. A pool thread never dies on an exception: the error is attached to the job's `Future`.
+
+`manager.shutdown()` dispatches the jobs still queued, stops the pool threads, and sends the `shutdown` control message to every worker. It is idempotent (once every worker has been notified a second call is a no-op, so no stale message is left for a later manager on the same communicator), and afterwards `start()`, `submit()`, `broadcast()`, `submit_group()` and `submit_global()` raise `RuntimeError`. The manager is marked closed only after the last session has been notified: if one `session.shutdown()` send raises, the exception propagates, the sessions not yet notified stay pending, and a later `shutdown()` resumes with them instead of silently returning; no work is accepted in between.
+
 #### Group mode
 
 Group mode is synchronous. The operation is dispatched to `Session` connected to the group communicator, and all workers in the group execute it collectively. The call blocks until the operation completes.
@@ -141,11 +145,13 @@ Each `Worker` maintains a registry, a dictionary mapping operation names to `Cal
 
 Each mode has its own registry (`local_registry`, `group_registry`, `global_registry`), built at construction time and swapped when the mode changes. The set of available operations can therefore differ between modes.
 
-In addition to the user-defined registry, the `Worker` exposes a set of builtin operations (`use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`) that are always available regardless of mode and are dispatched before the registry is consulted.
+In addition to the user-defined registry, the `Worker` exposes a set of builtin operations (`use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`) that are always available regardless of mode and are dispatched before the registry is consulted. They are listed once, in `pykmc.manager.worker.BUILTIN_OPS`, from which both the worker's dispatch table and `RESERVED_OPS` (everything but `list_ops`) are derived, so a control builtin added to the worker is reserved automatically. The four control builtins are *reserved*: `Manager.submit`, `broadcast`, `submit_group`, `submit_global` and the attribute wrappers raise `ValueError` for `use_local`, `use_group`, `use_global` and `shutdown` before anything is enqueued or sent (dispatched as ordinary operations they would return `SILENT` and hang the caller, and the mode switches would desynchronise the workers from `Manager.mode`). `list_ops` is read-only and stays reachable through `Manager.list_ops()` and the `group_list_ops` / `global_list_ops` wrappers. `start`, `close` and the `initialize_*` methods are ordinary engine operations.
+
+The `shutdown` builtin stops the loop and calls `close()` on every object of every mode that has one. Every object is attempted even if an earlier `close()` raises; the failures are collected and raised once as a single `RuntimeError` listing them, which the dispatch boundary turns into an `ERROR` outcome (logged, since the control message is fire-and-forget).
 
 A `Worker`'s registry is assembled at construction from three sources:
 
-1. Object methods (`local_obj`, `global_obj`, `group_obj`): `build_registry` collects, via `inspect.getmembers`, all public methods. Passing a list of objects merges their methods, a duplicate name raises `ValueError`. Object methods are called with kwargs only (no communicator is injected) so each object must already hold its communicator as an attribute, set at construction.
+1. Object methods (`local_obj`, `global_obj`, `group_obj`): `build_registry` collects all public callables. Names come from `dir(obj)` (so extension methods advertised by `Engine.__dir__` are seen) but every name is inspected statically with `inspect.getattr_static` and classified by one explicit allow-list (`is_static_callable`: plain and builtin functions, bound methods, the C-level method and wrapper descriptors, `classmethod`/`staticmethod`, and callable objects whose type has no `__get__`). A `@property`, a `functools.cached_property`, a `partialmethod` or any custom `__get__`-only descriptor is neither registered nor evaluated (`inspect.isroutine` is deliberately not used: it accepts every `__get__`-only descriptor), so the registry can be built on an engine that has not been started. A name resolved only through the object's `__getattr__` (an engine extension method) is bound through it; whatever is bound is re-checked with `callable()` before it enters the registry. The same helper is imported by `Engine.register`, `Engine.__dir__` and `Engine.__getattr__`, so an extension property or lazy attribute is never evaluated and never delegated. Passing a list of objects merges their methods, a duplicate name raises `ValueError`. Object methods are called with kwargs only (no communicator is injected) so each object must already hold its communicator as an attribute, set at construction.
 2. extra_ops: MPI-aware callables with signature `fn(comm, **kwargs)`. The `Worker` injects the active communicator at dispatch time, so the same function adapts automatically to whichever mode is current.
 3. Builtins: `use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`. Always available, handled separately from the registry.
 
@@ -153,7 +159,7 @@ A `Worker`'s registry is assembled at construction from three sources:
 
 A message starts at the `Manager`: a submit call (or one of its group_ / global_ variants) hands the operation to a `Session`, the object that actually talks to the worker. From there the `Session`, on world rank 0, sends it point-to-point over `world_comm` to the worker's master rank, the local rank 0 of the active communicator. That rank is the only one reading world_comm, the other ranks are blocked in a collective, waiting. Once the master rank has the message, it broadcast it over the active communicator so that every rank holds the same message, and then all ranks dispatch it together. The operation is performed and the return value (or error) travels back the other way: only the master rank replies to the `Session`, over `world_comm`, which hands it back to the `Manager`.
 
-A message has the shape `{"type": <op_name>, "value": <payload>}`. The `value` field becomes kwargs by the following rule:
+A message has the shape `{"type": <op_name>, "value": <payload>, "reply": <bool>}`. `Session.call` sets `reply` to `True` (it always waits for a status); `Session._send_command` sets it to `False` for the fire-and-forget control messages (mode switches, `shutdown`), and a message without the field is treated as `reply: True`. The `value` field becomes kwargs by the following rule:
 
 - absent or `None` → no kwargs;
 - `dict` → used as-is as kwargs;
@@ -163,8 +169,8 @@ In practice `Session.call(op, **kwargs)` always sends a `dict` (or nothing), but
 
 Dispatch distinguishes two categories:
 
-- Builtins : executed without a barrier, since they only mutate the worker's local state (mode switch, shutdown). They return `SILENT` unless they produce a value (`list_ops` returns a list → `SUCCESS`). Mode switches therefore send no status back: they are fire-and-forget.
-- Registry operations : bracketed by a `comm.barrier()` before and after, so that internal MPI collectives are safe. `extra_ops` receive `self.comm` as their first positional argument, object methods are called with kwargs only. An unknown name returns `ERROR` with the list of available operations.
+- Builtins : executed without a barrier, since they only mutate the worker's local state (mode switch, shutdown), but inside the same error boundary as registry operations (an exception becomes `ERROR` instead of killing the loop). They return `SILENT` unless they produce a value (`list_ops` returns a list → `SUCCESS`). Whether a reply is sent is decided by the sender's `reply` field, not by the return value.
+- Registry operations : bracketed by a `comm.barrier()` before and after, so that internal MPI collectives are safe. `extra_ops` receive `self.comm` as their first positional argument, object methods are called with kwargs only. An unknown name returns `ERROR` with the list of available operations. Inside the barrier bracket, every rank of the active communicator `gather`s its error string (`None` on success) on rank 0, a collective reached on both the success and the exception path; if any rank failed, rank 0 turns its own result into an `ERROR` listing every failed rank (`rank i: ExceptionType: message`). The value that travels back is always rank 0's, so an operation that returns a value on rank 0 and `None` on the other ranks is a normal success. This only observes failures that reach the rendezvous: a rank stuck in a mismatched collective inside a handler is not recoverable and ends in the `Worker.start` abort boundary.
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'step'}}}%%
@@ -181,9 +187,10 @@ flowchart TD
     J --> K{"extra_op?"}
     K -->|yes| L["handler(comm, **kwargs)"]
     K -->|no| M["handler(**kwargs)"]
-    L --> N["comm.barrier()"]
+    L --> N["gather per-rank errors on rank 0"]
     M --> N
-    N --> O["SUCCESS / ERROR"]
+    N --> N2["comm.barrier()"]
+    N2 --> O["SUCCESS / ERROR"]
 ```
 
 
@@ -208,14 +215,14 @@ class DispatchResult:
 
 These types never cross `world_comm`, they only tell the master rank whether to reply, and with what:
 
-- `SILENT` : no reply at all (builtins that only mutate local state, e.g. mode switches: fire-and-forget).
-- `SUCCESS` : send a `status` message, then a `result` message only if `value is not None`. 
+- `SILENT` : the operation produced no value. With `reply: False` (the control messages) nothing is sent at all, and an `ERROR` outcome is logged rather than dropped; with `reply: True` a void `status` is sent so the caller is released.
+- `SUCCESS` : the value is pickle-checked first; if it cannot be pickled an `ERROR` status naming the operation and the pickling error is sent instead. Otherwise send a `status` message, then a `result` message only if `value is not None`.
 - `ERROR` : send a `status` message carrying the error string, no result follows.
 
-Every rank produces a `DispatchResult`, but only local rank 0 acts on it (in `_send_result`). 
+Every reply-expected request therefore receives exactly one terminal reply. Every rank produces a `DispatchResult`, but only local rank 0 acts on it (in `_send_result`), after the per-rank errors have been gathered. 
 ### Reply and tags
 
-Only local rank 0 replies to the `Session`, over `world_comm`. It first sends the status message (`has_result` flag + optional `error`), then, if `has_result` is true, a second result message with the return value. On the `Session` side an `error` is re-raised as `RuntimeError`, otherwise the value is returned to the caller (or `None` when there is no result).
+Only local rank 0 replies to the `Session`, over `world_comm`. It first sends the status message (`has_result` flag + optional `error`), then, if `has_result` is true, a second result message with the return value. On the `Session` side an `error` that is not `None` is re-raised as `RuntimeError` (an empty string is still a failure; error texts are always prefixed with the exception type), otherwise the value is returned to the caller (or `None` when there is no result).
 
 The two directions use three tags to keep the flows from interleaving on `world_comm`:
 
@@ -230,7 +237,7 @@ The numeric values are arbitrary, the only invariant is that both sides agree on
 Notes :
 - `return None` means "void" : the `has_result` flag is computed from `r.value is not None`. An operation that legitimately returns `None` is treated as having no result, and `Session.call` returns `None` without waiting for a `result` message.
 - `extra_ops` signature : they must accept the communicator as their first argument (`fn(comm, **kwargs)`), unlike object methods.
-- Reserved names : the builtins (`use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`) cannot be reused by a method or `extra_op`.
+- Reserved names : the builtins (`use_local`, `use_group`, `use_global`, `shutdown`, `list_ops`) cannot be reused by a method or `extra_op`, and the four control builtins cannot be submitted through the `Manager` (see above).
 - Cross-mode consistency : Objects passed to the different modes must expose the same public methods, otherwise construction fails.
 
 ## Factory 
