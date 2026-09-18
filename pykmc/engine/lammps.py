@@ -153,6 +153,59 @@ def types_to_int(types: list[str] | np.ndarray, species: tuple[str, ...]) -> np.
         ) from exc
 
 
+def _validate_species_override(
+    species: tuple[str, ...], masses: tuple[float, ...]
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Check an explicit ``(species, masses)`` map for ``initialize_system``.
+
+    The override lets a scratch instance that holds only a subset of the atoms
+    (an HTST zone crop) keep the *full* system's type numbering and masses, so
+    an integer type means the same species in every instance built from the
+    same full system and a multi-element ``pair_coeff`` still matches
+    ``create_box``.
+
+    Parameters
+    ----------
+    species : tuple[str, ...]
+        Potential species order (``pair_coeff`` order); non-empty, unique.
+    masses : tuple[float, ...]
+        One finite positive mass in amu per species, in ``species`` order.
+
+    Returns
+    -------
+    tuple[tuple[str, ...], tuple[float, ...]]
+        ``(species, masses)`` as plain tuples of ``str`` and ``float``.
+
+    Raises
+    ------
+    ValueError
+        If either sequence is malformed or their lengths differ.
+
+    """
+    if isinstance(species, str) or not species:
+        raise ValueError("initialize_system: species must be a non-empty sequence")
+    species_t = tuple(str(s) for s in species)
+    if len(set(species_t)) != len(species_t):
+        raise ValueError(f"initialize_system: species contains duplicates: {species_t}")
+    if len(masses) != len(species_t):
+        raise ValueError(
+            f"initialize_system: masses has {len(masses)} entries but species has "
+            f"{len(species_t)}"
+        )
+    masses_t = []
+    for symbol, mass in zip(species_t, masses, strict=True):
+        if isinstance(mass, (bool, np.bool_)):
+            raise ValueError(f"initialize_system: mass of {symbol!r} must be a number")
+        value = float(mass)
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"initialize_system: mass of {symbol!r} must be finite and > 0, "
+                f"got {mass!r}"
+            )
+        masses_t.append(value)
+    return species_t, tuple(masses_t)
+
+
 def _require_finite_positions(positions: np.ndarray, op_name: str) -> np.ndarray:
     """Reject non-finite positions before they reach a collective LAMMPS call.
 
@@ -554,7 +607,40 @@ class LammpsEngine(Engine):
         positions: np.ndarray,
         cell: Cell,
         pbc: list[bool] | np.ndarray[bool],
+        *,
+        species: tuple[str, ...] | None = None,
+        masses: tuple[float, ...] | None = None,
     ) -> None:
+        """Define the box, atoms, integer types and per-type masses.
+
+        Parameters
+        ----------
+        types : list[str] | np.ndarray
+            Chemical symbol of every atom.
+        positions : np.ndarray
+            ``(N, 3)`` positions in the ASE frame.
+        cell : Cell
+            Simulation cell (anything ``Cell.new`` accepts).
+        pbc : list[bool] | np.ndarray
+            Periodicity per axis.
+        species : tuple[str, ...], optional
+            Keyword-only. Explicit potential species order to use instead of
+            ``species_map(types)``. Pass it together with ``masses`` when the
+            instance holds only a subset of a larger system (an HTST zone
+            crop) so the full system's type numbering and masses are kept.
+            When omitted the behaviour is exactly ``species_map(types)``.
+        masses : tuple[float, ...], optional
+            Keyword-only. Masses in amu in ``species`` order; required with
+            ``species``.
+
+        Raises
+        ------
+        ValueError
+            If ``pbc`` is malformed, if only one of ``species``/``masses`` is
+            given, if the override is malformed, or if a symbol in ``types``
+            is not in the species map.
+
+        """
         # system parameters
         natoms = len(types)
         cell = Cell.new(cell)
@@ -586,8 +672,17 @@ class LammpsEngine(Engine):
 
         ind = np.arange(1, natoms + 1)  # Lammps ids start at 1
         # One rule for species -> 1-based LAMMPS type and mass (see species_map):
-        # alphabetical species order, ASE masses. pair_coeff must follow it.
-        species, masses = species_map(types)
+        # alphabetical species order, ASE masses. pair_coeff must follow it. An
+        # explicit (species, masses) pair carries a full system's map into a
+        # scratch instance that holds only some of its atoms.
+        if (species is None) != (masses is None):
+            raise ValueError(
+                "initialize_system: species and masses must be given together"
+            )
+        if species is None:
+            species, masses = species_map(types)
+        else:
+            species, masses = _validate_species_override(species, masses)
         int_types = types_to_int(types, species).tolist()
 
         # lammps create system
@@ -665,6 +760,39 @@ class LammpsEngine(Engine):
         positions = np.ascontiguousarray(positions)
         c_array = (ctypes.c_double * len(positions))(*positions)
         self.lmp.scatter_atoms("x", 1, 3, c_array)
+
+    @lammps_error_handler
+    def get_forces(
+        self, positions: np.ndarray | None = None, recompute: bool = True
+    ) -> np.ndarray | None:
+        """Return the forces on every atom in eV/Å, in the ASE frame.
+
+        Like the energy getters this mutates *positions only* (when
+        ``positions`` is given) and restores nothing.
+
+        Parameters
+        ----------
+        positions : np.ndarray, optional
+            ``(N, 3)`` positions to scatter first (ASE frame).
+        recompute : bool, optional
+            Run ``run 0 post no`` before gathering so the forces match the
+            current positions. ``False`` returns the forces of the last run.
+
+        Returns
+        -------
+        np.ndarray | None
+            ``(N, 3)`` float64 copy of the forces on rank 0; ``None`` elsewhere.
+
+        """
+        if positions is not None:
+            self.set_positions(positions=positions)
+        if recompute:
+            self.lmp.command("run 0 post no")
+        result = self.lmp.gather_atoms("f", 1, 3)
+        if self._is_rank0:
+            forces = np.ctypeslib.as_array(result).reshape(-1, 3).astype(np.float64)
+            return self._positions_from_lammps(positions=forces)
+        return None
 
     @lammps_error_handler
     def get_total_energy(
