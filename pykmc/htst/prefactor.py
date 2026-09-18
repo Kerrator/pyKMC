@@ -38,7 +38,13 @@ def _hessian_for(
     hessian_fn: HessianFn, positions: np.ndarray, free: np.ndarray, label: str
 ) -> np.ndarray:
     """Call ``hessian_fn`` and check that it returned a real ``(3F, 3F)`` array."""
-    raw = hessian_fn(positions, free)
+    # Read-only views: an adapter that mutates its arguments in place would
+    # otherwise silently corrupt the shared free selection or the request.
+    positions_view = positions.view()
+    positions_view.setflags(write=False)
+    free_view = free.view()
+    free_view.setflags(write=False)
+    raw = hessian_fn(positions_view, free_view)
     if np.iscomplexobj(raw):
         raise ValueError(
             f"hessian_fn returned a complex array for the {label} geometry; "

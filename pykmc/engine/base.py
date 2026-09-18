@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 from ase.cell import Cell
 from pykmc._core import Registrable
-from pykmc.manager.worker import is_static_callable
+from pykmc._core.introspection import is_static_callable
 
 _MISSING = object()
 
@@ -15,7 +15,7 @@ def _is_class_operation(cls: type, name: str) -> bool:
 
     Inspection is static (:func:`inspect.getattr_static` on the class) and the
     classification is the one rule shared with ``build_registry``
-    (:func:`pykmc.manager.worker.is_static_callable`): plain functions, builtin
+    (:func:`pykmc._core.introspection.is_static_callable`): plain functions, builtin
     routines, classmethods and staticmethods qualify; ``property``,
     ``functools.cached_property`` and any other value-computing descriptor do
     not, so nothing is evaluated. Instance attributes are not consulted.

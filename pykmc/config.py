@@ -539,6 +539,7 @@ class RateConstantConfig(BaseModel):
     k0: float = Field(
         default=1.0,
         gt=0.0,
+        allow_inf_nan=False,
         description="Prefactor in ps^-1 (1.0 = 1 THz). When `style` is **'constant'** "
         "it is used directly as the pre-exponential factor ($k_0$); for **'htst'** "
         "and **'rpa'** it is the per-event fallback when no Vineyard prefactor is "
@@ -551,23 +552,27 @@ class RateConstantConfig(BaseModel):
     T: float = Field(
         default=300.0,
         gt=0.0,
+        allow_inf_nan=False,
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
     free_radius: float = Field(
         default=6.0,
         gt=0.0,
+        allow_inf_nan=False,
         description="HTST: radius (Angstrom) around the moving atom selecting the free "
         "(movable) atoms of the partial Hessian; every other atom is frozen.",
     )
     fd_step: float = Field(
         default=0.01,
         gt=0.0,
+        allow_inf_nan=False,
         description="HTST: central finite-difference displacement (Angstrom) used to "
         "build the Hessian.",
     )
     zone_radius: Optional[float] = Field(
         default=None,
         gt=0.0,
+        allow_inf_nan=False,
         description="HTST: optional radius (Angstrom) around the moving atom used to "
         "crop the scratch system on which the Hessians are computed. None (default) "
         "uses the full system.",
@@ -575,6 +580,7 @@ class RateConstantConfig(BaseModel):
     nu0_min_THz: float = Field(
         default=1.0,
         gt=0.0,
+        allow_inf_nan=False,
         description="HTST: lower bound (THz) of the acceptance window for the Vineyard "
         "prefactor nu0. The window is applied by the HTST kernel: an estimate below "
         "it is rejected and the event falls back to `k0`. Must be < `nu0_max_THz`.",
@@ -582,6 +588,7 @@ class RateConstantConfig(BaseModel):
     nu0_max_THz: float = Field(
         default=100.0,
         gt=0.0,
+        allow_inf_nan=False,
         description="HTST: upper bound (THz) of the acceptance window for the Vineyard "
         "prefactor nu0. The window is applied by the HTST kernel: an estimate above "
         "it is rejected and the event falls back to `k0`. Must be > `nu0_min_THz`.",

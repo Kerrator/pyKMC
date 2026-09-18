@@ -703,12 +703,15 @@ class TestLammpsSpeciesStateMPI:
             saddle_positions=system.positions[[far_atom]],
         )
         if self.is_rank0:
-            assert result is not None and not result.is_ok()
-            assert result.err_value().type is ErrorType.REFINEMENT_INVALID_MINIMA
-            is_err = True
+            is_err = (
+                result is not None
+                and not result.is_ok()
+                and result.err_value().type is ErrorType.REFINEMENT_INVALID_MINIMA
+            )
         else:
-            assert result is None
-            is_err = True
+            is_err = result is None
+        # Every rank must reach the same verdict; a lone False on any rank
+        # (an Err on a non-root rank, or a None on root) fails the allreduce.
         assert self.comm.allreduce(int(is_err)) == self.comm.Get_size()
         self._assert_restored(engine, system, e_fresh)
 

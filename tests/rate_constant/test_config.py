@@ -153,3 +153,18 @@ def test_htst_ini_section_round_trip(tmp_path: Path) -> None:
     assert (rc.k0, rc.T, rc.free_radius, rc.fd_step) == (1.0, 500.0, 5.5, 0.02)
     assert (rc.zone_radius, rc.nu0_min_THz, rc.nu0_max_THz) == (12.0, 0.5, 50.0)
     assert rc.premin is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["k0", "T", "free_radius", "fd_step", "zone_radius", "nu0_min_THz", "nu0_max_THz"],
+)
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_numeric_fields_reject_non_finite_values(field: str, value: float) -> None:
+    """Every bounded numeric field rejects inf and nan, not only values below 0."""
+    import pydantic
+
+    from pykmc.config import RateConstantConfig
+
+    with pytest.raises(pydantic.ValidationError):
+        RateConstantConfig(style="constant", **{field: value})

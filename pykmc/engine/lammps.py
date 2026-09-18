@@ -504,12 +504,9 @@ class LammpsEngine(Engine):
                 "ensure_full_system: the live LAMMPS instance is cropped and "
                 "full-system positions are required to rebuild it"
             )
-        positions = np.asarray(positions, dtype=np.float64)
-        if positions.shape != (fs.natoms, 3):
-            raise ValueError(
-                "ensure_full_system: positions have shape "
-                f"{positions.shape}, expected {(fs.natoms, 3)}"
-            )
+        positions = _require_positions(
+            positions, "ensure_full_system", natoms=fs.natoms
+        )
         self.lmp.command("clear")
         self.initialize_parameters()
         self.initialize_system(
