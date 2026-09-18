@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pandas as pd
-from .rate_constant import compute_rate_Eyring
+from .rate_constant import compute_rate_Eyring, create_rate_constant
 from .config import Config
 import numpy as np
 from .environments.graph_nauty import graph
@@ -26,6 +28,78 @@ from .utils.geometry import compute_delr
 
 if TYPE_CHECKING:
     from .event_recycling import Recycling
+    from .htst.result import DirectionalPrefactor
+
+SELF_REVERSE_NU0_RTOL: float = 0.05
+"""Relative tolerance under which two directional Vineyard prefactors count as equal.
+
+Used only by the htst/rpa directional identity gate: an event whose endpoint
+topologies match and whose saddle crops map onto each other (the IRA check) is
+collapsed to one self-linked catalogue row only when both directional
+prefactors were accepted and agree within this tolerance. For a genuinely
+self-reverse event the two minimum Hessians are related by the symmetry that
+maps min1 onto min2, so their spectra differ only by finite-difference and
+relaxation noise (well below one percent); 5 % leaves room for that noise while
+rejecting physically distinct spectra. The value is a documented constant, not
+a validated calibration.
+"""
+
+SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
+"""Barrier gap (eV) below which same-topology directions may be the same event."""
+
+
+@dataclass(frozen=True)
+class EventAdmission:
+    """Outcome of admitting one search result into the reference catalogue.
+
+    Attributes
+    ----------
+    frame : pd.DataFrame
+        One (forward only) or two (forward, backward) event rows whose logical
+        ids ``idx_ref``/``idx_backward`` are still unassigned (``-1``).
+    reverse_idx_ref : int or None
+        Logical id of an already catalogued reverse event that the single
+        forward row must link to; ``None`` when the frame carries its own
+        reverse or the reverse is unknown.
+    self_reverse_candidate : bool
+        htst/rpa only: the endpoint topologies match and the saddle crops map
+        onto each other, so constant-mode admission would have kept one
+        self-linked row. Both directional rows are kept until their
+        prefactors have been resolved; see
+        :meth:`ReferenceEventTable.finalize_self_reverse`.
+
+    """
+
+    frame: pd.DataFrame
+    reverse_idx_ref: int | None = None
+    self_reverse_candidate: bool = False
+
+
+def self_reverse_prefactors_agree(
+    forward: DirectionalPrefactor, backward: DirectionalPrefactor
+) -> bool:
+    """Return True when two directional prefactors support a self-reverse collapse.
+
+    Parameters
+    ----------
+    forward : DirectionalPrefactor
+        Resolved ``min1 -> saddle`` estimate.
+    backward : DirectionalPrefactor
+        Resolved ``min2 -> saddle`` estimate.
+
+    Returns
+    -------
+    bool
+        ``True`` only when both directions were accepted and their ``nu0_hz``
+        agree within :data:`SELF_REVERSE_NU0_RTOL`. A rejected direction never
+        supports a collapse: equal fallbacks do not demonstrate equal spectra.
+
+    """
+    if not (forward.ok and backward.ok):
+        return False
+    return math.isclose(
+        forward.nu0_hz, backward.nu0_hz, rel_tol=SELF_REVERSE_NU0_RTOL, abs_tol=0.0
+    )
 
 
 class ReferenceEventTable:
@@ -36,10 +110,23 @@ class ReferenceEventTable:
     config : Config
         The atomic simulations configuration.
 
+    Attributes
+    ----------
+    rate_constant : RateConstant
+        Rate facade built from ``config.rateconstant``; its backend decides
+        whether the catalogue carries per-event prefactors.
+    uses_prefactors : bool
+        ``True`` for the htst/rpa styles. Selects the directional identity
+        rules of :meth:`_admit_series`; constant-mode admission is unchanged.
+
     """
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self.rate_constant = create_rate_constant(config.rateconstant)
+        self.uses_prefactors: bool = bool(
+            self.rate_constant.backend.requires_event_prefactors
+        )
         self._initialize_table()
 
     def add_events(
@@ -61,7 +148,7 @@ class ReferenceEventTable:
         results_is_valid_events = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
-            res = self.is_valid_new_event(
+            res = self._admit(
                 min1_positions=ev.min1_positions,
                 saddle_positions=ev.saddle_positions,
                 min2_positions=ev.min2_positions,
@@ -71,9 +158,12 @@ class ReferenceEventTable:
                 cell=ev.cell,
                 types=ev.types,
             )
-            results_is_valid_events.append(res)
             if res.is_ok():
-                self.add(res.ok_value())
+                admission = res.ok_value()
+                self.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
+                results_is_valid_events.append(Ok(admission.frame))
+            else:
+                results_is_valid_events.append(res)
         # df_valid_events = self.get_valid_events(results_is_valid_events)
 
         # Check if events in results are not the same :
@@ -83,7 +173,7 @@ class ReferenceEventTable:
 
         return results_is_valid_events
 
-    def is_valid_new_event(
+    def _admit(
         self,
         min1_positions: np.ndarray,
         saddle_positions: np.ndarray,
@@ -93,8 +183,8 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
-    ) -> Result[pd.DataFrame, ErrorInfo]:
-        """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
+    ) -> Result[EventAdmission, ErrorInfo]:
+        """Apply the energy gates, build the directional series and admit them.
 
         Parameters
         ----------
@@ -117,8 +207,9 @@ class ReferenceEventTable:
 
         Returns
         -------
-        Result[pd.DataFrame, ErrorInfo]
-            The results of the operation.
+        Result[EventAdmission, ErrorInfo]
+            The admitted rows with their linking metadata (see
+            :meth:`_admit_series`), or the rejection.
 
         """
         # Energy bounds
@@ -187,89 +278,216 @@ class ReferenceEventTable:
                 cell=cell,
                 types=types,
             )
-            if self.is_new_event(
-                dfevent=dfevent_forward
-            ):  # check if event not already in the catalog
-                if (
-                    dfevent_forward["event_id"] == dfevent_forward["id_final"]
-                ):  # We are sure that the backward reaction same as forward
-                    # dfevent_forward["idx_backward"] = len(self.table)
-                    return Ok(dfevent_forward.to_frame().T)  # return only forward event
+            return self._admit_series(dfevent_forward, dfevent_backward)
 
-                # TODO : this is the same logic as is_new_event(), it is a quick fix but need to unify this
-                # TODO : will be easier when refacto ReferenceTable with Event dataclass
-                # backward event could still be the same as the forward one :
+    def is_valid_new_event(
+        self,
+        min1_positions: np.ndarray,
+        saddle_positions: np.ndarray,
+        min2_positions: np.ndarray,
+        move_atom_idx: int,
+        dE_forward: float,
+        dE_backward: float,
+        cell: np.ndarray,
+        types: list[str] = None,
+    ) -> Result[pd.DataFrame, ErrorInfo]:
+        """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
-                elif (
-                    dfevent_forward["event_id"] == dfevent_backward["event_id"]
-                ):  # same topo
-                    if (
-                        abs(
-                            dfevent_forward["energy_barrier"]
-                            - dfevent_backward["energy_barrier"]
-                        )
-                        < 0.25
-                    ):  # maybe same event so IRA check
-                        ref_saddle = dfevent_forward["saddle_positions"].copy()
-                        nat_ref = len(ref_saddle)
-                        typ_event = nat_ref * ["X"]
-                        typ_ref = typ_event
-                        result = simple_ira(
-                            nat_ref,
-                            typ_event,
-                            dfevent_backward["saddle_positions"].copy(),
-                            nat_ref,
-                            typ_ref,
-                            ref_saddle,
-                            self.config.ira.kmax_factor,
-                        )
+        Thin wrapper over :meth:`_admit` returning only the admitted frame;
+        the linking metadata is consumed by :meth:`add_events`.
 
-                        # if match
-                        if result.is_ok():
-                            # if matching score
-                            result = check_match(
-                                result, self.config.psr.matching_score_thr
-                            )
-                            if result.is_ok():  # same backward and forward event
-                                return Ok(dfevent_forward.to_frame().T)
-                        else:
-                            if self.is_new_event(dfevent=dfevent_backward):
-                                dfevent = pd.concat(
-                                    [
-                                        dfevent_forward.to_frame().T,
-                                        dfevent_backward.to_frame().T,
-                                    ],
-                                    ignore_index=True,
-                                )
-                                return Ok(dfevent)  # return both
-                            else:
-                                return Ok(dfevent_forward.to_frame().T)
+        Parameters
+        ----------
+        min1_positions : np.ndarray
+            event's positions of the first minimum.
+        saddle_positions : np.ndarray
+            event's positions of the saddle point.
+        min2_positions : np.ndarray
+            event's positions of the second minimum.
+        move_atom_idx : int
+            index of the atom that move the most during the event.
+        dE_forward : float
+            Energy barrier of the foward event.
+        dE_backward : float
+            Energy barrier of the backward event.
+        cell : np.ndarray
+            Simulation box cell.
+        types : list[str]
+            Event's atom types.
 
-                # we know they are different
-                else:
-                    # to the atomic environment of the forward event
-                    if self.is_new_event(dfevent=dfevent_backward):
-                        # backward is also new
-                        dfevent = pd.concat(
-                            [
-                                dfevent_forward.to_frame().T,
-                                dfevent_backward.to_frame().T,
-                            ],
-                            ignore_index=True,
-                        )
-                        return Ok(dfevent)  # return foward and backward event
-                    else:
-                        # backard is already known
-                        return Ok(dfevent_forward.to_frame().T)  # return only forward
+        Returns
+        -------
+        Result[pd.DataFrame, ErrorInfo]
+            The results of the operation.
 
-            else:
-                return Err(
-                    ErrorInfo(
-                        type=ErrorType.EVENT_NOT_NEW,
-                        message="Found event already in reference table",
-                        details="Same topology",
+        """
+        res = self._admit(
+            min1_positions=min1_positions,
+            saddle_positions=saddle_positions,
+            min2_positions=min2_positions,
+            move_atom_idx=move_atom_idx,
+            dE_forward=dE_forward,
+            dE_backward=dE_backward,
+            cell=cell,
+            types=types,
+        )
+        if res.is_ok():
+            return Ok(res.ok_value().frame)
+        return res
+
+    def _admit_series(
+        self, dfevent_forward: pd.Series, dfevent_backward: pd.Series
+    ) -> Result[EventAdmission, ErrorInfo]:
+        """Decide how the forward/backward series of one search enter the catalogue.
+
+        Constant mode reproduces the base admission exactly:
+
+        - forward already catalogued (:meth:`find_matching_event`) -> rejected;
+        - equal endpoint topologies (``event_id == id_final``) -> one
+          self-linked forward row, no geometric check;
+        - otherwise both rows when the backward is new, else the forward only
+          (self-linked by :meth:`add`).
+
+        htst/rpa mode keeps the same energy and duplicate rules but treats the
+        directional identity as a scientific decision (architecture rule
+        "Direction identity is a scientific review gate"):
+
+        - a backward direction already in the catalogue links the forward row
+          to that logical id instead of self-linking it;
+        - equal endpoint topologies collapse to one row only when the saddle
+          crops map onto each other (the IRA check, within
+          :data:`SAME_TOPOLOGY_BARRIER_TOL`) **and**, after resolution, both
+          directional prefactors agree (:meth:`finalize_self_reverse`); until
+          then both directional rows are kept with reciprocal links.
+
+        Parameters
+        ----------
+        dfevent_forward : pd.Series
+            Forward event series from :meth:`_build_event_series`.
+        dfevent_backward : pd.Series
+            Backward event series from :meth:`_build_event_series`.
+
+        Returns
+        -------
+        Result[EventAdmission, ErrorInfo]
+            The admitted rows and their linking metadata, or the rejection.
+
+        """
+        if self.find_matching_event(dfevent_forward) is not None:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.EVENT_NOT_NEW,
+                    message="Found event already in reference table",
+                    details="Same topology",
+                )
+            )
+        same_topology = dfevent_forward["event_id"] == dfevent_forward["id_final"]
+
+        if not self.uses_prefactors:
+            # Constant mode: unchanged base behaviour.
+            if same_topology:
+                # We are sure that the backward reaction same as forward
+                return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
+            if self.is_new_event(dfevent=dfevent_backward):
+                return Ok(
+                    EventAdmission(
+                        frame=self._two_rows(dfevent_forward, dfevent_backward)
                     )
                 )
+            # backward is already known: forward only (self-linked by add)
+            return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
+
+        # htst/rpa: directional identity gate.
+        reverse_idx_ref = self.find_matching_event(dfevent_backward)
+        if reverse_idx_ref is not None:
+            return Ok(
+                EventAdmission(
+                    frame=dfevent_forward.to_frame().T,
+                    reverse_idx_ref=reverse_idx_ref,
+                )
+            )
+        candidate = same_topology and self._saddle_crops_match(
+            dfevent_forward, dfevent_backward
+        )
+        return Ok(
+            EventAdmission(
+                frame=self._two_rows(dfevent_forward, dfevent_backward),
+                self_reverse_candidate=candidate,
+            )
+        )
+
+    @staticmethod
+    def _two_rows(
+        dfevent_forward: pd.Series, dfevent_backward: pd.Series
+    ) -> pd.DataFrame:
+        """Stack the forward and backward series into a two-row frame."""
+        return pd.concat(
+            [dfevent_forward.to_frame().T, dfevent_backward.to_frame().T],
+            ignore_index=True,
+        )
+
+    def _saddle_crops_match(
+        self, dfevent_forward: pd.Series, dfevent_backward: pd.Series
+    ) -> bool:
+        """Return True when the two directional saddle crops map onto each other.
+
+        This is the geometric self-reverse check of the base admission code
+        (IRA match of the forward saddle crop against the backward one,
+        accepted through ``psr.matching_score_thr``), applied only when the
+        two barriers lie within :data:`SAME_TOPOLOGY_BARRIER_TOL`. On the
+        base it sat behind an unreachable branch; the htst/rpa gate uses it as
+        the "physical mapping" half of the collapse decision. Species are fed
+        to IRA exactly as :meth:`find_matching_event` does: the local element
+        types in ``full`` colouring mode, a single grey label otherwise, so a
+        species-swapped pair of directional crops is never a candidate in
+        full mode.
+
+        Parameters
+        ----------
+        dfevent_forward : pd.Series
+            Forward event series.
+        dfevent_backward : pd.Series
+            Backward event series.
+
+        Returns
+        -------
+        bool
+            Whether the crops match.
+
+        """
+        gap = abs(
+            float(dfevent_forward["energy_barrier"])
+            - float(dfevent_backward["energy_barrier"])
+        )
+        if gap >= SAME_TOPOLOGY_BARRIER_TOL:
+            return False
+        ref_saddle = np.array(dfevent_forward["saddle_positions"], copy=True)
+        event_saddle = np.array(dfevent_backward["saddle_positions"], copy=True)
+        nat_ref = len(ref_saddle)
+        nat_event = len(event_saddle)
+        full = self.config.atomicenvironment.atom_coloring_mode == "full"
+        typ_ref = (
+            list(dfevent_forward["types"])
+            if full and dfevent_forward["types"] is not None
+            else nat_ref * ["X"]
+        )
+        typ_event = (
+            list(dfevent_backward["types"])
+            if full and dfevent_backward["types"] is not None
+            else nat_event * ["X"]
+        )
+        result = simple_ira(
+            nat_event,
+            typ_event,
+            event_saddle,
+            nat_ref,
+            typ_ref,
+            ref_saddle,
+            self.config.ira.kmax_factor,
+        )
+        if not result.is_ok():
+            return False
+        return check_match(result, self.config.psr.matching_score_thr).is_ok()
 
     def is_new_event(self, dfevent: pd.Series) -> bool:
         """Check if the constructed event Series is already in the table.
@@ -285,17 +503,38 @@ class ReferenceEventTable:
             if the event is in the table.
 
         """
+        return self.find_matching_event(dfevent) is None
+
+    def find_matching_event(self, dfevent: pd.Series) -> int | None:
+        """Return the logical id of the catalogued event matching ``dfevent``.
+
+        Same rules as the base duplicate check: same ``event_id``, barrier
+        within 0.25 eV, and a species-aware (``full`` colouring) or grey IRA
+        match of the saddle crops through ``psr.matching_score_thr``.
+
+        Parameters
+        ----------
+        dfevent : pd.Series
+            The event series to look up.
+
+        Returns
+        -------
+        int or None
+            ``idx_ref`` of the first matching row, ``None`` when the event is
+            new. The id is logical: rows are never addressed by position.
+
+        """
         # Only select rows with same event_id as dfenvent :
         subset = self.table[self.table["event_id"] == dfevent["event_id"]]
         if len(subset) == 0:
-            return True
+            return None
 
         # if same  id, chekc if same dE
         tol = 0.25
         dE = dfevent["energy_barrier"]
         subset = subset[(subset["energy_barrier"] - dE).abs() <= tol]
         if len(subset) == 0:
-            return True
+            return None
 
         # if all same, check PSR  saddle_initial
         event_saddle = dfevent["saddle_positions"]
@@ -338,8 +577,8 @@ class ReferenceEventTable:
             if not result.is_ok():  # matching score > thr
                 continue
 
-            return False
-        return True
+            return int(ev["idx_ref"])
+        return None
 
     def get_valid_events(
         self, results_is_valid_event: list[Result[pd.Series, ErrorInfo]]
@@ -359,20 +598,27 @@ class ReferenceEventTable:
         """
         return [e.ok_value() for e in results_is_valid_event if e.is_ok()]
 
-    def add(self, dfevent: pd.Series) -> None:
-        """Add on event series to the table.
+    def add(self, dfevent: pd.DataFrame, reverse_idx_ref: int | None = None) -> None:
+        """Add one or two event rows to the table and assign their logical ids.
 
         Parameters
         ----------
-        dfevent : pd.Series
-            The event series.
+        dfevent : pd.DataFrame
+            One row (forward only) or two rows (forward, backward). Modified in
+            place: ``idx_ref`` and ``idx_backward`` are assigned.
+        reverse_idx_ref : int or None, optional
+            For a single row, the logical id of its already catalogued reverse
+            event. ``None`` (the default, and always the case in constant
+            mode) self-links the row exactly as the base did.
 
         """
         # Check if only one or two events (if event is its own backard or not)
         ref = self.max_idx_ref()
         if len(dfevent) == 1:
             dfevent["idx_ref"] = ref
-            dfevent["idx_backward"] = ref
+            dfevent["idx_backward"] = (
+                ref if reverse_idx_ref is None else reverse_idx_ref
+            )
         else:
             dfevent.loc[0, "idx_ref"] = ref
             dfevent.loc[0, "idx_backward"] = ref + 1
@@ -380,6 +626,41 @@ class ReferenceEventTable:
             dfevent.loc[1, "idx_backward"] = ref
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
+
+    def finalize_self_reverse(
+        self, forward_idx_ref: int, backward_idx_ref: int, agree: bool
+    ) -> None:
+        """Resolve a self-reverse candidate once its directional prefactors are known.
+
+        Parameters
+        ----------
+        forward_idx_ref : int
+            Logical id of the forward row.
+        backward_idx_ref : int
+            Logical id of the backward row admitted alongside it.
+        agree : bool
+            Result of :func:`self_reverse_prefactors_agree` on the resolved
+            directional prefactors. ``True`` collapses the pair to the single
+            self-linked forward row (constant-mode representation): the
+            backward row is dropped and any row that linked to it as its
+            reverse is re-pointed at the forward row. ``False`` keeps both
+            directional rows with their reciprocal links; the logical ids stay
+            as assigned (the catalogue may therefore be sparse).
+
+        """
+        if not agree:
+            return
+        fwd_mask = self.table["idx_ref"] == forward_idx_ref
+        bwd_mask = self.table["idx_ref"] == backward_idx_ref
+        if not fwd_mask.any() or not bwd_mask.any():
+            raise ValueError(
+                f"self-reverse pair ({forward_idx_ref}, {backward_idx_ref}) is not "
+                "in the reference table"
+            )
+        self.table.loc[fwd_mask, "idx_backward"] = forward_idx_ref
+        relink = self.table["idx_backward"] == backward_idx_ref
+        self.table.loc[relink, "idx_backward"] = forward_idx_ref
+        self.table = self.table[~bwd_mask].reset_index(drop=True)
 
     def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
         """Return subset table with event having id in ids.
@@ -622,10 +903,21 @@ class ReferenceEventTable:
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
 
+        Constant mode: exactly the base rule (the event and the row its
+        ``idx_backward`` names; links are reciprocal or self there).
+
+        htst/rpa mode: links are not always reciprocal (a new forward row may
+        link to an already catalogued reverse), so the removal is closed
+        under reverse links: every surviving row whose ``idx_backward`` names
+        a removed id is removed as well, iterated to a fixed point. This may
+        remove more than the base pair, but never leaves a dangling link
+        (``info_active_events`` and the basin exploration dereference
+        ``idx_backward`` by logical id).
+
         Parameters
         ----------
-        ind : int
-            index of the event to be removed
+        idx_refs : list[int]
+            logical ids of the events to be removed
         """
 
         idx_refs = set(idx_refs)  # make a set if there are doublons
@@ -637,6 +929,20 @@ class ReferenceEventTable:
         )  # find set idx backwards
 
         all_refs = idx_refs | backward_refs  # all ref to remove
+        if self.uses_prefactors:
+            while True:
+                dangling = (
+                    set(
+                        self.table.loc[
+                            self.table["idx_backward"].astype(int).isin(all_refs),
+                            "idx_ref",
+                        ].astype(int)
+                    )
+                    - all_refs
+                )
+                if not dangling:
+                    break
+                all_refs = all_refs | dangling
 
         self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
             drop=True
