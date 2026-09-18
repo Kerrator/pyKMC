@@ -9,6 +9,7 @@ from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
 from .config import Config
+from .rate_constant import create_rate_constant
 
 
 def main() -> None:
@@ -30,6 +31,14 @@ def main() -> None:
         if config.control.group_size == -1
         else config.control.group_size
     )
+    # The HTST engine extension is registered only for the htst/rpa styles
+    # (contracts section 6); its module is LAMMPS/HTST bound and is never
+    # imported on the constant path.
+    engine_extensions = None
+    if create_rate_constant(config.rateconstant).backend.requires_event_prefactors:
+        from pykmc.engine.htst_lammps import LammpsHTSTExtension
+
+        engine_extensions = [LammpsHTSTExtension]
     # KMC
     factory = EngineManagerFactory(
         engine_style=config.control.engine,
@@ -37,11 +46,11 @@ def main() -> None:
         comm=comm,
         engine_config=config.lammps,
         group_size=group_size,
+        engine_extensions=engine_extensions,
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0
-        kmc = KMC(config)
-        kmc.manager = manager
+        kmc = KMC(config, manager=manager)
         try:
             kmc._initialize()
             kmc.run()

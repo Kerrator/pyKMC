@@ -2,9 +2,41 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pykmc import NeighborsList
-from pykmc.event_table import ReferenceEventTable
+from pykmc.config import RateConstantConfig
+from pykmc.event_table import ActiveEventTable, ReferenceEventTable
+
+S0_REFERENCE_COLUMNS = [
+    "idx_ref",
+    "event_id",
+    "initial_positions",
+    "saddle_positions",
+    "final_positions",
+    "types",
+    "energy_barrier",
+    "k",
+    "id_saddle",
+    "id_final",
+    "move_atom_idx",
+    "sym_matrix",
+    "sym_perm",
+    "idx_backward",
+    "dra",
+]
+"""Constant-mode reference schema recorded at S0 (contracts section 7)."""
+
+S0_ACTIVE_COLUMNS = [
+    "atom_index",
+    "saddle_positions",
+    "final_positions",
+    "energy_barrier",
+    "k",
+    "num_reference_event",
+    "refined",
+]
+"""Constant-mode active schema recorded at S0 (contracts section 7)."""
 
 
 def _build_trivial_series(config, system):
@@ -252,3 +284,37 @@ class TestGreyDedupSpeciesGating:
 
         # Sanity control: the byte-identical event IS recognised as a duplicate.
         assert table.is_new_event(fwd) is False
+
+
+class TestSchemaPins:
+    """Serialized schemas: constant mode equals S0; htst/rpa append their columns."""
+
+    def test_constant_schemas_equal_s0(self, config_system_single_type: object) -> None:
+        """The constant tables expose exactly the S0 columns, in order."""
+        config = config_system_single_type
+        assert config.rateconstant.style == "constant"
+        assert list(ReferenceEventTable(config).table.columns) == S0_REFERENCE_COLUMNS
+        assert list(ActiveEventTable(config).table.columns) == S0_ACTIVE_COLUMNS
+
+    @pytest.mark.parametrize("style", ["htst", "rpa"])
+    def test_prefactor_schemas_append_columns(
+        self, style: str, config_system_single_type: object
+    ) -> None:
+        """htst/rpa add four reference columns and six active columns after S0."""
+        config = config_system_single_type.model_copy(
+            update={"rateconstant": RateConstantConfig(style=style, k0=1.0, T=300.0)}
+        )
+        assert list(ReferenceEventTable(config).table.columns) == (
+            S0_REFERENCE_COLUMNS + ["k_prefactor", "nu0", "nu0_status", "nu0_reason"]
+        )
+        assert list(ActiveEventTable(config).table.columns) == (
+            S0_ACTIVE_COLUMNS
+            + [
+                "k_prefactor",
+                "nu0",
+                "nu0_status",
+                "nu0_reason",
+                "nu0_source",
+                "nu0_site_attempted",
+            ]
+        )

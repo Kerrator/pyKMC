@@ -16,7 +16,7 @@ from pykmc import (
 )
 from typing import Optional
 from ..utils import geometry
-from ..rate_constant import compute_rate_Eyring
+from ..rate_constant import create_rate_constant
 import pandas as pd
 import copy
 import numpy as np
@@ -81,6 +81,12 @@ class BasinsGenericEvents:
         self.states: dict[int, StateData] = {}  # Dictionnary of StateDate
         self.known_environments = known_environments
         self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
+        # Rate facade of the run: absorbing transitions are re-rated through it
+        # with the reference row's resolved prefactor (htst/rpa) or k0.
+        self.rate_constant = create_rate_constant(config.rateconstant)
+        self.uses_prefactors = bool(
+            self.rate_constant.backend.requires_event_prefactors
+        )
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -416,8 +422,46 @@ class BasinsGenericEvents:
 
         return Ok(new_system)
 
+    def _absorbing_rate(self, dE: float, idx_ref: int) -> float:
+        """Return the scalar rate (ps^-1) of a refined transient -> absorbing event.
+
+        The refined barrier ``dE`` is combined with the prefactor of the
+        reference event ``idx_ref`` (matched by logical id): the resolved
+        Vineyard estimate when its status is ``ok``, otherwise ``k0``. In the
+        constant style this is exactly ``k0 * exp(-dE / (kb T))`` as before.
+
+        Site-specific (refined-saddle) prefactors are **not** computed inside
+        basins in v1: the absorbing transition keeps the reference prefactor
+        of the generic event that leads to it, updated only through its
+        refined barrier. This is a documented limitation of the HTST + basin
+        combination, not full site support.
+
+        Parameters
+        ----------
+        dE : float
+            Refined energy barrier (eV).
+        idx_ref : int
+            Logical id of the reference event of the transition.
+
+        Returns
+        -------
+        float
+            Scalar rate in ps^-1 (never a ``RateComponents`` object).
+
+        """
+        nu0_hz = None
+        if self.uses_prefactors:
+            nu0_hz = self.reference_table.reference_estimate(int(idx_ref))["nu0_hz"]
+        return float(self.rate_constant.compute_rate(dE, nu0_hz).rate)
+
     def refine_absorbing(self, system):
-        """When connectivity table is build, and that we have dict of states, we refine the energy barrier and k_forward of the transient -> absorbing event"""
+        """Refine the barrier and rate of every transient -> absorbing transition.
+
+        Runs once the connectivity table is built and the states dictionary is
+        complete. The rate is recomputed through :meth:`_absorbing_rate` with the
+        reference event's prefactor at the refined barrier; no site-specific
+        prefactor is computed inside basins in v1.
+        """
         # compute the energy of the state
         # for all row in connectivity table where we need to refine
         futures_context = {}  # idx → { "min": f_min, "saddle": f_sad }
@@ -530,7 +574,9 @@ class BasinsGenericEvents:
                 dE = E_sad
             else:
                 dE = E_sad - E_min
-            k = compute_rate_Eyring(dE, self.config)
+            k = self._absorbing_rate(
+                dE, self.connectivity_table.df.loc[idx].at["event_connexion"]
+            )
 
             # also save saddle positions refined
             idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]

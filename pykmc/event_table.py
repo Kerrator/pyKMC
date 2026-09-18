@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from .rate_constant import compute_rate_Eyring, create_rate_constant
+from .rate_constant import (
+    RateConstant,
+    create_rate_constant,
+    rate_from_prefactor,
+    thz_to_hz,
+)
 from .config import Config
 import numpy as np
 from .environments.graph_nauty import graph
@@ -29,6 +35,75 @@ from .utils.geometry import compute_delr
 if TYPE_CHECKING:
     from .event_recycling import Recycling
     from .htst.result import DirectionalPrefactor
+    from .rate_constant.prefactors import PrefactorService
+
+logger = logging.getLogger("log")
+"""HTST lifecycle diagnostics go to the KMC ``log`` logger (see ``pykmc.log``)."""
+
+TABLE_SCHEMA_VERSION: int = 1
+"""Version of the HTST reference-table metadata persisted next to the pickle."""
+
+REFERENCE_BASE_COLUMNS: tuple[str, ...] = (
+    "idx_ref",
+    "event_id",
+    "initial_positions",
+    "saddle_positions",
+    "final_positions",
+    "types",
+    "energy_barrier",
+    "k",
+    "id_saddle",
+    "id_final",
+    "move_atom_idx",
+    "sym_matrix",
+    "sym_perm",
+    "idx_backward",
+    "dra",
+)
+"""Constant-mode reference schema (S0 baseline, contracts section 7)."""
+
+REFERENCE_HTST_COLUMNS: tuple[str, ...] = (
+    "k_prefactor",
+    "nu0",
+    "nu0_status",
+    "nu0_reason",
+)
+"""Columns appended to the reference schema by the htst/rpa styles."""
+
+ACTIVE_BASE_COLUMNS: tuple[str, ...] = (
+    "atom_index",
+    "saddle_positions",
+    "final_positions",
+    "energy_barrier",
+    "k",
+    "num_reference_event",
+    "refined",
+)
+"""Constant-mode active schema (S0 baseline, contracts section 7)."""
+
+ACTIVE_HTST_COLUMNS: tuple[str, ...] = (
+    "k_prefactor",
+    "nu0",
+    "nu0_status",
+    "nu0_reason",
+    "nu0_source",
+    "nu0_site_attempted",
+)
+"""Columns appended to the active schema by the htst/rpa styles."""
+
+NU0_OK: str = "ok"
+NU0_REJECTED: str = "rejected"
+NU0_PENDING: str = "pending"
+NU0_LEGACY: str = "legacy"
+NU0_STATUSES: tuple[str, ...] = (NU0_OK, NU0_REJECTED, NU0_PENDING, NU0_LEGACY)
+"""``nu0_status`` values: accepted estimate, scientific rejection (``k0``),
+not yet resolved (``k0`` placeholder), loaded without provenance (``k0``)."""
+
+SOURCE_REFERENCE: str = "reference"
+SOURCE_SITE: str = "site"
+SOURCE_K0: str = "k0"
+"""``nu0_source`` values of an active row: inherited reference estimate,
+site-specific estimate at the refined saddle, or the ``k0`` fallback."""
 
 SELF_REVERSE_NU0_RTOL: float = 0.05
 """Relative tolerance under which two directional Vineyard prefactors count as equal.
@@ -110,6 +185,11 @@ class ReferenceEventTable:
     config : Config
         The atomic simulations configuration.
 
+    prefactor_service : PrefactorService, optional
+        Batching service resolving per-event prefactors (htst/rpa). Required
+        as soon as an event is accepted in those styles; never built or used
+        by the constant style.
+
     Attributes
     ----------
     rate_constant : RateConstant
@@ -117,35 +197,57 @@ class ReferenceEventTable:
         whether the catalogue carries per-event prefactors.
     uses_prefactors : bool
         ``True`` for the htst/rpa styles. Selects the directional identity
-        rules of :meth:`_admit_series`; constant-mode admission is unchanged.
+        rules of :meth:`_admit_series` and the HTST columns of the schema;
+        constant-mode admission and schema are unchanged.
+    metadata : dict
+        Table-level HTST metadata read from a loaded pickle (empty when the
+        table was created fresh or loaded from a legacy file).
+
+    Notes
+    -----
+    Lifecycle of a reference prefactor (architecture rule 1): admission and
+    species-aware dedup run first; the full search geometry of every accepted
+    event is kept until its directional logical ids are known; exactly one
+    request per accepted event (both directions) is submitted; rows are
+    patched by logical id; the batch is resolved before :meth:`add_events`
+    returns, so refinement never reads an unresolved reference ``k``.
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self, config: Config, prefactor_service: PrefactorService | None = None
+    ) -> None:
         self.config = config
         self.rate_constant = create_rate_constant(config.rateconstant)
         self.uses_prefactors: bool = bool(
             self.rate_constant.backend.requires_event_prefactors
         )
+        self.prefactor_service = prefactor_service
+        self.metadata: dict[str, Any] = {}
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput]
-    ) -> Result[pd.DataFrame, ErrorInfo]:
-        """Events events to the table dataframe.
+        self, events: list[EventSearchOutput], pbc: Any = None
+    ) -> list[Result[pd.DataFrame, ErrorInfo]]:
+        """Admit events into the table and, for htst/rpa, resolve their prefactors.
 
         Parameters
         ----------
         events : list[EventSearchOutput]
             list of EventSearchOutput dataclass with events to be added to the table dataframe.
+        pbc : array_like of bool, optional
+            Actual periodicity of the system, required by the htst/rpa styles
+            to build the prefactor requests; ignored by the constant style.
 
         Returns
         -------
-        Result[pd.DataFrame, ErrorInfo]
-            The results of the operation.
+        list[Result[pd.DataFrame, ErrorInfo]]
+            One result per event: the admitted rows (as returned by admission,
+            before prefactor resolution) or the rejection.
 
         """
         results_is_valid_events = []
+        accepted: list[tuple[int, int | None, bool, EventSearchOutput]] = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self._admit(
@@ -162,16 +264,213 @@ class ReferenceEventTable:
                 admission = res.ok_value()
                 self.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
                 results_is_valid_events.append(Ok(admission.frame))
+                if self.uses_prefactors:
+                    frame = admission.frame
+                    fwd_id = int(frame.iloc[0]["idx_ref"])
+                    bwd_id = int(frame.iloc[1]["idx_ref"]) if len(frame) > 1 else None
+                    accepted.append(
+                        (fwd_id, bwd_id, admission.self_reverse_candidate, ev)
+                    )
             else:
                 results_is_valid_events.append(res)
-        # df_valid_events = self.get_valid_events(results_is_valid_events)
 
-        # Check if events in results are not the same :
-
-        # for df in df_valid_events:
-        #    self.add(df)
+        if self.uses_prefactors and accepted:
+            self._resolve_prefactors(accepted, pbc)
 
         return results_is_valid_events
+
+    def _resolve_prefactors(
+        self,
+        accepted: list[tuple[int, int | None, bool, EventSearchOutput]],
+        pbc: Any,
+    ) -> None:
+        """Submit one request per accepted event and patch the directional rows.
+
+        Parameters
+        ----------
+        accepted : list of (forward id, backward id or None, candidate, event)
+            Logical ids assigned by :meth:`add`, the self-reverse flag of the
+            admission and the full search geometry.
+        pbc : array_like of bool
+            Actual periodicity of the system.
+
+        Raises
+        ------
+        RuntimeError
+            If no prefactor service is attached, if ``pbc`` is missing or if a
+            search result carries no ``types`` (the request cannot be built).
+
+        """
+        if self.prefactor_service is None:
+            raise RuntimeError(
+                f"rateconstant style {self.config.rateconstant.style!r} needs a "
+                "PrefactorService on the reference table to resolve the prefactors "
+                "of accepted events; none was attached"
+            )
+        if pbc is None:
+            raise RuntimeError(
+                "add_events needs the system pbc to build HTST requests in "
+                f"style {self.config.rateconstant.style!r}"
+            )
+        requests = []
+        for fwd_id, bwd_id, _candidate, ev in accepted:
+            if ev.types is None:
+                raise RuntimeError(
+                    "EventSearchOutput.types is required to build the HTST request "
+                    f"of reference event {fwd_id}"
+                )
+            requests.append(
+                self.prefactor_service.build_request(
+                    event_key=(fwd_id, bwd_id),
+                    min1_positions=ev.min1_positions,
+                    saddle_positions=ev.saddle_positions,
+                    min2_positions=ev.min2_positions,
+                    types=ev.types,
+                    cell=ev.cell,
+                    pbc=pbc,
+                    center_index=ev.move_atom_index,
+                )
+            )
+        results = self.prefactor_service.compute(requests)
+        for fwd_id, bwd_id, candidate, _ev in accepted:
+            pre = results[(fwd_id, bwd_id)]
+            self._patch_row(fwd_id, pre.forward)
+            self._log_direction(fwd_id, "forward", pre.forward)
+            if bwd_id is not None:
+                self._patch_row(bwd_id, pre.backward)
+                self._log_direction(bwd_id, "backward", pre.backward)
+            else:
+                # The reverse is already catalogued; its own estimate stands.
+                logger.info(
+                    "[htst] reference event %d: reverse already catalogued as "
+                    "event %d, backward estimate of this search discarded",
+                    fwd_id,
+                    int(
+                        self.table.loc[
+                            self.table["idx_ref"] == fwd_id, "idx_backward"
+                        ].iloc[0]
+                    ),
+                )
+            if candidate:
+                agree = self_reverse_prefactors_agree(pre.forward, pre.backward)
+                self.finalize_self_reverse(fwd_id, bwd_id, agree)
+                logger.info(
+                    "[htst] reference events (%d, %d): equal endpoint topologies; %s",
+                    fwd_id,
+                    bwd_id,
+                    "prefactors agree, collapsed to one self-linked row"
+                    if agree
+                    else "prefactors differ, two directional rows kept",
+                )
+
+    @staticmethod
+    def _log_direction(
+        idx_ref: int, direction: str, estimate: DirectionalPrefactor
+    ) -> None:
+        """Log the outcome of one directional reference estimate."""
+        if estimate.ok:
+            logger.info(
+                "[htst] reference event %d (%s): nu0 = %.4e Hz",
+                idx_ref,
+                direction,
+                estimate.nu0_hz,
+            )
+        else:
+            logger.info(
+                "[htst] reference event %d (%s): prefactor rejected (%s: %s), "
+                "falling back to k0",
+                idx_ref,
+                direction,
+                estimate.reason_code.value,
+                estimate.reason,
+            )
+
+    def _patch_row(self, idx_ref: int, estimate: DirectionalPrefactor) -> None:
+        """Write one directional estimate on the row with logical id ``idx_ref``.
+
+        ``k``, ``k_prefactor``, ``nu0``, ``nu0_status`` and ``nu0_reason`` are
+        always updated together: an accepted estimate stores its Hz value and
+        the prefactor resolved through the backend (ps^-1); a rejected one
+        stores ``NaN``, ``k0`` and the reason.
+
+        Parameters
+        ----------
+        idx_ref : int
+            Logical id of the row (never a positional index).
+        estimate : DirectionalPrefactor
+            The direction's resolved estimate.
+
+        Raises
+        ------
+        ValueError
+            If no row carries ``idx_ref``.
+
+        """
+        mask = self.table["idx_ref"] == idx_ref
+        if not mask.any():
+            raise ValueError(f"idx_ref {idx_ref} is not in the reference table")
+        dE = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+        nu0_hz = float(estimate.nu0_hz) if estimate.ok else None
+        rc = self.rate_constant.compute_rate(dE, nu0_hz)
+        self.table.loc[mask, "k"] = rc.rate
+        self.table.loc[mask, "k_prefactor"] = rc.prefactor
+        self.table.loc[mask, "nu0"] = nu0_hz if nu0_hz is not None else float("nan")
+        self.table.loc[mask, "nu0_status"] = NU0_OK if estimate.ok else NU0_REJECTED
+        self.table.loc[mask, "nu0_reason"] = (
+            "" if estimate.ok else f"{estimate.reason_code.value}: {estimate.reason}"
+        )
+
+    def prefactor_summary(self) -> dict[str, int]:
+        """Count the reference rows per ``nu0_status`` (empty in constant mode).
+
+        Returns
+        -------
+        dict[str, int]
+            ``{status: count}`` for every status in :data:`NU0_STATUSES`.
+
+        """
+        if not self.uses_prefactors or "nu0_status" not in self.table.columns:
+            return {}
+        counts = self.table["nu0_status"].value_counts()
+        return {status: int(counts.get(status, 0)) for status in NU0_STATUSES}
+
+    def reference_estimate(self, idx_ref: int) -> dict[str, Any]:
+        """Return the stored estimate of the reference row ``idx_ref``.
+
+        Parameters
+        ----------
+        idx_ref : int
+            Logical id of the row.
+
+        Returns
+        -------
+        dict[str, Any]
+            Empty in constant mode; otherwise ``{"nu0_hz", "nu0_status",
+            "nu0_reason", "nu0_source"}`` with ``nu0_hz`` a float only when
+            the status is ``ok`` (``None`` otherwise) and ``nu0_source`` set to
+            ``reference``, ready to seed an ``EventRefinementOutput``.
+
+        Raises
+        ------
+        ValueError
+            If no row carries ``idx_ref``.
+
+        """
+        if not self.uses_prefactors:
+            return {}
+        rows = self.table[self.table["idx_ref"] == idx_ref]
+        if rows.empty:
+            raise ValueError(f"idx_ref {idx_ref} is not in the reference table")
+        row = rows.iloc[0]
+        status = str(row["nu0_status"])
+        nu0 = row["nu0"]
+        nu0_hz = float(nu0) if status == NU0_OK else None
+        return {
+            "nu0_hz": nu0_hz,
+            "nu0_status": status,
+            "nu0_reason": str(row["nu0_reason"]) if status != NU0_OK else "",
+            "nu0_source": SOURCE_REFERENCE,
+        }
 
     def _admit(
         self,
@@ -817,6 +1116,9 @@ class ReferenceEventTable:
             - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
         )
 
+        # Rates are built without a per-event estimate: the constant backend
+        # returns k0 and the htst/rpa backends resolve to their k0 placeholder;
+        # _resolve_prefactors patches the accepted rows afterwards.
         dfevent_forward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
@@ -826,7 +1128,7 @@ class ReferenceEventTable:
                 "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
-                "k": compute_rate_Eyring(dE_forward, self.config),
+                "k": self.rate_constant.compute_rate(dE_forward).rate,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -852,7 +1154,7 @@ class ReferenceEventTable:
                 "final_positions": min1_positions[neighbor_list_backward],
                 "types": local_types_backward,
                 "energy_barrier": dE_backward,
-                "k": compute_rate_Eyring(dE_backward, self.config),
+                "k": self.rate_constant.compute_rate(dE_backward).rate,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -862,6 +1164,12 @@ class ReferenceEventTable:
                 "dra": dra_backward,
             }
         )
+        if self.uses_prefactors:
+            for series in (dfevent_forward, dfevent_backward):
+                series["k_prefactor"] = self.config.rateconstant.k0
+                series["nu0"] = float("nan")
+                series["nu0_status"] = NU0_PENDING
+                series["nu0_reason"] = ""
 
         return dfevent_forward, dfevent_backward
 
@@ -878,27 +1186,238 @@ class ReferenceEventTable:
         If a path to a reference table is in the configurations it reads it, otherwise initialize an empty dataframe.
         """
         if self.config.control.reference_table is not None:
-            self.table = pd.read_pickle(self.config.control.reference_table)
+            self._load(self.config.control.reference_table)
         else:
-            self.table = pd.DataFrame(
-                {
-                    "idx_ref": pd.Series(dtype="int64"),
-                    "event_id": pd.Series(dtype="str"),
-                    "initial_positions": pd.Series(dtype="object"),
-                    "saddle_positions": pd.Series(dtype="object"),
-                    "final_positions": pd.Series(dtype="object"),
-                    "types": pd.Series(dtype="object"),
-                    "energy_barrier": pd.Series(dtype="float64"),
-                    "k": pd.Series(dtype="float64"),
-                    "id_saddle": pd.Series(dtype="str"),
-                    "id_final": pd.Series(dtype="str"),
-                    "move_atom_idx": pd.Series(dtype="int64"),
-                    "sym_matrix": pd.Series(dtype="object"),
-                    "sym_perm": pd.Series(dtype="object"),
-                    "idx_backward": pd.Series(dtype="int64"),
-                    "dra": pd.Series(dtype="float64"),
-                }
+            columns = {
+                "idx_ref": pd.Series(dtype="int64"),
+                "event_id": pd.Series(dtype="str"),
+                "initial_positions": pd.Series(dtype="object"),
+                "saddle_positions": pd.Series(dtype="object"),
+                "final_positions": pd.Series(dtype="object"),
+                "types": pd.Series(dtype="object"),
+                "energy_barrier": pd.Series(dtype="float64"),
+                "k": pd.Series(dtype="float64"),
+                "id_saddle": pd.Series(dtype="str"),
+                "id_final": pd.Series(dtype="str"),
+                "move_atom_idx": pd.Series(dtype="int64"),
+                "sym_matrix": pd.Series(dtype="object"),
+                "sym_perm": pd.Series(dtype="object"),
+                "idx_backward": pd.Series(dtype="int64"),
+                "dra": pd.Series(dtype="float64"),
+            }
+            if self.uses_prefactors:
+                columns["k_prefactor"] = pd.Series(dtype="float64")
+                columns["nu0"] = pd.Series(dtype="float64")
+                columns["nu0_status"] = pd.Series(dtype="str")
+                columns["nu0_reason"] = pd.Series(dtype="str")
+            self.table = pd.DataFrame(columns)
+
+    def _load(self, path: str) -> None:
+        """Load a pickled reference table deliberately, per style and provenance.
+
+        Constant style: a constant-mode pickle is loaded exactly as the base
+        did (no new columns, no metadata, rates untouched). A pickle carrying
+        any HTST column (the complete set or a partial one such as the
+        donor-era ``k_prefactor`` + ``nu0`` pair) or metadata is stripped of
+        them and its rates are recomputed with ``k0`` at the current
+        temperature, with a warning: constant runs never reuse per-event
+        prefactors.
+
+        htst/rpa style: a table without the HTST columns, or with them but
+        without table-level metadata (Hz ``nu0`` of unknown provenance), is a
+        legacy table: every row gets ``nu0_status = "legacy"``, ``k_prefactor
+        = k0`` and ``k`` recomputed from ``energy_barrier`` at the current
+        temperature, and one warning is logged. A table with metadata is
+        validated (schema version and units) and its rates are recomputed
+        from the stored ``nu0`` (accepted rows, through the rate backend,
+        which must reproduce the stored ``k_prefactor``) or the current
+        ``k0`` (every other status) and ``energy_barrier`` at the current
+        temperature, so a temperature change on reload is never silently
+        ignored and a row whose ``k_prefactor`` disagrees with its ``nu0`` is
+        refused.
+
+        Parameters
+        ----------
+        path : str
+            Pickle file written by :meth:`save`.
+
+        Raises
+        ------
+        ValueError
+            If the metadata declares an unsupported schema version or units,
+            or if an accepted row's ``k_prefactor`` is not the resolution of
+            its ``nu0`` (or its status is outside the vocabulary).
+
+        """
+        df = pd.read_pickle(path)
+        metadata = dict(df.attrs) if df.attrs else {}
+        df.attrs = {}
+        present_htst = [c for c in REFERENCE_HTST_COLUMNS if c in df.columns]
+        has_htst_columns = len(present_htst) == len(REFERENCE_HTST_COLUMNS)
+        k0 = self.config.rateconstant.k0
+        T = self.config.rateconstant.T
+
+        if not self.uses_prefactors:
+            # Any HTST provenance is dropped: the complete S6 column set, a
+            # partial one (the donor-era ``k_prefactor`` + ``nu0`` pair) or
+            # table metadata. A constant run never reuses per-event
+            # prefactors, whatever subset of them a pickle carries.
+            if present_htst or metadata:
+                logger.warning(
+                    "Reference table %s carries HTST prefactor data (columns: %s%s) "
+                    "but the run uses the constant style: dropping the HTST "
+                    "columns and recomputing every rate with k0 = %g ps^-1 at "
+                    "T = %g K",
+                    path,
+                    ", ".join(present_htst) if present_htst else "none",
+                    "; table metadata" if metadata else "",
+                    k0,
+                    T,
+                )
+                df = df.drop(columns=present_htst)
+                df["k"] = [
+                    rate_from_prefactor(k0, float(dE), T) for dE in df["energy_barrier"]
+                ]
+            self.table = df
+            return
+
+        if not has_htst_columns or not metadata:
+            if has_htst_columns:
+                why = "no HTST metadata"
+            elif present_htst:
+                why = "incomplete HTST columns (" + ", ".join(present_htst) + ")"
+            else:
+                why = "no HTST columns"
+            logger.warning(
+                "Reference table %s is a legacy table (%s): every event gets "
+                "nu0_status = 'legacy', k_prefactor = k0 = %g ps^-1 and k "
+                "recomputed from its barrier at T = %g K; no prefactor of this "
+                "table is an HTST estimate",
+                path,
+                why,
+                k0,
+                T,
             )
+            df["k_prefactor"] = float(k0)
+            if "nu0" not in df.columns:
+                df["nu0"] = float("nan")
+            df["nu0_status"] = NU0_LEGACY
+            df["nu0_reason"] = f"legacy table: {why}"
+            df["k"] = [
+                rate_from_prefactor(k0, float(dE), T) for dE in df["energy_barrier"]
+            ]
+            # Canonical layout: the HTST columns follow the others in schema order.
+            other = [c for c in df.columns if c not in REFERENCE_HTST_COLUMNS]
+            self.table = df[other + list(REFERENCE_HTST_COLUMNS)]
+            return
+
+        version = metadata.get("schema_version")
+        if version != TABLE_SCHEMA_VERSION:
+            raise ValueError(
+                f"reference table {path} has schema_version {version!r}; this "
+                f"code reads version {TABLE_SCHEMA_VERSION}"
+            )
+        if metadata.get("nu0_units") != "Hz" or (
+            metadata.get("k_prefactor_units") != "ps^-1"
+        ):
+            raise ValueError(
+                f"reference table {path} declares nu0_units="
+                f"{metadata.get('nu0_units')!r} and k_prefactor_units="
+                f"{metadata.get('k_prefactor_units')!r}; expected 'Hz' and 'ps^-1' "
+                "(units are never inferred from magnitudes)"
+            )
+        if metadata.get("T") != T:
+            logger.info(
+                "Reference table %s was saved at T = %s K; rates recomputed at "
+                "T = %g K from the stored prefactors",
+                path,
+                metadata.get("T"),
+                T,
+            )
+        if metadata.get("k0") != k0:
+            logger.info(
+                "Reference table %s was saved with k0 = %s ps^-1; fallback rows "
+                "re-based on k0 = %g ps^-1",
+                path,
+                metadata.get("k0"),
+                k0,
+            )
+        labels = df["idx_ref"] if "idx_ref" in df.columns else df.index
+        prefactors = []
+        rates = []
+        for label, status, k_prefactor, nu0, dE in zip(
+            labels,
+            df["nu0_status"],
+            df["k_prefactor"],
+            df["nu0"],
+            df["energy_barrier"],
+            strict=True,
+        ):
+            if status not in NU0_STATUSES:
+                raise ValueError(
+                    f"reference table {path}: event {label} has nu0_status "
+                    f"{status!r}; expected one of {NU0_STATUSES}"
+                )
+            if status == NU0_OK:
+                nu0 = float(nu0)
+                if not math.isfinite(nu0) or nu0 <= 0.0:
+                    raise ValueError(
+                        f"reference table {path}: event {label} has nu0_status "
+                        f"'ok' but nu0 = {nu0!r} Hz; an accepted estimate must be "
+                        "a finite positive frequency"
+                    )
+                # Single conversion point: the stored prefactor must be the
+                # backend's own resolution of the stored frequency, otherwise
+                # k, k_prefactor and nu0 would disagree on the loaded row.
+                rc = self.rate_constant.compute_rate(float(dE), nu0)
+                if not math.isclose(
+                    rc.prefactor, float(k_prefactor), rel_tol=1e-9, abs_tol=0.0
+                ):
+                    raise ValueError(
+                        f"reference table {path}: event {label} stores k_prefactor "
+                        f"= {float(k_prefactor)!r} ps^-1 but its nu0 = {nu0!r} Hz "
+                        f"resolves to {rc.prefactor!r} ps^-1; k, k_prefactor and "
+                        "nu0 must agree (the table was edited or corrupted)"
+                    )
+            else:
+                rc = self.rate_constant.compute_rate(float(dE))  # k0 fallback
+            prefactors.append(rc.prefactor)
+            rates.append(rc.rate)
+        df["k_prefactor"] = prefactors
+        df["k"] = rates
+        self.metadata = metadata
+        self.table = df
+
+    def table_metadata(self) -> dict[str, Any]:
+        """Return the table-level HTST metadata persisted with the pickle.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``schema_version``, ``style``, ``nu0_units`` (Hz),
+            ``k_prefactor_units`` (ps^-1), ``T`` (K), ``k0`` (ps^-1) and the
+            kernel ``settings`` (radii and step in Angstrom, window in Hz).
+
+        """
+        rc = self.config.rateconstant
+        return {
+            "schema_version": TABLE_SCHEMA_VERSION,
+            "style": rc.style,
+            "nu0_units": "Hz",
+            "k_prefactor_units": "ps^-1",
+            "T": float(rc.T),
+            "k0": float(rc.k0),
+            "settings": {
+                "free_radius": float(rc.free_radius),
+                "fd_step": float(rc.fd_step),
+                "zone_radius": None
+                if rc.zone_radius is None
+                else float(rc.zone_radius),
+                "premin": bool(rc.premin),
+                "nu0_min_hz": thz_to_hz(rc.nu0_min_THz),
+                "nu0_max_hz": thz_to_hz(rc.nu0_max_THz),
+            },
+        }
 
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
@@ -951,12 +1470,21 @@ class ReferenceEventTable:
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
 
+        In the htst/rpa styles the table-level metadata of
+        :meth:`table_metadata` travels inside the pickle as
+        ``DataFrame.attrs`` (pandas persists ``attrs`` through
+        ``to_pickle``/``read_pickle``; ``concat`` drops them, which is why they
+        are re-attached here at every save). Constant-mode pickles carry no
+        attrs and are byte-identical to the base.
+
         Parameters
         ----------
         outfile : str, optional
             path to the output file, by default 'reference_table.pickle'.
 
         """
+        if self.uses_prefactors:
+            self.table.attrs = self.table_metadata()
         self.table.to_pickle(outfile)
 
 
@@ -969,6 +1497,28 @@ class ActiveEventTable:
         The atomic simulations configuration.
     event_dataframe : pd.DataFrame, optional
         An table with active event use to initialize the table. by default 'None'.
+        In the htst/rpa styles it must carry :data:`ACTIVE_HTST_COLUMNS`;
+        the first htst-only operation (:meth:`add_events`,
+        :meth:`request_site_prefactors`) refuses a frame that lacks any of
+        them with a ``ValueError`` naming the missing columns.
+    recycler : Recycling, optional
+        Recycling plugin deciding which rows survive between steps.
+    prefactor_service : PrefactorService, optional
+        Batching service for the site-specific estimates (htst/rpa only).
+
+    Notes
+    -----
+    Lifecycle of an active prefactor (architecture rules 2-4): a row is built
+    from the estimate inherited through ``EventRefinementOutput`` (source
+    ``reference`` when the reference estimate is accepted, else ``k0``) with
+    ``k`` recomputed at the refined barrier. After duplicates are removed,
+    :meth:`request_site_prefactors` submits one request per newly accepted
+    ``refined == "T"`` row; success overrides the estimate (source ``site``),
+    a scientific rejection keeps the row as it is (a valid inherited
+    reference estimate, else ``k0``). ``nu0_site_attempted`` records the
+    attempt, not its success, so a recycled row is never re-attempted. A
+    row's geometry is never rebuilt in place: a changed geometry is a new row
+    built by :meth:`add_events` from its reference estimate.
 
     """
 
@@ -977,12 +1527,18 @@ class ActiveEventTable:
         config: Config,
         event_dataframe: pd.DataFrame = None,
         recycler: "Recycling | None" = None,
+        prefactor_service: PrefactorService | None = None,
     ):
         self.config = config
         # Optional recycling plugin. If attached, `prune_for_recycling` keeps
         # the rows the recycler selects between KMC steps. If None, the table
         # is cleared at the end of each step (matching prior behavior).
         self.recycler = recycler
+        # The rate facade is built on first use so that a table wrapped around
+        # an existing DataFrame (recycling tests, tooling) never touches the
+        # rate configuration, exactly as before.
+        self._rate_constant: RateConstant | None = None
+        self.prefactor_service = prefactor_service
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -998,7 +1554,49 @@ class ActiveEventTable:
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
             }
+            if self.uses_prefactors:
+                columns["k_prefactor"] = pd.Series(dtype="float64")
+                columns["nu0"] = pd.Series(dtype="float64")
+                columns["nu0_status"] = pd.Series(dtype="str")
+                columns["nu0_reason"] = pd.Series(dtype="str")
+                columns["nu0_source"] = pd.Series(dtype="str")
+                columns["nu0_site_attempted"] = pd.Series(dtype="bool")
             self.table = pd.DataFrame(columns)
+
+    @property
+    def rate_constant(self) -> RateConstant:
+        """Return the rate facade of ``config.rateconstant`` (built on first use)."""
+        if self._rate_constant is None:
+            self._rate_constant = create_rate_constant(self.config.rateconstant)
+        return self._rate_constant
+
+    @property
+    def uses_prefactors(self) -> bool:
+        """Return True when the rate backend needs per-event prefactors (htst/rpa)."""
+        return bool(self.rate_constant.backend.requires_event_prefactors)
+
+    def _require_htst_columns(self, operation: str) -> None:
+        """Refuse an htst/rpa table whose frame lacks the HTST columns.
+
+        Parameters
+        ----------
+        operation : str
+            Name of the operation about to run, for the error message.
+
+        Raises
+        ------
+        ValueError
+            Naming the missing :data:`ACTIVE_HTST_COLUMNS`.
+
+        """
+        missing = [c for c in ACTIVE_HTST_COLUMNS if c not in self.table.columns]
+        if missing:
+            raise ValueError(
+                f"{operation}: the active table of style "
+                f"{self.config.rateconstant.style!r} lacks the HTST columns "
+                f"{missing}; a caller-supplied event_dataframe must carry "
+                f"{list(ACTIVE_HTST_COLUMNS)}"
+            )
 
     def prune_for_recycling(
         self,
@@ -1062,6 +1660,8 @@ class ActiveEventTable:
             raise TypeError(
                 "Input 'events' must be an EventRefinementOutput dataclass or a list of it."
             )
+        if self.uses_prefactors:
+            self._require_htst_columns("add_events")
         self.add(dfactive)
 
     def add(self, dfevents: pd.Series | list[pd.Series]) -> None:
@@ -1108,20 +1708,235 @@ class ActiveEventTable:
 
         """
 
+        dE = event_refinement_output.dE_forward
+        if self.uses_prefactors:
+            status, nu0_hz, reason, source = self._inherited_estimate(
+                event_refinement_output
+            )
+            rc = self.rate_constant.compute_rate(dE, nu0_hz)
+        else:
+            rc = self.rate_constant.compute_rate(dE)
         dfactive = pd.Series(
             {
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
-                "energy_barrier": event_refinement_output.dE_forward,
-                "k": compute_rate_Eyring(
-                    event_refinement_output.dE_forward, self.config
-                ),
+                "energy_barrier": dE,
+                "k": rc.rate,
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined,
             }
         )
+        if self.uses_prefactors:
+            dfactive["k_prefactor"] = rc.prefactor
+            dfactive["nu0"] = nu0_hz if nu0_hz is not None else float("nan")
+            dfactive["nu0_status"] = status
+            dfactive["nu0_reason"] = reason
+            dfactive["nu0_source"] = source
+            dfactive["nu0_site_attempted"] = False
         return dfactive
+
+    @staticmethod
+    def _inherited_estimate(
+        event_refinement_output: EventRefinementOutput,
+    ) -> tuple[str, float | None, str, str]:
+        """Normalise the estimate a refinement output inherited from its reference.
+
+        Parameters
+        ----------
+        event_refinement_output : EventRefinementOutput
+            Refinement output carrying ``nu0_hz``/``nu0_status``/``nu0_reason``.
+
+        Returns
+        -------
+        tuple[str, float | None, str, str]
+            ``(nu0_status, nu0_hz, nu0_reason, nu0_source)``: an accepted
+            reference estimate is inherited as is (source ``reference``); any
+            other status, or no information at all, resolves to ``k0``
+            (source ``k0``) while keeping the status and reason.
+
+        Raises
+        ------
+        ValueError
+            If the status is ``ok`` without a finite positive ``nu0_hz``.
+
+        """
+        status = event_refinement_output.nu0_status
+        if status == NU0_OK:
+            nu0 = event_refinement_output.nu0_hz
+            if nu0 is None or not math.isfinite(nu0) or nu0 <= 0.0:
+                raise ValueError(
+                    "EventRefinementOutput has nu0_status 'ok' but nu0_hz "
+                    f"{nu0!r}; an accepted estimate must be a finite positive Hz"
+                )
+            return NU0_OK, float(nu0), "", SOURCE_REFERENCE
+        if status is None:
+            return NU0_REJECTED, None, "no reference estimate", SOURCE_K0
+        if status not in NU0_STATUSES:
+            raise ValueError(f"unknown nu0_status {status!r}")
+        return status, None, event_refinement_output.nu0_reason or "", SOURCE_K0
+
+    def request_site_prefactors(
+        self, system: System, neighbors_list: NeighborsList
+    ) -> dict[str, int]:
+        """Request one site-specific estimate per newly accepted refined row.
+
+        Call after :meth:`remove_duplicates`, so duplicates never cost a
+        Hessian. Only ``refined == "T"`` rows that have not been attempted
+        participate; ``"F"``/``"B"`` rows and recycled rows keep their values.
+
+        Ordering invariant: a refined row stores its saddle and final
+        positions cropped by ``neighbors_list.get_neighbors("rcut",
+        atom_index)`` evaluated on the neighbour list refinement ran with,
+        in that list's order (``Refinement.refine_single`` crops with
+        ``ctx["neighbors"]`` and ``KMC._reconstruction_active_event`` reads
+        them back through the same call). The caller must therefore pass that
+        same neighbour list; the full geometries are rebuilt by writing the
+        crops into a copy of the current minimum at those indices, and the
+        crop length is checked against the mapping before any request.
+
+        Crop approximation: only the atoms inside the ``rcut`` crop carry
+        refined saddle/final positions; every other atom sits at its current
+        minimum position in the rebuilt geometries. Free atoms of the Hessian
+        beyond ``rcut`` (``rateconstant.free_radius > atomicenvironment.rcut``)
+        are therefore evaluated off their stationary point, which biases the
+        site spectra towards ``saddle_not_first_order``/``unstable_minimum``
+        rejections (and the reference/``k0`` fallback). ``Initializer``
+        warns once about that configuration.
+
+        Parameters
+        ----------
+        system : System
+            Current system; its positions are the initial minimum of every
+            active event.
+        neighbors_list : NeighborsList
+            The neighbour list refinement cropped with.
+
+        Returns
+        -------
+        dict[str, int]
+            ``{"attempted", "ok", "rejected"}`` counts for this call (all zero
+            in constant mode or when nothing was eligible).
+
+        Raises
+        ------
+        RuntimeError
+            If a row is eligible but no prefactor service is attached, or if
+            a row's crop does not match the current neighbour mapping.
+        ValueError
+            If the table (a caller-supplied frame) lacks the HTST columns.
+
+        """
+        summary = {"attempted": 0, "ok": 0, "rejected": 0}
+        if not self.uses_prefactors or len(self.table) == 0:
+            return summary
+        self._require_htst_columns("request_site_prefactors")
+        eligible = (self.table["refined"] == "T") & ~self.table[
+            "nu0_site_attempted"
+        ].astype(bool)
+        rows = self.table[eligible]
+        if rows.empty:
+            return summary
+        if self.prefactor_service is None:
+            raise RuntimeError(
+                f"rateconstant style {self.config.rateconstant.style!r} needs a "
+                "PrefactorService on the active table to request site estimates; "
+                "none was attached"
+            )
+        positions = np.asarray(system.positions, dtype=float)
+        requests = []
+        keys: list[tuple[Any, tuple]] = []
+        for idx, row in rows.iterrows():
+            atom = int(row["atom_index"])
+            neighbors = np.asarray(
+                neighbors_list.get_neighbors("rcut", atom), dtype=int
+            )
+            saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
+            final_crop = np.asarray(row["final_positions"], dtype=float)
+            if (
+                saddle_crop.shape != (len(neighbors), 3)
+                or final_crop.shape != (len(neighbors), 3)
+                or atom not in neighbors
+            ):
+                raise RuntimeError(
+                    f"active row {idx} (atom {atom}): stored crops of shape "
+                    f"{saddle_crop.shape}/{final_crop.shape} do not match the "
+                    f"current rcut mapping of {len(neighbors)} neighbours; the "
+                    "site request must use the neighbour list refinement cropped with"
+                )
+            full_saddle = positions.copy()
+            full_saddle[neighbors] = saddle_crop
+            full_min2 = positions.copy()
+            full_min2[neighbors] = final_crop
+            key = ("site", int(idx), atom, int(row["num_reference_event"]))
+            requests.append(
+                self.prefactor_service.build_request(
+                    event_key=key,
+                    min1_positions=positions,
+                    saddle_positions=full_saddle,
+                    min2_positions=full_min2,
+                    types=system.types,
+                    cell=system.cell,
+                    pbc=system.pbc,
+                    center_index=atom,
+                )
+            )
+            keys.append((idx, key))
+        results = self.prefactor_service.compute(requests)
+        for idx, key in keys:
+            estimate = results[key].forward
+            self.table.loc[idx, "nu0_site_attempted"] = True
+            summary["attempted"] += 1
+            atom = int(self.table.loc[idx, "atom_index"])
+            ref = int(self.table.loc[idx, "num_reference_event"])
+            if estimate.ok:
+                dE = float(self.table.loc[idx, "energy_barrier"])
+                rc = self.rate_constant.compute_rate(dE, float(estimate.nu0_hz))
+                self.table.loc[idx, "k"] = rc.rate
+                self.table.loc[idx, "k_prefactor"] = rc.prefactor
+                self.table.loc[idx, "nu0"] = float(estimate.nu0_hz)
+                self.table.loc[idx, "nu0_status"] = NU0_OK
+                self.table.loc[idx, "nu0_reason"] = ""
+                self.table.loc[idx, "nu0_source"] = SOURCE_SITE
+                summary["ok"] += 1
+                logger.info(
+                    "[htst] active event (atom %d, reference %d): site nu0 = %.4e Hz",
+                    atom,
+                    ref,
+                    estimate.nu0_hz,
+                )
+            else:
+                summary["rejected"] += 1
+                logger.info(
+                    "[htst] active event (atom %d, reference %d): site prefactor "
+                    "rejected (%s: %s); keeping the %s estimate",
+                    atom,
+                    ref,
+                    estimate.reason_code.value,
+                    estimate.reason,
+                    self.table.loc[idx, "nu0_source"],
+                )
+        return summary
+
+    def prefactor_summary(self) -> dict[str, int]:
+        """Count the active rows per ``nu0_source`` and the attempted ones.
+
+        Returns
+        -------
+        dict[str, int]
+            ``{"reference", "site", "k0", "site_attempted"}``; empty in
+            constant mode.
+
+        """
+        if not self.uses_prefactors or "nu0_source" not in self.table.columns:
+            return {}
+        counts = self.table["nu0_source"].value_counts()
+        return {
+            SOURCE_REFERENCE: int(counts.get(SOURCE_REFERENCE, 0)),
+            SOURCE_SITE: int(counts.get(SOURCE_SITE, 0)),
+            SOURCE_K0: int(counts.get(SOURCE_K0, 0)),
+            "site_attempted": int(self.table["nu0_site_attempted"].astype(bool).sum()),
+        }
 
     def remove(self, ind: int | list[int]) -> None:
         """Remove event at row = ind

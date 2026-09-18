@@ -74,6 +74,9 @@ class Refinement:
         """
         existing_pairs = existing_pairs or set()
         self.results = []
+        # htst/rpa reference tables carry the resolved prefactor columns; the
+        # inherited estimate travels with each refinement through its context.
+        self._carry_prefactors = "nu0_status" in df_reference_events.columns
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(
             df_reference_events
@@ -120,6 +123,11 @@ class Refinement:
             if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
+                estimate = ctx["estimate"]
+                res.ok_value().nu0_hz = estimate["nu0_hz"]
+                res.ok_value().nu0_status = estimate["nu0_status"]
+                res.ok_value().nu0_reason = estimate["nu0_reason"]
+                res.ok_value().nu0_source = estimate["nu0_source"]
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[
                     ctx["neighbors"]
                 ]
@@ -301,11 +309,45 @@ class Refinement:
                     "num_reference_event": dfevent["idx_ref"],
                     "reference_energy_barrier": dfevent["energy_barrier"],
                     "neighbors": neighbors.copy(),
+                    "estimate": self._inherited_estimate(dfevent),
                 }
 
                 # => Restore the system to its initial state
                 self.system.update_positions(current_positions)
             return futures
+
+    def _inherited_estimate(self, dfevent: pd.Series) -> dict:
+        """Return the reference prefactor estimate a refinement inherits.
+
+        Parameters
+        ----------
+        dfevent : pd.Series
+            The reference event row being refined.
+
+        Returns
+        -------
+        dict
+            ``nu0_hz`` (Hz, only when the reference status is ``ok``),
+            ``nu0_status``, ``nu0_reason`` and ``nu0_source`` (``reference``);
+            every value is ``None`` in the constant style, whose reference
+            table has no prefactor columns.
+
+        """
+        if not self._carry_prefactors:
+            return {
+                "nu0_hz": None,
+                "nu0_status": None,
+                "nu0_reason": None,
+                "nu0_source": None,
+            }
+        status = str(dfevent["nu0_status"])
+        ok = status == "ok"
+        return {
+            "nu0_hz": float(dfevent["nu0"]) if ok else None,
+            "nu0_status": status,
+            "nu0_reason": "" if ok else str(dfevent["nu0_reason"]),
+            "nu0_source": "reference",
+        }
 
     def check_refinement_energy(
         self,

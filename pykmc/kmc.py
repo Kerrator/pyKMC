@@ -52,6 +52,7 @@ from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
+from .rate_constant import create_rate_constant
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -85,14 +86,28 @@ class KMC:
         Track atomic environments already explored. Those for which event searches as been previously done.
     total_energy : float
         The total energy of the system.
+    manager : Manager or None
+        The engine manager. Passed at construction by ``run.py``; assigning
+        ``kmc.manager`` afterwards keeps working. ``Initializer.initialize``
+        refuses to run while it is ``None``.
+    rate_constant : RateConstant
+        Rate facade of the run; ``rate_constant.backend.requires_event_prefactors``
+        is the single test for the htst/rpa styles.
+    prefactor_service : PrefactorService or None
+        Batching service for per-event prefactors, built once by
+        ``Initializer.initialize_prefactor_service`` for the htst/rpa styles
+        and shared by the reference and active tables; ``None`` in the
+        constant style, which never constructs a request.
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, manager: object | None = None) -> None:
         self.config = config
         self.loggers = None
         self.system = None
-        self.manager = None
+        self.manager = manager
+        self.rate_constant = create_rate_constant(config.rateconstant)
+        self.prefactor_service = None
         self.engine = None
         self.neighbors_list = None
         self.atomic_environment = None
@@ -113,6 +128,11 @@ class KMC:
                     movement_thr=self.config.eventrecycling.movement_thr,
                     distance_thr=self.config.eventrecycling.distance_thr,
                 )
+
+    @property
+    def uses_event_prefactors(self) -> bool:
+        """Return True when the rate backend needs a per-event prefactor (htst/rpa)."""
+        return bool(self.rate_constant.backend.requires_event_prefactors)
 
     def run(self) -> None:
         """Run the simulation."""
@@ -181,7 +201,11 @@ class KMC:
 
         # Build the persistent active event table once, with the recycler
         # plugin (built in __init__) attached.
-        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
+        self.active_table = ActiveEventTable(
+            self.config,
+            recycler=self.recycler,
+            prefactor_service=self.prefactor_service,
+        )
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
@@ -265,6 +289,15 @@ class KMC:
                 ),
             )
 
+            # == Site-specific prefactors for refined events (htst/rpa) ==
+            # After dedup so duplicates never cost a Hessian; recycled rows were
+            # attempted in the step that built them and are skipped. A no-op in
+            # the constant style.
+            site_summary = active_table.request_site_prefactors(
+                self.system, self.neighbors_list
+            )
+            self._log_htst_step_summary(site_summary)
+
             # == Update System ==
             (
                 result_reconstruction,
@@ -311,6 +344,12 @@ class KMC:
             ):
                 self.loggers.info("log", "\t :=> System is in a Basin.")
                 self.loggers.info("log", "\t :=> Exploring the Basin.")
+                if self.uses_event_prefactors:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> HTST: basin rates use the reference prefactors; "
+                        "site refinement is not computed inside basins (v1).",
+                    )
                 # get basin info/explore
                 basin = BasinsGenericEvents(
                     self.config,
@@ -331,14 +370,22 @@ class KMC:
                         result_basin.ok_value().from_state
                     ].neighbors_list
                     # construct new active table with only event : new_actual_state - > exit_state
-                    tmp_active_table = ActiveEventTable(self.config)
+                    # The temporary event carries the exit event's reference
+                    # prefactor metadata (htst/rpa) instead of silently
+                    # resolving to k0; site refinement is not computed inside
+                    # basins in v1 (see BasinsGenericEvents._absorbing_rate).
+                    tmp_active_table = ActiveEventTable(
+                        self.config, prefactor_service=self.prefactor_service
+                    )
+                    exit_ref = result_basin.ok_value().num_reference_event
                     tmp_event = EventRefinementOutput(
                         central_atom_index=result_basin.ok_value().central_atom,
                         saddle_positions=result_basin.ok_value().saddle_positions,
                         E_saddle=-1,
                         min2_positions=result_basin.ok_value().final_positions,
                         dE_forward=result_basin.ok_value().energy_barrier,
-                        num_reference_event=result_basin.ok_value().num_reference_event,
+                        num_reference_event=exit_ref,
+                        **self.reference_table.reference_estimate(exit_ref),
                     )
                     neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
@@ -637,7 +684,12 @@ class KMC:
             List of event dataframe that has been added to the reference event table.
 
         """
-        results_is_valid_events = self.reference_table.add_events(events)
+        # htst/rpa: add_events resolves the prefactors of the accepted events
+        # (one request per event, both directions) before returning, so the
+        # refinement below never reads an unresolved reference rate.
+        results_is_valid_events = self.reference_table.add_events(
+            events, pbc=self.system.pbc
+        )
         self.loggers.info(
             "log",
             "\t :=> Adding {} events to the reference table".format(
@@ -645,6 +697,37 @@ class KMC:
             ),
         )
         return results_is_valid_events
+
+    def _log_htst_step_summary(self, site_summary: dict[str, int]) -> None:
+        """Log the per-step HTST prefactor summary to the ``log`` logger.
+
+        Parameters
+        ----------
+        site_summary : dict[str, int]
+            Counts returned by ``ActiveEventTable.request_site_prefactors``.
+
+        """
+        if not self.uses_event_prefactors:
+            return
+        ref = self.reference_table.prefactor_summary()
+        act = self.active_table.prefactor_summary()
+        self.loggers.info(
+            "log",
+            "\t :=> HTST prefactors: reference ok={} rejected={} legacy={} "
+            "pending={}; active sources reference={} site={} k0={}; site "
+            "attempts this step={} (ok={}, rejected={})".format(
+                ref.get("ok", 0),
+                ref.get("rejected", 0),
+                ref.get("legacy", 0),
+                ref.get("pending", 0),
+                act.get("reference", 0),
+                act.get("site", 0),
+                act.get("k0", 0),
+                site_summary.get("attempted", 0),
+                site_summary.get("ok", 0),
+                site_summary.get("rejected", 0),
+            ),
+        )
 
     def execute_refinements(
         self,

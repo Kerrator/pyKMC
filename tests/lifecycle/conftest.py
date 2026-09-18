@@ -96,6 +96,7 @@ class FakeManager:
         self.expected = expected
         self.submitted: list[tuple[str, dict[str, Any]]] = []
         self.broadcasts: list[tuple[str, dict[str, Any]]] = []
+        self.group_calls: list[tuple[str, dict[str, Any]]] = []
         self.completion_order: list[Any] = []
         self._pending: list[tuple[Future, Any]] = []
         self._lock = threading.Lock()
@@ -132,6 +133,10 @@ class FakeManager:
     def broadcast(self, op_name: str, **kwargs: Any) -> None:
         """Record a broadcast."""
         self.broadcasts.append((op_name, kwargs))
+
+    def submit_group(self, op_name: str, **kwargs: Any) -> None:
+        """Record a synchronous group operation."""
+        self.group_calls.append((op_name, kwargs))
 
     def group_minimize_with_results(self, **kwargs: Any) -> tuple[Any, float]:
         """Pretend to minimise: return the given positions and a fixed energy."""

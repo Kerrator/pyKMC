@@ -24,21 +24,28 @@ from pykmc.result import EventRefinementOutput
 
 
 class _FakeManager:
-    """Engine-pool stand-in exposing the calls ``KMC.run`` makes."""
+    """Engine-pool stand-in exposing the calls ``KMC.run`` makes.
 
-    def initialize_sessions(self, config: Any, system: Any) -> None:
-        """Pretend to boot the session pool."""
+    ``KMC.run`` synchronises the engines through ``manager.broadcast`` (the
+    current ``pykmc.manager.Manager`` API); ``shutdown`` is what ``_close``
+    calls (stubbed out in the test, kept here for completeness).
+    """
 
-    def use_local(self) -> None:
-        """Pretend to switch engines to local mode."""
+    def __init__(self) -> None:
+        self.broadcasts: list[tuple[str, dict[str, Any]]] = []
 
-    def use_global(self) -> None:
-        """Pretend to switch engines to global mode."""
+    def broadcast(self, op_name: str, **kwargs: Any) -> None:
+        """Record a broadcast to every local engine."""
+        self.broadcasts.append((op_name, kwargs))
+
+    def submit(self, op_name: str, **kwargs: Any) -> None:
+        """Fail loudly: the constant style must never submit a worker job here."""
+        raise AssertionError(f"unexpected manager.submit({op_name!r})")
 
     def set_all_positions(self, positions: Optional[np.ndarray] = None) -> None:
         """Pretend to broadcast positions to the engines."""
 
-    def close_all(self) -> None:
+    def shutdown(self) -> None:
         """Pretend to shut the pool down."""
 
 

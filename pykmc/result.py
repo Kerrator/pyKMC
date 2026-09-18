@@ -177,6 +177,16 @@ class EventRefinementOutput:
         Index of the corresponding reference event (if matched).
     refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
+    nu0_hz : Optional[float]
+        Reference Vineyard frequency (Hz) inherited from the reference event;
+        set only when ``nu0_status`` is ``"ok"`` (htst/rpa styles).
+    nu0_status : Optional[str]
+        Status of the inherited reference estimate (``ok``, ``rejected``,
+        ``pending``, ``legacy``); ``None`` in the constant style.
+    nu0_reason : Optional[str]
+        Rejection reason of the inherited estimate (``""`` when accepted).
+    nu0_source : Optional[str]
+        Provenance of the inherited estimate (``"reference"``).
     """
 
     central_atom_index: int
@@ -186,6 +196,10 @@ class EventRefinementOutput:
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
     refined: Optional[str] = None
+    nu0_hz: Optional[float] = None
+    nu0_status: Optional[str] = None
+    nu0_reason: Optional[str] = None
+    nu0_source: Optional[str] = None
 
 
 @dataclass

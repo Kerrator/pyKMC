@@ -31,10 +31,26 @@ class Initializer:
         self.kmc = kmc
 
     def initialize(self) -> None:
-        """Initialize the entire KMC object before starting the simulation."""
+        """Initialize the entire KMC object before starting the simulation.
+
+        Raises
+        ------
+        RuntimeError
+            If ``kmc.manager`` is ``None``: the manager must be injected
+            (``KMC(config, manager=...)`` or ``kmc.manager = ...``) before the
+            engines, the prefactor service and the reference table are built.
+
+        """
+        if self.kmc.manager is None:
+            raise RuntimeError(
+                "KMC.manager is None: pass the engine manager to "
+                "KMC(config, manager=...) (or assign kmc.manager) before "
+                "Initializer.initialize()"
+            )
         self.initialize_loggers()
         self.initialize_system()
         self.initialize_engine()
+        self.initialize_prefactor_service()
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()
@@ -89,6 +105,11 @@ class Initializer:
             pbc=system.pbc,
         )
         self.kmc.manager.broadcast("initialize_potential")
+        if self.kmc.uses_event_prefactors:
+            # Capability preflight of the HTST extension (contracts section
+            # 6): fails fast when LAMMPS lacks PHONON or the potential cannot
+            # be initialised in a scratch instance. Constant style: no call.
+            self.kmc.manager.broadcast("htst_preflight")
         self.kmc.manager.submit_group("start")
         self.kmc.manager.submit_group("initialize_parameters")
         self.kmc.manager.submit_group(
@@ -99,6 +120,50 @@ class Initializer:
             pbc=system.pbc,
         )
         self.kmc.manager.submit_group("initialize_potential")
+
+    def initialize_prefactor_service(self) -> None:
+        """Build the per-event prefactor service for the htst/rpa styles.
+
+        The constant style leaves ``kmc.prefactor_service`` as ``None`` and
+        never imports the HTST modules. A ``free_radius`` larger than the
+        ``rcut`` crop radius is warned about once: site-specific requests
+        rebuild the saddle and final geometries from ``rcut`` crops, so free
+        atoms beyond ``rcut`` are evaluated at minimum positions (see
+        ``ActiveEventTable.request_site_prefactors``).
+        """
+        if not self.kmc.uses_event_prefactors:
+            self.kmc.prefactor_service = None
+            return
+        from .rate_constant.prefactors import PrefactorService  # htst path only
+
+        self.kmc.prefactor_service = PrefactorService(
+            self.kmc.config, self.kmc.manager, self.kmc.rate_constant
+        )
+        settings = self.kmc.prefactor_service.settings
+        self.kmc.loggers.info(
+            "log",
+            ":=> HTST prefactor service ready (style {}, free_radius {} A, "
+            "fd_step {} A, nu0 window [{:.3e}, {:.3e}] Hz, k0 fallback {} ps^-1)".format(
+                self.kmc.config.rateconstant.style,
+                settings.free_radius,
+                settings.fd_step,
+                settings.nu0_min_hz,
+                settings.nu0_max_hz,
+                self.kmc.config.rateconstant.k0,
+            ),
+        )
+        rcut = self.kmc.config.atomicenvironment.rcut
+        if settings.free_radius > rcut:
+            self.kmc.loggers.warning(
+                "log",
+                ":=> WARNING: rateconstant.free_radius = {} A exceeds "
+                "atomicenvironment.rcut = {} A: site-specific prefactor requests "
+                "rebuild the saddle and final geometries from rcut crops, so free "
+                "atoms beyond rcut sit at minimum positions there; expect "
+                "saddle_not_first_order/unstable_minimum rejections of site "
+                "estimates (reference or k0 fallback). Set free_radius <= rcut "
+                "for stationary site geometries.".format(settings.free_radius, rcut),
+            )
 
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""
@@ -133,7 +198,9 @@ class Initializer:
             )
         else:
             self.kmc.loggers.info("log", ":=> Generate a empty reference table")
-        self.kmc.reference_table = ReferenceEventTable(self.kmc.config)
+        self.kmc.reference_table = ReferenceEventTable(
+            self.kmc.config, prefactor_service=self.kmc.prefactor_service
+        )
 
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""
