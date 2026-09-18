@@ -77,6 +77,23 @@ _PREFLIGHT_BOX = 40.0
 _PREFLIGHT_SPACING = 3.0
 
 
+class _QuietConfig:
+    """Proxy the engine's LAMMPS config with log output disabled.
+
+    Scratch engines are created once per event operation; inheriting the
+    production ``verbosity`` would write one ``lammps.log.<id>`` file per
+    Hessian call. Every other attribute is forwarded to the wrapped config.
+    """
+
+    verbosity: int = 0
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 class LammpsHTSTExtension(EngineExtension):
     """Per-event HTST prefactors for a ``LammpsEngine`` (see the module docstring).
 
@@ -344,7 +361,9 @@ class LammpsHTSTExtension(EngineExtension):
             _SCRATCH_ID_STRIDE * (int(self.engine.engine_id) + 1) + self._scratch_calls
         )
         return LammpsEngine(
-            config=self.engine.config, comm=MPI.COMM_SELF, engine_id=engine_id
+            config=_QuietConfig(self.engine.config),
+            comm=MPI.COMM_SELF,
+            engine_id=engine_id,
         )
 
     @staticmethod

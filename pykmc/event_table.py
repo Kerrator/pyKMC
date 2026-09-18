@@ -1359,6 +1359,12 @@ class ReferenceEventTable:
                     f"{status!r}; expected one of {NU0_STATUSES}"
                 )
             if status == NU0_OK:
+                if nu0 is None:
+                    raise ValueError(
+                        f"reference table {path}: event {label} has nu0_status "
+                        "'ok' but no nu0 value; an accepted estimate must carry "
+                        "its frequency in Hz"
+                    )
                 nu0 = float(nu0)
                 if not math.isfinite(nu0) or nu0 <= 0.0:
                     raise ValueError(

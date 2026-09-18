@@ -618,6 +618,17 @@ class RateConstantConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _check_zone_radius(self) -> RateConstantConfig:
+        """Require the crop zone to enclose the free region when it is set."""
+        if self.zone_radius is not None and self.zone_radius <= self.free_radius:
+            raise ValueError(
+                "zone_radius must be > free_radius when set (the frozen shell "
+                f"between them is the Hessian boundary), got zone_radius="
+                f"{self.zone_radius} and free_radius={self.free_radius}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _check_k0_units(self) -> RateConstantConfig:
         """Reject a Hz-scale ``k0`` for the ``htst``/``rpa`` styles.
 

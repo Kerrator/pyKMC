@@ -189,6 +189,20 @@ class TestHtstRoundTrip:
         with pytest.raises(ValueError, match="finite positive frequency"):
             ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
 
+    def test_ok_row_with_none_nu0_is_refused_as_value_error(
+        self, system_single_type_fcc: Any, tmp_path: Path
+    ) -> None:
+        """An object ``None`` in nu0 on an accepted row raises ValueError, not TypeError."""
+        out = self._saved_ok_table(system_single_type_fcc, tmp_path)
+        df = pd.read_pickle(out)
+        attrs = dict(df.attrs)
+        df["nu0"] = df["nu0"].astype(object)
+        df.loc[0, "nu0"] = None
+        df.attrs = attrs
+        df.to_pickle(out)
+        with pytest.raises(ValueError, match="no nu0 value"):
+            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+
     def test_unknown_status_is_refused(
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:

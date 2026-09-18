@@ -241,6 +241,28 @@ class TestLammpsHTSTSerial:
         with pytest.raises(TypeError, match="LammpsEngine"):
             LammpsHTSTExtension(fake)
 
+    def test_scratch_engines_never_write_log_files(
+        self,
+        search_engine: LammpsEngine,
+        hop_request: Callable[..., HTSTEventRequest],
+        sw_config: _SWConfig,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A verbose production config must not produce one log per Hessian call.
+
+        The search engine has already been started, so re-pointing its config
+        at a verbose copy only affects the scratch engines the extension builds.
+        """
+        verbose = _SWConfig(**{**sw_config.__dict__, "verbosity": 2})
+        monkeypatch.setattr(search_engine, "config", verbose)
+        monkeypatch.chdir(tmp_path)
+        ext = LammpsHTSTExtension(search_engine)
+        assert ext.htst_preflight() is not None
+        result = ext.compute_event_prefactors(hop_request(free_radius=4.0))
+        assert result.forward.status == "ok"
+        assert sorted(tmp_path.iterdir()) == []
+
     def test_public_surface_is_exactly_two_operations(
         self, search_engine: LammpsEngine
     ) -> None:

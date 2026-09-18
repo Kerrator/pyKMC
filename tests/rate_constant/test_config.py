@@ -168,3 +168,19 @@ def test_numeric_fields_reject_non_finite_values(field: str, value: float) -> No
 
     with pytest.raises(pydantic.ValidationError):
         RateConstantConfig(style="constant", **{field: value})
+
+
+@pytest.mark.parametrize("zone_radius", [5.0, 6.0])
+def test_zone_radius_must_exceed_free_radius(zone_radius: float) -> None:
+    """A crop zone that does not enclose the free region is a configuration error."""
+    with pytest.raises(ValidationError, match="zone_radius must be > free_radius"):
+        RateConstantConfig(style="htst", free_radius=6.0, zone_radius=zone_radius)
+
+
+def test_zone_radius_none_or_larger_is_accepted() -> None:
+    """``None`` (full system) and a strictly larger zone both validate."""
+    assert RateConstantConfig(style="htst", free_radius=6.0).zone_radius is None
+    assert (
+        RateConstantConfig(style="htst", free_radius=6.0, zone_radius=10.0).zone_radius
+        == 10.0
+    )
