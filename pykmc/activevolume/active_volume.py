@@ -1,16 +1,126 @@
-from ase import Atoms, Atom
-from ase.build import bulk
-from lammps import lammps
-from ase.data import atomic_numbers, atomic_masses
-import pypARTn
+"""Active-volume crop of the LAMMPS engine for pARTn search and refinement.
+
+The active volume (AV) rebuilds the *shared* LAMMPS instance as a spherical
+crop around a central atom (``define_AV``); ``LammpsEngine.partn_search`` /
+``partn_refine`` restore the full system afterwards (see the engine's
+"State ownership" notes). Three index spaces meet here:
+
+- **global index**: position in the full-system arrays (0-based);
+- **crop index**: position in ``atom_map`` (0-based); ``atom_map[i]`` is the
+  global index of crop atom ``i``;
+- **LAMMPS id**: ``crop index + 1`` inside the cropped instance.
+
+Species/type/mass identity is the engine's single rule (``species_map`` /
+``types_to_int`` in ``pykmc.engine.lammps``): the crop always allocates the
+*full* species set and sets one mass per species, even when the crop holds a
+subset of the species.
+
+Supported geometry: orthorhombic cells only (``reset`` raises before touching
+the instance otherwise). ``define_AV`` selects atoms with minimum-image
+distances on every axis (``find_mic(..., pbc=True)``); on a slab this treats
+the non-periodic axis as periodic when picking AV members, while the crop's
+``boundary`` now follows the real pbc. When the vacuum gap on a non-periodic
+axis is smaller than ``ract`` the selection can pick atoms across the vacuum
+that do not interact across the crop's non-periodic boundary; ``define_AV``
+warns (``RuntimeWarning``) in that case. Changing the selection rule is a
+scientific change recorded as a follow-up, not part of this integration.
+
+Every position array handed to LAMMPS from here (``partn_search_AV``,
+``partn_refine_AV``, ``redefine_atoms``, ``set_positions``) goes through the
+engine's finite/shape guard first (``pykmc.engine.lammps._require_positions``)
+so a NaN coordinate raises ``ValueError`` symmetrically on every rank before
+any collective call instead of desynchronising a multi-rank instance.
+"""
+
+from __future__ import annotations
+
+import warnings
+from typing import Protocol, TypedDict
+
 import numpy as np
 import ctypes
+from ase.cell import Cell
 from ase.geometry import find_mic
-from ..system import System
-from ..config import Config
 
 
-def define_AV(config, central_atom_idx: int, positions, cell):
+class ActiveVolumeSaddleError(ValueError):
+    """A saddle atom is missing from (or duplicated in) the active-volume crop."""
+
+
+def _check_positions(
+    positions: np.ndarray, op_name: str, natoms: int | None = None
+) -> np.ndarray:
+    """Apply the engine's finite/shape guard (imported lazily, like ``map_types``)."""
+    from ..engine.lammps import _require_positions
+
+    return _require_positions(positions, op_name, natoms=natoms)
+
+
+def require_orthorhombic_cell(cell: np.ndarray, op_name: str) -> None:
+    """Raise ``ValueError`` if ``cell`` is not orthorhombic.
+
+    The active-volume crop builds a ``region box block`` and selects atoms
+    with cell-diagonal bounds, so a triclinic cell must be rejected *before*
+    any ``clear`` rebuilds the instance.
+
+    Parameters
+    ----------
+    cell : np.ndarray
+        (3, 3) cell (or an ``ase.cell.Cell``).
+    op_name : str
+        Operation name used in the error message.
+
+    """
+    if not Cell.new(np.asarray(cell, dtype=float)).orthorhombic:
+        raise ValueError(
+            f"{op_name}: the active-volume crop supports orthorhombic cells only "
+            "(the crop box is a `region box block`); got a non-orthorhombic cell"
+        )
+
+
+def _warn_thin_vacuum(
+    positions: np.ndarray, cell: np.ndarray, pbc: tuple[bool, bool, bool], r_a: float
+) -> None:
+    """Warn when a non-periodic axis has a vacuum gap thinner than ``ract``.
+
+    ``define_AV`` selects members with ``find_mic(pbc=True)`` on every axis
+    (the recorded selection rule). On a slab whose vacuum is thinner than
+    ``ract`` that rule can pick atoms on the far side of the vacuum which do
+    not interact across the crop's non-periodic (``f``) boundary. The
+    selection is unchanged; this only makes the case visible.
+    """
+    cell = np.asarray(cell, dtype=float)
+    positions = np.asarray(positions, dtype=float)
+    for axis in range(3):
+        if pbc[axis]:
+            continue
+        length = float(np.linalg.norm(cell[axis]))
+        gap = length - float(positions[:, axis].max() - positions[:, axis].min())
+        if gap < r_a:
+            warnings.warn(
+                f"active_volume.define_AV: axis {axis} is non-periodic but its "
+                f"vacuum gap ({gap:.2f} A) is smaller than ract ({r_a:.2f} A); the "
+                "minimum-image member selection may include atoms across the "
+                "vacuum that do not interact across the crop's non-periodic "
+                "boundary (recorded follow-up: pbc-aware selection)",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
+
+def define_AV(
+    config: object,
+    central_atom_idx: int,
+    positions: np.ndarray,
+    cell: np.ndarray,
+    pbc: tuple[bool, bool, bool] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Select the active-volume members around ``central_atom_idx``.
+
+    Members are chosen with minimum-image distances on every axis. ``pbc`` is
+    only used to warn about a slab whose vacuum gap is thinner than ``ract``
+    (see ``_warn_thin_vacuum``); it never changes the selection.
+    """
     # Defining parameters
     # Radius of whole active volume in Ang
     r_a = config.activevolume.ract  # Ensure AV is larger than topology analysis
@@ -18,6 +128,9 @@ def define_AV(config, central_atom_idx: int, positions, cell):
     r_m = config.activevolume.rmov
 
     # NEED TO ADD WARNING IF R_A<R_M
+
+    if pbc is not None and not all(pbc):
+        _warn_thin_vacuum(positions, cell, pbc, r_a)
 
     center = positions[central_atom_idx]
 
@@ -50,8 +163,15 @@ def define_AV(config, central_atom_idx: int, positions, cell):
     return av_positions, av_idx, buffer_idx
 
 
-def make_AV(engine, av_indices, buffer_indices):
+def _quiet(engine: _CommandEngine, cmd: str) -> None:
+    """Run a cleanup command, swallowing its error so the original propagates."""
+    try:
+        engine.command(cmd)
+    except Exception:  # noqa: BLE001 - secondary cleanup failure
+        pass
 
+
+def make_AV(engine, av_indices, buffer_indices):
     # Define the buffer group based on the new LAMMPS IDs
     # We need to find which index in 'av_indices' corresponds to 'buffer_indices'
     engine_buffer_ids = []
@@ -60,28 +180,106 @@ def make_AV(engine, av_indices, buffer_indices):
         if original_id in buffer_set:
             engine_buffer_ids.append(i + 1)  # LAMMPS IDs are 1-based
 
-    if engine_buffer_ids:
-        engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
-        engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
-    else:
-        engine.command(f"group buffer empty")
-        engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
-        print("No buffer atoms defined")
+    # The buffer group and its setforce fix must outlive this call (they hold
+    # the shell frozen during the pARTn run); the full-system restore removes
+    # them. They are only torn down here if the first run fails.
+    try:
+        if engine_buffer_ids:
+            engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
+            engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+        else:
+            engine.command("group buffer empty")
+            engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
+            print("No buffer atoms defined")
 
-    engine.command("run 0 post no")
+        engine.command("run 0 post no")
+    except Exception:
+        _quiet(engine, "unfix f_buffer")
+        _quiet(engine, "group buffer delete")
+        raise
 
 
-def reset(engine, config, cell) -> None:
+class TypeEntry(TypedDict):
+    """One LAMMPS atom type: its 1-based index and its mass."""
+
+    ref: int
+    mass: float
+
+
+class _CommandEngine(Protocol):
+    """Minimal engine surface the active-volume box rebuild drives."""
+
+    def command(self, cmd: str) -> None:
+        """Run one LAMMPS command string."""
+        ...
+
+
+def map_types(
+    types: list[str] | np.ndarray,
+) -> tuple[np.ndarray, dict[str, TypeEntry]]:
+    """Map element symbols to LAMMPS integer types.
+
+    Delegates to the engine's single rule (``species_map`` / ``types_to_int``
+    in ``pykmc.engine.lammps``: alphabetical ``sorted(set(types))``, ASE
+    masses), so an integer type means the same species in the active-volume
+    engine as in the main engine. ``types`` must be the full-system species
+    list: the box size and the integer refs follow its species set, which
+    ``pair_coeff`` was written against and which is assumed fixed for the
+    run. Returns the per-atom integer types and the
+    ``{symbol: {"ref": int, "mass": float}}`` map.
     """
-    Clear lammps instance, preps it for the new sim:
-    """
+    from ..engine.lammps import species_map, types_to_int
 
+    species, masses = species_map(types)
+    map_type: dict[str, TypeEntry] = {
+        symbol: {"ref": i + 1, "mass": mass}
+        for i, (symbol, mass) in enumerate(zip(species, masses, strict=True))
+    }
+    int_types = types_to_int(types, species)
+    return int_types, map_type
+
+
+def _engine_pbc(engine: object) -> tuple[bool, bool, bool]:
+    """Return the pbc remembered by ``engine`` or fully periodic if it has none."""
+    full = getattr(engine, "full_system", None)
+    pbc = getattr(full, "pbc", None)
+    if pbc is None:
+        return (True, True, True)
+    return (bool(pbc[0]), bool(pbc[1]), bool(pbc[2]))
+
+
+def reset(
+    engine: _CommandEngine,
+    config: object,
+    cell: np.ndarray,
+    map_type: dict[str, TypeEntry],
+    pbc: tuple[bool, bool, bool] | None = None,
+) -> None:
+    """Clear the LAMMPS instance and rebuild an empty box for the active volume.
+
+    ``map_type`` is the ``{symbol: {"ref", "mass"}}`` map ``map_types`` built
+    from the full-system types. The box gets one LAMMPS atom type per species
+    and one ``mass`` per type, both before ``pair_coeff``: a multi-element
+    ``pair_coeff`` (``eam/alloy``, ``eam/fs``) needs the full type count to
+    exist, and pair styles that do not set masses themselves (``lj/cut``,
+    ``mlip``, ``sw``) need them before the first ``run 0``.
+
+    ``pbc`` is the crop's boundary; when omitted it is read from the engine's
+    remembered full system (``engine.full_system.pbc``) and falls back to
+    fully periodic for engines without one. A non-orthorhombic ``cell`` raises
+    ``ValueError`` before anything is cleared.
+    """
+    require_orthorhombic_cell(cell, "active_volume.reset")
+    if pbc is None:
+        pbc = _engine_pbc(engine)
     engine.command("clear")
-    initialize_parameters(engine)
+    initialize_parameters(engine, pbc)
     # Create cell
     xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
     engine.command("region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi))
-    engine.command("create_box 1 box")  # NEEDS TO BE UPDATED FOR ALLOYS
+    engine.command("create_box {} box".format(len(map_type)))
+    for entry in map_type.values():
+        engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
     initialize_potential(engine, config)
 
 
@@ -99,6 +297,9 @@ def redefine_atoms(engine, positions, type=None) -> None:
     """
     if type is None:
         type = [1] * len(positions)
+    positions = _check_positions(
+        positions, "active_volume.redefine_atoms", natoms=len(positions)
+    )
     new_positions = positions.flatten().astype(np.float64)
     ids = np.arange(1, len(positions) + 1, dtype=np.int32)
     engine.lmp.create_atoms(len(positions), ids, type, x=new_positions)
@@ -106,27 +307,29 @@ def redefine_atoms(engine, positions, type=None) -> None:
     engine.command("balance 1.1 rcb")
     engine.command("neigh_modify every 1 delay 0 check yes")
     engine.command("fix 1 all setforce 0.0 0.0 0.0")
-    engine.command("run 0")
-    engine.command("unfix 1")
+    try:
+        engine.command("run 0")
+    finally:
+        _quiet(engine, "unfix 1")
 
 
 def partn_search_AV(
     engine, config, central_atom_idx: int, positions, cell, type
 ) -> [np.array, int]:
-    reset(engine, config, cell)
+    # Guard the full-system positions before the crop clears anything: a NaN
+    # raises here on every rank, with the engine still intact.
+    positions = _check_positions(
+        positions, "active_volume.partn_search_AV", natoms=len(type)
+    )
+    int_types, map_type = map_types(type)
+    pbc = _engine_pbc(engine)
+    reset(engine, config, cell, map_type=map_type, pbc=pbc)
     av_positions, av_idx, buffer_idx = define_AV(
-        config, central_atom_idx, positions, cell
+        config, central_atom_idx, positions, cell, pbc=pbc
     )
 
-    # Need to map type to positions
     atom_map = np.array(av_idx, dtype=int)
-    map_type = {
-        atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(type)))
-    }
-    type = np.array([map_type[element]["ref"] for element in type])  # map to integer
-
-    av_type = type[atom_map]
+    av_type = int_types[atom_map]
 
     redefine_atoms(engine, av_positions, av_type)
     make_AV(engine, av_idx, buffer_idx)
@@ -149,27 +352,32 @@ def partn_refine_AV(
 
     This was added in order to get the activation energy for an event, as the traditional method does not work for
     Active Volumes.
+
+    Raises ``ActiveVolumeSaddleError`` when a saddle atom is not in the crop
+    (the engine reports it as ``Err(REFINEMENT_INVALID_MINIMA)``); this is
+    the base's ``.item()`` crash case. A saddle position is placed wherever
+    the caller put it, as the base did: there is no distance check against
+    ``ract`` (an in-crop shell atom relaxed slightly past ``ract`` is a
+    legitimate saddle geometry). Non-finite ``saddle_positions`` raise
+    ``ValueError`` before any LAMMPS command.
     """
-
-    reset(engine, config, cell)
-    av_positions, av_idx, buffer_idx = define_AV(
-        config, central_atom_idx, positions, cell
+    saddle_idx = np.asarray(saddle_idx, dtype=int)
+    saddle_positions = _check_positions(
+        saddle_positions, "active_volume.partn_refine_AV (saddle_positions)"
     )
+    if saddle_positions.shape != (saddle_idx.size, 3):
+        raise ValueError(
+            "active_volume.partn_refine_AV: saddle_positions have shape "
+            f"{saddle_positions.shape}, expected {(saddle_idx.size, 3)} "
+            "(one row per saddle_idx entry)"
+        )
 
-    # Need to map types to positions
-    atom_map = np.array(av_idx, dtype=int)
-    map_type = {
-        atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(type)))
-    }
-    type = np.array([map_type[element]["ref"] for element in type])  # map to integer
+    atom_map, central_lammps_id = partn_search_AV(
+        engine, config, central_atom_idx, positions, cell, type
+    )
+    av_positions = positions[atom_map]
 
-    av_type = type[atom_map]
-
-    redefine_atoms(engine, av_positions, av_type)
-    make_AV(engine, av_idx, buffer_idx)
-
-    if config.activevolume.AV_debug == True:
+    if config.activevolume.AV_debug:
         E_before = get_potential_energy(engine)
         engine.command("min_style {}".format(config.lammps.min_style))
         engine.command("minimize 1.0e-6 1.0e-8 10 10")
@@ -182,32 +390,42 @@ def partn_refine_AV(
     core_idx = []
     core_ids = []
     for i, atom_idx in enumerate(saddle_idx):
-        index = int(
-            np.where(atom_map == atom_idx)[0].item()
-        )  # index in atom map where this value is true
+        matches = np.where(atom_map == atom_idx)[0]
+        if matches.size != 1:
+            raise ActiveVolumeSaddleError(
+                f"saddle atom {atom_idx} matched {matches.size} atoms in the "
+                "active-volume map (expected exactly 1)"
+            )
+        index = int(matches[0])  # index in atom map where this value is true
         av_positions[index] = saddle_positions[i]
         core_idx.append(index)  # Atom id
         core_ids.append(index + 1)
     set_positions(engine, av_positions)
 
     engine.command("fix 1 all setforce 0.0 0.0 0.0")
-    engine.command("run 0")
-    engine.command("unfix 1")
+    try:
+        engine.command("run 0")
+    finally:
+        _quiet(engine, "unfix 1")
 
     # Want to minimize initially to speed up refinement process
     engine.command(f"group core id {' '.join(map(str, core_ids))}")
-    engine.command("fix f_core core setforce 0.0 0.0 0.0")
-    engine.command("min_style {}".format(config.lammps.min_style))
-    engine.command("minimize {}".format(config.lammps.frz_min))
-    engine.command("unfix f_core")
+    try:
+        engine.command("fix f_core core setforce 0.0 0.0 0.0")
+        try:
+            engine.command("min_style {}".format(config.lammps.min_style))
+            engine.command("minimize {}".format(config.lammps.frz_min))
+        finally:
+            _quiet(engine, "unfix f_core")
+    finally:
+        _quiet(engine, "group core delete")
 
-    return E_init, atom_map, (np.where(atom_map == central_atom_idx)[0] + 1)
+    return E_init, atom_map, central_lammps_id
 
 
 def position_results_AV(
     config, artn, atom_map, positions
 ) -> [np.array, np.array, np.array, int]:
-
     min1positions = artn.extract("tau_min1")
     min2positions = artn.extract("tau_min2")
     saddlepositions = artn.extract("tau_sad")
@@ -249,11 +467,14 @@ def position_results_AV(
     )
 
 
-def initialize_parameters(engine):
+def initialize_parameters(
+    engine: _CommandEngine, pbc: tuple[bool, bool, bool] = (True, True, True)
+) -> None:
+    """Emit the crop's global settings; ``boundary`` follows ``pbc``."""
     engine.command("units metal")
     engine.command("atom_style atomic")
     engine.command("dimension 3")
-    engine.command("boundary p p p")
+    engine.command("boundary " + " ".join("p" if p else "f" for p in pbc))
     engine.command("atom_modify map array")  # ! necessary for scatter atoms
     engine.command("atom_modify sort 0 0.0")  # ! necessary for partn
 
@@ -262,24 +483,19 @@ def initialize_system(engine, system):
     # system parameters
     natoms = len(system.types)
     cell = system.cell
-    types = system.types
     x = system.positions.flatten()  # Lammps format
 
     xhi, yhi, zhi = cell[0][0], cell[1, 1], cell[2, 2]
 
     ind = np.linspace(0, natoms - 1, natoms).astype(int)
     ind += 1  # Lammps id start at 1
-    # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
-    map_type = {
-        atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-        for i, atom_type in enumerate(sorted(set(types)))
-    }
-    types = [map_type[element]["ref"] for element in types]  # map to integer
+    # Same species -> type/mass rule as the engine (see map_types).
+    int_types, map_type = map_types(system.types)
 
     # lammps create system
     engine.command("region box block 0.0 {} 0.0 {} 0.0 {}".format(xhi, yhi, zhi))
     engine.command("create_box {} box".format(len(map_type)))
-    engine.lmp.create_atoms(natoms, ind, types, x)
+    engine.lmp.create_atoms(natoms, ind, int_types.tolist(), x)
     # Set masses
     for key in map_type.keys():
         engine.command("mass {} {}".format(map_type[key]["ref"], map_type[key]["mass"]))
@@ -319,9 +535,11 @@ def get_potential_energy(engine, positions=None):
         set_positions(engine=engine, positions=positions)
     # get potential energy
     engine.command("compute c1 all pe")
-    engine.command("run 0")
-    result = engine.lmp.extract_compute("c1", 0, 0)
-    engine.command("uncompute c1")
+    try:
+        engine.command("run 0")
+        result = engine.lmp.extract_compute("c1", 0, 0)
+    finally:
+        _quiet(engine, "uncompute c1")
     return result
 
 
@@ -335,6 +553,10 @@ def get_positions(engine):
 
 
 def set_positions(engine, positions):
+    # Same symmetric finite/shape guard as LammpsEngine.set_positions.
+    positions = _check_positions(
+        positions, "active_volume.set_positions", natoms=int(engine.lmp.get_natoms())
+    )
     positions = positions.flatten().astype(np.float64)
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)

@@ -4,7 +4,9 @@ import numpy as np
 import ctypes
 import functools
 import os
-from typing import Protocol
+import warnings
+from dataclasses import dataclass, replace
+from typing import Any, Protocol
 from .base import Engine
 from ase.cell import Cell
 from ase.data import atomic_masses, atomic_numbers
@@ -19,9 +21,11 @@ except ImportError:
     pypARTn = None
 
 from ..activevolume.active_volume import (
+    ActiveVolumeSaddleError,
     partn_search_AV,
     partn_refine_AV,
     position_results_AV,
+    require_orthorhombic_cell,
 )
 from ..atomic_environment import AtomicEnvironment
 from ..result import (
@@ -38,14 +42,21 @@ try:
 
     _LAMMPS_EXCEPTIONS = (_LAMMPSException,)
 except ImportError:
-    _LAMMPS_EXCEPTIONS = ()  # LAMMPS not compiled with -DLAMMPS_EXCEPTIONS=yes — decorator is a no-op
+    # The installed `lammps` Python module does not export LAMMPSException
+    # (e.g. lammps 20250722 exposes only MPIAbortException and raises a plain
+    # Exception from `command`): the decorator is then a no-op and a LAMMPS
+    # error propagates as that plain exception without closing the engine.
+    _LAMMPS_EXCEPTIONS = ()
 
 
 def lammps_error_handler(method):
-    """Catch LAMMPSException, close the engine, and re-raise as RuntimeError.
+    """Close the engine and re-raise as RuntimeError on a LAMMPSException.
 
-    Requires LAMMPS compiled with -DLAMMPS_EXCEPTIONS=yes.
-    Without it, LAMMPS calls MPI_Abort and no exception is raised.
+    Only active when the installed ``lammps`` module exports
+    ``LAMMPSException`` (``_LAMMPS_EXCEPTIONS`` is non-empty); otherwise the
+    wrapped method's exceptions propagate unchanged and the engine stays open.
+    A LAMMPS build without exception support calls MPI_Abort instead of
+    raising at all.
     """
 
     @functools.wraps(method)
@@ -59,6 +70,208 @@ def lammps_error_handler(method):
             ) from e
 
     return wrapper
+
+
+# ----------------------------------------------------------------------
+# Species / type / mass rule (one authoritative implementation)
+# ----------------------------------------------------------------------
+
+
+def species_map(
+    types: list[str] | np.ndarray,
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Return the potential species order and the masses LAMMPS is given.
+
+    This is the single rule that maps chemical symbols to LAMMPS atom types
+    for the whole code base: species are ``sorted(set(types))`` (alphabetical),
+    species ``i`` (0-based) is LAMMPS type ``i + 1`` and its mass is the ASE
+    standard atomic mass in amu. ``LammpsEngine.initialize_system`` and the
+    active-volume crop (``activevolume.active_volume.map_types``) both use it,
+    so an integer type means the same species in every LAMMPS instance built
+    from the same full-system ``types``.
+
+    Consequently the elements of a multi-element ``pair_coeff`` **must be
+    listed in this alphabetical order** (for example ``* * NiFeCr.eam Cr Ni``
+    for a Ni/Cr system), and ``types`` must be the *full* system's symbols:
+    a crop that holds only a subset of the species still needs the full map.
+
+    Parameters
+    ----------
+    types : list[str] | np.ndarray
+        Chemical symbols, one per atom (full system).
+
+    Returns
+    -------
+    tuple[tuple[str, ...], tuple[float, ...]]
+        ``(species, masses)``: plain tuples of ``str`` and ``float`` in LAMMPS
+        type order, ready to be stored on an ``HTSTEventRequest``.
+
+    Raises
+    ------
+    ValueError
+        If ``types`` is empty or contains an unknown chemical symbol.
+
+    """
+    symbols = [str(t) for t in types]
+    if not symbols:
+        raise ValueError("species_map: `types` must contain at least one atom")
+    species = tuple(sorted(set(symbols)))
+    try:
+        masses = tuple(float(atomic_masses[atomic_numbers[s]]) for s in species)
+    except KeyError as exc:
+        raise ValueError(f"species_map: unknown chemical symbol {exc}") from exc
+    return species, masses
+
+
+def types_to_int(types: list[str] | np.ndarray, species: tuple[str, ...]) -> np.ndarray:
+    """Map chemical symbols to 1-based LAMMPS integer types.
+
+    Parameters
+    ----------
+    types : list[str] | np.ndarray
+        Chemical symbols, one per atom (any subset of the full system).
+    species : tuple[str, ...]
+        Species order from ``species_map`` (built from the *full* system).
+
+    Returns
+    -------
+    np.ndarray
+        ``int32`` array, ``species.index(symbol) + 1`` for every entry.
+
+    Raises
+    ------
+    ValueError
+        If a symbol in ``types`` is not in ``species``.
+
+    """
+    lookup = {s: i + 1 for i, s in enumerate(species)}
+    try:
+        return np.array([lookup[str(t)] for t in types], dtype=np.int32)
+    except KeyError as exc:
+        raise ValueError(
+            f"types_to_int: symbol {exc} is not in the species map {species}"
+        ) from exc
+
+
+def _require_finite_positions(positions: np.ndarray, op_name: str) -> np.ndarray:
+    """Reject non-finite positions before they reach a collective LAMMPS call.
+
+    A NaN/inf coordinate makes LAMMPS raise a *per-rank* error ("Non-numeric
+    atom coords") on the rank(s) owning the bad atom only. On a multi-rank
+    engine the erroring rank unwinds to Python while the other ranks stay
+    inside liblammps's own collectives, so the whole worker hangs. Every rank
+    receives the same ``positions``, so raising here is symmetric: either all
+    ranks raise together or none does.
+
+    Parameters
+    ----------
+    positions : np.ndarray
+        Candidate positions.
+    op_name : str
+        Operation name used in the error message.
+
+    Returns
+    -------
+    np.ndarray
+        ``positions`` as a float array.
+
+    Raises
+    ------
+    ValueError
+        If any coordinate is NaN or infinite.
+
+    """
+    arr = np.asarray(positions, dtype=np.float64)
+    if not np.isfinite(arr).all():
+        n_bad = int((~np.isfinite(arr)).sum())
+        raise ValueError(
+            f"{op_name}: positions contain {n_bad} non-finite value(s) (NaN/inf); "
+            "refusing to scatter them to LAMMPS (a per-rank 'Non-numeric atom "
+            "coords' error would desynchronise a multi-rank engine and hang it)."
+        )
+    return arr
+
+
+def _require_positions(
+    positions: np.ndarray, op_name: str, natoms: int | None = None
+) -> np.ndarray:
+    """Finite-position guard plus an optional ``(natoms, 3)`` shape check.
+
+    ``scatter_atoms`` copies exactly ``3 * natoms`` doubles from the buffer it
+    is given: a longer array is silently truncated (only the first ``natoms``
+    atoms move) and a shorter one is read past its end (garbage or NaN
+    coordinates, no error). ``natoms`` is the live instance's global atom
+    count, so the raise is symmetric across ranks.
+
+    Parameters
+    ----------
+    positions : np.ndarray
+        Candidate positions.
+    op_name : str
+        Operation name used in the error message.
+    natoms : int | None
+        Expected atom count; ``None`` skips the shape check.
+
+    Returns
+    -------
+    np.ndarray
+        ``positions`` as a float array.
+
+    Raises
+    ------
+    ValueError
+        If any coordinate is non-finite or the shape is not ``(natoms, 3)``.
+
+    """
+    arr = _require_finite_positions(positions, op_name)
+    if natoms is not None and arr.shape != (natoms, 3):
+        raise ValueError(
+            f"{op_name}: positions have shape {arr.shape}, expected "
+            f"{(natoms, 3)} (the live instance has {natoms} atoms); refusing "
+            "to scatter them to LAMMPS (a size mismatch is silently truncated "
+            "or read past the buffer)"
+        )
+    return arr
+
+
+@dataclass(frozen=True, eq=False)
+class FullSystem:
+    """What ``LammpsEngine`` remembers about the last fully initialised system.
+
+    Positions are deliberately not stored: they change every KMC step and the
+    caller that needs a restore always has the current ones. ``cell`` is a
+    private copy; ``pbc`` is a plain tuple.
+
+    Attributes
+    ----------
+    types : tuple[str, ...]
+        Chemical symbol of every atom, in engine (LAMMPS id - 1) order.
+    species : tuple[str, ...]
+        Potential species order (see ``species_map``).
+    masses : tuple[float, ...]
+        Mass of each species in amu, in ``species`` order, as the live
+        instance holds them: ``initialize_system`` records the ASE values it
+        emitted and ``initialize_potential`` refreshes them from
+        ``extract_atom("mass")`` after ``pair_coeff``, because a potential
+        file that carries masses (``eam/alloy``, ``eam/fs``) overrides the
+        emitted ones. Between the two calls they are the ASE values.
+    cell : np.ndarray
+        (3, 3) cell in the ASE frame.
+    pbc : tuple[bool, bool, bool]
+        Periodicity per axis.
+
+    """
+
+    types: tuple[str, ...]
+    species: tuple[str, ...]
+    masses: tuple[float, ...]
+    cell: np.ndarray
+    pbc: tuple[bool, bool, bool]
+
+    @property
+    def natoms(self) -> int:
+        """Number of atoms in the full system."""
+        return len(self.types)
 
 
 class LammpsConfigProtocol(Protocol):
@@ -127,6 +340,49 @@ class LammpsEngine(Engine):
         must apply the rotation manually using `_positions_to_lammps()` and
         `_positions_from_lammps()`.
 
+    State ownership
+        The live LAMMPS instance (`self.lmp`) holds *positions*, a *box*
+        (cell, boundary), an *atom count* with integer types, per-type
+        *masses* and the *potential*. Which operation mutates what, and who
+        restores it:
+
+        - `initialize_system` defines box, atoms, types and masses and records
+          them in `self.full_system` (types, species, masses, cell, pbc; not
+          positions). It is the only operation that changes the *identity* of
+          the full system; nothing restores a previous one.
+        - `set_positions`, `minimize`, `minimize_with_results`,
+          `minimize_freeze_core` and the energy getters with `positions=`
+          mutate *positions only*. They never restore anything: the caller
+          owns the positions it wants back and passes them to the next call.
+        - `partn_search` / `partn_refine` without active volume mutate
+          positions only (the search leaves the last pARTn geometry in the
+          instance). Groups and fixes they create are removed on the success
+          path. `lammps_error_handler` closes the engine on a LAMMPS error
+          only when the installed `lammps` module exports `LAMMPSException`;
+          otherwise (lammps 20250722 raises a plain `Exception`) the error
+          propagates as-is and the engine stays open.
+        - `partn_search` / `partn_refine` **with** active volume rebuild the
+          instance as a crop (`activevolume.active_volume.reset`): box, atom
+          count, types, masses and potential all change and the buffer shell
+          is frozen. Both wrappers restore the full system on every exit path
+          (Ok, Err, exception) through `ensure_full_system(positions)`, which
+          replays `initialize_parameters` / `initialize_system` /
+          `initialize_potential` from `self.full_system` so the restored
+          instance reproduces a fresh engine's energy for the same positions.
+          When the search/refine itself failed, a failure of the restore is
+          reported as a `RuntimeWarning` and the *original* exception is the
+          one raised (`system_is_cropped` then tells whether the engine is
+          still a crop). The AV helpers clean up the groups/fixes/computes
+          they create on their own failure paths; on success the `clear` of
+          the restore removes them.
+        - `system_is_cropped` reports whether the live instance still holds
+          the remembered full system. Any `clear` issued through
+          `self.command` (the AV helpers' path) marks the instance as
+          replaced, and an atom-count mismatch is detected independently.
+        - Scratch work that must not disturb this engine (HTST Hessians)
+          belongs in a separate `LammpsEngine(comm=MPI.COMM_SELF)`; nothing
+          here caches state across instances.
+
     Examples
     --------
     Serial usage:
@@ -160,6 +416,10 @@ class LammpsEngine(Engine):
         self.engine_id = engine_id
         self._is_orthorhombic = None
         self.lmp = None
+        # Remembered full system (set by initialize_system) and whether the live
+        # instance has been replaced by a crop since then.
+        self.full_system: FullSystem | None = None
+        self._cleared_since_init = False
 
     # Convenience
     @property
@@ -174,8 +434,89 @@ class LammpsEngine(Engine):
         return 0 if self.comm is None else self.comm.Get_rank()
 
     def command(self, cmd: str) -> None:
-        """Run a LAMMPS command string."""
+        """Run a LAMMPS command string.
+
+        A ``clear`` issued through this method (the active-volume helpers'
+        path) marks the live instance as no longer holding the remembered full
+        system; see ``system_is_cropped``.
+        """
+        if cmd.strip() == "clear":
+            self._cleared_since_init = True
         self.lmp.command(cmd)
+
+    # ------------------------------------------------------------------
+    # Full-system memory and restore
+    # ------------------------------------------------------------------
+
+    @property
+    def system_is_cropped(self) -> bool:
+        """True when the live instance does not hold the remembered full system.
+
+        Either a ``clear`` went through ``command`` since ``initialize_system``
+        (the active-volume crop path) or the live atom count differs from the
+        remembered one. False before ``initialize_system`` or after ``close``.
+        """
+        if self.lmp is None or self.full_system is None:
+            return False
+        if self._cleared_since_init:
+            return True
+        return int(self.lmp.get_natoms()) != self.full_system.natoms
+
+    def ensure_full_system(self, positions: np.ndarray | None = None) -> bool:
+        """Rebuild the remembered full system if the live instance is cropped.
+
+        Replays ``initialize_parameters`` / ``initialize_system`` /
+        ``initialize_potential`` from ``self.full_system`` after a ``clear``,
+        so a restored engine reproduces a freshly initialised one (same box,
+        boundary, types, masses and potential) for the same positions.
+
+        Parameters
+        ----------
+        positions : np.ndarray | None
+            Full-system positions (ASE frame) to create the atoms at. Required
+            when a rebuild is needed; ignored otherwise (this method never
+            moves atoms of an intact full system).
+
+        Returns
+        -------
+        bool
+            True if the system was rebuilt, False if it was already intact.
+
+        Raises
+        ------
+        RuntimeError
+            If ``initialize_system`` has not been called on this engine.
+        ValueError
+            If a rebuild is needed and ``positions`` is missing or has the
+            wrong shape.
+
+        """
+        if self.full_system is None:
+            raise RuntimeError(
+                "ensure_full_system: initialize_system has not been called, "
+                "there is no remembered full system to restore"
+            )
+        if not self.system_is_cropped:
+            return False
+        fs = self.full_system
+        if positions is None:
+            raise ValueError(
+                "ensure_full_system: the live LAMMPS instance is cropped and "
+                "full-system positions are required to rebuild it"
+            )
+        positions = np.asarray(positions, dtype=np.float64)
+        if positions.shape != (fs.natoms, 3):
+            raise ValueError(
+                "ensure_full_system: positions have shape "
+                f"{positions.shape}, expected {(fs.natoms, 3)}"
+            )
+        self.lmp.command("clear")
+        self.initialize_parameters()
+        self.initialize_system(
+            types=fs.types, positions=positions, cell=Cell(fs.cell), pbc=fs.pbc
+        )
+        self.initialize_potential()
+        return True
 
     def _positions_to_lammps(self, positions: np.ndarray) -> np.ndarray:
         return positions @ self.Q.T if not self._is_orthorhombic else positions
@@ -219,6 +560,10 @@ class LammpsEngine(Engine):
     ) -> None:
         # system parameters
         natoms = len(types)
+        cell = Cell.new(cell)
+        pbc = tuple(bool(p) for p in pbc)
+        if len(pbc) != 3:
+            raise ValueError(f"initialize_system: pbc must have 3 entries, got {pbc}")
         # To deal with Lammps convention if non orthonhombic cell
         self._is_orthorhombic = cell.orthorhombic
         if not self._is_orthorhombic:
@@ -243,12 +588,10 @@ class LammpsEngine(Engine):
         self.lmp.command(f"boundary {boundary}")
 
         ind = np.arange(1, natoms + 1)  # Lammps ids start at 1
-        # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
-        map_type = {
-            atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-            for i, atom_type in enumerate(sorted(set(types)))
-        }
-        int_types = [map_type[element]["ref"] for element in types]  # map to integer
+        # One rule for species -> 1-based LAMMPS type and mass (see species_map):
+        # alphabetical species order, ASE masses. pair_coeff must follow it.
+        species, masses = species_map(types)
+        int_types = types_to_int(types, species).tolist()
 
         # lammps create system
         # ortho
@@ -259,23 +602,48 @@ class LammpsEngine(Engine):
             self.lmp.command(
                 f"region box prism 0.0 {xhi} 0.0 {yhi} 0.0 {zhi} {xy} {xz} {yz}"
             )
-        self.lmp.command("create_box {} box".format(len(map_type)))
+        self.lmp.command("create_box {} box".format(len(species)))
         self.lmp.create_atoms(natoms, ind, int_types, x)
         # Set masses
-        for key in map_type.keys():
-            self.lmp.command(
-                "mass {} {}".format(map_type[key]["ref"], map_type[key]["mass"])
-            )
+        for i, mass in enumerate(masses):
+            self.lmp.command("mass {} {}".format(i + 1, mass))
         # Label atoms name to type :
         self.lmp.command(
-            "labelmap atom "
-            + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
+            "labelmap atom " + " ".join(f"{i + 1} {s}" for i, s in enumerate(species))
         )
+        # Remember the full system so a cropped instance can be rebuilt.
+        self.full_system = FullSystem(
+            types=tuple(str(t) for t in types),
+            species=species,
+            masses=masses,
+            cell=np.array(cell, dtype=np.float64, copy=True),
+            pbc=(pbc[0], pbc[1], pbc[2]),
+        )
+        self._cleared_since_init = False
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
         self.lmp.command("pair_style {}".format(self.config.pair_style))
         self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
+        self._refresh_full_system_masses()
+
+    def _refresh_full_system_masses(self) -> None:
+        """Record the per-type masses the live instance holds after ``pair_coeff``.
+
+        ``eam/alloy``-style potentials re-set the masses from the potential
+        file, so ``full_system.masses`` (what an HTST request is built from)
+        follows the live instance rather than the ASE values emitted earlier.
+        Per-type masses are global, so every rank reads the same values.
+        """
+        fs = self.full_system
+        if fs is None or self.lmp is None:
+            return
+        live = self.lmp.extract_atom("mass")
+        if live is None:
+            return
+        masses = tuple(float(live[i + 1]) for i in range(len(fs.species)))
+        if masses != fs.masses:
+            self.full_system = replace(fs, masses=masses)
 
     @lammps_error_handler
     def get_positions(self) -> np.ndarray | None:
@@ -290,6 +658,11 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def set_positions(self, positions: np.ndarray) -> None:
+        # Symmetric finite + shape guard on every rank before the collective
+        # scatter (get_natoms is the global count, so all ranks agree).
+        positions = _require_positions(
+            positions, "set_positions", natoms=int(self.lmp.get_natoms())
+        )
         positions = self._positions_to_lammps(positions=positions)
         positions = positions.flatten().astype(np.float64)
         positions = np.ascontiguousarray(positions)
@@ -438,79 +811,164 @@ class LammpsEngine(Engine):
     # pARTn search and refinement
     # ------------------------------------------------------------------
 
+    def _check_active_volume_inputs(
+        self,
+        config: Any,
+        positions: np.ndarray | None,
+        cell: np.ndarray | None,
+        types: list[str] | np.ndarray | None,
+        op_name: str,
+    ) -> None:
+        """Reject unsupported active-volume calls before any LAMMPS state changes.
+
+        Raises
+        ------
+        ValueError
+            If positions, cell or types are missing (the crop and the restore
+            both need the full system), or if ``config.frozen_atoms`` is set:
+            frozen indices are full-system ids and the crop renumbers atoms, so
+            that combination would freeze the wrong atoms.
+
+        """
+        if positions is None or cell is None or types is None:
+            raise ValueError(
+                f"{op_name}: active_volume requires full-system positions, cell "
+                "and types (needed for the crop and to restore the engine)"
+            )
+        require_orthorhombic_cell(cell, op_name)
+        if getattr(config, "frozen_atoms", None) is not None:
+            raise ValueError(
+                f"{op_name}: frozen_atoms is not supported together with "
+                "active_volume (frozen indices are full-system ids but the "
+                "active-volume crop renumbers atoms)"
+            )
+
+    def _restore_after_failure(
+        self, positions: np.ndarray, original: BaseException, op_name: str
+    ) -> None:
+        """Restore the full system after ``op_name`` raised ``original``.
+
+        A failure of the restore itself must not replace the original
+        exception (the first failure is the one to report), so it is turned
+        into a ``RuntimeWarning`` naming both; ``system_is_cropped`` then
+        tells the caller whether the engine is still a crop.
+        """
+        try:
+            self.ensure_full_system(positions)
+        except Exception as restore_exc:  # noqa: BLE001 - secondary failure
+            warnings.warn(
+                f"[LammpsEngine] {op_name} raised {type(original).__name__}: "
+                f"{original}; restoring the full system afterwards failed too "
+                f"({restore_exc!r}). The original exception is raised; the "
+                "engine may still be cropped (see system_is_cropped).",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
     @lammps_error_handler
     def partn_search(
         self, config, central_atom_idx: int, positions=None, cell=None, types=None
     ):
+        """Run a pARTn event search around ``central_atom_idx``.
+
+        Under ``config.control.active_volume`` the engine is rebuilt as the
+        cropped active volume for the search and the full system is restored
+        on every exit path (Ok, Err, exception); see the class docstring,
+        "State ownership".
+        """
+        if not config.control.active_volume:
+            return self._partn_search_impl(
+                config, central_atom_idx, positions, cell, types
+            )
+        self._check_active_volume_inputs(config, positions, cell, types, "partn_search")
+        try:
+            result = self._partn_search_impl(
+                config, central_atom_idx, positions, cell, types
+            )
+        except BaseException as exc:
+            self._restore_after_failure(positions, exc, "partn_search")
+            raise
+        self.ensure_full_system(positions)
+        return result
+
+    def _partn_search_impl(
+        self,
+        config: Any,
+        central_atom_idx: int,
+        positions: np.ndarray | None = None,
+        cell: np.ndarray | None = None,
+        types: list[str] | np.ndarray | None = None,
+    ) -> Ok | Err | None:
         original_stdout_fd = os.dup(1)
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, 1)
+        try:
+            print("Central Atom", central_atom_idx)
+            if config.control.active_volume:
+                atom_map, central_lammps_id = partn_search_AV(
+                    self, config, central_atom_idx, positions, cell, types
+                )
+            else:
+                atom_map = None
+                central_lammps_id = [central_atom_idx + 1]
+                if positions is not None:
+                    self.set_positions(positions=positions)
 
-        print("Central Atom", central_atom_idx)
-        if config.control.active_volume:
-            atom_map, central_lammps_id = partn_search_AV(
-                self, config, central_atom_idx, positions, cell, types
-            )
-        else:
-            atom_map = None
-            central_lammps_id = [central_atom_idx + 1]
-            if positions is not None:
-                self.set_positions(positions=positions)
+            delr_threshold = config.eventsearch.delr_thr
 
-        delr_threshold = config.eventsearch.delr_thr
+            artn = pypARTn.artn(engine="lmp")
 
-        artn = pypARTn.artn(engine="lmp")
+            self.lmp.command(f"plugin load {artn.lib._name}")
+            atoms_frozen = self._make_frozen_group(config, positions, types)
+            self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
+            self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
+            self._apply_frozen_fix("f_frozen_post", atoms_frozen)
+            self.lmp.command("min_style fire")
 
-        self.lmp.command(f"plugin load {artn.lib._name}")
-        atoms_frozen = self._make_frozen_group(config, positions, types)
-        self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
-        self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
-        self._apply_frozen_fix("f_frozen_post", atoms_frozen)
-        self.lmp.command("min_style fire")
+            artn.reset_input()
+            artn.set("filout", "artn.out." + str(self.engine_id))
+            artn.set("engine_units", "lammps/metal")
+            artn.set("verbose", config.partn.verbosity)
+            artn.set("struc_format_out", "none")
+            artn.set("delr_thr", config.partn.delr_thr)
+            artn.set("lpush_final", True)
+            artn.set("lmove_nextmin", False)
+            artn.set("zseed", config.partn.zseed)
+            artn.set("push_mode", config.partn.push_mode)
+            if config.partn.push_mode == "rad":
+                artn.set("push_dist_thr", config.partn.push_dist_thr)
+            artn.set("push_step_size", config.partn.push_step_size)
+            artn.set("push_ids", central_lammps_id)
+            artn.set("ninit", config.partn.ninit)
+            artn.set("lanczos_min_size", config.partn.lanczos_min_size)
+            artn.set("lanczos_max_size", config.partn.lanczos_max_size)
+            artn.set("lanczos_disp", config.partn.lanczos_disp)
+            artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
+            artn.set("eigval_thr", config.partn.eigval_thr)
+            artn.set("eigen_step_size", config.partn.eigen_step_size)
+            artn.set("nsmooth", config.partn.nsmooth)
+            artn.set("neigen", config.partn.neigen)
+            artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
+            artn.set("nnewchance", config.partn.nnewchance)
+            if config.partn.nperp is not None:
+                artn.set("nperp", config.partn.nperp)
+            if config.partn.nperp_limitation is not None:
+                artn.set("nperp_limitation", np.array(config.partn.nperp_limitation))
+            else:
+                artn.set("lnperp_limitation", False)
+            artn.set("forc_thr", config.partn.forc_thr)
+            artn.set("push_over", config.partn.push_over)
 
-        artn.reset_input()
-        artn.set("filout", "artn.out." + str(self.engine_id))
-        artn.set("engine_units", "lammps/metal")
-        artn.set("verbose", config.partn.verbosity)
-        artn.set("struc_format_out", "none")
-        artn.set("delr_thr", config.partn.delr_thr)
-        artn.set("lpush_final", True)
-        artn.set("lmove_nextmin", False)
-        artn.set("zseed", config.partn.zseed)
-        artn.set("push_mode", config.partn.push_mode)
-        if config.partn.push_mode == "rad":
-            artn.set("push_dist_thr", config.partn.push_dist_thr)
-        artn.set("push_step_size", config.partn.push_step_size)
-        artn.set("push_ids", central_lammps_id)
-        artn.set("ninit", config.partn.ninit)
-        artn.set("lanczos_min_size", config.partn.lanczos_min_size)
-        artn.set("lanczos_max_size", config.partn.lanczos_max_size)
-        artn.set("lanczos_disp", config.partn.lanczos_disp)
-        artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
-        artn.set("eigval_thr", config.partn.eigval_thr)
-        artn.set("eigen_step_size", config.partn.eigen_step_size)
-        artn.set("nsmooth", config.partn.nsmooth)
-        artn.set("neigen", config.partn.neigen)
-        artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
-        artn.set("nnewchance", config.partn.nnewchance)
-        if config.partn.nperp is not None:
-            artn.set("nperp", config.partn.nperp)
-        if config.partn.nperp_limitation is not None:
-            artn.set("nperp_limitation", np.array(config.partn.nperp_limitation))
-        else:
-            artn.set("lnperp_limitation", False)
-        artn.set("forc_thr", config.partn.forc_thr)
-        artn.set("push_over", config.partn.push_over)
-
-        self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
-        self.lmp.command("unfix 10")
-        self._remove_frozen_fix("f_frozen_post", atoms_frozen)
-        self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
-        self._delete_frozen_group(atoms_frozen)
-
-        os.dup2(original_stdout_fd, 1)
-        os.close(original_stdout_fd)
-        os.close(devnull)
+            self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
+            self.lmp.command("unfix 10")
+            self._remove_frozen_fix("f_frozen_post", atoms_frozen)
+            self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
+            self._delete_frozen_group(atoms_frozen)
+        finally:
+            # Always give stdout back, even when pARTn or LAMMPS raised.
+            os.dup2(original_stdout_fd, 1)
+            os.close(original_stdout_fd)
+            os.close(devnull)
 
         if self._is_rank0:
             err = artn.get_error()
@@ -599,9 +1057,20 @@ class LammpsEngine(Engine):
         saddle_positions=None,
         minimize_outer_atoms: bool = True,
     ):
-        if config.control.active_volume:
-            E_init, atom_map, central_lammps_id = partn_refine_AV(
-                self,
+        """Refine a saddle point with pARTn starting from ``saddle_positions``.
+
+        Under ``config.control.active_volume`` the engine is rebuilt as the
+        cropped active volume and the full system is restored on every exit
+        path (Ok, Err, exception); see the class docstring, "State
+        ownership". A saddle atom that is missing from the crop yields
+        ``Err(REFINEMENT_INVALID_MINIMA)`` on rank 0 (``None`` elsewhere)
+        instead of an exception; a saddle position is otherwise placed where
+        the caller put it (no distance check against ``ract``, as in the
+        base). Non-finite ``saddle_positions`` raise ``ValueError`` on every
+        rank before any LAMMPS call.
+        """
+        if not config.control.active_volume:
+            return self._partn_refine_impl(
                 config,
                 central_atom_idx,
                 positions,
@@ -609,7 +1078,60 @@ class LammpsEngine(Engine):
                 types,
                 saddle_idx,
                 saddle_positions,
+                minimize_outer_atoms,
             )
+        self._check_active_volume_inputs(config, positions, cell, types, "partn_refine")
+        try:
+            result = self._partn_refine_impl(
+                config,
+                central_atom_idx,
+                positions,
+                cell,
+                types,
+                saddle_idx,
+                saddle_positions,
+                minimize_outer_atoms,
+            )
+        except BaseException as exc:
+            self._restore_after_failure(positions, exc, "partn_refine")
+            raise
+        self.ensure_full_system(positions)
+        return result
+
+    def _partn_refine_impl(
+        self,
+        config: Any,
+        central_atom_idx: int,
+        positions: np.ndarray | None = None,
+        cell: np.ndarray | None = None,
+        types: list[str] | np.ndarray | None = None,
+        saddle_idx: np.ndarray | None = None,
+        saddle_positions: np.ndarray | None = None,
+        minimize_outer_atoms: bool = True,
+    ) -> Ok | Err | None:
+        if config.control.active_volume:
+            try:
+                E_init, atom_map, central_lammps_id = partn_refine_AV(
+                    self,
+                    config,
+                    central_atom_idx,
+                    positions,
+                    cell,
+                    types,
+                    saddle_idx,
+                    saddle_positions,
+                )
+            except ActiveVolumeSaddleError as exc:
+                # A saddle atom missing from the crop: report, do not crash the
+                # worker (the base's `.item()` numpy error).
+                if self._is_rank0:
+                    return Err(
+                        ErrorInfo(
+                            type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                            message=str(exc),
+                        )
+                    )
+                return None
         else:
             central_lammps_id = [central_atom_idx + 1]
             E_init = 0
