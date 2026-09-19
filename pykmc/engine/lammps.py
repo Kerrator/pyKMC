@@ -300,7 +300,10 @@ class FullSystem:
     types : tuple[str, ...]
         Chemical symbol of every atom, in engine (LAMMPS id - 1) order.
     species : tuple[str, ...]
-        Potential species order (see ``species_map``).
+        Potential species order (see ``species_map``). Together with
+        ``masses`` it is the explicit map ``ensure_full_system`` replays, so
+        a system initialised with a map larger than its own symbols is
+        rebuilt with the same type numbering.
     masses : tuple[float, ...]
         Mass of each species in amu, in ``species`` order, as the live
         instance holds them: ``initialize_system`` records the ASE values it
@@ -402,7 +405,8 @@ class LammpsEngine(Engine):
         - `initialize_system` defines box, atoms, types and masses and records
           them in `self.full_system` (types, species, masses, cell, pbc; not
           positions). It is the only operation that changes the *identity* of
-          the full system; nothing restores a previous one.
+          the full system; nothing restores a previous one. `initialize_potential`
+          completes it: it is the step that takes the cropped marker down.
         - `set_positions`, `minimize`, `minimize_with_results`,
           `minimize_freeze_core` and the energy getters with `positions=`
           mutate *positions only*. They never restore anything: the caller
@@ -419,19 +423,25 @@ class LammpsEngine(Engine):
           count, types, masses and potential all change and the buffer shell
           is frozen. Both wrappers restore the full system on every exit path
           (Ok, Err, exception) through `ensure_full_system(positions)`, which
-          replays `initialize_parameters` / `initialize_system` /
-          `initialize_potential` from `self.full_system` so the restored
+          replays `initialize_parameters` / `initialize_system` (with the
+          remembered `species` / `masses` as the explicit map, so a
+          subset-species system keeps its type numbering and explicit masses)
+          / `initialize_potential` from `self.full_system` so the restored
           instance reproduces a fresh engine's energy for the same positions.
-          When the search/refine itself failed, a failure of the restore is
-          reported as a `RuntimeWarning` and the *original* exception is the
-          one raised (`system_is_cropped` then tells whether the engine is
-          still a crop). The AV helpers clean up the groups/fixes/computes
-          they create on their own failure paths; on success the `clear` of
-          the restore removes them.
+          A replay that raises leaves the instance marked cropped with the
+          remembered descriptor intact, so a later `ensure_full_system`
+          retries from the same map. When the search/refine itself failed, a
+          failure of the restore is reported as a `RuntimeWarning` and the
+          *original* exception is the one raised (`system_is_cropped` then
+          tells whether the engine is still a crop). The AV helpers clean up
+          the groups/fixes/computes they create on their own failure paths;
+          on success the `clear` of the restore removes them.
         - `system_is_cropped` reports whether the live instance still holds
           the remembered full system. Any `clear` issued through
-          `self.command` (the AV helpers' path) marks the instance as
-          replaced, and an atom-count mismatch is detected independently.
+          `self.command` (the AV helpers' path, and the start of a restore)
+          marks the instance as replaced; only a completed
+          `initialize_potential` clears that marker, and an atom-count
+          mismatch is detected independently.
         - Scratch work that must not disturb this engine (HTST Hessians)
           belongs in a separate `LammpsEngine(comm=MPI.COMM_SELF)`; nothing
           here caches state across instances.
@@ -491,7 +501,8 @@ class LammpsEngine(Engine):
 
         A ``clear`` issued through this method (the active-volume helpers'
         path) marks the live instance as no longer holding the remembered full
-        system; see ``system_is_cropped``.
+        system; the marker stays up until ``initialize_potential`` completes.
+        See ``system_is_cropped``.
         """
         if cmd.strip() == "clear":
             self._cleared_since_init = True
@@ -505,9 +516,13 @@ class LammpsEngine(Engine):
     def system_is_cropped(self) -> bool:
         """True when the live instance does not hold the remembered full system.
 
-        Either a ``clear`` went through ``command`` since ``initialize_system``
-        (the active-volume crop path) or the live atom count differs from the
-        remembered one. False before ``initialize_system`` or after ``close``.
+        Either the cropped marker is up or the live atom count differs from
+        the remembered one. The marker goes up on any ``clear`` issued through
+        ``command`` (the active-volume crop path and the start of an
+        ``ensure_full_system`` replay) and comes down only when
+        ``initialize_potential`` completes, so an instance whose rebuild
+        stopped short of the potential is still reported as cropped. False
+        before ``initialize_system`` or after ``close``.
         """
         if self.lmp is None or self.full_system is None:
             return False
@@ -521,7 +536,18 @@ class LammpsEngine(Engine):
         Replays ``initialize_parameters`` / ``initialize_system`` /
         ``initialize_potential`` from ``self.full_system`` after a ``clear``,
         so a restored engine reproduces a freshly initialised one (same box,
-        boundary, types, masses and potential) for the same positions.
+        boundary, types, masses and potential) for the same positions. The
+        remembered ``species`` / ``masses`` are passed to ``initialize_system``
+        as the explicit map, so a system initialised with a species map larger
+        than the symbols it holds (or with explicit masses) keeps its type
+        numbering and per-type masses.
+
+        The rebuild is complete only once ``initialize_potential`` has
+        returned. If any replay step raises, the exception propagates, the
+        instance stays reported as cropped (``system_is_cropped`` is True even
+        though the atom count may already match) and ``self.full_system`` is
+        the same descriptor as before, so calling this method again retries
+        the rebuild from the same species/mass map, cell, pbc and types.
 
         Parameters
         ----------
@@ -542,6 +568,9 @@ class LammpsEngine(Engine):
         ValueError
             If a rebuild is needed and ``positions`` is missing or has the
             wrong shape.
+        Exception
+            Whatever a replay step raises; see above for the state left
+            behind.
 
         """
         if self.full_system is None:
@@ -560,12 +589,27 @@ class LammpsEngine(Engine):
         positions = _require_positions(
             positions, "ensure_full_system", natoms=fs.natoms
         )
-        self.lmp.command("clear")
-        self.initialize_parameters()
-        self.initialize_system(
-            types=fs.types, positions=positions, cell=Cell(fs.cell), pbc=fs.pbc
-        )
-        self.initialize_potential()
+        # The clear goes through `command` so the marker is up for the whole
+        # replay even when only the atom count flagged the crop; a completed
+        # `initialize_potential` is the only thing that takes it down.
+        self.command("clear")
+        try:
+            self.initialize_parameters()
+            self.initialize_system(
+                types=fs.types,
+                positions=positions,
+                cell=Cell(fs.cell),
+                pbc=fs.pbc,
+                species=fs.species,
+                masses=fs.masses,
+            )
+            self.initialize_potential()
+        except BaseException:
+            # Incomplete rebuild: keep the authoritative descriptor (the replay
+            # may have re-recorded it) and the marker so the next call retries.
+            self.full_system = fs
+            self._cleared_since_init = True
+            raise
         return True
 
     def _positions_to_lammps(self, positions: np.ndarray) -> np.ndarray:
@@ -627,8 +671,9 @@ class LammpsEngine(Engine):
             Keyword-only. Explicit potential species order to use instead of
             ``species_map(types)``. Pass it together with ``masses`` when the
             instance holds only a subset of a larger system (an HTST zone
-            crop) so the full system's type numbering and masses are kept.
-            When omitted the behaviour is exactly ``species_map(types)``.
+            crop) so the full system's type numbering and masses are kept;
+            ``ensure_full_system`` passes the remembered map this way. When
+            omitted the behaviour is exactly ``species_map(types)``.
         masses : tuple[float, ...], optional
             Keyword-only. Masses in amu in ``species`` order; required with
             ``species``.
@@ -639,6 +684,12 @@ class LammpsEngine(Engine):
             If ``pbc`` is malformed, if only one of ``species``/``masses`` is
             given, if the override is malformed, or if a symbol in ``types``
             is not in the species map.
+
+        Notes
+        -----
+        This records the descriptor but does not take the cropped marker
+        down: after a ``clear`` the live instance counts as restored only
+        once ``initialize_potential`` has completed (see ``system_is_cropped``).
 
         """
         # system parameters
@@ -703,7 +754,8 @@ class LammpsEngine(Engine):
         self.lmp.command(
             "labelmap atom " + " ".join(f"{i + 1} {s}" for i, s in enumerate(species))
         )
-        # Remember the full system so a cropped instance can be rebuilt.
+        # Remember the full system so a cropped instance can be rebuilt. The
+        # cropped marker is left as it is: only `initialize_potential` clears it.
         self.full_system = FullSystem(
             types=tuple(str(t) for t in types),
             species=species,
@@ -711,13 +763,22 @@ class LammpsEngine(Engine):
             cell=np.array(cell, dtype=np.float64, copy=True),
             pbc=(pbc[0], pbc[1], pbc[2]),
         )
-        self._cleared_since_init = False
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
+        """Replay ``pair_style`` / ``pair_coeff`` and complete the live system.
+
+        Refreshes ``full_system.masses`` from the live instance (a potential
+        file may override the emitted masses) and takes the cropped marker
+        down, so ``system_is_cropped`` reports False only once the remembered
+        full system has its potential back. Nothing before this point (a
+        ``clear``, ``initialize_parameters``, ``initialize_system``) counts as
+        a completed rebuild.
+        """
         self.lmp.command("pair_style {}".format(self.config.pair_style))
         self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
         self._refresh_full_system_masses()
+        self._cleared_since_init = False
 
     def _refresh_full_system_masses(self) -> None:
         """Record the per-type masses the live instance holds after ``pair_coeff``.
