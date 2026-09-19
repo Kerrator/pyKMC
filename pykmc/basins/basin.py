@@ -184,7 +184,7 @@ class BasinsGenericEvents:
             types=system.types.copy(),
             cell=system.cell.copy(),
             pbc=system.pbc.copy(),
-            index=np.arange(len(system.types)),
+            index=system.index.copy(),
         )
         self._add_state(
             state_index=0, system=new_system
@@ -357,7 +357,7 @@ class BasinsGenericEvents:
             types=self.states[from_state].system.types,
             cell=self.states[from_state].system.cell,
             pbc=source.pbc,
-            index=source.index,
+            index=source.index.copy(),
         )
         # new_system = copy.deepcopy(self.states[from_state].system)
 

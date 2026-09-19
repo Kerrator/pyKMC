@@ -69,6 +69,25 @@ the union of user constraints and outside-radius atoms before changing any sourc
 coordinates. Crop copies retain source context and map frozen global identities to
 local rows. Active-volume membership uses the source periodic axes.
 
+Search, refinement and reconstruction resolve that same union from the full
+source before cropping. The initialized user mask is carried separately: moving
+an unfrozen atom across a configured spatial boundary does not silently change
+which source identities were frozen. Returned search vertices retain their
+original full-coordinate frame for prefactor evaluation, even when the event
+catalogue stores a recentered representation. Basin state copies preserve these
+source identities.
+
+During constrained pARTn searches and refinements, force masking is followed by
+a temporary LAMMPS `fix external` callback that also zeros fixed-atom velocities.
+ARTn's perpendicular relaxation can otherwise rewrite velocities and allow FIRE
+to move fixed atoms despite zero forces. This requires the LAMMPS Python callback
+API; multi-rank engines also require its `force_timeout` soft-stop API. The
+callback uses current local atom tags after redistribution, leaves free and
+ghost velocities unchanged, and never projects returned coordinates. Worker
+failures are agreed across the engine communicator before native work resumes;
+only operation-owned callbacks and fixes are removed. A failed cleanup remains
+an explicit pending-restoration error.
+
 A reconstruction validates its claimed minimum/saddle/minimum against those
 references before protecting working pushes. Both endpoint dispatches receive the
 same payload and actual species labels. An explicit payload passed to

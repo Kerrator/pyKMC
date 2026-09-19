@@ -1073,6 +1073,17 @@ class LammpsEngine(Engine):
                 handle.callback.pop(name, None)
                 del owned[name]
 
+    def _operation_failures(self, error):
+        """Agree on a recoverable Python failure before a native collective."""
+        failure = repr(error) if error is not None else None
+        return self.comm.allgather(failure) if self.comm is not None else [failure]
+
+    def _raise_operation_failure(self, error, failures, phase):
+        if error is not None:
+            raise error
+        if any(failure is not None for failure in failures):
+            raise RuntimeError(f"pARTn {phase} failed on a worker: {failures}")
+
     @contextmanager
     def _fixed_velocity_guard(self, local_fixed_indices):
         """Hold fixed velocities after ARTn, without projecting coordinates.
@@ -1087,38 +1098,47 @@ class LammpsEngine(Engine):
         if not fixed:
             yield
             return
-        if not callable(getattr(native, "set_fix_external_callback", None)):
-            raise RuntimeError(
-                "constrained pARTn requires LAMMPS fix external callbacks"
-            )
         native_ids = np.asarray(fixed, dtype=np.int64) + 1
         serial = getattr(self, "_velocity_serial", 0)
         while True:
             serial += 1
             name = f"pykmc_artn_velocity_{serial}"
-            if not native.has_id("fix", name) and name not in native.callback:
+            collision = native.has_id("fix", name) or name in native.callback
+            collisions = (
+                self.comm.allgather(collision) if self.comm is not None else [collision]
+            )
+            if not any(collisions):
                 break
         self._velocity_serial = serial
         owned = getattr(self, "_velocity_callbacks", None)
         if owned is None:
             owned = self._velocity_callbacks = {}
         callback_errors = []
+        callback_failures = []
 
         def hold_velocity(_caller, _step, nlocal, tags, _positions, added_force):
             # ctypes cannot propagate an exception out of this callback. Keep
             # the cause and reject the operation after native control returns.
             try:
-                added_force.fill(0.0)
-                if not nlocal:
-                    return
-                velocity = native.numpy.extract_atom("v", nelem=nlocal, dim=3)
-                if velocity is None or velocity.shape[0] < nlocal:
-                    raise RuntimeError("native local velocities are unavailable")
-                selected = np.isin(np.asarray(tags), native_ids)
-                velocity[:nlocal][selected] = 0.0
+                # Empty native ranks can receive None instead of empty arrays.
+                if nlocal:
+                    added_force.fill(0.0)
+                    velocity = native.numpy.extract_atom("v", nelem=nlocal, dim=3)
+                    if velocity is None or velocity.shape[0] < nlocal:
+                        raise RuntimeError("native local velocities are unavailable")
+                    selected = np.isin(np.asarray(tags), native_ids)
+                    velocity[:nlocal][selected] = 0.0
             except BaseException as exc:
                 if not callback_errors:
                     callback_errors.append(exc)
+            # Every native rank calls this fix, including ranks with no atoms.
+            # A rank-local soft stop would leave peers in native collectives.
+            failures = self._operation_failures(
+                callback_errors[0] if callback_errors else None
+            )
+            if any(failure is not None for failure in failures):
+                if not callback_failures:
+                    callback_failures.extend(failures)
                     stop = getattr(native, "force_timeout", None)
                     if callable(stop):
                         try:
@@ -1128,42 +1148,84 @@ class LammpsEngine(Engine):
 
         original = None
         try:
+            failure = None
+            if not callable(getattr(native, "set_fix_external_callback", None)):
+                failure = RuntimeError(
+                    "constrained pARTn requires LAMMPS fix external callbacks"
+                )
+            if (
+                self.comm is not None
+                and self.comm.Get_size() > 1
+                and not callable(getattr(native, "force_timeout", None))
+            ):
+                failure = RuntimeError(
+                    "parallel constrained pARTn requires a collective soft-stop API"
+                )
+            self._raise_operation_failure(
+                failure, self._operation_failures(failure), "velocity preflight"
+            )
             # Record ownership before allocation: a failing native command or
             # callback registration may leave a partially installed resource.
             owned[name] = native
-            native.command(f"fix {name} all external pf/callback 1 1")
-            native.set_fix_external_callback(name, hold_velocity)
-            yield
-            failures = [repr(callback_errors[0]) if callback_errors else None]
-            if self.comm is not None:
-                failures = self.comm.allgather(failures[0])
+            for phase, action in (
+                (
+                    "velocity fix allocation",
+                    lambda: native.command(f"fix {name} all external pf/callback 1 1"),
+                ),
+                (
+                    "velocity callback registration",
+                    lambda: native.set_fix_external_callback(name, hold_velocity),
+                ),
+            ):
+                failure = None
+                try:
+                    action()
+                except BaseException as exc:
+                    failure = exc
+                self._raise_operation_failure(
+                    failure, self._operation_failures(failure), phase
+                )
+            failure = None
+            try:
+                yield
+            except BaseException as exc:
+                failure = exc
+            self._raise_operation_failure(
+                failure, self._operation_failures(failure), "minimization"
+            )
             if callback_errors:
                 raise RuntimeError(
                     "pARTn fixed-velocity callback failed"
                 ) from callback_errors[0]
-            if any(failure is not None for failure in failures):
+            if callback_failures:
                 raise RuntimeError(
-                    f"pARTn fixed-velocity callback failed on a worker: {failures}"
+                    f"pARTn fixed-velocity callback failed on a worker: {callback_failures}"
                 )
         except BaseException as exc:
             original = exc
             raise
         finally:
+            cleanup = None
             try:
                 if self.lmp is native and native.has_id("fix", name):
                     native.command(f"unfix {name}")
                 # A closed handle or successful unfix cannot call Python again.
                 native.callback.pop(name, None)
                 owned.pop(name, None)
-            except BaseException as cleanup:
+            except BaseException as exc:
+                cleanup = exc
+            failures = self._operation_failures(cleanup)
+            if any(failure is not None for failure in failures):
                 self._cleared_since_init = True
                 # Retain the callable while the native fix may still be live.
                 if original is None:
-                    raise
+                    self._raise_operation_failure(
+                        cleanup, failures, "velocity unfix cleanup"
+                    )
                 add_note = getattr(BaseException, "add_note", None)
                 if add_note is not None:
                     add_note(
-                        original, f"Fixed-velocity unfix cleanup failed: {cleanup!r}"
+                        original, f"Fixed-velocity unfix cleanup failed: {failures}"
                     )
 
     # ------------------------------------------------------------------
@@ -1297,6 +1359,83 @@ class LammpsEngine(Engine):
     # pARTn search and refinement
     # ------------------------------------------------------------------
 
+    @contextmanager
+    def _partn_resource_scope(self, active):
+        """Clean full-system ARTn resources after a constrained failure.
+
+        Active-volume calls have their own complete crop/replay transaction.
+        Full-system calls retain their native handle and unrelated user fixes.
+        """
+        if active:
+            yield
+            return
+        native = self.lmp
+        resources = (
+            ("fix", "10", "unfix 10"),
+            ("fix", "f_frozen_post", "unfix f_frozen_post"),
+            ("fix", "f_frozen_pre", "unfix f_frozen_pre"),
+            ("fix", "freeze", "unfix freeze"),
+            ("group", "g_frozen", "group g_frozen delete"),
+            ("group", "frozen_group", "group frozen_group delete"),
+        )
+        occupied = [name for kind, name, _ in resources if native.has_id(kind, name)]
+        failure = (
+            ValueError(f"pARTn resource names already in use: {occupied}")
+            if occupied
+            else None
+        )
+        self._raise_operation_failure(
+            failure, self._operation_failures(failure), "resource preflight"
+        )
+        entry = self.get_positions()
+        if self.comm is not None:
+            entry = self.comm.bcast(entry, root=0)
+        entry = np.array(entry, copy=True)
+        original = None
+        try:
+            try:
+                yield
+            except BaseException as exc:
+                original = exc
+            failures = self._operation_failures(original)
+            if original is None and any(value is not None for value in failures):
+                original = RuntimeError(f"pARTn failed on a worker: {failures}")
+        finally:
+            cleanup = None
+            if self.lmp is not native:
+                cleanup = RuntimeError("pARTn native handle closed during operation")
+            else:
+                for kind, name, command in resources:
+                    try:
+                        if native.has_id(kind, name):
+                            native.command(command)
+                    except BaseException as exc:
+                        if cleanup is None:
+                            cleanup = exc
+            failures = self._operation_failures(cleanup)
+            if any(value is not None for value in failures):
+                self._cleared_since_init = True
+                if original is None:
+                    self._raise_operation_failure(cleanup, failures, "resource cleanup")
+                add_note = getattr(BaseException, "add_note", None)
+                if add_note is not None:
+                    add_note(original, f"pARTn resource cleanup failed: {failures}")
+            elif original is not None and not self._cleared_since_init:
+                try:
+                    self.set_positions(entry)
+                except BaseException as exc:
+                    cleanup = exc
+                failures = self._operation_failures(cleanup)
+                if any(value is not None for value in failures):
+                    self._cleared_since_init = True
+                    add_note = getattr(BaseException, "add_note", None)
+                    if add_note is not None:
+                        add_note(
+                            original, f"pARTn position restoration failed: {failures}"
+                        )
+        if original is not None:
+            raise original
+
     def _check_active_volume_inputs(
         self,
         config: Any,
@@ -1383,15 +1522,16 @@ class LammpsEngine(Engine):
             user_constraints,
         )
         try:
-            result = self._partn_search_impl(
-                config,
-                central_atom_idx,
-                positions,
-                cell,
-                types,
-                constraints,
-                user_constraints,
-            )
+            with self._partn_resource_scope(active):
+                result = self._partn_search_impl(
+                    config,
+                    central_atom_idx,
+                    positions,
+                    cell,
+                    types,
+                    constraints,
+                    user_constraints,
+                )
         except BaseException as exc:
             if active:
                 self._restore_after_failure(positions, exc, "partn_search")
@@ -1666,18 +1806,19 @@ class LammpsEngine(Engine):
         )
         # The helper validates the proposed overlay before it clears the engine.
         try:
-            result = self._partn_refine_impl(
-                config,
-                central_atom_idx,
-                positions,
-                cell,
-                types,
-                saddle_idx,
-                saddle_positions,
-                minimize_outer_atoms,
-                constraints,
-                user_constraints,
-            )
+            with self._partn_resource_scope(active):
+                result = self._partn_refine_impl(
+                    config,
+                    central_atom_idx,
+                    positions,
+                    cell,
+                    types,
+                    saddle_idx,
+                    saddle_positions,
+                    minimize_outer_atoms,
+                    constraints,
+                    user_constraints,
+                )
         except BaseException as exc:
             if active:
                 self._restore_after_failure(positions, exc, "partn_refine")
