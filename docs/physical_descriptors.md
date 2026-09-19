@@ -61,6 +61,41 @@ provenance; attaching a service or saving a table must never establish missing
 provenance for that estimate. Geometry and constraint consumption, persistence
 policy, and whole-event matching remain separate consumers of this contract.
 
+## Reference estimate persistence
+
+HTST/RPA reference pickles use schema 2. Their metadata contains a descriptor
+registry, immutable directional calculation records, and explicit associations
+from logical reference IDs to those records. Each calculation retains the full
+source triplet before preminimization and the full produced triplet before any
+Hessian crop, together with actual free/crop atom identities and method. A digest
+also binds the associated local event geometry and barrier; changing dataframe
+labels does not change the association.
+
+Saving only serializes these facts and clearly labeled rate-policy context.
+Attaching a different service cannot change an old producer. Unknown or
+superseded values remain in diagnostic history, outside selectable `nu0` columns.
+Schema-1 tables and rows without a producing calculation keep their event
+geometry and use an explicit unavailable status with the current `k0` fallback.
+Repeated saving and loading cannot supply their missing provenance.
+
+Loading, reference-estimate retrieval, and the catalogue subset passed to
+refinement validate current physics before inheritance. Verified same-input
+calculations reuse their frequencies. Current inclusive frequency windows are
+applied separately, and temperature/`k0` changes rebuild rates without Hessians.
+Complete source snapshots can be recalculated after incompatible physics or
+numerical changes; local event crops alone cannot reconstruct missing atoms.
+Recalculation resolves current initialized user constraints and AV policy while
+preserving the saved AV search center separately from the HTST moving atom.
+Triplets that would move a newly fixed atom remain unavailable.
+
+Restart recomputation requests all three full-system potential energies after
+preminimization and before cropping. It updates the directional barrier as well
+as the frequency; ordinary prefactor calls incur no extra energy evaluations.
+The superseded calculation remains in the registry and history. Fresh opaque
+force-model results can be used in their producing context, but serialization
+does not make them reusable: a subsequent load needs a new calculation or an
+explicit fallback. Worker and transport failures still propagate.
+
 ## Source-resolved endpoint constraints
 
 `ResolvedConstraints` can carry the source cell/PBC, event center identity and

@@ -111,7 +111,9 @@ class PrefactorArchive:
             ("estimate_references", "references"),
             ("estimate_history", "history"),
         ):
-            value = metadata.get(field) or {}
+            value = metadata.get(field)
+            if value is None:
+                value = {}
             if not isinstance(value, dict):
                 raise ValueError(f"reference table {field} must be a dictionary")
             setattr(archive, attribute, deepcopy(value))

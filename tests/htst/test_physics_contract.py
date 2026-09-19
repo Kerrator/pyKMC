@@ -447,7 +447,13 @@ def test_reference_and_site_callers_transport_the_contract(tmp_path, monkeypatch
     first, saddle, final = geometry()
     ref = ReferenceEventTable(cfg, prefactor_service=svc)
     patched = []
-    monkeypatch.setattr(ref, "_patch_row", lambda idx, estimate: patched.append(idx))
+
+    def record_patch(idx, estimate, *, calculation=None, fresh=False):
+        assert calculation is None  # RecordingWorker never calculated a spectrum.
+        assert fresh is True
+        patched.append(idx)
+
+    monkeypatch.setattr(ref, "_patch_row", record_patch)
     monkeypatch.setattr(ref, "_log_direction", lambda *args: None)
     event = SimpleNamespace(
         min1_positions=first,

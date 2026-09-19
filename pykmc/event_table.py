@@ -1394,7 +1394,11 @@ class ReferenceEventTable:
             Subset of the reference table dataframe with only event having IDs in ids.
 
         """
-        return self.table[self.table["event_id"].isin(ids)]
+        mask = self.table["event_id"].isin(ids)
+        if self.uses_prefactors:
+            for idx_ref in self.table.loc[mask, "idx_ref"].tolist():
+                self._ensure_current_estimate(int(idx_ref))
+        return self.table[mask]
 
     def _build_event_series(
         self,
@@ -1633,6 +1637,8 @@ class ReferenceEventTable:
 
     def _validate_stored_estimates(self, df, path: str) -> None:
         """Reject corrupt declared estimates before considering reuse policy."""
+        if df["idx_ref"].duplicated().any():
+            raise ValueError(f"reference table {path}: duplicate logical reference IDs")
         for _, row in df.iterrows():
             status = row["nu0_status"]
             if status not in NU0_STATUSES:
@@ -1649,7 +1655,7 @@ class ReferenceEventTable:
                 or float(value) <= 0
             ):
                 raise ValueError(
-                    f"reference table {path}: accepted nu0 must be finite and positive"
+                    f"reference table {path}: accepted estimate nu0 must be finite and positive"
                 )
             rate = self.rate_constant.compute_rate(
                 float(row["energy_barrier"]), float(value)
