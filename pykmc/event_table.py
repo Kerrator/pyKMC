@@ -1383,6 +1383,9 @@ class ReferenceEventTable:
     def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
         """Return subset table with event having id in ids.
 
+        In prefactor modes, validate the requested rows and their linked
+        reverses before callers read either direction's barriers and rates.
+
         Parameters
         ----------
         ids : list[str]
@@ -1396,7 +1399,9 @@ class ReferenceEventTable:
         """
         mask = self.table["event_id"].isin(ids)
         if self.uses_prefactors:
-            for idx_ref in self.table.loc[mask, "idx_ref"].tolist():
+            required = self.table.loc[mask, ["idx_ref", "idx_backward"]].to_numpy()
+            linked = self.table["idx_ref"].isin(required.ravel())
+            for idx_ref in self.table.loc[linked, "idx_ref"].tolist():
                 self._ensure_current_estimate(int(idx_ref))
         return self.table[mask]
 
