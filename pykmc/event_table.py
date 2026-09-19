@@ -363,12 +363,18 @@ class ReferenceEventTable:
             self._resolve_prefactors(accepted, pbc)
             # Resolution can merge a proven reverse. Return only surviving,
             # resolved rows and their current links, not provisional frames.
-            results_is_valid_events = [
-                Ok(self.table[self.table.idx_ref.isin(res.ok_value().idx_ref)].copy())
-                if res.is_ok()
-                else res
-                for res in results_is_valid_events
-            ]
+            resolved_results = []
+            for res in results_is_valid_events:
+                if not res.is_ok():
+                    resolved_results.append(res)
+                    continue
+                surviving = self.table[self.table.idx_ref.isin(res.ok_value().idx_ref)].copy()
+                resolved_results.append(Ok(surviving) if len(surviving) else Err(ErrorInfo(
+                    type=ErrorType.EVENT_NOT_NEW,
+                    message="Found event already in reference table",
+                    details="Both resolved directions match an earlier whole event",
+                )))
+            results_is_valid_events = resolved_results
 
         return results_is_valid_events
 
@@ -448,8 +454,19 @@ class ReferenceEventTable:
                     fresh=True,
                 )
                 self._log_direction(bwd_id, "backward", pre.backward, pre.n_free, wall)
-                if admission.reverse_idx_ref is not None:
-                    self._finalize_known_reverse(bwd_id, admission.reverse_idx_ref)
+                # Earlier entries in this same batch were pending at lookup.
+                # Refresh identity only after both actual producers exist.
+                known_forward = self._matching_resolved_direction(fwd_id, before=fwd_id)
+                known_backward = self._matching_resolved_direction(bwd_id, before=fwd_id)
+                if known_forward is not None and known_backward is not None:
+                    self._merge_direction(fwd_id, known_forward)
+                    self._merge_direction(bwd_id, known_backward)
+                elif known_backward is not None:
+                    self._merge_direction(bwd_id, known_backward)
+                    logger.info(
+                        "[htst] reference event %d: reverse already catalogued as event %d; actual backward estimate agrees (n_free %d, batch %.3f s)",
+                        fwd_id, known_backward, pre.n_free, wall,
+                    )
                 elif admission.self_reverse_candidate:
                     self._record_self_reverse(fwd_id, bwd_id, pre, wall)
             else:
@@ -636,35 +653,31 @@ class ReferenceEventTable:
         self._merge_direction(bwd_id, fwd_id)
         return True
 
-    def _finalize_known_reverse(self, bwd_id, known_id):
-        """A known reverse also needs agreement of the actual new producer."""
+    def _matching_resolved_direction(self, idx_ref, *, before):
+        """Find an older, current accepted producer after this batch resolves.
+
+        Both directional spectra and the complete source/produced map must
+        agree. Pending later rows cannot become a merge target.
+        """
         from .htst.event_identity import calculations_equivalent
 
-        first = self._eligible_identity_calculation(bwd_id)
-        second = self._eligible_identity_calculation(known_id)
-        new_row = self.table[self.table.idx_ref == bwd_id].iloc[0]
-        old_row = self.table[self.table.idx_ref == known_id].iloc[0]
-        if (
-            first is not None
-            and second is not None
-            and abs(float(new_row.energy_barrier) - float(old_row.energy_barrier))
-            <= SELF_REVERSE_BARRIER_TOL
-            and self_reverse_prefactors_agree(first.estimate, second.estimate)
-            and calculations_equivalent(
-                first,
-                second,
-                tolerance=self.config.psr.matching_score_thr,
+        first = self._eligible_identity_calculation(idx_ref)
+        if first is None:
+            return None
+        row = self.table[self.table.idx_ref == idx_ref].iloc[0]
+        candidates = self.table[
+            (self.table.idx_ref < before)
+            & (self.table.event_id == row.event_id)
+            & ((self.table.energy_barrier - float(row.energy_barrier)).abs() <= SELF_REVERSE_BARRIER_TOL)
+        ]
+        for known_id in candidates.idx_ref:
+            second = self._eligible_identity_calculation(int(known_id))
+            if second is not None and self_reverse_prefactors_agree(first.estimate, second.estimate) and calculations_equivalent(
+                first, second, tolerance=self.config.psr.matching_score_thr,
                 kmax_factor=self.config.ira.kmax_factor,
-            )
-        ):
-            self._merge_direction(bwd_id, known_id)
-            return True
-        logger.info(
-            "[htst] reverse candidate %d is unproven; retaining both directions including %d",
-            known_id,
-            bwd_id,
-        )
-        return False
+            ):
+                return int(known_id)
+        return None
 
     def _record_self_reverse(self, idx_ref, bwd_id, pre, wall_s):
         """Finalize a candidate, preserving each directional estimate on failure."""
