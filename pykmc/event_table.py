@@ -368,12 +368,20 @@ class ReferenceEventTable:
                 if not res.is_ok():
                     resolved_results.append(res)
                     continue
-                surviving = self.table[self.table.idx_ref.isin(res.ok_value().idx_ref)].copy()
-                resolved_results.append(Ok(surviving) if len(surviving) else Err(ErrorInfo(
-                    type=ErrorType.EVENT_NOT_NEW,
-                    message="Found event already in reference table",
-                    details="Both resolved directions match an earlier whole event",
-                )))
+                surviving = self.table[
+                    self.table.idx_ref.isin(res.ok_value().idx_ref)
+                ].copy()
+                resolved_results.append(
+                    Ok(surviving)
+                    if len(surviving)
+                    else Err(
+                        ErrorInfo(
+                            type=ErrorType.EVENT_NOT_NEW,
+                            message="Found event already in reference table",
+                            details="Both resolved directions match an earlier whole event",
+                        )
+                    )
+                )
             results_is_valid_events = resolved_results
 
         return results_is_valid_events
@@ -457,7 +465,9 @@ class ReferenceEventTable:
                 # Earlier entries in this same batch were pending at lookup.
                 # Refresh identity only after both actual producers exist.
                 known_forward = self._matching_resolved_direction(fwd_id, before=fwd_id)
-                known_backward = self._matching_resolved_direction(bwd_id, before=fwd_id)
+                known_backward = self._matching_resolved_direction(
+                    bwd_id, before=fwd_id
+                )
                 if known_forward is not None and known_backward is not None:
                     self._merge_direction(fwd_id, known_forward)
                     self._merge_direction(bwd_id, known_backward)
@@ -465,7 +475,10 @@ class ReferenceEventTable:
                     self._merge_direction(bwd_id, known_backward)
                     logger.info(
                         "[htst] reference event %d: reverse already catalogued as event %d; actual backward estimate agrees (n_free %d, batch %.3f s)",
-                        fwd_id, known_backward, pre.n_free, wall,
+                        fwd_id,
+                        known_backward,
+                        pre.n_free,
+                        wall,
                     )
                 elif admission.self_reverse_candidate:
                     self._record_self_reverse(fwd_id, bwd_id, pre, wall)
@@ -668,13 +681,22 @@ class ReferenceEventTable:
         candidates = self.table[
             (self.table.idx_ref < before)
             & (self.table.event_id == row.event_id)
-            & ((self.table.energy_barrier - float(row.energy_barrier)).abs() <= SELF_REVERSE_BARRIER_TOL)
+            & (
+                (self.table.energy_barrier - float(row.energy_barrier)).abs()
+                <= SELF_REVERSE_BARRIER_TOL
+            )
         ]
         for known_id in candidates.idx_ref:
             second = self._eligible_identity_calculation(int(known_id))
-            if second is not None and self_reverse_prefactors_agree(first.estimate, second.estimate) and calculations_equivalent(
-                first, second, tolerance=self.config.psr.matching_score_thr,
-                kmax_factor=self.config.ira.kmax_factor,
+            if (
+                second is not None
+                and self_reverse_prefactors_agree(first.estimate, second.estimate)
+                and calculations_equivalent(
+                    first,
+                    second,
+                    tolerance=self.config.psr.matching_score_thr,
+                    kmax_factor=self.config.ira.kmax_factor,
+                )
             ):
                 return int(known_id)
         return None
