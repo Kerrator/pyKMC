@@ -1,14 +1,18 @@
 """Per-event orchestration: two directional Vineyard estimates sharing one saddle.
 
-The orchestrator validates the request, selects one common free-atom subset,
-obtains and classifies the saddle Hessian exactly once, then evaluates each
-direction independently. Rejection precedence is "saddle first": when the shared
-saddle spectrum is not a first-order saddle both directions are rejected with
-``SADDLE_NOT_FIRST_ORDER`` and no minimum Hessian is requested. Scientific
-rejections (:class:`PrefactorRejected`) become ``status="rejected"`` on the
-affected direction only; every other exception propagates to the caller,
-because a broken payload, a dead engine or a programming error must not
-masquerade as a physical fallback.
+The orchestrator validates the request, selects one common free-atom subset
+(centred on the moving atom in the geometry named by
+``settings.free_region_center``: the saddle by default, ``min1`` for the
+original model), obtains and classifies the saddle Hessian exactly once, then
+evaluates each direction independently. Rejection precedence is "saddle
+first": when the shared saddle spectrum is not a first-order saddle both
+directions are rejected with ``SADDLE_NOT_FIRST_ORDER`` and no minimum Hessian
+is requested. Scientific rejections (:class:`PrefactorRejected`) become
+``status="rejected"`` on the affected direction only; every other exception
+propagates to the caller, because a broken payload, a dead engine or a
+programming error must not masquerade as a physical fallback. With
+``compute_backward=False`` the ``min2`` Hessian is never requested and the
+backward direction is returned as ``status="skipped"``.
 """
 
 from __future__ import annotations
@@ -123,6 +127,7 @@ def compute_event_prefactors(
     *,
     method: str = "fd",
     free_indices: Any | None = None,
+    compute_backward: bool = True,
 ) -> EventPrefactors:
     """Compute the forward and backward Vineyard prefactors of one event.
 
@@ -140,22 +145,31 @@ def compute_event_prefactors(
         plumbing error and raises ``ValueError``. It may raise
         :class:`PrefactorRejected` (any code, detail optional) to reject the
         direction(s) that need that geometry. Called exactly once for the saddle,
-        then once per minimum only when the saddle is a first-order saddle.
+        then once per requested minimum only when the saddle is a first-order
+        saddle.
     method : str, optional
         Label recorded on the result, e.g. ``"fd"`` or ``"lammps_eskm"``.
     free_indices : array_like, optional
         Caller-supplied free selection (global indices) overriding the sphere of
-        radius ``settings.free_radius`` around ``center_index`` in the ``min1``
-        geometry. One selection feeds all three Hessians, so the backward
-        direction's sphere is centred on the moving atom's ``min1`` position, not
-        its ``min2`` position. An empty selection rejects both directions with
+        radius ``settings.free_radius`` around ``center_index`` in the geometry
+        named by ``settings.free_region_center`` (the saddle by default, so the
+        selection is the same seen from either minimum; ``"min1"`` reproduces
+        the original model, whose backward direction then sees a boundary
+        centred on the mover's initial position). One selection feeds every
+        Hessian of the event. An empty selection rejects both directions with
         ``EMPTY_FREE_REGION``.
+    compute_backward : bool, optional
+        ``False`` skips the ``min2`` Hessian entirely: the backward direction is
+        returned as ``status="skipped"`` (``reason="not requested"``, no
+        estimate, no rejection code) on every path, including the early
+        rejections. Site requests use this because only the forward direction
+        of a refined event enters the live rates.
 
     Returns
     -------
     EventPrefactors
         Per-direction results; ``forward`` is ``min1 -> saddle`` and ``backward`` is
-        ``min2 -> saddle``.
+        ``min2 -> saddle`` (or skipped).
 
     Raises
     ------
@@ -185,9 +199,13 @@ def compute_event_prefactors(
     n_atoms = min1.shape[0]
     center = int(request.center_index)
 
+    if not isinstance(compute_backward, bool):
+        raise ValueError(f"compute_backward must be a bool, got {compute_backward!r}")
+
     if free_indices is None:
+        centring = saddle if request.settings.free_region_center == "saddle" else min1
         free = select_free_indices(
-            min1, center, request.settings.free_radius, request.cell, request.pbc
+            centring, center, request.settings.free_radius, request.cell, request.pbc
         )
     else:
         free = np.asarray(free_indices)
@@ -217,7 +235,9 @@ def compute_event_prefactors(
         return EventPrefactors(
             event_key=request.event_key,
             forward=empty,
-            backward=empty,
+            backward=empty
+            if compute_backward
+            else DirectionalPrefactor.not_requested(n_free=0, n_negative_saddle=None),
             method=method,
             n_free=0,
             settings=request.settings,
@@ -245,7 +265,11 @@ def compute_event_prefactors(
         return EventPrefactors(
             event_key=request.event_key,
             forward=both,
-            backward=both,
+            backward=both
+            if compute_backward
+            else DirectionalPrefactor.not_requested(
+                n_free=n_free, n_negative_saddle=None
+            ),
             method=method,
             n_free=n_free,
             settings=request.settings,
@@ -265,7 +289,11 @@ def compute_event_prefactors(
         return EventPrefactors(
             event_key=request.event_key,
             forward=both,
-            backward=both,
+            backward=both
+            if compute_backward
+            else DirectionalPrefactor.not_requested(
+                n_free=n_free, n_negative_saddle=n_negative_saddle
+            ),
             method=method,
             n_free=n_free,
             settings=request.settings,
@@ -274,9 +302,14 @@ def compute_event_prefactors(
     forward = _direction(
         hessian_fn, min1, free, sad_spec, n_negative_saddle, request, "min1"
     )
-    backward = _direction(
-        hessian_fn, min2, free, sad_spec, n_negative_saddle, request, "min2"
-    )
+    if compute_backward:
+        backward = _direction(
+            hessian_fn, min2, free, sad_spec, n_negative_saddle, request, "min2"
+        )
+    else:
+        backward = DirectionalPrefactor.not_requested(
+            n_free=n_free, n_negative_saddle=n_negative_saddle
+        )
     return EventPrefactors(
         event_key=request.event_key,
         forward=forward,

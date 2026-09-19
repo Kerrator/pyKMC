@@ -43,7 +43,7 @@ from .result import (
     PrefactorRejected,
     PrefactorRejection,
 )
-from .settings import HTSTSettings
+from .settings import FREE_REGION_CENTERS, HTSTSettings
 from .vineyard import (
     VineyardEstimate,
     vineyard_from_spectra,
@@ -56,6 +56,7 @@ __all__ = [
     "ANGSTROM_M",
     "ESKM_METAL_CONVERSION",
     "EV_J",
+    "FREE_REGION_CENTERS",
     "H_EV_S",
     "HBAR_EV_S",
     "HBAR_J_S",

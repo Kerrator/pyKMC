@@ -168,13 +168,16 @@ def _refined(
     """Build a refinement output with neighbour-cropped geometry shifted by ``offset``."""
     neighbors = np.asarray(neighbors_list.get_neighbors("rcut", atom), dtype=int)
     pos = np.asarray(system.positions, dtype=float)
+    full_saddle = pos.copy()
+    full_saddle[neighbors] += offset
     return EventRefinementOutput(
         central_atom_index=atom,
-        saddle_positions=pos[neighbors] + offset,
+        saddle_positions=full_saddle[neighbors],
         E_saddle=dE,
         min2_positions=pos[neighbors] + 2.0 * offset,
         dE_forward=dE,
         num_reference_event=0,
+        full_saddle_positions=full_saddle if estimate.get("refined") == "T" else None,
         **estimate,
     )
 
@@ -335,11 +338,11 @@ class TestComposition:
         Initializer(kmc).initialize_prefactor_service()
         assert kmc.prefactor_service is None
 
-    @pytest.mark.parametrize("delta,warned", [(1.0, True), (0.0, False), (-1.0, False)])
-    def test_free_radius_beyond_rcut_is_warned_once(
-        self, htst_config: Any, delta: float, warned: bool
+    @pytest.mark.parametrize("delta", [1.0, 0.0, -1.0])
+    def test_free_radius_is_independent_of_rcut(
+        self, htst_config: Any, delta: float
     ) -> None:
-        """free_radius > rcut means non-stationary site geometries: one warning."""
+        """Site requests use the full refined saddle: no rcut warning in any case."""
         from pykmc.config import RateConstantConfig
 
         rcut = htst_config.atomicenvironment.rcut
@@ -350,12 +353,357 @@ class TestComposition:
         kmc = KMC(config, manager=FakeManager())
         kmc.loggers = _Recorder()
         Initializer(kmc).initialize_prefactor_service()
-        hits = [
-            m for _, m in kmc.loggers.messages if "free_radius" in m and "rcut" in m
-        ]
-        assert len(hits) == (1 if warned else 0)
-        if warned:
-            assert f"free_radius = {rcut + delta} A exceeds" in hits[0]
+        assert not [m for _, m in kmc.loggers.messages if "rcut" in m]
+        ready = [m for _, m in kmc.loggers.messages if "prefactor service ready" in m]
+        assert len(ready) == 1
+        assert "centred on the saddle geometry" in ready[0]
+
+
+class TestExitStatus:
+    """``_close`` chooses the status and ``run.py`` propagates it after shutdown."""
+
+    def test_close_exits_zero_on_completion_and_one_on_failure(
+        self, htst_config: Any
+    ) -> None:
+        """Normal completion -> SystemExit(0); an aborted simulation -> SystemExit(1)."""
+        for failed, code in ((False, 0), (True, 1)):
+            manager = FakeManager()
+            kmc = KMC(htst_config, manager=manager)
+            kmc.loggers = _Recorder()
+            with pytest.raises(SystemExit) as info:
+                kmc._close(failed=failed)
+            assert info.value.code == code
+            assert manager.shutdowns == 1  # workers are shut down before exiting
+            assert ("log", ":=> End of simulation") in kmc.loggers.messages
+        manager = FakeManager()
+        kmc = KMC(htst_config, manager=manager)
+        kmc.loggers = _Recorder()
+        with pytest.raises(SystemExit) as info:
+            kmc._close()  # the default is a normal completion
+        assert info.value.code == 0
+
+    def test_abort_paths_close_with_failure(
+        self,
+        htst_config: Any,
+        system_single_type_fcc: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """'No events found' and 'all reconstructions failed' both use failed=True."""
+        manager = FakeManager()
+        kmc = KMC(_step_config("constant", k0=5.0), manager=manager)
+        kmc.system = copy.deepcopy(system_single_type_fcc)
+        kmc.loggers = _Recorder()
+        kmc.reference_table = ReferenceEventTable(kmc.config)
+        kmc.visited_environments = set()
+        seen: list[bool] = []
+
+        def fake_close(failed: bool = False) -> None:
+            seen.append(failed)
+            raise SystemExit(1 if failed else 0)
+
+        monkeypatch.setattr(kmc, "_close", fake_close)
+        monkeypatch.setattr(kmc, "minimize_system", lambda: None)
+        monkeypatch.setattr(
+            kmc, "execute_event_searches", lambda atoms: _FakeEventSearch([])
+        )
+        monkeypatch.setattr(kmc, "_append_snapshot_to_trajectory", lambda: None)
+        with pytest.raises(SystemExit) as info:
+            kmc.run()  # empty reference table after the first search
+        assert info.value.code == 1 and seen == [True]
+
+        # every reconstruction failing is the other abort path
+        table = ActiveEventTable(kmc.config)
+        table.table = pd.DataFrame(
+            {
+                "atom_index": [0],
+                "saddle_positions": [np.zeros((1, 3))],
+                "final_positions": [np.zeros((1, 3))],
+                "energy_barrier": [0.5],
+                "k": [1.0],
+                "num_reference_event": [0],
+                "refined": ["T"],
+            }
+        )
+        kmc.reference_table.table = pd.DataFrame(
+            {"idx_ref": [0], "event_id": ["X"], "idx_backward": [0]}
+        )
+        monkeypatch.setattr(kmc, "_select_event", lambda t: (0, 1.0, 1.0))
+        monkeypatch.setattr(
+            kmc,
+            "_reconstruction_active_event",
+            lambda idx, t: types.SimpleNamespace(
+                is_ok=lambda: False,
+                err_value=lambda: types.SimpleNamespace(message="boom"),
+            ),
+        )
+        with pytest.raises(SystemExit) as info:
+            kmc.reconstruction(table)
+        assert info.value.code == 1 and seen == [True, True]
+
+    @pytest.mark.parametrize("code", [0, 1])
+    def test_run_propagates_the_exit_status_after_shutting_down(
+        self, code: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``run.main`` re-raises SystemExit with the status; workers are shut down."""
+        manager = FakeManager()
+        aborted: list[int] = []
+
+        class FakeFactory:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def launch(self) -> Any:
+                return manager
+
+        class FakeKMC:
+            def __init__(self, config: Any, manager: Any = None) -> None:
+                self.manager = manager
+
+            def _initialize(self) -> None:
+                pass
+
+            def run(self) -> None:
+                # KMC._close: shutdown first, then exit with the status
+                self.manager.shutdown()
+                sys.exit(code)
+
+        class FakeComm:
+            def Get_size(self) -> int:
+                return 2
+
+            def Abort(self, status: int) -> None:
+                aborted.append(status)
+
+        ini = TestRunWiring._ini(tmp_path, "constant")
+        monkeypatch.setattr(run_module, "EngineManagerFactory", FakeFactory)
+        monkeypatch.setattr(run_module, "KMC", FakeKMC)
+        monkeypatch.setattr(run_module.MPI, "COMM_WORLD", FakeComm())
+        monkeypatch.setattr(sys, "argv", ["pykmc", "-in", str(ini)])
+        with pytest.raises(SystemExit) as info:
+            run_module.main()
+        assert info.value.code == code
+        assert manager.shutdowns >= 1  # idempotent on the real manager
+        assert aborted == []  # a SystemExit is never an MPI abort
+
+    def test_run_still_aborts_the_communicator_on_other_failures(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The BaseException boundary is unchanged: comm.Abort(1) then re-raise."""
+        aborted: list[int] = []
+
+        class FakeFactory:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def launch(self) -> Any:
+                return FakeManager()
+
+        class FakeKMC:
+            def __init__(self, config: Any, manager: Any = None) -> None:
+                pass
+
+            def _initialize(self) -> None:
+                raise RuntimeError("engine died")
+
+            def run(self) -> None:
+                pass
+
+        class FakeComm:
+            def Get_size(self) -> int:
+                return 2
+
+            def Abort(self, status: int) -> None:
+                aborted.append(status)
+
+        ini = TestRunWiring._ini(tmp_path, "constant")
+        monkeypatch.setattr(run_module, "EngineManagerFactory", FakeFactory)
+        monkeypatch.setattr(run_module, "KMC", FakeKMC)
+        monkeypatch.setattr(run_module.MPI, "COMM_WORLD", FakeComm())
+        monkeypatch.setattr(sys, "argv", ["pykmc", "-in", str(ini)])
+        with pytest.raises(RuntimeError, match="engine died"):
+            run_module.main()
+        assert aborted == [1]
+
+    def test_run_aborts_when_the_safety_net_shutdown_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A shutdown failing inside the SystemExit handler still aborts the comm.
+
+        A SystemExit raised without a prior ``_close`` reaches the handler with
+        the workers still waiting; if that shutdown itself raises, the failure
+        must go through ``comm.Abort(1)`` like any other, or the un-notified
+        ranks hang under mpirun.
+        """
+        aborted: list[int] = []
+
+        class BrokenManager(FakeManager):
+            def shutdown(self) -> None:
+                super().shutdown()
+                raise RuntimeError("session send failed")
+
+        manager = BrokenManager()
+
+        class FakeFactory:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def launch(self) -> Any:
+                return manager
+
+        class FakeKMC:
+            def __init__(self, config: Any, manager: Any = None) -> None:
+                pass
+
+            def _initialize(self) -> None:
+                pass
+
+            def run(self) -> None:
+                sys.exit(0)  # raised outside _close: nothing shut down yet
+
+        class FakeComm:
+            def Get_size(self) -> int:
+                return 2
+
+            def Abort(self, status: int) -> None:
+                aborted.append(status)
+
+        ini = TestRunWiring._ini(tmp_path, "constant")
+        monkeypatch.setattr(run_module, "EngineManagerFactory", FakeFactory)
+        monkeypatch.setattr(run_module, "KMC", FakeKMC)
+        monkeypatch.setattr(run_module.MPI, "COMM_WORLD", FakeComm())
+        monkeypatch.setattr(sys, "argv", ["pykmc", "-in", str(ini)])
+        with pytest.raises(RuntimeError, match="session send failed"):
+            run_module.main()
+        assert manager.shutdowns == 1 and aborted == [1]
+
+
+class TestSeed:
+    """``control.seed`` makes the searched atoms reproducible."""
+
+    @staticmethod
+    def _draw(config: Any, seed: int | None, n_atoms: int = 60) -> list[int]:
+        control = config.control.model_copy(update={"seed": seed})
+        kmc = KMC(config.model_copy(update={"control": control}), manager=FakeManager())
+        kmc.inactive_ae = None
+        kmc.atomic_environment = types.SimpleNamespace(
+            atomic_environment_list=["A", "B"] * (n_atoms // 2)
+        )
+        return kmc.central_atoms_research(["A", "B"], nsearch=12)
+
+    def test_same_seed_same_selection(self, htst_config: Any) -> None:
+        """Two KMC objects built with one seed draw the same central atoms."""
+        first = self._draw(htst_config, 11)
+        second = self._draw(htst_config, 11)
+        assert first == second and len(first) == 24
+        assert self._draw(htst_config, 12) != first
+
+    def test_seed_also_fixes_the_numpy_stream(self, htst_config: Any) -> None:
+        """NumPy's global generator (basin exit draws) is seeded as well."""
+        self._draw(htst_config, 11)
+        a = np.random.random(3)
+        self._draw(htst_config, 11)
+        assert np.array_equal(np.random.random(3), a)
+
+    def test_seed_is_optional_and_parsed_from_text(self, htst_config: Any) -> None:
+        """The field defaults to None and accepts the INI string form."""
+        from pykmc.config import ControlConfig
+
+        assert htst_config.control.seed is None
+        parsed = ControlConfig.model_validate(
+            {"initial_config": "x.xyz", "n_steps": 1, "engine": "lammps", "seed": "7"}
+        )
+        assert parsed.seed == 7
+        assert "zseed" in ControlConfig.model_fields["seed"].description
+
+    def test_new_environments_are_sorted_through_the_real_method(
+        self, htst_config: Any
+    ) -> None:
+        """``KMC.get_new_environments`` returns the real method's ids sorted.
+
+        ``AtomicEnvironment.get_new_environments`` builds its list from a set,
+        so its own order follows the per-process string hash; with forty
+        distinct ids an accidentally sorted set order is all but impossible,
+        so this fails whenever the call site stops sorting.
+        """
+        from pykmc.atomic_environment import AtomicEnvironment
+
+        kmc = KMC(htst_config, manager=FakeManager())
+        kmc.loggers = _Recorder()
+        ids = [f"env-{i:02d}-{'x' * (i % 7)}" for i in range(40)]
+        ae = AtomicEnvironment.__new__(AtomicEnvironment)
+        ae.atomic_environment_list = [ids[i % 40] for i in range(200)] + ["cr"]
+        kmc.atomic_environment = ae
+        kmc.visited_environments = {"cr", ids[3]}
+        new = kmc.get_new_environments()
+        assert new == sorted(set(ids) - {ids[3]}) and len(new) == 39
+        assert ("log", "\t :=> 39 new atomic environments found") in (
+            kmc.loggers.messages
+        )
+
+    def test_seed_reproduces_the_selection_across_hash_seeds(self) -> None:
+        """Interpreters with different ``PYTHONHASHSEED`` pick the same atoms.
+
+        Each subprocess builds a real ``AtomicEnvironment`` holding sixteen
+        distinct environment ids, calls ``KMC.get_new_environments`` (the real
+        method underneath) and ``central_atoms_research`` under
+        ``control.seed``, and prints the order and the selection. mpirun gives
+        every rank its own random hash seed, so neither may depend on it.
+        """
+        script = textwrap.dedent(
+            """
+            from pykmc.atomic_environment import AtomicEnvironment
+            from pykmc.config import Config
+            from pykmc.kmc import KMC
+
+            class M:
+                def broadcast(self, *a, **k):
+                    pass
+
+            class L:
+                def info(self, *a, **k):
+                    pass
+
+            config = Config.from_ini_file("tests/data/input.in")
+            control = config.control.model_copy(update={"seed": 20260918})
+            kmc = KMC(config.model_copy(update={"control": control}), manager=M())
+            kmc.loggers = L()
+            kmc.inactive_ae = None
+            letters = "abcdefghijklmnop"
+            ids = ["hash%02d_%s" % (i, letters[i] * 24) for i in range(16)]
+            ae = AtomicEnvironment.__new__(AtomicEnvironment)
+            ae.atomic_environment_list = [ids[i % 16] for i in range(160)]
+            ae.atomic_environment_list += ["crystal"] * 40
+            kmc.atomic_environment = ae
+            kmc.visited_environments = {"crystal"}
+            new = kmc.get_new_environments()
+            picked = kmc.central_atoms_research(new, nsearch=3)
+            print("ORDER", " ".join(e[:6] for e in new))
+            print("PICKED", " ".join(map(str, picked)))
+            """
+        )
+        root = Path.cwd()
+        outputs: list[list[str]] = []
+        for hash_seed in ("0", "1", "2"):
+            env = dict(os.environ, PYTHONPATH=str(root), PYTHONHASHSEED=hash_seed)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            assert proc.returncode == 0, proc.stdout + proc.stderr
+            lines = [
+                line
+                for line in proc.stdout.splitlines()
+                if line.startswith(("ORDER ", "PICKED "))
+            ]
+            assert len(lines) == 2, proc.stdout
+            outputs.append(lines)
+        assert outputs[0][0] == "ORDER " + " ".join(f"hash{i:02d}" for i in range(16))
+        assert len(outputs[0][1].split()) == 1 + 16 * 3
+        assert outputs[1] == outputs[0] and outputs[2] == outputs[0], outputs
 
 
 class TestRunWiring:
@@ -644,9 +992,12 @@ class TestStepOrdering:
         )
         assert [r.event_key[0] for r in manager.prefactor_requests] == ["site", "site"]
         assert sorted(r.center_index for r in manager.prefactor_requests) == [0, 5]
+        assert manager.prefactor_backward_flags == [False, False]
         summary_lines = [m for n, m in log.messages if "site attempts this step=2" in m]
         assert len(summary_lines) == 1
         assert "(ok=2, rejected=0)" in summary_lines[0]
+        assert "hessian requests this step=2" in summary_lines[0]
+        assert "prefactor wall=" in summary_lines[0] and summary_lines[0].endswith(" s")
         assert log.step_lines[0]["k"] in (
             rate_from_prefactor(6.0, 0.5, config.rateconstant.T),
             rate_from_prefactor(6.0, 0.7, config.rateconstant.T),

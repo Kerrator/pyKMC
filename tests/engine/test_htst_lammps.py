@@ -384,37 +384,147 @@ class TestLammpsHTSTSerial:
 
     # -- SW-Si fixture -----------------------------------------------------
 
+    @pytest.mark.parametrize(
+        ("center", "n_free", "forward_thz", "backward_thz"),
+        [
+            ("saddle", 37, 21.1588, 21.1844),
+            ("min1", 43, 23.6139, 19.6167),
+        ],
+    )
     def test_sw_si_fixture_end_to_end(
         self,
         search_engine: LammpsEngine,
         hop_request: Callable[..., HTSTEventRequest],
         scratch_log: list[LammpsEngine],
+        center: str,
+        n_free: int,
+        forward_thz: float,
+        backward_thz: float,
     ) -> None:
         """Both directions accepted on the tracked vacancy hop; nothing leaks.
 
-        Measured (free_radius 6, dx 0.01, premin False, full system): 43 free
-        atoms, forward 23.614 THz, backward 19.617 THz; the donor's 23.6 THz /
-        43 free atoms is reproduced without tuning.
+        Measured (free_radius 6, dx 0.01, premin False, full system) with the
+        S7 measurement script and reproduced here without tuning: the
+        saddle-centred free region (default) holds 37 atoms and gives forward
+        21.1588 / backward 21.1844 THz (symmetric to 0.12 %, as the hop is);
+        the min1-centred region of the original model holds 43 atoms and gives
+        23.6139 / 19.6167 THz, a 20 % asymmetry that is entirely the
+        frozen-boundary choice (the donor's 23.6 THz / 43 atoms).
         """
         ext = LammpsHTSTExtension(search_engine)
         before = _engine_state(search_engine)
         tmp_before = _count_tmpdirs()
-        result = ext.compute_event_prefactors(hop_request(free_radius=6.0))
+        settings = {"free_radius": 6.0, "free_region_center": center}
+        result = ext.compute_event_prefactors(hop_request(**settings))
         assert isinstance(result, EventPrefactors)
         assert result.method == "lammps_eskm"
         assert result.event_key == ("ref", 4)
-        assert result.n_free == 43
+        assert result.settings.free_region_center == center
+        assert result.n_free == n_free
         for direction in (result.forward, result.backward):
             assert direction.status == "ok", direction.reason
-            assert direction.n_free == 43
+            assert direction.n_free == n_free
             assert direction.n_negative_saddle == 1
-            assert direction.n_positive_min == 3 * 43
+            assert direction.n_positive_min == 3 * n_free
             assert 1.0 <= direction.nu0_hz / _THZ <= 100.0
-        assert result.forward.nu0_hz / _THZ == pytest.approx(23.6, rel=0.02)
-        assert result.backward.nu0_hz / _THZ == pytest.approx(19.6, rel=0.02)
+        assert result.forward.nu0_hz / _THZ == pytest.approx(forward_thz, rel=1e-3)
+        assert result.backward.nu0_hz / _THZ == pytest.approx(backward_thz, rel=1e-3)
         _assert_state_unchanged(search_engine, before)
         assert _count_tmpdirs() == tmp_before
         _assert_all_closed(scratch_log, 1)
+
+    def test_default_centring_is_the_saddle(
+        self, hop_request: Callable[..., HTSTEventRequest]
+    ) -> None:
+        """A request built without the setting is saddle-centred (the decided default)."""
+        assert hop_request().settings.free_region_center == "saddle"
+
+    def test_forward_only_request_skips_the_min2_hessian(
+        self,
+        search_engine: LammpsEngine,
+        hop_request: Callable[..., HTSTEventRequest],
+        hessian_geometries: list[np.ndarray],
+        scratch_log: list[LammpsEngine],
+    ) -> None:
+        """``compute_backward=False``: two eskm calls, backward 'skipped', same forward value."""
+        ext = LammpsHTSTExtension(search_engine)
+        request = hop_request(free_radius=6.0)
+        both = ext.compute_event_prefactors(request)
+        assert len(hessian_geometries) == 3
+        del hessian_geometries[:]
+        forward_only = ext.compute_event_prefactors(request, compute_backward=False)
+        assert len(hessian_geometries) == 2  # saddle, then min1
+        assert np.array_equal(hessian_geometries[0], request.saddle_positions)
+        assert np.array_equal(hessian_geometries[1], request.min1_positions)
+        assert forward_only.forward == both.forward
+        assert forward_only.backward.status == "skipped"
+        assert forward_only.backward.reason == "not requested"
+        assert forward_only.backward.nu0_hz is None
+        assert forward_only.backward.n_free == 37
+        assert forward_only.backward.n_negative_saddle == 1
+        _assert_all_closed(scratch_log, 2)
+
+    def test_site_geometry_from_the_full_saddle_matches_the_reference(
+        self,
+        search_engine: LammpsEngine,
+        si_hop: dict[str, Any],
+        hop_request: Callable[..., HTSTEventRequest],
+    ) -> None:
+        """A site request from the full refined saddle equals the reference; a crop does not.
+
+        The S7 '(iv)' bias: the request ``ActiveEventTable.request_site_prefactors``
+        builds (current minimum as min1, full saddle, min2 unused, forward only)
+        gives the reference forward nu0 to 1e-9, whereas the previous
+        construction (the ``rcut`` crop of the saddle pasted into the minimum,
+        every other atom at its minimum position) does not.
+
+        Measured with the Si_vac example's ``rcut`` 6.3 A under saddle
+        centring: -14.8 % (the free atoms between 6.3 A and free_radius plus
+        the SW cutoff see an unrelaxed boundary); the bias vanishes only from
+        ``rcut`` 10 A on.
+        """
+        ext = LammpsHTSTExtension(search_engine)
+        full_system = search_engine.full_system
+        reference = ext.compute_event_prefactors(hop_request(free_radius=6.0))
+        min1 = si_hop["min1_positions"]
+        saddle = si_hop["saddle_positions"]
+        center = int(si_hop["central_atom_idx"])
+
+        def site_request(saddle_geometry: np.ndarray, key: tuple) -> HTSTEventRequest:
+            return HTSTEventRequest(
+                event_key=key,
+                min1_positions=min1.copy(),
+                saddle_positions=saddle_geometry.copy(),
+                min2_positions=min1.copy(),  # unused: forward only
+                types=tuple(str(t) for t in si_hop["types"]),
+                species=full_system.species,
+                masses=full_system.masses,
+                cell=si_hop["cell"].copy(),
+                pbc=_ALL_PERIODIC,
+                center_index=center,
+                settings=HTSTSettings(free_radius=6.0),
+            )
+
+        new = ext.compute_event_prefactors(
+            site_request(saddle, ("site", "full")), compute_backward=False
+        )
+        assert new.forward.ok and new.backward.skipped
+        assert new.n_free == reference.n_free == 37
+        assert new.forward.nu0_hz == pytest.approx(reference.forward.nu0_hz, rel=1e-9)
+
+        rcut = 6.3  # examples/Si_vac atomicenvironment.rcut
+        crop = select_free_indices(min1, center, rcut, si_hop["cell"], _ALL_PERIODIC)
+        pasted = min1.copy()
+        pasted[crop] = saddle[crop]
+        old = ext.compute_event_prefactors(
+            site_request(pasted, ("site", "crop")), compute_backward=False
+        )
+        assert old.forward.ok
+        bias = old.forward.nu0_hz / reference.forward.nu0_hz - 1.0
+        assert abs(bias) > 0.01, (
+            bias
+        )  # the old construction is biased (measured -14.8 %)
+        assert bias == pytest.approx(-0.148, abs=0.01)
 
     def test_fd_and_eskm_prefactors_agree_on_fixture(
         self,
@@ -424,8 +534,10 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """The FD oracle and eskm give the same nu0 at ``free_radius=4``.
 
-        Measured: 13 free atoms, forward 17.350 THz, backward 12.593 THz for
-        both; ratio eskm/FD = 1 - 4e-13 (forward) and 1 + 6e-12 (backward).
+        Measured (saddle-centred): 19 free atoms, forward 19.809 THz, backward
+        19.805 THz for both; the min1-centred selection of the original model
+        gives 13 free atoms, 17.350 / 12.593 THz. The FD oracle follows the
+        same centring setting as the extension, so the free sets are equal.
         """
         from mpi4py import MPI
 
@@ -447,7 +559,9 @@ class TestLammpsHTSTSerial:
         finally:
             scratch.close()
         assert fd.method == "fd" and eskm.method == "lammps_eskm"
-        assert fd.n_free == eskm.n_free == 13
+        assert fd.n_free == eskm.n_free == 19
+        assert eskm.forward.nu0_hz / _THZ == pytest.approx(19.809, rel=1e-3)
+        assert eskm.backward.nu0_hz / _THZ == pytest.approx(19.805, rel=1e-3)
         for oracle, native in (
             (fd.forward, eskm.forward),
             (fd.backward, eskm.backward),
@@ -463,15 +577,18 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """``zone_radius=10`` reproduces the full system within 2 percent.
 
-        Measured: identical to 1e-12 relative (the 4 Å shell exceeds the SW
-        cutoff of 3.77 Å, so every free-atom Hessian block is complete).
+        Measured under saddle centring (37 free atoms, 207-atom zone):
+        identical to 1e-12 relative (the 4 Å shell exceeds the SW cutoff of
+        3.77 Å, so every free-atom Hessian block is complete). The zone is
+        selected on the same centring geometry as the free set, so the free
+        set is a subset of the zone by construction.
         """
         ext = LammpsHTSTExtension(search_engine)
         full = ext.compute_event_prefactors(hop_request(free_radius=6.0))
         zone = ext.compute_event_prefactors(
             hop_request(free_radius=6.0, zone_radius=10.0)
         )
-        assert zone.n_free == full.n_free == 43
+        assert zone.n_free == full.n_free == 37
         for cropped, reference in (
             (zone.forward, full.forward),
             (zone.backward, full.backward),
@@ -479,17 +596,26 @@ class TestLammpsHTSTSerial:
             assert cropped.ok and reference.ok
             assert cropped.nu0_hz == pytest.approx(reference.nu0_hz, rel=0.02)
             assert cropped.nu0_hz == pytest.approx(reference.nu0_hz, rel=1e-9)
-        # The crop really held only the zone atoms, with the full species map.
+        # The crop really held only the zone atoms (selected on the saddle
+        # geometry, like the free set), with the full species map.
         request = hop_request(free_radius=6.0, zone_radius=10.0)
         zone_atoms = select_free_indices(
-            request.min1_positions,
+            request.saddle_positions,
             request.center_index,
             10.0,
             request.cell,
             request.pbc,
         )
+        free_atoms = select_free_indices(
+            request.saddle_positions,
+            request.center_index,
+            6.0,
+            request.cell,
+            request.pbc,
+        )
+        assert np.isin(free_atoms, zone_atoms).all()
         crop_engine = scratch_log[-1]
-        assert 43 < crop_engine.full_system.natoms == zone_atoms.size < 1727
+        assert 37 < crop_engine.full_system.natoms == zone_atoms.size < 1727
         assert crop_engine.full_system.species == ("Si",)
         _assert_all_closed(scratch_log, 2)
 
@@ -562,8 +688,10 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """``premin=True``: core rows are bit-identical, surroundings move slightly.
 
-        Measured on the fixture: forward 23.628 THz vs 23.614 THz without premin
-        (0.06 percent), backward 19.629 vs 19.617 THz.
+        Measured on the fixture (saddle-centred, 37 free atoms): forward
+        21.177 THz vs 21.159 THz without premin (0.09 percent), backward
+        21.190 vs 21.184 THz (0.03 percent). The core is the free set, selected
+        on the saddle geometry.
         """
         ext = LammpsHTSTExtension(search_engine)
         reference = ext.compute_event_prefactors(hop_request(free_radius=6.0))
@@ -573,12 +701,13 @@ class TestLammpsHTSTSerial:
         result = ext.compute_event_prefactors(request)
         assert len(hessian_geometries) == 3
         core = select_free_indices(
-            request.min1_positions,
+            request.saddle_positions,
             request.center_index,
             request.settings.free_radius,
             request.cell,
             request.pbc,
         )
+        assert core.size == 37
         rest = np.setdiff1d(np.arange(len(request.types)), core)
         originals = (
             request.saddle_positions,
@@ -764,7 +893,7 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """NaN entries are returned to the kernel, which rejects NONFINITE_HESSIAN."""
         request = hop_request(free_radius=4.0)
-        n_free = 13
+        n_free = 19  # saddle-centred selection at free_radius 4
 
         def write_nan(
             scratch: LammpsEngine, group: str, fd_step: float, path: str
@@ -899,7 +1028,7 @@ class TestLammpsHTSTEngineMPI:
             energy_after = engine.get_total_energy()
             if comm.Get_rank() == 0:
                 assert report["phonon"] is True
-                assert result.n_free == 43
+                assert result.n_free == 37
                 assert result.forward.ok and result.backward.ok
                 assert energy_after == energy_before
                 # comm=None would be MPI_COMM_WORLD inside the lammps wrapper (a

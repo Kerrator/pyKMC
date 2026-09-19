@@ -20,12 +20,18 @@ scientific verdict. Files go to a ``tempfile.mkdtemp`` directory removed in
 ``finally``. There is no finite-difference production fallback: a LAMMPS build
 without PHONON fails ``htst_preflight`` and every ``compute_event_prefactors``.
 
-Zone crop
----------
-With ``settings.zone_radius`` set, the scratch instance holds only the atoms
-within ``zone_radius`` of the centre (minimum image in the ``min1`` geometry, in
-the full cell with the request's pbc); the ``free_radius``..``zone_radius`` shell
-is the frozen boundary and everything beyond it is absent. The shell must
+Free region and zone crop
+-------------------------
+The one common free set of the three Hessians is the sphere of
+``settings.free_radius`` around the moving atom in the geometry named by
+``settings.free_region_center``: the saddle by default (symmetric between the
+two minima by construction), or ``min1`` for the original model. With
+``settings.zone_radius`` set, the scratch instance holds only the atoms within
+``zone_radius`` of the centre, selected on that same centring geometry (minimum
+image in the full cell with the request's pbc), so the free set is a subset of
+the zone by construction (``free_radius < zone_radius`` on one geometry; the
+remap is checked, never assumed); the ``free_radius``..``zone_radius`` shell is
+the frozen boundary and everything beyond it is absent. The shell must
 therefore exceed the potential's interaction range or the outermost free atoms
 see a truncated environment: every energy term coupling two free atoms must have
 all of its atoms present, which for a three-body potential can reach twice the
@@ -33,6 +39,10 @@ cutoff. On the SW-Si fixture ``zone_radius=10`` with ``free_radius=6`` (a 4 Å
 shell, cutoff 3.77 Å) reproduces the full system to 1e-12 relative; that margin
 is a per-potential choice, not a general guarantee. The crop keeps the full
 species map so integer types keep their meaning.
+
+Only the forward direction can be requested (``compute_backward=False``): the
+``min2`` Hessian is then never computed and the backward result is
+``status="skipped"``; site requests use this.
 
 Premin
 ------
@@ -199,7 +209,7 @@ class LammpsHTSTExtension(EngineExtension):
             scratch.close()
 
     def compute_event_prefactors(
-        self, request: HTSTEventRequest
+        self, request: HTSTEventRequest, *, compute_backward: bool = True
     ) -> EventPrefactors | None:
         """Compute the forward and backward Vineyard prefactors of one event.
 
@@ -208,6 +218,9 @@ class LammpsHTSTExtension(EngineExtension):
         request : HTSTEventRequest
             Full-system geometries, types, the full species/mass map, cell, pbc,
             centre index and settings. Validated before any engine work.
+        compute_backward : bool, optional
+            ``False`` skips the ``min2`` Hessian; the backward direction of the
+            result is then ``status="skipped"`` (site requests).
 
         Returns
         -------
@@ -256,16 +269,19 @@ class LammpsHTSTExtension(EngineExtension):
         min2 = np.array(request.min2_positions, dtype=float)
         cell = np.asarray(request.cell, dtype=float)
         center = int(request.center_index)
-        # One common free set for the three Hessians, selected in the request's
-        # min1 geometry; premin freezes exactly these atoms so the selection
-        # cannot drift with the relaxed surroundings.
+        # One common free set for the three Hessians, selected in the centring
+        # geometry (saddle by default, min1 for the original model); premin
+        # freezes exactly these atoms so the selection cannot drift with the
+        # relaxed surroundings. The zone is selected on the same geometry so
+        # that the free set is a subset of the zone (checked below).
+        centring = saddle if settings.free_region_center == "saddle" else min1
         free_global = select_free_indices(
-            min1, center, settings.free_radius, cell, request.pbc
+            centring, center, settings.free_radius, cell, request.pbc
         )
         zone: np.ndarray | None = None
         if settings.zone_radius is not None:
             zone = select_free_indices(
-                min1, center, settings.zone_radius, cell, request.pbc
+                centring, center, settings.zone_radius, cell, request.pbc
             )
 
         geometries = [min1, saddle, min2]
@@ -341,6 +357,7 @@ class LammpsHTSTExtension(EngineExtension):
                 self._hessian_fn(scratch, settings.fd_step),
                 method="lammps_eskm",
                 free_indices=free_local,
+                compute_backward=compute_backward,
             )
         finally:
             scratch.close()

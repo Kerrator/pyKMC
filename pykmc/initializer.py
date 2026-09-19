@@ -125,11 +125,9 @@ class Initializer:
         """Build the per-event prefactor service for the htst/rpa styles.
 
         The constant style leaves ``kmc.prefactor_service`` as ``None`` and
-        never imports the HTST modules. A ``free_radius`` larger than the
-        ``rcut`` crop radius is warned about once: site-specific requests
-        rebuild the saddle and final geometries from ``rcut`` crops, so free
-        atoms beyond ``rcut`` are evaluated at minimum positions (see
-        ``ActiveEventTable.request_site_prefactors``).
+        never imports the HTST modules. Site-specific requests are built from
+        the full pARTn-refined saddle (``ActiveEventTable.request_site_prefactors``),
+        so ``free_radius`` is independent of the ``rcut`` crop radius.
         """
         if not self.kmc.uses_event_prefactors:
             self.kmc.prefactor_service = None
@@ -142,28 +140,18 @@ class Initializer:
         settings = self.kmc.prefactor_service.settings
         self.kmc.loggers.info(
             "log",
-            ":=> HTST prefactor service ready (style {}, free_radius {} A, "
-            "fd_step {} A, nu0 window [{:.3e}, {:.3e}] Hz, k0 fallback {} ps^-1)".format(
+            ":=> HTST prefactor service ready (style {}, free_radius {} A centred "
+            "on the {} geometry, fd_step {} A, nu0 window [{:.3e}, {:.3e}] Hz, "
+            "k0 fallback {} ps^-1)".format(
                 self.kmc.config.rateconstant.style,
                 settings.free_radius,
+                settings.free_region_center,
                 settings.fd_step,
                 settings.nu0_min_hz,
                 settings.nu0_max_hz,
                 self.kmc.config.rateconstant.k0,
             ),
         )
-        rcut = self.kmc.config.atomicenvironment.rcut
-        if settings.free_radius > rcut:
-            self.kmc.loggers.warning(
-                "log",
-                ":=> WARNING: rateconstant.free_radius = {} A exceeds "
-                "atomicenvironment.rcut = {} A: site-specific prefactor requests "
-                "rebuild the saddle and final geometries from rcut crops, so free "
-                "atoms beyond rcut sit at minimum positions there; expect "
-                "saddle_not_first_order/unstable_minimum rejections of site "
-                "estimates (reference or k0 fallback). Set free_radius <= rcut "
-                "for stationary site geometries.".format(settings.free_radius, rcut),
-            )
 
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""

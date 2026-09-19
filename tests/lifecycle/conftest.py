@@ -48,6 +48,11 @@ def rejected(reason: str = "test rejection") -> DirectionalPrefactor:
     )
 
 
+def skipped() -> DirectionalPrefactor:
+    """Return the ``skipped`` backward estimate of a forward-only request."""
+    return DirectionalPrefactor.not_requested(n_free=5, n_negative_saddle=1)
+
+
 def event_prefactors(
     event_key: tuple,
     forward: DirectionalPrefactor,
@@ -98,6 +103,7 @@ class FakeManager:
         self.broadcasts: list[tuple[str, dict[str, Any]]] = []
         self.group_calls: list[tuple[str, dict[str, Any]]] = []
         self.completion_order: list[Any] = []
+        self.shutdowns = 0
         self._pending: list[tuple[Future, Any]] = []
         self._lock = threading.Lock()
 
@@ -147,13 +153,23 @@ class FakeManager:
         return -1.0
 
     def shutdown(self) -> None:
-        """Pretend to shut the pool down."""
+        """Pretend to shut the pool down (counted)."""
+        self.shutdowns += 1
 
     @property
     def prefactor_requests(self) -> list[Any]:
         """Return the submitted ``compute_event_prefactors`` requests in order."""
         return [
             kw["request"]
+            for op, kw in self.submitted
+            if op == "compute_event_prefactors"
+        ]
+
+    @property
+    def prefactor_backward_flags(self) -> list[bool]:
+        """Return the ``compute_backward`` flag of every prefactor submission."""
+        return [
+            kw["compute_backward"]
             for op, kw in self.submitted
             if op == "compute_event_prefactors"
         ]

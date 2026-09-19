@@ -175,3 +175,38 @@ def test_prefactor_rejected_none_detail_is_stored_as_empty_string() -> None:
     assert exc.detail == ""
     assert str(exc) == "nonfinite_hessian: "
     assert (exc.detail or exc.reason_code.value) == "nonfinite_hessian"
+
+
+def test_skipped_direction_invariants() -> None:
+    """status='skipped' carries no estimate, no code and a non-empty reason."""
+    skipped = DirectionalPrefactor.not_requested(n_free=4, n_negative_saddle=1)
+    assert skipped.status == "skipped"
+    assert skipped.skipped and not skipped.ok
+    assert skipped.nu0_hz is None and skipped.reason_code is None
+    assert skipped.reason == "not requested"
+    assert skipped.n_free == 4 and skipped.n_negative_saddle == 1
+    assert skipped.n_positive_min is None
+    assert pickle.loads(pickle.dumps(skipped)) == skipped
+    fields: dict[str, Any] = {
+        "nu0_hz": None,
+        "status": "skipped",
+        "reason_code": None,
+        "reason": "not requested",
+        "n_free": 4,
+        "n_positive_min": None,
+        "n_negative_saddle": 1,
+    }
+    assert DirectionalPrefactor(**fields) == skipped
+    for override in (
+        {"nu0_hz": 1.0e12},
+        {"reason_code": PrefactorRejection.OUT_OF_WINDOW},
+        {"reason": ""},
+        {"reason": None},
+        {"n_positive_min": 3},
+    ):
+        with pytest.raises(ValueError):
+            DirectionalPrefactor(**{**fields, **override})
+    # accepted and rejected results never report skipped
+    assert not DirectionalPrefactor.accepted(
+        1.0e13, n_free=1, n_positive_min=3, n_negative_saddle=1
+    ).skipped

@@ -24,6 +24,7 @@ def test_defaults() -> None:
     assert cfg.nu0_min_THz == 1.0
     assert cfg.nu0_max_THz == 100.0
     assert cfg.premin is False
+    assert cfg.free_region_center == "saddle"
 
 
 def test_style_is_required_and_restricted() -> None:
@@ -45,12 +46,43 @@ def test_k0_max_is_a_class_var_not_a_field() -> None:
         "k0",
         "T",
         "free_radius",
+        "free_region_center",
         "fd_step",
         "zone_radius",
         "nu0_min_THz",
         "nu0_max_THz",
         "premin",
     }
+
+
+@pytest.mark.parametrize("center", ["saddle", "min1"])
+def test_free_region_center_accepts_the_two_centrings(center: str) -> None:
+    """Assert both documented centrings validate and are stored as given."""
+    assert (
+        RateConstantConfig(style="htst", free_region_center=center).free_region_center
+        == center
+    )
+    # the INI path hands pydantic a plain string, exactly as here
+    assert (
+        RateConstantConfig.model_validate(
+            {"style": "htst", "free_region_center": center}
+        ).free_region_center
+        == center
+    )
+
+
+@pytest.mark.parametrize("bad", ["min2", "SADDLE", "Saddle", "", "none", 0, None])
+def test_free_region_center_rejects_anything_else(bad: object) -> None:
+    """Assert other strings (and non-strings) are configuration errors."""
+    with pytest.raises(ValidationError):
+        RateConstantConfig(style="htst", free_region_center=bad)  # type: ignore[arg-type]
+
+
+def test_free_region_center_description_states_the_min1_artifact() -> None:
+    """Assert the field documents the measured min1 asymmetry and its purpose."""
+    description = RateConstantConfig.model_fields["free_region_center"].description
+    assert "20 percent" in description
+    assert "comparison with older results" in description
 
 
 def test_nu0_window_must_be_ordered() -> None:

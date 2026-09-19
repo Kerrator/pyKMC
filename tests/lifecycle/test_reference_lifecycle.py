@@ -330,40 +330,48 @@ class TestPatchByLogicalId:
 
 
 class TestSelfReverseThroughAddEvents:
-    """The identity gate is applied with the resolved prefactors."""
+    """A self-reverse event is one row; its backward estimate is compared only."""
 
-    def test_agreeing_spectra_collapse(
+    def test_agreeing_spectra_leave_the_reason_empty(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """A trivial self-reverse event ends as one self-linked row."""
-        responses = {(0, 1): (accepted(5.0e12), accepted(5.02e12))}
+        """A trivial self-reverse event is one self-linked row with the forward value."""
+        responses = {(0, None): (accepted(5.0e12), accepted(5.02e12))}
         table, fake = _table_with_service(htst_config, responses)
         sys_ = system_single_type_fcc
         table.add_events([_event(sys_, 0, 0.5, 0.5)], pbc=sys_.pbc)
         assert len(fake.prefactor_requests) == 1
+        assert fake.prefactor_requests[0].event_key == (0, None)
         assert list(
             zip(table.table["idx_ref"], table.table["idx_backward"], strict=True)
         ) == [(0, 0)]
         assert _row(table, 0)["nu0"] == 5.0e12
-        # The dropped backward id is free again: nothing references it any more
-        # (links made to it were re-pointed at the forward row), so the next
-        # event reuses max(idx_ref) + 1 exactly as the base allocates ids.
+        assert _row(table, 0)["nu0_reason"] == ""
         assert table.max_idx_ref() == 1
 
-    def test_unequal_spectra_keep_two_rows(
+    def test_unequal_spectra_keep_one_row_with_the_backward_recorded(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """Equal topologies with different spectra stay two directional rows."""
-        responses = {(0, 1): (accepted(5.0e12), accepted(3.0e12))}
+        """Equal topologies with different spectra: one row, forward kept, reason set."""
+        responses = {(0, None): (accepted(5.0e12), accepted(3.0e12))}
         table, _ = _table_with_service(htst_config, responses)
         sys_ = system_single_type_fcc
         table.add_events([_event(sys_, 0, 0.5, 0.5)], pbc=sys_.pbc)
         links = list(
             zip(table.table["idx_ref"], table.table["idx_backward"], strict=True)
         )
-        assert [(int(a), int(b)) for a, b in links] == [(0, 1), (1, 0)]
-        assert _row(table, 0)["k_prefactor"] == 5.0
-        assert _row(table, 1)["k_prefactor"] == 3.0
+        assert [(int(a), int(b)) for a, b in links] == [(0, 0)]
+        row = _row(table, 0)
+        assert row["k_prefactor"] == 5.0 and row["nu0_status"] == "ok"
+        assert row["nu0_reason"] == (
+            "self-reverse: backward nu0 = 3.0000e+12 Hz, differs by 40.0%"
+        )
+        assert table.prefactor_summary() == {
+            "ok": 1,
+            "rejected": 0,
+            "pending": 0,
+            "legacy": 0,
+        }
 
 
 class TestMisconfiguration:

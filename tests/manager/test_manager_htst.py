@@ -121,7 +121,7 @@ def _assert_same_prefactors(
     """Both directions accepted and equal within ``rel``."""
     assert isinstance(result, EventPrefactors)
     assert result.method == reference.method == "lammps_eskm"
-    assert result.n_free == reference.n_free == 43
+    assert result.n_free == reference.n_free == 37
     assert result.event_key == reference.event_key
     for got, want in (
         (result.forward, reference.forward),
@@ -246,6 +246,6 @@ class TestManagerHTST:
             for _ in range(self.n_workers)
         ]
         for result in results:
-            assert result.n_free == 13
+            assert result.n_free == 19  # saddle-centred selection at free_radius 4
             assert result.forward.ok and result.backward.ok
             assert result.forward.nu0_hz == pytest.approx(results[0].forward.nu0_hz)

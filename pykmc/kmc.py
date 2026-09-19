@@ -106,6 +106,13 @@ class KMC:
         self.loggers = None
         self.system = None
         self.manager = manager
+        # control.seed: one seeding of the Python and NumPy global generators
+        # (central_atoms_research, the BKL draws, the basin exit draws); the
+        # saddle search has its own stream (partn.zseed).
+        seed = self.config.control.seed
+        if seed is not None:
+            random.seed(int(seed))
+            np.random.seed(int(seed))
         self.rate_constant = create_rate_constant(config.rateconstant)
         self.prefactor_service = None
         self.engine = None
@@ -211,6 +218,8 @@ class KMC:
         for step in range(last_step, nkmc_steps + last_step):
             start_real = time.time()
             start_cpu = time.process_time()
+            if self.prefactor_service is not None:
+                self.prefactor_service.reset_step_counters()
 
             self.loggers.info(
                 "log",
@@ -255,7 +264,7 @@ class KMC:
                     "log",
                     "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.",
                 )
-                self._close()
+                self._close(failed=True)
 
             # == Update variables ==
             l_ids = list(set(self.atomic_environment.atomic_environment_list))
@@ -585,14 +594,22 @@ class KMC:
     def get_new_environments(self) -> list[str]:
         """Get atomic environments of the current system that has not been already explored.
 
+        The ids come back sorted. ``AtomicEnvironment.get_new_environments``
+        builds its list from a set, whose iteration order follows the
+        per-process string hash (``PYTHONHASHSEED`` is random on every rank
+        under ``mpirun``); sorting at this, its only call site, is what makes
+        ``central_atoms_research`` and therefore ``control.seed`` reproducible
+        without ``PYTHONHASHSEED`` (contracts section 7c).
+
         Returns
         -------
         list[str]
-            The atomic environments of the current system that are encounter for the first time.
+            The atomic environments of the current system that are encounter
+            for the first time, in sorted order.
 
         """
-        new_environments = self.atomic_environment.get_new_environments(
-            self.visited_environments
+        new_environments = sorted(
+            self.atomic_environment.get_new_environments(self.visited_environments)
         )
         self.loggers.info(
             "log",
@@ -711,11 +728,15 @@ class KMC:
             return
         ref = self.reference_table.prefactor_summary()
         act = self.active_table.prefactor_summary()
+        service = self.prefactor_service
+        n_requests = service.step_requests if service is not None else 0
+        wall = service.step_wall_s if service is not None else 0.0
         self.loggers.info(
             "log",
             "\t :=> HTST prefactors: reference ok={} rejected={} legacy={} "
             "pending={}; active sources reference={} site={} k0={}; site "
-            "attempts this step={} (ok={}, rejected={})".format(
+            "attempts this step={} (ok={}, rejected={}); hessian requests this "
+            "step={}, prefactor wall={:.3f} s".format(
                 ref.get("ok", 0),
                 ref.get("rejected", 0),
                 ref.get("legacy", 0),
@@ -726,6 +747,8 @@ class KMC:
                 site_summary.get("attempted", 0),
                 site_summary.get("ok", 0),
                 site_summary.get("rejected", 0),
+                n_requests,
+                wall,
             ),
         )
 
@@ -862,7 +885,7 @@ class KMC:
                 active_table.remove(idx_selected_event)
         else:
             self.loggers.error("log", "All event reconstuctions failed.")
-            self._close()
+            self._close(failed=True)
         return (
             result_reconstruction,
             delta_t,
@@ -1057,8 +1080,20 @@ class KMC:
             last_time=last_time,
         )
 
-    def _close(self) -> None:
-        """Close the simulation."""
+    def _close(self, failed: bool = False) -> None:
+        """Close the simulation: shut the workers down, then exit the process.
+
+        Parameters
+        ----------
+        failed : bool, optional
+            ``True`` when the simulation stops because it cannot continue
+            (empty reference table, every reconstruction failed): the process
+            exits with status 1. ``False`` (default) is a normal completion
+            (step budget, ``max_physical_time``, only crystalline
+            environments) and exits with status 0. ``run.py`` propagates the
+            status to ``python -m pykmc``.
+
+        """
         self.loggers.info("log", ":=> End of simulation")
         self.manager.shutdown()
-        sys.exit()
+        sys.exit(1 if failed else 0)

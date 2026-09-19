@@ -116,6 +116,19 @@ class ControlConfig(BaseModel):
         description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).",
     )
 
+    seed: Optional[int] = Field(
+        default=None,
+        description="Reproducibility knob. When set, the Python `random` module and "
+        "NumPy's global random generator are seeded once at KMC construction, so "
+        "the choice of the atoms searched per new environment "
+        "(`central_atoms_research`), the rejection-free (BKL) event and time "
+        "draws and the basin exit draws repeat between runs; the new-environment "
+        "list is sorted, so `PYTHONHASHSEED` is not needed. It does not seed "
+        "the saddle-point search: pARTn's own stream is `[pARTn] zseed`, and the "
+        "saddle instance a search returns can still differ between runs. "
+        "Defaults to None (unseeded).",
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""
@@ -521,9 +534,9 @@ class RateConstantConfig(BaseModel):
     - ``rpa``: registered alias of ``htst``; bare Vineyard, no recrossing
       correction is implemented.
 
-    The HTST-only fields (``free_radius``, ``fd_step``, ``zone_radius``,
-    ``nu0_min_THz``, ``nu0_max_THz``, ``premin``) are validated for every style
-    and ignored by ``constant``.
+    The HTST-only fields (``free_radius``, ``free_region_center``, ``fd_step``,
+    ``zone_radius``, ``nu0_min_THz``, ``nu0_max_THz``, ``premin``) are validated
+    for every style and ignored by ``constant``.
     """
 
     K0_MAX_PS_INV: ClassVar[float] = 1.0e4
@@ -561,6 +574,17 @@ class RateConstantConfig(BaseModel):
         allow_inf_nan=False,
         description="HTST: radius (Angstrom) around the moving atom selecting the free "
         "(movable) atoms of the partial Hessian; every other atom is frozen.",
+    )
+    free_region_center: Literal["saddle", "min1"] = Field(
+        default="saddle",
+        description="HTST: geometry in which the free (movable) region of the "
+        "partial Hessians is selected around the moving atom. 'saddle' (default) "
+        "centres the one common free region on the atom's saddle-point position, "
+        "which is symmetric between the two minima by construction. 'min1' centres "
+        "it on the atom's initial position (the original model); on the symmetric "
+        "SW-Si vacancy hop this gives forward and backward prefactors that differ "
+        "by 20 percent (23.6 vs 19.6 THz) purely through the frozen-boundary "
+        "choice, so 'min1' exists only for comparison with older results.",
     )
     fd_step: float = Field(
         default=0.01,

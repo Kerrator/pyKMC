@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -11,6 +12,9 @@ import numpy as np
 # NumPy) are never numbers here.
 _REAL_TYPES = (int, float, np.integer, np.floating)
 _BOOL_TYPES = (bool, np.bool_)
+
+FREE_REGION_CENTERS: tuple[str, ...] = ("saddle", "min1")
+"""Geometries the common free region may be centred on (``free_region_center``)."""
 
 
 def _require_finite_positive(name: str, value: float) -> float:
@@ -31,6 +35,14 @@ class HTSTSettings:
     free_radius : float
         Radius (Å) of the movable sphere around the centre atom; every atom outside
         it is frozen during the partial Hessian.
+    free_region_center : {"saddle", "min1"}
+        Geometry in which the one common free region is selected around the
+        centre atom. ``"saddle"`` (default) centres it on the mover's saddle
+        position, which is symmetric between the two minima by construction;
+        ``"min1"`` centres it on the mover's initial position, the original
+        model, kept for comparison with older results (on the symmetric SW-Si
+        hop it gives a 20 % forward/backward asymmetry that is entirely the
+        frozen-boundary choice).
     fd_step : float
         Finite-difference displacement (Å) for the Hessian.
     zone_radius : float or None
@@ -60,12 +72,21 @@ class HTSTSettings:
     nu0_min_hz: float = 1.0e12
     nu0_max_hz: float = 1.0e14
     zero_mode_tol: float = 1.0e-6
+    free_region_center: Literal["saddle", "min1"] = "saddle"
 
     def __post_init__(self) -> None:
         """Validate finiteness, positivity and the window; store reals as float."""
         self._store(
             "free_radius", _require_finite_positive("free_radius", self.free_radius)
         )
+        if (
+            not isinstance(self.free_region_center, str)
+            or self.free_region_center not in FREE_REGION_CENTERS
+        ):
+            raise ValueError(
+                f"free_region_center must be one of {FREE_REGION_CENTERS}, got "
+                f"{self.free_region_center!r}"
+            )
         self._store("fd_step", _require_finite_positive("fd_step", self.fd_step))
         if self.zone_radius is not None:
             self._store(
@@ -96,4 +117,4 @@ class HTSTSettings:
         object.__setattr__(self, name, value)
 
 
-__all__ = ["HTSTSettings"]
+__all__ = ["FREE_REGION_CENTERS", "HTSTSettings"]

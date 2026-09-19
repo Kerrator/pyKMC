@@ -128,6 +128,14 @@ class Refinement:
                 res.ok_value().nu0_status = estimate["nu0_status"]
                 res.ok_value().nu0_reason = estimate["nu0_reason"]
                 res.ok_value().nu0_source = estimate["nu0_source"]
+                if self._carry_prefactors and res.ok_value().refined == "T":
+                    # htst/rpa: the site-specific prefactor request needs the
+                    # full pARTn saddle, not the rcut crop stored on the row.
+                    # Kept only in those styles so the constant path never
+                    # holds an extra (N, 3) array per refinement.
+                    res.ok_value().full_saddle_positions = (
+                        res.ok_value().saddle_positions
+                    )
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[
                     ctx["neighbors"]
                 ]

@@ -21,6 +21,7 @@ def test_defaults_match_contract() -> None:
     assert s.nu0_min_hz == 1.0e12
     assert s.nu0_max_hz == 1.0e14
     assert s.zero_mode_tol == 1.0e-6
+    assert s.free_region_center == "saddle"
 
 
 @pytest.mark.parametrize(
@@ -46,12 +47,28 @@ def test_defaults_match_contract() -> None:
         {"free_radius": np.bool_(True)},
         {"zero_mode_tol": np.bool_(False)},
         {"nu0_max_hz": np.float32("inf")},
+        {"free_region_center": "min2"},
+        {"free_region_center": "Saddle"},
+        {"free_region_center": ""},
+        {"free_region_center": None},
+        {"free_region_center": 1},
     ],
 )
 def test_invalid_settings_raise_value_error(kwargs: dict[str, object]) -> None:
     """Non-finite, non-positive or inverted-window settings are rejected."""
     with pytest.raises(ValueError):
         HTSTSettings(**kwargs)
+
+
+@pytest.mark.parametrize("center", ["saddle", "min1"])
+def test_free_region_center_accepts_the_two_centrings(center: str) -> None:
+    """Both centrings validate, pickle and keep value equality."""
+    s = HTSTSettings(free_region_center=center)
+    assert s.free_region_center == center
+    assert pickle.loads(pickle.dumps(s)) == s
+    assert s != HTSTSettings(
+        free_region_center="min1" if center == "saddle" else "saddle"
+    )
 
 
 def test_zero_tolerance_is_allowed() -> None:

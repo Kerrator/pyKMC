@@ -71,6 +71,7 @@ class TestSettings:
             fd_step=0.02,
             zone_radius=9.0,
             premin=True,
+            free_region_center="min1",
         )
         settings = settings_from_config(config.rateconstant)
         assert isinstance(settings, HTSTSettings)
@@ -80,6 +81,12 @@ class TestSettings:
         assert settings.fd_step == 0.02
         assert settings.zone_radius == 9.0
         assert settings.premin is True
+        assert settings.free_region_center == "min1"
+
+    def test_free_region_center_defaults_to_the_saddle(self) -> None:
+        """The config default (saddle) reaches the kernel settings unchanged."""
+        config = _config("htst", k0=1.0, T=300.0)
+        assert settings_from_config(config.rateconstant).free_region_center == "saddle"
 
     def test_service_holds_one_settings_object(self) -> None:
         """Every request shares the service's settings instance."""
@@ -250,3 +257,57 @@ class TestCompute:
         fake = FakeManager(self._responder)
         assert _service(config, fake).compute([]) == {}
         assert fake.submitted == []
+
+    def test_compute_backward_is_forwarded_to_the_operation(self) -> None:
+        """Every submission carries the flag: True by default, False when asked."""
+        config = _config("htst", k0=1.0, T=300.0)
+        fake = FakeManager(self._responder)
+        service = _service(config, fake)
+        service.compute([service.build_request(event_key=("evt", 1), **_geometry())])
+        service.compute(
+            [service.build_request(event_key=("evt", 2), **_geometry())],
+            compute_backward=False,
+        )
+        assert fake.prefactor_backward_flags == [True, False]
+        with pytest.raises(ValueError, match="compute_backward"):
+            service.compute(
+                [service.build_request(event_key=("evt", 3), **_geometry())],
+                compute_backward="no",  # type: ignore[arg-type]
+            )
+        assert len(fake.submitted) == 2
+
+    def test_batch_wall_time_and_step_counters(self) -> None:
+        """The batch is timed around submission and resolution; counters add up per step."""
+        config = _config("htst", k0=1.0, T=300.0)
+        fake = FakeManager(self._responder)
+        service = _service(config, fake)
+        assert (service.step_requests, service.step_wall_s) == (0, 0.0)
+        service.compute(
+            [service.build_request(event_key=("evt", k), **_geometry()) for k in (1, 2)]
+        )
+        first = service.last_batch_wall_s
+        assert first >= 0.0
+        assert service.step_requests == 2
+        assert service.step_wall_s == first
+        service.compute([service.build_request(event_key=("evt", 3), **_geometry())])
+        assert service.step_requests == 3
+        assert service.step_wall_s == pytest.approx(first + service.last_batch_wall_s)
+        assert service.n_submitted == 3
+        service.reset_step_counters()
+        assert (service.step_requests, service.step_wall_s) == (0, 0.0)
+        assert service.n_submitted == 3  # the run total is not a step counter
+
+    def test_worker_failure_still_records_the_batch_time(self) -> None:
+        """A raising worker leaves the wall time set (no summary hides the cost)."""
+
+        def boom(req: HTSTEventRequest) -> Any:
+            raise OSError("scratch failed")
+
+        config = _config("htst", k0=1.0, T=300.0)
+        service = _service(config, FakeManager(boom))
+        with pytest.raises(OSError):
+            service.compute(
+                [service.build_request(event_key=("evt", 1), **_geometry())]
+            )
+        assert service.step_requests == 1
+        assert service.step_wall_s >= 0.0

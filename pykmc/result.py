@@ -187,6 +187,13 @@ class EventRefinementOutput:
         Rejection reason of the inherited estimate (``""`` when accepted).
     nu0_source : Optional[str]
         Provenance of the inherited estimate (``"reference"``).
+    full_saddle_positions : Optional[np.ndarray]
+        Transient, htst/rpa only: the full-system ``(N, 3)`` refined saddle
+        as pARTn returned it, set by ``Refinement.execute`` on ``refined ==
+        "T"`` outputs before ``saddle_positions`` is cropped to the ``rcut``
+        neighbours. ``ActiveEventTable`` builds the site-specific prefactor
+        request from it and releases it after that request; it is never
+        stored in a table.
     """
 
     central_atom_index: int
@@ -200,6 +207,7 @@ class EventRefinementOutput:
     nu0_status: Optional[str] = None
     nu0_reason: Optional[str] = None
     nu0_source: Optional[str] = None
+    full_saddle_positions: Optional[np.ndarray] = None
 
 
 @dataclass

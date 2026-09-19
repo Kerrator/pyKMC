@@ -28,6 +28,7 @@ from tests.lifecycle.conftest import (
     accepted,
     event_prefactors,
     rejected,
+    skipped,
 )
 
 
@@ -41,6 +42,18 @@ def neighbors_list(system_single_type_fcc: Any, htst_config: Any) -> NeighborsLi
     )
 
 
+def _full_saddle(system: Any, neighbors: np.ndarray) -> np.ndarray:
+    """Full refined saddle: the crop atoms shifted by 0.1, everything else by 0.01.
+
+    The far-field shift makes the full saddle distinguishable from the old
+    construction (crop pasted into the minimum, far atoms at minimum positions).
+    """
+    pos = np.asarray(system.positions, dtype=float)
+    full = pos + 0.01
+    full[neighbors] = pos[neighbors] + 0.1
+    return full
+
+
 def _refined(
     system: Any,
     neighbors_list: NeighborsList,
@@ -48,19 +61,27 @@ def _refined(
     refined: str = "T",
     dE: float = 0.5,
     ref: int = 0,
+    full_saddle: str = "auto",
     **estimate: Any,
 ) -> EventRefinementOutput:
-    """Refinement output with neighbour-cropped geometry, as production builds it."""
+    """Refinement output with neighbour-cropped geometry, as production builds it.
+
+    ``full_saddle="auto"`` attaches the full refined saddle exactly as
+    ``Refinement.execute`` does for ``refined == "T"`` outputs in htst/rpa;
+    ``"none"`` leaves it out.
+    """
     neighbors = np.asarray(neighbors_list.get_neighbors("rcut", atom), dtype=int)
     pos = np.asarray(system.positions, dtype=float)
+    full = _full_saddle(system, neighbors)
     return EventRefinementOutput(
         central_atom_index=atom,
-        saddle_positions=pos[neighbors] + 0.1,
+        saddle_positions=full[neighbors],
         E_saddle=dE,
         min2_positions=pos[neighbors] + 0.2,
         dE_forward=dE,
         num_reference_event=ref,
         refined=refined,
+        full_saddle_positions=full if full_saddle == "auto" else None,
         **estimate,
     )
 
@@ -74,13 +95,16 @@ def _service(config: Any, responder: Any) -> tuple[PrefactorService, FakeManager
 
 
 def _site_ok(nu0: float) -> Any:
-    return lambda req: event_prefactors(req.event_key, accepted(nu0), rejected("n/a"))
+    return lambda req: event_prefactors(req.event_key, accepted(nu0), skipped())
 
 
 def _site_rejected(reason: str = "saddle_not_first_order") -> Any:
-    return lambda req: event_prefactors(
-        req.event_key, rejected(reason), rejected(reason)
-    )
+    return lambda req: event_prefectors_rejected(req, reason)
+
+
+def event_prefectors_rejected(req: Any, reason: str) -> Any:
+    """Forward rejected, backward skipped: what a forward-only request returns."""
+    return event_prefactors(req.event_key, rejected(reason), skipped())
 
 
 def _assert_consistent(table: ActiveEventTable, config: Any) -> None:
@@ -273,37 +297,175 @@ class TestSiteRequests:
         }
         _assert_consistent(table, htst_config)
 
-    def test_request_geometry_uses_the_crop_mapping(
+    def test_request_geometry_is_the_full_refined_saddle_forward_only(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
     ) -> None:
-        """Crops are written back at the neighbour indices, in their order."""
+        """The request carries the full pARTn saddle and asks for the forward direction only."""
         service, fake = _service(htst_config, _site_ok(5.0e12))
         table = ActiveEventTable(htst_config, prefactor_service=service)
-        table.add_events(
-            _refined(
-                system_single_type_fcc,
-                neighbors_list,
-                3,
-                ref=11,
-                nu0_hz=7.0e11,
-                nu0_status="ok",
-            )
+        out = _refined(
+            system_single_type_fcc,
+            neighbors_list,
+            3,
+            ref=11,
+            nu0_hz=7.0e11,
+            nu0_status="ok",
         )
+        table.add_events(out)
         table.request_site_prefactors(system_single_type_fcc, neighbors_list)
 
         (req,) = fake.prefactor_requests
+        assert fake.prefactor_backward_flags == [False]
         pos = np.asarray(system_single_type_fcc.positions, dtype=float)
         neighbors = np.asarray(neighbors_list.get_neighbors("rcut", 3), dtype=int)
         outside = np.setdiff1d(np.arange(len(pos)), neighbors)
         assert req.event_key == ("site", 0, 3, 11)
         assert req.center_index == 3
         assert np.array_equal(req.min1_positions, pos)
-        assert np.allclose(req.saddle_positions[neighbors], pos[neighbors] + 0.1)
-        assert np.allclose(req.min2_positions[neighbors], pos[neighbors] + 0.2)
-        assert np.array_equal(req.saddle_positions[outside], pos[outside])
-        assert np.array_equal(req.min2_positions[outside], pos[outside])
+        assert np.array_equal(req.saddle_positions, out.full_saddle_positions)
+        assert req.saddle_positions is not out.full_saddle_positions  # copied
+        assert np.array_equal(req.saddle_positions[neighbors], out.saddle_positions)
+        # the old construction (crop pasted into the minimum) is NOT what is sent
+        assert not np.array_equal(req.saddle_positions[outside], pos[outside])
+        # min2 is unused for a forward-only request: a copy of the minimum
+        assert np.array_equal(req.min2_positions, pos)
         assert req.types == tuple(system_single_type_fcc.types)
         assert req.pbc == tuple(bool(p) for p in system_single_type_fcc.pbc)
+
+    def test_missing_full_saddle_is_an_error(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """A refined row without its full saddle cannot be requested from a crop."""
+        service, fake = _service(htst_config, _site_ok(5.0e12))
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        table.add_events(
+            _refined(system_single_type_fcc, neighbors_list, 0, full_saddle="none")
+        )
+        with pytest.raises(RuntimeError, match="full refined saddle"):
+            table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert fake.prefactor_requests == []
+
+    def test_crop_inconsistent_with_the_full_saddle_is_an_error(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """The stored crop must be the full saddle at the current mapping."""
+        service, fake = _service(htst_config, _site_ok(5.0e12))
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        out = _refined(system_single_type_fcc, neighbors_list, 0)
+        out.saddle_positions = out.saddle_positions + 1.0e-3
+        table.add_events(out)
+        with pytest.raises(RuntimeError, match="not the full refined saddle"):
+            table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert fake.prefactor_requests == []
+
+    def test_full_saddles_follow_their_rows_and_are_released(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """The side store is keyed by row label, remapped on removal, cleared after the batch."""
+        service, fake = _service(htst_config, _site_ok(5.0e12))
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        outs = [
+            _refined(
+                system_single_type_fcc,
+                neighbors_list,
+                atom,
+                nu0_hz=7e11,
+                nu0_status="ok",
+            )
+            for atom in (0, 5, 9)
+        ]
+        table.add_events(outs)
+        assert sorted(table._full_saddles) == [0, 1, 2]
+        table.remove(1)
+        assert sorted(table._full_saddles) == [0, 1]
+        assert np.array_equal(table._full_saddles[1], outs[2].full_saddle_positions)
+        assert list(table.table["atom_index"]) == [0, 9]
+        table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert table._full_saddles == {}
+        assert [r.center_index for r in fake.prefactor_requests] == [0, 9]
+        assert all(
+            np.array_equal(r.saddle_positions, o.full_saddle_positions)
+            for r, o in zip(fake.prefactor_requests, (outs[0], outs[2]), strict=True)
+        )
+        # the DataFrame never carries the full array
+        assert "full_saddle_positions" not in table.table.columns
+        table.add_events(_refined(system_single_type_fcc, neighbors_list, 20))
+        assert sorted(table._full_saddles) == [2]
+        table.prune_for_recycling(0, system_single_type_fcc, None)
+        assert table._full_saddles == {}
+
+    def test_worker_failure_releases_the_full_saddles(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """A raising worker propagates and still drops the transient arrays."""
+
+        def boom(req: Any) -> Any:
+            raise OSError("scratch failed")
+
+        service, _ = _service(htst_config, boom)
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        table.add_events(_refined(system_single_type_fcc, neighbors_list, 0))
+        with pytest.raises(OSError):
+            table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert table._full_saddles == {}
+
+    def test_site_log_lines_carry_n_free_and_batch_time(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """Success and rejection lines report the free-atom count and the batch wall time."""
+        import logging
+
+        records: list[logging.LogRecord] = []
+
+        class _Collect(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        logger = logging.getLogger("log")
+        handler = _Collect(level=logging.DEBUG)
+        previous = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        try:
+            outcomes = {0: _site_ok(5e12), 5: _site_rejected("bad")}
+            service, _ = _service(
+                htst_config, lambda req: outcomes[req.center_index](req)
+            )
+            table = ActiveEventTable(htst_config, prefactor_service=service)
+            table.add_events(
+                [
+                    _refined(
+                        system_single_type_fcc,
+                        neighbors_list,
+                        0,
+                        nu0_hz=7e11,
+                        nu0_status="ok",
+                    ),
+                    _refined(
+                        system_single_type_fcc,
+                        neighbors_list,
+                        5,
+                        nu0_hz=7e11,
+                        nu0_status="ok",
+                    ),
+                ]
+            )
+            table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(previous)
+        lines = [
+            r.getMessage() for r in records if "active event (atom" in r.getMessage()
+        ]
+        assert len(lines) == 2
+        assert all(
+            "n_free 5" in line and "batch " in line and " s)" in line for line in lines
+        )
+        assert "site nu0 = 5.0000e+12 Hz" in lines[0]
+        assert (
+            "site prefactor rejected (out_of_window: bad); keeping the reference"
+            in lines[1]
+        )
 
     def test_foreign_frame_without_htst_columns_is_refused(
         self,
@@ -336,7 +498,7 @@ class TestSiteRequests:
         out = _refined(system_single_type_fcc, neighbors_list, 0)
         out.saddle_positions = out.saddle_positions[:-1]
         table.add_events(out)
-        with pytest.raises(RuntimeError, match="do not match the current rcut mapping"):
+        with pytest.raises(RuntimeError, match="not match the current rcut mapping"):
             table.request_site_prefactors(system_single_type_fcc, neighbors_list)
 
     def test_site_rejection_keeps_the_reference_estimate(

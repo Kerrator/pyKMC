@@ -34,7 +34,7 @@ from .utils.geometry import compute_delr
 
 if TYPE_CHECKING:
     from .event_recycling import Recycling
-    from .htst.result import DirectionalPrefactor
+    from .htst.result import DirectionalPrefactor, EventPrefactors
     from .rate_constant.prefactors import PrefactorService
 
 logger = logging.getLogger("log")
@@ -108,15 +108,18 @@ site-specific estimate at the refined saddle, or the ``k0`` fallback."""
 SELF_REVERSE_NU0_RTOL: float = 0.05
 """Relative tolerance under which two directional Vineyard prefactors count as equal.
 
-Used only by the htst/rpa directional identity gate: an event whose endpoint
-topologies match and whose saddle crops map onto each other (the IRA check) is
-collapsed to one self-linked catalogue row only when both directional
-prefactors were accepted and agree within this tolerance. For a genuinely
-self-reverse event the two minimum Hessians are related by the symmetry that
-maps min1 onto min2, so their spectra differ only by finite-difference and
-relaxation noise (well below one percent); 5 % leaves room for that noise while
-rejecting physically distinct spectra. The value is a documented constant, not
-a validated calibration.
+Used only by the htst/rpa directional identity gate: a self-reverse candidate
+(endpoint topologies match and the saddle crops map onto each other, the IRA
+check) is always one self-linked catalogue row carrying the forward estimate.
+When both directional prefactors were accepted and agree within this
+tolerance the row's ``nu0_reason`` stays empty; otherwise the backward value
+and the relative difference are recorded in ``nu0_reason`` and logged as a
+warning (no averaging, never a second row). For a genuinely self-reverse event
+the two minimum Hessians are related by the symmetry that maps min1 onto min2,
+so their spectra differ only by finite-difference and relaxation noise (well
+below one percent); 5 % leaves room for that noise while flagging physically
+distinct spectra. The value is a documented constant, not a validated
+calibration.
 """
 
 SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
@@ -135,18 +138,22 @@ class EventAdmission:
     reverse_idx_ref : int or None
         Logical id of an already catalogued reverse event that the single
         forward row must link to; ``None`` when the frame carries its own
-        reverse or the reverse is unknown.
+        reverse or the row is its own reverse.
+    same_topology : bool
+        The endpoint topologies match (``event_id == id_final``): the frame is
+        one self-linked row in every style, so two rows sharing one
+        ``event_id`` are never created.
     self_reverse_candidate : bool
-        htst/rpa only: the endpoint topologies match and the saddle crops map
-        onto each other, so constant-mode admission would have kept one
-        self-linked row. Both directional rows are kept until their
-        prefactors have been resolved; see
-        :meth:`ReferenceEventTable.finalize_self_reverse`.
+        htst/rpa only: ``same_topology`` and the saddle crops map onto each
+        other (the IRA check). The backward prefactor of the search is then
+        compared with the forward one and the outcome recorded on the single
+        row; see :meth:`ReferenceEventTable._record_self_reverse`.
 
     """
 
     frame: pd.DataFrame
     reverse_idx_ref: int | None = None
+    same_topology: bool = False
     self_reverse_candidate: bool = False
 
 
@@ -166,8 +173,9 @@ def self_reverse_prefactors_agree(
     -------
     bool
         ``True`` only when both directions were accepted and their ``nu0_hz``
-        agree within :data:`SELF_REVERSE_NU0_RTOL`. A rejected direction never
-        supports a collapse: equal fallbacks do not demonstrate equal spectra.
+        agree within :data:`SELF_REVERSE_NU0_RTOL`. A rejected or skipped
+        direction never agrees: equal fallbacks do not demonstrate equal
+        spectra.
 
     """
     if not (forward.ok and backward.ok):
@@ -210,7 +218,10 @@ class ReferenceEventTable:
     event is kept until its directional logical ids are known; exactly one
     request per accepted event (both directions) is submitted; rows are
     patched by logical id; the batch is resolved before :meth:`add_events`
-    returns, so refinement never reads an unresolved reference ``k``.
+    returns, so refinement never reads an unresolved reference ``k``. A
+    self-reverse event is one self-linked row carrying the forward estimate;
+    its backward estimate is only compared and recorded (see
+    :meth:`_record_self_reverse`).
 
     """
 
@@ -247,7 +258,7 @@ class ReferenceEventTable:
 
         """
         results_is_valid_events = []
-        accepted: list[tuple[int, int | None, bool, EventSearchOutput]] = []
+        accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self._admit(
@@ -268,9 +279,7 @@ class ReferenceEventTable:
                     frame = admission.frame
                     fwd_id = int(frame.iloc[0]["idx_ref"])
                     bwd_id = int(frame.iloc[1]["idx_ref"]) if len(frame) > 1 else None
-                    accepted.append(
-                        (fwd_id, bwd_id, admission.self_reverse_candidate, ev)
-                    )
+                    accepted.append((fwd_id, bwd_id, admission, ev))
             else:
                 results_is_valid_events.append(res)
 
@@ -281,16 +290,16 @@ class ReferenceEventTable:
 
     def _resolve_prefactors(
         self,
-        accepted: list[tuple[int, int | None, bool, EventSearchOutput]],
+        accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]],
         pbc: Any,
     ) -> None:
         """Submit one request per accepted event and patch the directional rows.
 
         Parameters
         ----------
-        accepted : list of (forward id, backward id or None, candidate, event)
-            Logical ids assigned by :meth:`add`, the self-reverse flag of the
-            admission and the full search geometry.
+        accepted : list of (forward id, backward id or None, admission, event)
+            Logical ids assigned by :meth:`add`, the admission (its linking
+            flags) and the full search geometry.
         pbc : array_like of bool
             Actual periodicity of the system.
 
@@ -313,7 +322,7 @@ class ReferenceEventTable:
                 f"style {self.config.rateconstant.style!r}"
             )
         requests = []
-        for fwd_id, bwd_id, _candidate, ev in accepted:
+        for fwd_id, bwd_id, _admission, ev in accepted:
             if ev.types is None:
                 raise RuntimeError(
                     "EventSearchOutput.types is required to build the HTST request "
@@ -332,58 +341,164 @@ class ReferenceEventTable:
                 )
             )
         results = self.prefactor_service.compute(requests)
-        for fwd_id, bwd_id, candidate, _ev in accepted:
+        wall = self.prefactor_service.last_batch_wall_s
+        for fwd_id, bwd_id, admission, _ev in accepted:
             pre = results[(fwd_id, bwd_id)]
             self._patch_row(fwd_id, pre.forward)
-            self._log_direction(fwd_id, "forward", pre.forward)
+            self._log_direction(fwd_id, "forward", pre.forward, pre.n_free, wall)
             if bwd_id is not None:
                 self._patch_row(bwd_id, pre.backward)
-                self._log_direction(bwd_id, "backward", pre.backward)
+                self._log_direction(bwd_id, "backward", pre.backward, pre.n_free, wall)
+            elif admission.self_reverse_candidate:
+                self._record_self_reverse(fwd_id, pre, wall)
+            elif admission.same_topology:
+                # Equal endpoint topologies whose saddle crops do not map onto
+                # each other: one self-linked row as in constant mode; the
+                # backward estimate describes a different local geometry and
+                # is not compared with the forward one.
+                logger.info(
+                    "[htst] reference event %d: equal endpoint topologies but the "
+                    "saddle crops do not map onto each other; single self-linked "
+                    "row kept, backward estimate of this search discarded "
+                    "(n_free %d, batch %.3f s)",
+                    fwd_id,
+                    pre.n_free,
+                    wall,
+                )
             else:
                 # The reverse is already catalogued; its own estimate stands.
                 logger.info(
                     "[htst] reference event %d: reverse already catalogued as "
-                    "event %d, backward estimate of this search discarded",
+                    "event %d, backward estimate of this search discarded "
+                    "(n_free %d, batch %.3f s)",
                     fwd_id,
                     int(
                         self.table.loc[
                             self.table["idx_ref"] == fwd_id, "idx_backward"
                         ].iloc[0]
                     ),
-                )
-            if candidate:
-                agree = self_reverse_prefactors_agree(pre.forward, pre.backward)
-                self.finalize_self_reverse(fwd_id, bwd_id, agree)
-                logger.info(
-                    "[htst] reference events (%d, %d): equal endpoint topologies; %s",
-                    fwd_id,
-                    bwd_id,
-                    "prefactors agree, collapsed to one self-linked row"
-                    if agree
-                    else "prefactors differ, two directional rows kept",
+                    pre.n_free,
+                    wall,
                 )
 
     @staticmethod
     def _log_direction(
-        idx_ref: int, direction: str, estimate: DirectionalPrefactor
+        idx_ref: int,
+        direction: str,
+        estimate: DirectionalPrefactor,
+        n_free: int,
+        wall_s: float,
     ) -> None:
-        """Log the outcome of one directional reference estimate."""
+        """Log the outcome of one directional reference estimate.
+
+        Parameters
+        ----------
+        idx_ref : int
+            Logical id of the row.
+        direction : str
+            ``"forward"`` or ``"backward"``.
+        estimate : DirectionalPrefactor
+            The resolved estimate.
+        n_free : int
+            Free atoms of the event's Hessians.
+        wall_s : float
+            Wall time (s) of the batch that produced the estimate.
+
+        """
         if estimate.ok:
             logger.info(
-                "[htst] reference event %d (%s): nu0 = %.4e Hz",
+                "[htst] reference event %d (%s): nu0 = %.4e Hz (n_free %d, "
+                "batch %.3f s)",
                 idx_ref,
                 direction,
                 estimate.nu0_hz,
+                n_free,
+                wall_s,
+            )
+        elif estimate.skipped:
+            logger.info(
+                "[htst] reference event %d (%s): not requested (n_free %d, "
+                "batch %.3f s)",
+                idx_ref,
+                direction,
+                n_free,
+                wall_s,
             )
         else:
             logger.info(
                 "[htst] reference event %d (%s): prefactor rejected (%s: %s), "
-                "falling back to k0",
+                "falling back to k0 (n_free %d, batch %.3f s)",
                 idx_ref,
                 direction,
                 estimate.reason_code.value,
                 estimate.reason,
+                n_free,
+                wall_s,
             )
+
+    def _record_self_reverse(
+        self, idx_ref: int, pre: EventPrefactors, wall_s: float
+    ) -> None:
+        """Compare the backward estimate of a self-reverse row with its forward one.
+
+        The row already carries the forward estimate (:meth:`_patch_row`).
+        Agreement within :data:`SELF_REVERSE_NU0_RTOL` leaves ``nu0_reason``
+        untouched; a disagreement, a rejected backward direction or a rejected
+        forward direction is appended to ``nu0_reason`` and logged as a
+        warning. The estimate itself is never changed (no averaging) and no
+        second row is created. Both outcomes are the only report of the
+        backward estimate, so their log lines carry ``n_free`` and the wall
+        time of the batch like every other ``[htst]`` reference line.
+
+        Parameters
+        ----------
+        idx_ref : int
+            Logical id of the single self-linked row.
+        pre : EventPrefactors
+            The resolved pair of directional estimates of the search.
+        wall_s : float
+            Wall time (s) of the batch that produced the estimates.
+
+        """
+        fwd, bwd = pre.forward, pre.backward
+        if fwd.ok and bwd.ok:
+            if self_reverse_prefactors_agree(fwd, bwd):
+                logger.info(
+                    "[htst] reference event %d: self-reverse, backward nu0 = "
+                    "%.4e Hz agrees with the forward estimate within %.0f%% "
+                    "(n_free %d, batch %.3f s)",
+                    idx_ref,
+                    bwd.nu0_hz,
+                    100.0 * SELF_REVERSE_NU0_RTOL,
+                    pre.n_free,
+                    wall_s,
+                )
+                return
+            differs = 100.0 * abs(fwd.nu0_hz - bwd.nu0_hz) / fwd.nu0_hz
+            note = f"self-reverse: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
+        elif bwd.ok:
+            note = (
+                f"self-reverse: backward nu0 = {bwd.nu0_hz:.4e} Hz (forward rejected)"
+            )
+        elif bwd.skipped:
+            note = "self-reverse: backward prefactor not requested"
+        else:
+            note = (
+                "self-reverse: backward prefactor rejected "
+                f"({bwd.reason_code.value}: {bwd.reason})"
+            )
+        mask = self.table["idx_ref"] == idx_ref
+        current = str(self.table.loc[mask, "nu0_reason"].iloc[0])
+        self.table.loc[mask, "nu0_reason"] = f"{current}; {note}" if current else note
+        logger.warning(
+            "[htst] reference event %d: %s; the single self-linked row keeps the "
+            "forward estimate (%s) (n_free %d, batch %.3f s)",
+            idx_ref,
+            note,
+            f"nu0 = {fwd.nu0_hz:.4e} Hz" if fwd.ok else "k0 fallback",
+            pre.n_free,
+            wall_s,
+        )
 
     def _patch_row(self, idx_ref: int, estimate: DirectionalPrefactor) -> None:
         """Write one directional estimate on the row with logical id ``idx_ref``.
@@ -403,9 +518,15 @@ class ReferenceEventTable:
         Raises
         ------
         ValueError
-            If no row carries ``idx_ref``.
+            If no row carries ``idx_ref`` or if the estimate was skipped
+            (``status == "skipped"`` is never stored: it is no estimate).
 
         """
+        if estimate.skipped:
+            raise ValueError(
+                f"reference event {idx_ref}: a skipped direction carries no "
+                "estimate and is never written to the table"
+            )
         mask = self.table["idx_ref"] == idx_ref
         if not mask.any():
             raise ValueError(f"idx_ref {idx_ref} is not in the reference table")
@@ -653,11 +774,14 @@ class ReferenceEventTable:
 
         - a backward direction already in the catalogue links the forward row
           to that logical id instead of self-linking it;
-        - equal endpoint topologies collapse to one row only when the saddle
-          crops map onto each other (the IRA check, within
-          :data:`SAME_TOPOLOGY_BARRIER_TOL`) **and**, after resolution, both
-          directional prefactors agree (:meth:`finalize_self_reverse`); until
-          then both directional rows are kept with reciprocal links.
+        - equal endpoint topologies are one self-linked row, as in constant
+          mode (two rows sharing one ``event_id`` would be applied twice per
+          site and break the basin explorer); when the saddle crops also map
+          onto each other (the IRA check, within
+          :data:`SAME_TOPOLOGY_BARRIER_TOL`) the row is a self-reverse
+          candidate whose backward prefactor is compared with the forward one
+          after resolution (:meth:`_record_self_reverse`), otherwise the
+          backward estimate is discarded.
 
         Parameters
         ----------
@@ -705,14 +829,18 @@ class ReferenceEventTable:
                     reverse_idx_ref=reverse_idx_ref,
                 )
             )
-        candidate = same_topology and self._saddle_crops_match(
-            dfevent_forward, dfevent_backward
-        )
-        return Ok(
-            EventAdmission(
-                frame=self._two_rows(dfevent_forward, dfevent_backward),
-                self_reverse_candidate=candidate,
+        if same_topology:
+            return Ok(
+                EventAdmission(
+                    frame=dfevent_forward.to_frame().T,
+                    same_topology=True,
+                    self_reverse_candidate=self._saddle_crops_match(
+                        dfevent_forward, dfevent_backward
+                    ),
+                )
             )
+        return Ok(
+            EventAdmission(frame=self._two_rows(dfevent_forward, dfevent_backward))
         )
 
     @staticmethod
@@ -734,8 +862,10 @@ class ReferenceEventTable:
         (IRA match of the forward saddle crop against the backward one,
         accepted through ``psr.matching_score_thr``), applied only when the
         two barriers lie within :data:`SAME_TOPOLOGY_BARRIER_TOL`. On the
-        base it sat behind an unreachable branch; the htst/rpa gate uses it as
-        the "physical mapping" half of the collapse decision. Species are fed
+        base it sat behind an unreachable branch; the htst/rpa gate uses it to
+        decide whether the backward prefactor of a same-topology search
+        describes the same saddle crop (and is compared with the forward one)
+        or a different one (and is discarded). Species are fed
         to IRA exactly as :meth:`find_matching_event` does: the local element
         types in ``full`` colouring mode, a single grey label otherwise, so a
         species-swapped pair of directional crops is never a candidate in
@@ -925,41 +1055,6 @@ class ReferenceEventTable:
             dfevent.loc[1, "idx_backward"] = ref
 
         self.table = pd.concat([self.table, dfevent], ignore_index=True)
-
-    def finalize_self_reverse(
-        self, forward_idx_ref: int, backward_idx_ref: int, agree: bool
-    ) -> None:
-        """Resolve a self-reverse candidate once its directional prefactors are known.
-
-        Parameters
-        ----------
-        forward_idx_ref : int
-            Logical id of the forward row.
-        backward_idx_ref : int
-            Logical id of the backward row admitted alongside it.
-        agree : bool
-            Result of :func:`self_reverse_prefactors_agree` on the resolved
-            directional prefactors. ``True`` collapses the pair to the single
-            self-linked forward row (constant-mode representation): the
-            backward row is dropped and any row that linked to it as its
-            reverse is re-pointed at the forward row. ``False`` keeps both
-            directional rows with their reciprocal links; the logical ids stay
-            as assigned (the catalogue may therefore be sparse).
-
-        """
-        if not agree:
-            return
-        fwd_mask = self.table["idx_ref"] == forward_idx_ref
-        bwd_mask = self.table["idx_ref"] == backward_idx_ref
-        if not fwd_mask.any() or not bwd_mask.any():
-            raise ValueError(
-                f"self-reverse pair ({forward_idx_ref}, {backward_idx_ref}) is not "
-                "in the reference table"
-            )
-        self.table.loc[fwd_mask, "idx_backward"] = forward_idx_ref
-        relink = self.table["idx_backward"] == backward_idx_ref
-        self.table.loc[relink, "idx_backward"] = forward_idx_ref
-        self.table = self.table[~bwd_mask].reset_index(drop=True)
 
     def has_id_subset_table(self, ids: list[str]) -> pd.DataFrame:
         """Return subset table with event having id in ids.
@@ -1415,6 +1510,7 @@ class ReferenceEventTable:
             "k0": float(rc.k0),
             "settings": {
                 "free_radius": float(rc.free_radius),
+                "free_region_center": str(rc.free_region_center),
                 "fd_step": float(rc.fd_step),
                 "zone_radius": None
                 if rc.zone_radius is None
@@ -1526,6 +1622,16 @@ class ActiveEventTable:
     row's geometry is never rebuilt in place: a changed geometry is a new row
     built by :meth:`add_events` from its reference estimate.
 
+    Site geometry: the request is built from the current full minimum and the
+    full pARTn-refined saddle that ``Refinement.execute`` hands over on
+    ``EventRefinementOutput.full_saddle_positions`` (only the forward
+    direction is computed). That array is kept in a transient side store keyed
+    by row label, never in the DataFrame, and released as soon as the site
+    batch has been submitted; every table mutation that relabels rows
+    (:meth:`remove`, :meth:`prune_for_recycling`) keeps the store consistent,
+    and the request path checks the stored crop against the full saddle before
+    submitting anything.
+
     """
 
     def __init__(
@@ -1545,6 +1651,9 @@ class ActiveEventTable:
         # rate configuration, exactly as before.
         self._rate_constant: RateConstant | None = None
         self.prefactor_service = prefactor_service
+        # Transient full refined saddles of rows awaiting their site request,
+        # keyed by the row's current label (see the class notes).
+        self._full_saddles: dict[int, np.ndarray] = {}
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -1613,8 +1722,11 @@ class ActiveEventTable:
         """Replace `self.table` with the rows that survive the recycler's filter.
 
         If no recycler is attached, clear the table (matches the prior
-        end-of-step `del active_table` behavior).
+        end-of-step `del active_table` behavior). Rows surviving a prune were
+        attempted in the step that built them, so the transient full saddles
+        are dropped here.
         """
+        self._full_saddles = {}
         if self.recycler is None:
             self.table = self.table.iloc[0:0].reset_index(drop=True)
         else:
@@ -1657,10 +1769,10 @@ class ActiveEventTable:
 
         """
         if isinstance(events, list):
-            dfactive = []
-            for e in events:
-                dfactive.append(self.build_event_series(e))
+            outputs = list(events)
+            dfactive = [self.build_event_series(e) for e in outputs]
         elif isinstance(events, EventRefinementOutput):
+            outputs = [events]
             dfactive = self.build_event_series(events)
         else:
             raise TypeError(
@@ -1668,7 +1780,17 @@ class ActiveEventTable:
             )
         if self.uses_prefactors:
             self._require_htst_columns("add_events")
+        first_label = len(self.table)
         self.add(dfactive)
+        if self.uses_prefactors:
+            # The full refined saddle travels beside the row (never in it) until
+            # request_site_prefactors consumes it.
+            for offset, output in enumerate(outputs):
+                full = output.full_saddle_positions
+                if full is not None:
+                    self._full_saddles[first_label + offset] = np.asarray(
+                        full, dtype=float
+                    )
 
     def add(self, dfevents: pd.Series | list[pd.Series]) -> None:
         """Add a pd.Series of the active events.
@@ -1791,24 +1913,29 @@ class ActiveEventTable:
         Hessian. Only ``refined == "T"`` rows that have not been attempted
         participate; ``"F"``/``"B"`` rows and recycled rows keep their values.
 
+        Geometry: the request carries the current full minimum as ``min1``
+        and the full pARTn-refined saddle handed over by ``Refinement.execute``
+        (``EventRefinementOutput.full_saddle_positions``, held in the
+        transient side store) as ``saddle``; only the forward direction is
+        computed (``compute_backward=False``), so ``min2`` is a copy of
+        ``min1`` and is never used. Rebuilding the saddle from the ``rcut``
+        crop pasted into the minimum (the previous construction) left every
+        atom between ``rcut`` and ``free_radius`` plus the potential cutoff at
+        its minimum position and biased the site estimate (-4.5 % on SW-Si at
+        ``rcut`` 6.3 Å, -31 % on Cu); the full saddle removes that bias and
+        makes ``free_radius`` independent of ``rcut``.
+
         Ordering invariant: a refined row stores its saddle and final
         positions cropped by ``neighbors_list.get_neighbors("rcut",
         atom_index)`` evaluated on the neighbour list refinement ran with,
         in that list's order (``Refinement.refine_single`` crops with
         ``ctx["neighbors"]`` and ``KMC._reconstruction_active_event`` reads
         them back through the same call). The caller must therefore pass that
-        same neighbour list; the full geometries are rebuilt by writing the
-        crops into a copy of the current minimum at those indices, and the
-        crop length is checked against the mapping before any request.
+        same neighbour list: the stored crop is checked against the full
+        saddle at those indices before any request is submitted.
 
-        Crop approximation: only the atoms inside the ``rcut`` crop carry
-        refined saddle/final positions; every other atom sits at its current
-        minimum position in the rebuilt geometries. Free atoms of the Hessian
-        beyond ``rcut`` (``rateconstant.free_radius > atomicenvironment.rcut``)
-        are therefore evaluated off their stationary point, which biases the
-        site spectra towards ``saddle_not_first_order``/``unstable_minimum``
-        rejections (and the reference/``k0`` fallback). ``Initializer``
-        warns once about that configuration.
+        The full saddles are released once the batch has been submitted and
+        resolved (also when a worker failure propagates).
 
         Parameters
         ----------
@@ -1827,8 +1954,9 @@ class ActiveEventTable:
         Raises
         ------
         RuntimeError
-            If a row is eligible but no prefactor service is attached, or if
-            a row's crop does not match the current neighbour mapping.
+            If a row is eligible but no prefactor service is attached, if an
+            eligible row has no full refined saddle, or if a row's crop does
+            not match the full saddle at the current neighbour mapping.
         ValueError
             If the table (a caller-supplied frame) lacks the HTST columns.
 
@@ -1852,45 +1980,61 @@ class ActiveEventTable:
         positions = np.asarray(system.positions, dtype=float)
         requests = []
         keys: list[tuple[Any, tuple]] = []
-        for idx, row in rows.iterrows():
-            atom = int(row["atom_index"])
-            neighbors = np.asarray(
-                neighbors_list.get_neighbors("rcut", atom), dtype=int
-            )
-            saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
-            final_crop = np.asarray(row["final_positions"], dtype=float)
-            if (
-                saddle_crop.shape != (len(neighbors), 3)
-                or final_crop.shape != (len(neighbors), 3)
-                or atom not in neighbors
-            ):
-                raise RuntimeError(
-                    f"active row {idx} (atom {atom}): stored crops of shape "
-                    f"{saddle_crop.shape}/{final_crop.shape} do not match the "
-                    f"current rcut mapping of {len(neighbors)} neighbours; the "
-                    "site request must use the neighbour list refinement cropped with"
+        try:
+            for idx, row in rows.iterrows():
+                atom = int(row["atom_index"])
+                neighbors = np.asarray(
+                    neighbors_list.get_neighbors("rcut", atom), dtype=int
                 )
-            full_saddle = positions.copy()
-            full_saddle[neighbors] = saddle_crop
-            full_min2 = positions.copy()
-            full_min2[neighbors] = final_crop
-            key = ("site", int(idx), atom, int(row["num_reference_event"]))
-            requests.append(
-                self.prefactor_service.build_request(
-                    event_key=key,
-                    min1_positions=positions,
-                    saddle_positions=full_saddle,
-                    min2_positions=full_min2,
-                    types=system.types,
-                    cell=system.cell,
-                    pbc=system.pbc,
-                    center_index=atom,
+                saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
+                if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
+                    raise RuntimeError(
+                        f"active row {idx} (atom {atom}): stored crop of shape "
+                        f"{saddle_crop.shape} does not match the current rcut "
+                        f"mapping of {len(neighbors)} neighbours; the site request "
+                        "must use the neighbour list refinement cropped with"
+                    )
+                full_saddle = self._full_saddles.get(int(idx))
+                if full_saddle is None:
+                    raise RuntimeError(
+                        f"active row {idx} (atom {atom}): refined row without its "
+                        "full refined saddle; site requests are built from "
+                        "EventRefinementOutput.full_saddle_positions, which "
+                        "Refinement.execute sets on refined outputs in the htst/rpa "
+                        "styles"
+                    )
+                if full_saddle.shape != positions.shape or not np.array_equal(
+                    full_saddle[neighbors], saddle_crop
+                ):
+                    raise RuntimeError(
+                        f"active row {idx} (atom {atom}): the stored saddle crop is "
+                        "not the full refined saddle at the current rcut mapping; "
+                        "the site request must use the neighbour list refinement "
+                        "cropped with"
+                    )
+                key = ("site", int(idx), atom, int(row["num_reference_event"]))
+                requests.append(
+                    self.prefactor_service.build_request(
+                        event_key=key,
+                        min1_positions=positions,
+                        saddle_positions=full_saddle,
+                        min2_positions=positions,  # unused: forward only
+                        types=system.types,
+                        cell=system.cell,
+                        pbc=system.pbc,
+                        center_index=atom,
+                    )
                 )
-            )
-            keys.append((idx, key))
-        results = self.prefactor_service.compute(requests)
+                keys.append((idx, key))
+            results = self.prefactor_service.compute(requests, compute_backward=False)
+        finally:
+            # Release the full arrays: the requests hold their own copies and
+            # a row is attempted at most once.
+            self._full_saddles = {}
+        wall = self.prefactor_service.last_batch_wall_s
         for idx, key in keys:
-            estimate = results[key].forward
+            pre = results[key]
+            estimate = pre.forward
             self.table.loc[idx, "nu0_site_attempted"] = True
             summary["attempted"] += 1
             atom = int(self.table.loc[idx, "atom_index"])
@@ -1906,21 +2050,29 @@ class ActiveEventTable:
                 self.table.loc[idx, "nu0_source"] = SOURCE_SITE
                 summary["ok"] += 1
                 logger.info(
-                    "[htst] active event (atom %d, reference %d): site nu0 = %.4e Hz",
+                    "[htst] active event (atom %d, reference %d): site nu0 = %.4e Hz "
+                    "(n_free %d, batch %.3f s)",
                     atom,
                     ref,
                     estimate.nu0_hz,
+                    pre.n_free,
+                    wall,
                 )
             else:
+                # A skipped forward direction cannot happen (only the backward
+                # one is skipped); a rejected one keeps the row as it is.
                 summary["rejected"] += 1
                 logger.info(
                     "[htst] active event (atom %d, reference %d): site prefactor "
-                    "rejected (%s: %s); keeping the %s estimate",
+                    "rejected (%s: %s); keeping the %s estimate (n_free %d, "
+                    "batch %.3f s)",
                     atom,
                     ref,
-                    estimate.reason_code.value,
+                    estimate.reason_code.value if estimate.reason_code else "skipped",
                     estimate.reason,
                     self.table.loc[idx, "nu0_source"],
+                    pre.n_free,
+                    wall,
                 )
         return summary
 
@@ -1947,13 +2099,24 @@ class ActiveEventTable:
     def remove(self, ind: int | list[int]) -> None:
         """Remove event at row = ind
 
+        The surviving rows are relabelled ``0..n-1``; the transient full
+        saddles follow their rows.
+
         Parameters
         ----------
         ind : int
             index of the row to be removed
         """
+        dropped = {int(ind)} if np.isscalar(ind) else {int(i) for i in ind}
+        kept = [label for label in self.table.index if int(label) not in dropped]
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
+        if self._full_saddles:
+            self._full_saddles = {
+                new: self._full_saddles[int(old)]
+                for new, old in enumerate(kept)
+                if int(old) in self._full_saddles
+            }
 
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""

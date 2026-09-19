@@ -78,12 +78,17 @@ class DirectionalPrefactor:
     ----------
     nu0_hz : float or None
         Linear Vineyard frequency in Hz; a finite float > 0 iff ``status == "ok"``.
-    status : {"ok", "rejected"}
-        Whether ``nu0_hz`` was produced (enforced at construction).
+    status : {"ok", "rejected", "skipped"}
+        Whether ``nu0_hz`` was produced (enforced at construction). ``"skipped"``
+        means the direction was not requested (``compute_backward=False``): no
+        Hessian was computed for it, it carries no estimate and no rejection
+        code, and every consumer treats it as "no estimate". Tables never
+        store it.
     reason_code : PrefactorRejection or None
         Set iff rejected.
     reason : str or None
-        Human-readable detail; ``None`` when ok.
+        Human-readable detail; ``None`` when ok, ``"not requested"`` when
+        skipped.
     n_free : int or None
         Number of free atoms in the partial Hessian, when known.
     n_positive_min : int or None
@@ -95,7 +100,7 @@ class DirectionalPrefactor:
     """
 
     nu0_hz: float | None
-    status: Literal["ok", "rejected"]
+    status: Literal["ok", "rejected", "skipped"]
     reason_code: PrefactorRejection | None
     reason: str | None
     n_free: int | None
@@ -103,9 +108,11 @@ class DirectionalPrefactor:
     n_negative_saddle: int | None
 
     def __post_init__(self) -> None:
-        """Enforce the ok/rejected invariants."""
-        if self.status not in ("ok", "rejected"):
-            raise ValueError(f"status must be 'ok' or 'rejected', got {self.status!r}")
+        """Enforce the ok/rejected/skipped invariants."""
+        if self.status not in ("ok", "rejected", "skipped"):
+            raise ValueError(
+                f"status must be 'ok', 'rejected' or 'skipped', got {self.status!r}"
+            )
         if self.status == "ok":
             if not _is_finite_positive_float(self.nu0_hz):
                 raise ValueError(
@@ -113,6 +120,15 @@ class DirectionalPrefactor:
                 )
             if self.reason_code is not None:
                 raise ValueError("status 'ok' must not carry a reason_code")
+        elif self.status == "skipped":
+            if self.nu0_hz is not None:
+                raise ValueError("status 'skipped' must carry nu0_hz=None")
+            if self.reason_code is not None:
+                raise ValueError("status 'skipped' must not carry a reason_code")
+            if not isinstance(self.reason, str) or not self.reason:
+                raise ValueError("status 'skipped' requires a non-empty reason")
+            if self.n_positive_min is not None:
+                raise ValueError("status 'skipped' never computed a minimum spectrum")
         else:
             if self.nu0_hz is not None:
                 raise ValueError("status 'rejected' must carry nu0_hz=None")
@@ -131,6 +147,39 @@ class DirectionalPrefactor:
     def ok(self) -> bool:
         """Return True when this direction carries an accepted prefactor."""
         return self.status == "ok"
+
+    @property
+    def skipped(self) -> bool:
+        """Return True when this direction was not requested (no estimate)."""
+        return self.status == "skipped"
+
+    @classmethod
+    def not_requested(
+        cls, *, n_free: int | None, n_negative_saddle: int | None
+    ) -> DirectionalPrefactor:
+        """Build a ``"skipped"`` result for a direction that was not computed.
+
+        Parameters
+        ----------
+        n_free, n_negative_saddle : int or None
+            Diagnostics shared with the computed direction (the free set and
+            the saddle spectrum are common to both directions).
+
+        Returns
+        -------
+        DirectionalPrefactor
+            ``status="skipped"``, ``reason="not requested"``, no estimate.
+
+        """
+        return cls(
+            nu0_hz=None,
+            status="skipped",
+            reason_code=None,
+            reason="not requested",
+            n_free=n_free,
+            n_positive_min=None,
+            n_negative_saddle=n_negative_saddle,
+        )
 
     @classmethod
     def accepted(

@@ -55,7 +55,18 @@ def main() -> None:
             kmc._initialize()
             kmc.run()
         except SystemExit:
-            pass
+            # KMC._close chose the status (0 normal completion, 1 aborted
+            # simulation) after shutting the workers down; the idempotent
+            # shutdown here covers an exit raised anywhere else. The status
+            # propagates to ``python -m pykmc`` instead of being swallowed.
+            # A shutdown failing here leaves workers un-notified, so it goes
+            # through the same abort boundary as any other failure.
+            try:
+                manager.shutdown()
+            except BaseException:
+                comm.Abort(1)
+                raise
+            raise
         except BaseException:
             comm.Abort(1)
             raise

@@ -446,3 +446,165 @@ def test_hessian_fn_prefactor_rejected_with_none_detail_falls_back_to_code() -> 
     for d in (res.forward, res.backward):
         assert d.reason_code is PrefactorRejection.NONFINITE_HESSIAN
         assert d.reason == "nonfinite_hessian"
+
+
+def test_compute_backward_false_skips_the_min2_hessian() -> None:
+    """Forward only: one saddle and one min1 Hessian; the backward is 'skipped'."""
+    req = make_request()
+    hess = SpectrumHessian(req, *three_mode_spectra())
+    res = compute_event_prefactors(req, hess, compute_backward=False)
+    assert hess.calls == {"min1": 1, "saddle": 1, "min2": 0}
+    assert res.forward.ok
+    assert res.forward.nu0_hz == pytest.approx(
+        nu_hz(0.3) * nu_hz(0.5) * nu_hz(0.7) / (nu_hz(0.4) * nu_hz(0.6)), rel=1e-9
+    )
+    assert res.backward.status == "skipped" and res.backward.skipped
+    assert res.backward.nu0_hz is None and res.backward.reason_code is None
+    assert res.backward.reason == "not requested"
+    assert res.backward.n_free == 1 and res.backward.n_negative_saddle == 1
+    assert res.backward.n_positive_min is None
+    back = pickle.loads(pickle.dumps(res))
+    assert back == res and back.backward.skipped
+    # the forward value is the same as the two-direction computation's
+    both = compute_event_prefactors(req, SpectrumHessian(req, *three_mode_spectra()))
+    assert both.forward == res.forward
+
+
+def test_compute_backward_false_keeps_early_rejections_forward_only() -> None:
+    """A rejected saddle or an empty selection rejects forward; backward stays skipped."""
+    req = make_request()
+    min1, _, min2 = three_mode_spectra()
+    hess = SpectrumHessian(req, min1, toy_hessian(np.array([0.2, 0.4, 0.6]), 5), min2)
+    res = compute_event_prefactors(req, hess, compute_backward=False)
+    assert res.forward.reason_code is PrefactorRejection.SADDLE_NOT_FIRST_ORDER
+    assert res.backward.skipped and res.backward.n_negative_saddle == 0
+    assert hess.calls == {"min1": 0, "saddle": 1, "min2": 0}
+    empty = compute_event_prefactors(
+        req, hess, free_indices=np.array([], dtype=int), compute_backward=False
+    )
+    assert empty.forward.reason_code is PrefactorRejection.EMPTY_FREE_REGION
+    assert empty.backward.skipped and empty.backward.n_free == 0
+    with pytest.raises(ValueError, match="compute_backward"):
+        compute_event_prefactors(req, hess, compute_backward="no")  # type: ignore[arg-type]
+
+
+def test_free_region_is_selected_on_the_saddle_by_default() -> None:
+    """The mover's saddle position, not its min1 position, centres the free sphere."""
+    base = np.array([[5.0, 5.0, 5.0], [7.5, 5.0, 5.0], [15.0, 5.0, 5.0]])
+    saddle = base.copy()
+    saddle[0, 0] = 6.0  # the mover moves 1 Å towards atom 1
+    seen: dict[str, list[np.ndarray]] = {"saddle": [], "min1": []}
+
+    def make_hess(label: str) -> Any:
+        def hess(positions: np.ndarray, free: np.ndarray) -> np.ndarray:
+            seen[label].append(np.asarray(free))
+            n = 3 * free.size
+            lam = np.linspace(0.3, 0.8, n)
+            if np.array_equal(positions, saddle):
+                lam = lam.copy()
+                lam[0] = -0.2
+            return toy_hessian(lam, 1)
+
+        return hess
+
+    for label in ("saddle", "min1"):
+        req = make_request(
+            settings=HTSTSettings(
+                nu0_min_hz=1e6,
+                nu0_max_hz=1e20,
+                free_radius=2.0,
+                free_region_center=label,
+            ),
+            n_atoms=3,
+            min1_positions=base.copy(),
+            saddle_positions=saddle.copy(),
+            min2_positions=base + np.array([2.0, 0.0, 0.0]),
+        )
+        res = compute_event_prefactors(req, make_hess(label))
+        assert res.forward.ok
+        assert res.settings.free_region_center == label
+    # saddle-centred: atom 1 is 1.5 Å from the mover's saddle position -> free
+    assert all(f.tolist() == [0, 1] for f in seen["saddle"])
+    # min1-centred: atom 1 is 2.5 Å from the mover's min1 position -> frozen
+    assert all(f.tolist() == [0] for f in seen["min1"])
+    assert make_request().settings.free_region_center == "saddle"
+
+
+def _mirror_toy() -> tuple[np.ndarray, np.ndarray, np.ndarray, Any, np.ndarray]:
+    """Three atoms on a line, mirror-symmetric about the mover's saddle plane.
+
+    Mover M hops from x=10 (min1) through x=11 (saddle) to x=12 (min2); A sits
+    at x=8.5 and B at x=13.5, the mirror image of A about x=11. M feels a
+    quartic double well along x (minima at 10 and 12, saddle at 11) plus a
+    harmonic confinement in y, z; A and B are tethered harmonically to their
+    sites and coupled to M by a Gaussian pair energy of the distance. The
+    energy is invariant under x -> 22 - x with A <-> B, which maps min1 onto
+    min2.
+    """
+    a, c, g, sigma = 0.5, 2.0, 0.05, 1.5
+    sites = np.array([[10.0, 10.0, 10.0], [8.5, 10.0, 10.0], [13.5, 10.0, 10.0]])
+    min1 = sites.copy()
+    saddle = sites.copy()
+    saddle[0, 0] = 11.0
+    min2 = sites.copy()
+    min2[0, 0] = 12.0
+
+    def forces(pos: np.ndarray) -> np.ndarray:
+        grad = np.zeros_like(pos)
+        u = pos[0, 0] - 11.0
+        grad[0, 0] = 4.0 * a * (u * u - 1.0) * u
+        grad[0, 1:] = c * (pos[0, 1:] - 10.0)
+        for j in (1, 2):
+            grad[j] += c * (pos[j] - sites[j])
+            d = pos[j] - pos[0]
+            coupling = g * (2.0 / sigma**2) * math.exp(-float(d @ d) / sigma**2) * d
+            grad[0] += coupling
+            grad[j] -= coupling
+        return -grad
+
+    masses = np.array([1.0, 1.0, 1.0])
+    return min1, saddle, min2, forces, masses
+
+
+@pytest.mark.parametrize(("center", "symmetric"), [("saddle", True), ("min1", False)])
+def test_mirror_symmetric_toy_is_symmetric_only_with_saddle_centring(
+    center: str, symmetric: bool
+) -> None:
+    """Saddle centring gives fwd == bwd on a mirror-symmetric hop; min1 centring does not.
+
+    With ``free_radius=2`` the saddle-centred sphere holds the mover alone (A
+    and B are 2.5 Å away), so the two minimum Hessians are mirror images and
+    the prefactors agree to round-off. The min1-centred sphere holds M and A
+    (1.5 Å apart at min1); at min2 the same A is 3.5 Å from M, so the backward
+    Hessian sees a different boundary and the prefactors differ.
+    """
+    min1, saddle, min2, forces, masses = _mirror_toy()
+    settings = HTSTSettings(
+        free_radius=2.0,
+        fd_step=1.0e-4,
+        nu0_min_hz=1e6,
+        nu0_max_hz=1e20,
+        free_region_center=center,
+    )
+    req = HTSTEventRequest(
+        event_key=("mirror", center),
+        min1_positions=min1,
+        saddle_positions=saddle,
+        min2_positions=min2,
+        types=("H", "H", "H"),
+        species=("H",),
+        masses=(1.0,),
+        cell=np.diag([40.0, 40.0, 40.0]),
+        pbc=(True, True, True),
+        center_index=0,
+        settings=settings,
+    )
+    res = compute_event_prefactors(req, fd_hessian_fn(forces, masses, settings.fd_step))
+    assert res.forward.ok and res.backward.ok, (res.forward.reason, res.backward.reason)
+    ratio = res.forward.nu0_hz / res.backward.nu0_hz
+    if symmetric:
+        assert res.n_free == 1
+        assert ratio == pytest.approx(1.0, rel=1e-8)
+    else:
+        assert res.n_free == 2
+        assert abs(ratio - 1.0) > 1e-3

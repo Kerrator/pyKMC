@@ -11,10 +11,15 @@ shared by the reference and active event tables. It is the only place that:
   species rule (:func:`pykmc.engine.lammps.species_map`, imported lazily so the
   constant path never imports LAMMPS);
 - fans the requests out through ``Manager.submit("compute_event_prefactors",
-  request=...)`` (one job per accepted event, both directions per job), keeps
-  the request-to-Future association keyed by ``event_key`` and resolves every
-  Future before any consumer reads a rate, returning the results mapped by
-  ``event_key`` regardless of completion order with strict cardinality.
+  request=..., compute_backward=...)`` (one job per accepted event; both
+  directions for a reference event, the forward direction only for a site
+  request), keeps the request-to-Future association keyed by ``event_key`` and
+  resolves every Future before any consumer reads a rate, returning the results
+  mapped by ``event_key`` regardless of completion order with strict
+  cardinality;
+- measures the wall time of every batch around the submission and Future
+  resolution and accumulates the request count and wall time per KMC step for
+  the ``[htst]`` log lines and the per-step summary.
 
 Exceptions raised by a worker operation propagate through the Future: a
 transport or programming failure is never turned into a ``k0`` fallback. Only
@@ -26,6 +31,7 @@ Nothing in the constant path imports this module.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +74,7 @@ def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
         premin=rate_config.premin,
         nu0_min_hz=thz_to_hz(rate_config.nu0_min_THz),
         nu0_max_hz=thz_to_hz(rate_config.nu0_max_THz),
+        free_region_center=rate_config.free_region_center,
     )
 
 
@@ -91,6 +98,13 @@ class PrefactorService:
         Kernel settings shared by every request of the run.
     n_submitted : int
         Total number of requests submitted so far (diagnostics).
+    last_batch_wall_s : float
+        Wall time (s) of the most recent :meth:`compute` batch, measured
+        around the submissions and the resolution of every Future.
+    step_requests : int
+        Requests submitted since :meth:`reset_step_counters` was last called.
+    step_wall_s : float
+        Wall time (s) of the batches run since :meth:`reset_step_counters`.
 
     """
 
@@ -112,6 +126,14 @@ class PrefactorService:
         self.rate_constant = rate_constant
         self.settings = settings_from_config(config.rateconstant)
         self.n_submitted = 0
+        self.last_batch_wall_s = 0.0
+        self.step_requests = 0
+        self.step_wall_s = 0.0
+
+    def reset_step_counters(self) -> None:
+        """Zero the per-step request count and wall time (called at each KMC step)."""
+        self.step_requests = 0
+        self.step_wall_s = 0.0
 
     def build_request(
         self,
@@ -170,7 +192,7 @@ class PrefactorService:
         return request
 
     def compute(
-        self, requests: Sequence[HTSTEventRequest]
+        self, requests: Sequence[HTSTEventRequest], *, compute_backward: bool = True
     ) -> dict[tuple, EventPrefactors]:
         """Submit every request, wait for all of them and map results by key.
 
@@ -178,6 +200,10 @@ class PrefactorService:
         ----------
         requests : Sequence[HTSTEventRequest]
             Requests with pairwise distinct ``event_key`` values.
+        compute_backward : bool, optional
+            Forwarded to the worker operation. ``False`` (site requests)
+            skips the ``min2`` Hessian; the backward direction of every result
+            is then ``status="skipped"``.
 
         Returns
         -------
@@ -200,26 +226,42 @@ class PrefactorService:
         keys = [req.event_key for req in requests]
         if len(set(keys)) != len(keys):
             raise ValueError(f"event_key values must be distinct, got {keys}")
+        if not isinstance(compute_backward, bool):
+            raise ValueError(
+                f"compute_backward must be a bool, got {compute_backward!r}"
+            )
+        start = time.perf_counter()
         pending: list[tuple[tuple, Any]] = []
-        for req in requests:
-            future = self.manager.submit(PREFACTOR_OPERATION, request=req)
-            pending.append((req.event_key, future))
-        self.n_submitted += len(pending)
+        try:
+            for req in requests:
+                future = self.manager.submit(
+                    PREFACTOR_OPERATION,
+                    request=req,
+                    compute_backward=compute_backward,
+                )
+                pending.append((req.event_key, future))
+            self.n_submitted += len(pending)
+            self.step_requests += len(pending)
 
-        results: dict[tuple, EventPrefactors] = {}
-        for key, future in pending:
-            value = future.result()  # a worker exception propagates here
-            if not isinstance(value, EventPrefactors):
-                raise RuntimeError(
-                    f"{PREFACTOR_OPERATION} returned {type(value).__name__} for "
-                    f"event {key!r}; expected EventPrefactors"
-                )
-            if value.event_key != key:
-                raise RuntimeError(
-                    f"{PREFACTOR_OPERATION} echoed event_key {value.event_key!r} "
-                    f"for the request submitted as {key!r}"
-                )
-            results[key] = value
+            results: dict[tuple, EventPrefactors] = {}
+            for key, future in pending:
+                value = future.result()  # a worker exception propagates here
+                if not isinstance(value, EventPrefactors):
+                    raise RuntimeError(
+                        f"{PREFACTOR_OPERATION} returned {type(value).__name__} for "
+                        f"event {key!r}; expected EventPrefactors"
+                    )
+                if value.event_key != key:
+                    raise RuntimeError(
+                        f"{PREFACTOR_OPERATION} echoed event_key {value.event_key!r} "
+                        f"for the request submitted as {key!r}"
+                    )
+                results[key] = value
+        finally:
+            # The batch time covers submission and resolution, also when a
+            # worker failure propagates (the step summary then never prints).
+            self.last_batch_wall_s = time.perf_counter() - start
+            self.step_wall_s += self.last_batch_wall_s
         if len(results) != len(requests):
             raise RuntimeError(
                 f"resolved {len(results)} results for {len(requests)} requests"
