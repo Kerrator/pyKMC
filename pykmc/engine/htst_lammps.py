@@ -76,7 +76,7 @@ from ..htst import (
 from ..htst import compute_event_prefactors as _kernel_compute_event_prefactors
 from .base import EngineExtension
 from .lammps import LammpsEngine
-from ..physics import ForceModel
+from ..physics import EnginePhysics, ForceModel
 
 TMPDIR_PREFIX: str = "pykmc_htst_"
 """Prefix of the per-call ``tempfile.mkdtemp`` directory (tests count these)."""
@@ -198,6 +198,7 @@ class LammpsHTSTExtension(EngineExtension):
                     pbc=(True, True, True),
                     species=full_system.species,
                     masses=full_system.masses,
+                    expected_physics=physics,
                 )
                 scratch.lmp.command("run 0 post no")
             except Exception as exc:
@@ -320,6 +321,10 @@ class LammpsHTSTExtension(EngineExtension):
                     pbc=request.pbc,
                     species=request.species,
                     masses=request.masses,
+                    expected_physics=None
+                    if request.descriptor is None
+                    else request.descriptor.engine,
+                    check_premin=settings.premin,
                 )
                 full_built = True
                 geometries = [
@@ -336,6 +341,10 @@ class LammpsHTSTExtension(EngineExtension):
                         pbc=request.pbc,
                         species=request.species,
                         masses=request.masses,
+                        expected_physics=None
+                        if request.descriptor is None
+                        else request.descriptor.engine,
+                        check_premin=settings.premin,
                     )
                 local_request = replace(
                     request,
@@ -357,6 +366,10 @@ class LammpsHTSTExtension(EngineExtension):
                     pbc=request.pbc,
                     species=request.species,
                     masses=request.masses,
+                    expected_physics=None
+                    if request.descriptor is None
+                    else request.descriptor.engine,
+                    check_premin=settings.premin,
                 )
                 # free_radius < zone_radius on the same geometry, so every free
                 # atom is in the zone and the remap is exact.
@@ -418,6 +431,8 @@ class LammpsHTSTExtension(EngineExtension):
         pbc: tuple[bool, bool, bool],
         species: tuple[str, ...],
         masses: tuple[float, ...],
+        expected_physics: EnginePhysics | None = None,
+        check_premin: bool = False,
     ) -> None:
         """Replay parameters / system / potential on a started scratch engine."""
         scratch.initialize_parameters()
@@ -430,6 +445,29 @@ class LammpsHTSTExtension(EngineExtension):
             masses=masses,
         )
         scratch.initialize_potential()
+        actual = scratch.full_system
+        if actual is None or (actual.species, actual.masses) != (species, masses):
+            raise HTSTRequestError(
+                "initialized scratch species/masses differ from requested physics"
+            )
+        if expected_physics is not None and (
+            actual.physics is None
+            or actual.physics.force_model != expected_physics.force_model
+        ):
+            raise HTSTRequestError(
+                "initialized scratch force model differs from requested physics"
+            )
+        if (
+            check_premin
+            and expected_physics is not None
+            and (
+                actual.physics is None
+                or actual.physics.premin_solver != expected_physics.premin_solver
+            )
+        ):
+            raise HTSTRequestError(
+                "initialized scratch premin inputs differ from requested physics"
+            )
 
     @staticmethod
     def _premin(

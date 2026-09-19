@@ -519,9 +519,17 @@ def scratch_spy(monkeypatch, cfg):
 
         def initialize_system(self, **kwargs):
             calls.append(("system", kwargs))
+            self.full_system = SimpleNamespace(
+                species=kwargs["species"], masses=kwargs["masses"], physics=None
+            )
 
         def initialize_potential(self):
             calls.append(("potential",))
+            from pykmc.physics import EnginePhysics
+
+            self.full_system.physics = EnginePhysics.capture(
+                cfg.lammps, self.full_system.species, self.full_system.masses
+            )
 
         def close(self):
             calls.append(("close",))
