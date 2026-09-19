@@ -1,16 +1,10 @@
-"""Directional identity gate of the reference catalogue (architecture rule S6).
+"""Directional identity gate of the reference catalogue.
 
-``idx_ref`` is a logical event id and ``idx_backward`` a directional link; the
-base admission collapses an event to one self-linked row whenever its endpoint
-topologies match, and self-links a lone forward row even when its reverse is
-already catalogued. In constant mode that representation is kept byte for
-byte (the fixed-sequence test below pins it). In htst/rpa mode an already
-catalogued reverse is linked by its logical id, and a same-topology event is
-still ONE self-linked row (two rows sharing one ``event_id`` would be applied
-twice per site and break the basin explorer): when its saddle crops map onto
-each other the backward prefactor is compared with the forward one and any
-discrepancy is recorded on the row and logged as a warning, never averaged
-and never a second row.
+Constant mode retains its topology-based representation. HTST/RPA retain
+provisional reciprocal rows until accepted directional calculations and a
+single whole-event physical map authorize a merge. The declared worker
+frequencies in these protocol tests are synthetic; geometry, source context,
+logical links and lifecycle actions exercise the actual catalogue/service.
 """
 
 from __future__ import annotations
@@ -197,12 +191,12 @@ class TestPrefactorAgreement:
 
 
 class TestSameTopologyIsOneRow:
-    """Equal endpoint topologies admit one self-linked row in every style."""
+    """Equal endpoint topologies propose a candidate; HTST proof is deferred."""
 
     def test_htst_admits_a_single_self_linked_candidate(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """Matching crops make the single row a self-reverse candidate."""
+        """Matching crops propose a candidate; admission retains both directions."""
         table = ReferenceEventTable(htst_config)
         fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.5)
         assert fwd["event_id"] == fwd["id_final"]
@@ -211,27 +205,28 @@ class TestSameTopologyIsOneRow:
         assert admission.same_topology is True
         assert admission.self_reverse_candidate is True
         assert admission.reverse_idx_ref is None
-        assert len(admission.frame) == 1
+        assert len(admission.frame) == 2
 
         table.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
-        assert _links(table) == [(0, 0)]
+        assert _links(table) == [(0, 1), (1, 0)]
 
     def test_mismatching_saddle_crops_still_admit_one_row(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """Equal topologies with non-matching crops: one row, not a candidate."""
+        """Coarse crop mismatch never removes a provisional direction."""
         table = ReferenceEventTable(htst_config)
         fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.5)
         rng = np.random.default_rng(7)
         bwd["saddle_positions"] = np.asarray(bwd["saddle_positions"]) + rng.uniform(
             -1.5, 1.5, size=np.asarray(bwd["saddle_positions"]).shape
         )
+        assert table._saddle_crops_match(fwd, bwd) is False
         admission = table._admit_series(fwd, bwd).ok_value()
         assert admission.same_topology is True
-        assert admission.self_reverse_candidate is False
-        assert len(admission.frame) == 1
+        assert admission.self_reverse_candidate is True
+        assert len(admission.frame) == 2
         table.add(admission.frame)
-        assert _links(table) == [(0, 0)]
+        assert _links(table) == [(0, 1), (1, 0)]
 
     def test_constant_collapses_as_the_base(
         self, constant_config: Any, system_single_type_fcc: Any
@@ -263,7 +258,7 @@ class TestSameTopologyIsOneRow:
 
 
 class TestSelfReverseRecording:
-    """The backward estimate of a self-reverse row is compared, recorded, never stored."""
+    """Both directional results are stored before a proven self-reverse merge."""
 
     def test_symmetric_spectra_keep_an_empty_reason(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
@@ -277,7 +272,7 @@ class TestSelfReverseRecording:
         )
         assert _links(table) == [(0, 0)]
         assert len(fake.prefactor_requests) == 1
-        assert fake.prefactor_requests[0].event_key == (0, None)
+        assert fake.prefactor_requests[0].event_key == (0, 1)
         assert fake.prefactor_backward_flags == [True]
         row = table.table.iloc[0]
         assert row["nu0"] == 5.0e12 and row["k_prefactor"] == 5.0
@@ -285,22 +280,21 @@ class TestSelfReverseRecording:
         assert row["k"] == rate_from_prefactor(5.0, 0.5, htst_config.rateconstant.T)
         assert not [r for r in htst_log_records if r.levelno >= logging.WARNING]
         assert any(
-            "agrees with the forward estimate" in r.getMessage()
-            for r in htst_log_records
+            "whole-event self-reverse" in r.getMessage() for r in htst_log_records
         )
 
     def test_asymmetric_spectra_keep_one_row_and_record_the_backward(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
-        """Disagreement: still one self-linked row with the forward estimate; warned."""
+        """Disagreement retains both directional rates without averaging."""
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(3.0e12)
         )
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
-        assert _links(table) == [(0, 0)]
-        assert len(table.table) == 1
+        assert _links(table) == [(0, 1), (1, 0)]
+        assert len(table.table) == 2
         row = table.table.iloc[0]
         assert (
             row["nu0"] == 5.0e12 and row["k_prefactor"] == 5.0
@@ -308,52 +302,65 @@ class TestSelfReverseRecording:
         assert row["nu0_status"] == "ok"
         assert (
             row["nu0_reason"]
-            == "self-reverse: backward nu0 = 3.0000e+12 Hz, differs by 40.0%"
+            == "self-reverse unproven: backward nu0 = 3.0000e+12 Hz, differs by 40.0%"
         )
         warnings = [r for r in htst_log_records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
         assert "differs by 40.0%" in warnings[0].getMessage()
-        assert (
-            "single self-linked row keeps the forward estimate"
-            in warnings[0].getMessage()
+        assert "retaining both directions" in warnings[0].getMessage()
+        backward = table.table.iloc[1]
+        assert backward["nu0"] == 3.0e12 and backward["k_prefactor"] == 3.0
+        assert backward["nu0_status"] == "ok" and backward["nu0_reason"] == ""
+        assert backward["k"] == rate_from_prefactor(
+            3.0, 0.5, htst_config.rateconstant.T
         )
-        assert table.max_idx_ref() == 1
+        assert row["k"] == rate_from_prefactor(5.0, 0.5, htst_config.rateconstant.T)
+        assert table.max_idx_ref() == 2
 
     def test_rejected_backward_is_recorded_on_the_single_row(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
-        """A rejected backward direction is noted in nu0_reason; the row stays ok."""
+        """Rejected backward retains its own cause and k0 beside the accepted forward."""
         table, _ = _table_with_service(
             htst_config, accepted(5.0e12), rejected("bwd window")
         )
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
-        assert _links(table) == [(0, 0)]
+        assert _links(table) == [(0, 1), (1, 0)]
         row = table.table.iloc[0]
         assert row["nu0_status"] == "ok" and row["nu0"] == 5.0e12
         assert row["nu0_reason"] == (
-            "self-reverse: backward prefactor rejected (out_of_window: bwd window)"
+            "self-reverse unproven: backward prefactor rejected (out_of_window: bwd window)"
         )
+        backward = table.table.iloc[1]
+        assert backward["nu0_status"] == "rejected"
+        assert backward["nu0_reason"] == "out_of_window: bwd window"
+        assert backward["k_prefactor"] == htst_config.rateconstant.k0
+        assert np.isnan(backward["nu0"])
         assert sum(r.levelno == logging.WARNING for r in htst_log_records) == 1
 
     def test_rejected_forward_keeps_k0_and_notes_the_backward(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
-        """A rejected forward is the k0 fallback as usual; the backward value is only noted."""
+        """Rejected forward keeps k0 and the accepted backward keeps its own rate."""
         table, _ = _table_with_service(
             htst_config, rejected("fwd window"), accepted(4.0e12)
         )
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
+        assert _links(table) == [(0, 1), (1, 0)]
         row = table.table.iloc[0]
         assert row["nu0_status"] == "rejected"
         assert row["k_prefactor"] == htst_config.rateconstant.k0
         assert row["nu0_reason"] == (
-            "out_of_window: fwd window; self-reverse: backward nu0 = 4.0000e+12 Hz "
+            "out_of_window: fwd window; self-reverse unproven: backward nu0 = 4.0000e+12 Hz "
             "(forward rejected)"
         )
+        backward = table.table.iloc[1]
+        assert backward["nu0_status"] == "ok" and backward["nu0"] == 4.0e12
+        assert backward["k_prefactor"] == 4.0 and backward["nu0_reason"] == ""
         assert sum(r.levelno == logging.WARNING for r in htst_log_records) == 1
 
     def test_skipped_estimate_is_never_written(self, htst_config: Any) -> None:
@@ -367,8 +374,7 @@ class TestSelfReverseRecording:
     ) -> None:
         """Every reference line reports the free-atom count and the batch wall time.
 
-        The forward line and the self-reverse comparison line (the only
-        report of the backward estimate of the single self-linked row) both
+        The forward line and the whole-event comparison line both
         end with the ``(n_free N, batch T s)`` suffix of contract 7c.
         """
         table, fake = _table_with_service(
@@ -388,10 +394,17 @@ class TestSelfReverseRecording:
             "[htst] reference event 0 (forward): nu0 = 5.0000e+12 Hz"
         )
         assert (
-            "self-reverse, backward nu0 = 5.0000e+12 Hz agrees with the forward "
-            "estimate within 5%" in comparison
+            "whole-event self-reverse, backward nu0 = 5.0000e+12 Hz agrees within 5%"
+            in comparison
         )
-        for line in lines:
+        backward_lines = [
+            r.getMessage()
+            for r in htst_log_records
+            if r.getMessage().startswith("[htst] reference event 1 (backward)")
+        ]
+        assert len(backward_lines) == 1
+        assert "nu0 = 5.0000e+12 Hz" in backward_lines[0]
+        for line in lines + backward_lines:
             match = _BATCH_SUFFIX.search(line)
             assert match is not None, line
             assert int(match.group(1)) == len(
@@ -435,7 +448,7 @@ class TestSelfReverseRecording:
 
 
 class TestLinkingNotesCarryBatchData:
-    """The two linking notes of a forward-only row are reference lines as well."""
+    """Retained directions keep complete diagnostic free-count and batch metadata."""
 
     def test_unmapped_saddle_crops_note_carries_n_free_and_batch_time(
         self,
@@ -444,7 +457,7 @@ class TestLinkingNotesCarryBatchData:
         htst_log_records: Any,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Equal topologies, crops that do not map: the discard note ends with the suffix."""
+        """A coarse matcher seam cannot discard an unequal accepted direction."""
         monkeypatch.setattr(
             ReferenceEventTable, "_saddle_crops_match", lambda self, fwd, bwd: False
         )
@@ -454,20 +467,20 @@ class TestLinkingNotesCarryBatchData:
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
-        assert _links(table) == [(0, 0)]
+        assert _links(table) == [(0, 1), (1, 0)]
         assert fake.prefactor_backward_flags == [True]
         row = table.table.iloc[0]
-        assert row["nu0"] == 5.0e12 and row["nu0_reason"] == ""  # discarded, not noted
-        assert not [r for r in htst_log_records if r.levelno >= logging.WARNING]
+        assert row["nu0"] == 5.0e12
+        assert "differs by 40.0%" in row["nu0_reason"]
+        assert table.table.iloc[1]["nu0"] == 3.0e12
+        assert sum(r.levelno == logging.WARNING for r in htst_log_records) == 1
         notes = [
             r.getMessage()
             for r in htst_log_records
-            if "saddle crops do not map onto each other" in r.getMessage()
+            if "retaining both directions" in r.getMessage()
         ]
         assert len(notes) == 1
-        assert notes[0].startswith(
-            "[htst] reference event 0: equal endpoint topologies"
-        )
+        assert notes[0].startswith("[htst] reference event 0: self-reverse unproven")
         match = _BATCH_SUFFIX.search(notes[0])
         assert match is not None, notes[0]
         assert int(match.group(1)) == len(
@@ -477,7 +490,7 @@ class TestLinkingNotesCarryBatchData:
     def test_reverse_already_catalogued_note_carries_n_free_and_batch_time(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
-        """A forward row linked to a catalogued reverse: the discard note ends with the suffix."""
+        """A bare coarse-match row cannot suppress either new directional diagnostic."""
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(3.0e12)
         )
@@ -488,25 +501,32 @@ class TestLinkingNotesCarryBatchData:
             [_hop_event(system_single_type_fcc, 0, 2.0, 1.5, shift)],
             pbc=system_single_type_fcc.pbc,
         )
-        assert _links(table) == [(7, 7), (8, 7)]
-        assert [r.event_key for r in fake.prefactor_requests] == [(8, None)]
+        assert _links(table) == [(7, 7), (8, 9), (9, 8)]
+        assert [r.event_key for r in fake.prefactor_requests] == [(8, 9)]
         row = table.table[table.table["idx_ref"] == 8].iloc[0]
         assert row["nu0"] == 5.0e12 and row["nu0_reason"] == ""
         assert not [r for r in htst_log_records if r.levelno >= logging.WARNING]
+        backward = table.table[table.table["idx_ref"] == 9].iloc[0]
+        assert backward["nu0"] == 3.0e12 and backward["nu0_reason"] == ""
+        assert table.prefactor_archive.references.get(7) is None
         notes = [
             r.getMessage()
             for r in htst_log_records
-            if "reverse already catalogued" in r.getMessage()
+            if r.getMessage().startswith(
+                (
+                    "[htst] reference event 8 (forward)",
+                    "[htst] reference event 9 (backward)",
+                )
+            )
         ]
-        assert len(notes) == 1
-        assert notes[0].startswith(
-            "[htst] reference event 8: reverse already catalogued as event 7"
-        )
-        match = _BATCH_SUFFIX.search(notes[0])
-        assert match is not None, notes[0]
-        assert int(match.group(1)) == len(
-            common_free_indices(fake.prefactor_requests[0])
-        )
+        assert len(notes) == 2
+        for line in notes:
+            match = _BATCH_SUFFIX.search(line)
+            assert match is not None, line
+            assert int(match.group(1)) == len(
+                common_free_indices(fake.prefactor_requests[0])
+            )
+            assert float(match.group(2)) >= 0.0
 
 
 class TestReverseAlreadyCatalogued:
@@ -525,23 +545,53 @@ class TestReverseAlreadyCatalogued:
         _insert(table, existing, idx_ref=7, idx_backward=7)
         return fwd, bwd
 
+    def _resolved_catalogue_with_reverse(self, config, system):
+        """Resolve a full-source typed record before linking a sparse reverse."""
+        table, fake = _table_with_service(config, accepted(5.0e12), accepted(3.0e12))
+        fwd, bwd = self._catalogue_with_reverse(table, system)
+        event = _hop_event(system, 0, 0.5, 0.7, np.zeros(3))
+        request = table._event_request(event, system.pbc, event_key=("existing", 7))
+        assert table._admit_series(fwd, bwd).ok_value().reverse_idx_ref is None
+        assert (
+            table._admit_series(fwd, bwd, request=request).ok_value().reverse_idx_ref
+            is None
+        )
+        prior = table.prefactor_service.compute([request])[request.event_key]
+        assert prior.provenance.source.is_complete
+        table._patch_row(
+            7, prior.backward, calculation=prior.calculation("backward"), fresh=True
+        )
+        return table, fake, fwd, bwd, event, request
+
     def test_htst_links_to_the_matched_logical_id(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """The lone forward row links to the catalogued reverse, not to itself."""
-        table = ReferenceEventTable(htst_config)
-        fwd, bwd = self._catalogue_with_reverse(table, system_single_type_fcc)
+        """A known full reverse is merged only after the new actual result agrees."""
+        table, fake, fwd, bwd, event, request = self._resolved_catalogue_with_reverse(
+            htst_config, system_single_type_fcc
+        )
 
         assert table.find_matching_event(bwd) == 7
         assert table.find_matching_event(fwd) is None
-        admission = table._admit_series(fwd, bwd).ok_value()
+        admission = table._admit_series(fwd, bwd, request=request).ok_value()
         assert admission.reverse_idx_ref == 7
         assert admission.self_reverse_candidate is False
         assert admission.same_topology is False
-        assert len(admission.frame) == 1
+        assert len(admission.frame) == 2
 
         table.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
+        assert _links(table) == [(7, 7), (8, 9), (9, 8)]
+        table._resolve_prefactors(
+            [(8, 9, admission, event)], system_single_type_fcc.pbc
+        )
         assert _links(table) == [(7, 7), (8, 7)]
+        assert [r.event_key for r in fake.prefactor_requests] == [
+            ("existing", 7),
+            (8, 9),
+        ]
+        assert table.table.loc[table.table.idx_ref == 7, "nu0"].item() == 3.0e12
+        assert table.table.loc[table.table.idx_ref == 8, "nu0"].item() == 5.0e12
+        assert table.prefactor_archive.history[9][-1]["nu0"] == 3.0e12
 
     def test_constant_self_links_as_the_base(
         self, constant_config: Any, system_single_type_fcc: Any
@@ -558,10 +608,14 @@ class TestReverseAlreadyCatalogued:
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
         """Removing the reverse also removes the forward row that links to it."""
-        table = ReferenceEventTable(htst_config)
-        fwd, bwd = self._catalogue_with_reverse(table, system_single_type_fcc)
-        admission = table._admit_series(fwd, bwd).ok_value()
+        table, _, fwd, bwd, event, request = self._resolved_catalogue_with_reverse(
+            htst_config, system_single_type_fcc
+        )
+        admission = table._admit_series(fwd, bwd, request=request).ok_value()
         table.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
+        table._resolve_prefactors(
+            [(8, 9, admission, event)], system_single_type_fcc.pbc
+        )
         assert _links(table) == [(7, 7), (8, 7)]
 
         table.remove([7])
@@ -571,10 +625,14 @@ class TestReverseAlreadyCatalogued:
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
         """Removing the forward row removes the reverse it links to (base rule)."""
-        table = ReferenceEventTable(htst_config)
-        fwd, bwd = self._catalogue_with_reverse(table, system_single_type_fcc)
-        admission = table._admit_series(fwd, bwd).ok_value()
+        table, _, fwd, bwd, event, request = self._resolved_catalogue_with_reverse(
+            htst_config, system_single_type_fcc
+        )
+        admission = table._admit_series(fwd, bwd, request=request).ok_value()
         table.add(admission.frame, reverse_idx_ref=admission.reverse_idx_ref)
+        table._resolve_prefactors(
+            [(8, 9, admission, event)], system_single_type_fcc.pbc
+        )
         table.remove([8])
         assert _links(table) == []
 
@@ -656,7 +714,7 @@ class TestSparseReorderedCatalogue:
 
         ``_saddle_crops_match`` feeds IRA the same labels as
         ``find_matching_event``: the local element types in ``full``
-        colouring, one grey label otherwise. Either way the frame is one row.
+        colouring, one grey label otherwise. Both modes retain a pair until a full physical map is proven.
         """
         env = htst_config.atomicenvironment.model_copy(
             update={"atom_coloring_mode": coloring}
@@ -669,9 +727,9 @@ class TestSparseReorderedCatalogue:
         bwd["types"] = ["Fe" if t == "Ni" else "Ni" for t in bwd["types"]]
         assert table._saddle_crops_match(fwd, bwd) is expected
         admission = table._admit_series(fwd, bwd).ok_value()
-        assert admission.self_reverse_candidate is expected
+        assert admission.self_reverse_candidate is True
         assert admission.same_topology is True
-        assert len(admission.frame) == 1
+        assert len(admission.frame) == 2
 
 
 class TestConstantModeFixedSequence:
@@ -761,33 +819,51 @@ class TestConstantModeFixedSequence:
     def test_htst_same_sequence_has_the_same_row_layout(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """HTST admission yields the ids and links of constant mode (one row per self-reverse)."""
+        """HTST keeps all unproven directions, including numerically distinct barriers."""
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(4.0e12)
         )
         results = table.add_events(
             self._events(system_single_type_fcc), pbc=system_single_type_fcc.pbc
         )
-        assert [r.is_ok() for r in results] == [True, False, True, True, True, True]
-        assert _links(table) == [(0, 0), (1, 1), (2, 3), (3, 2), (4, 5), (5, 4), (6, 6)]
-        assert len(fake.prefactor_requests) == 5
+        assert [r.is_ok() for r in results] == [True, True, True, True, True, True]
+        assert _links(table) == [
+            (i, i + 1) if i % 2 == 0 else (i, i - 1) for i in range(12)
+        ]
+        assert len(fake.prefactor_requests) == 6
         assert [k for k in (r.event_key for r in fake.prefactor_requests)] == [
-            (0, None),
-            (1, None),
+            (0, 1),
             (2, 3),
             (4, 5),
-            (6, None),
+            (6, 7),
+            (8, 9),
+            (10, 11),
         ]
-        # the self-reverse rows keep the forward estimate and note the 20 % gap
-        for idx in (0, 1, 6):
+        # The 0.1 eV change exceeds physical equality, despite a coarse candidate.
+        assert list(table.table.energy_barrier) == [
+            0.5,
+            0.5,
+            0.6,
+            0.6,
+            1.0,
+            1.0,
+            2.0,
+            1.5,
+            2.0,
+            1.5,
+            0.5,
+            0.5,
+        ]
+        # Same-topology candidates keep both estimates and note the 20 % gap.
+        for idx in (0, 2, 4, 10):
             row = table.table[table.table["idx_ref"] == idx].iloc[0]
             assert row["nu0"] == 5.0e12
             assert row["nu0_reason"].startswith(
-                "self-reverse: backward nu0 = 4.0000e+12 Hz"
+                "self-reverse unproven: backward nu0 = 4.0000e+12 Hz"
             )
-        for idx in (2, 4):
+        for idx in (6, 8):
             assert table.table[table.table["idx_ref"] == idx].iloc[0]["nu0"] == 5.0e12
-        for idx in (3, 5):
+        for idx in (1, 3, 5, 7, 9, 11):
             row = table.table[table.table["idx_ref"] == idx].iloc[0]
             assert row["nu0"] == 4.0e12 and row["nu0_reason"] == ""
 
@@ -819,18 +895,26 @@ class TestSameTopologyBarriersDecide:
     def test_gap_inside_the_tolerance_is_one_row_beyond_it_two(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """A 9 meV gap (minimiser noise) is one row; an 11 meV gap is two."""
+        """A 9 meV gap may be proved later; an 11 meV gap cannot collapse."""
         from pykmc.event_table import SELF_REVERSE_BARRIER_TOL
 
         table = ReferenceEventTable(htst_config)
         fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.509)
         assert abs(0.509 - 0.5) < SELF_REVERSE_BARRIER_TOL
         one = table._admit_series(fwd, bwd).ok_value()
-        assert one.same_topology is True and len(one.frame) == 1
+        assert (
+            one.same_topology is True
+            and one.self_reverse_candidate is True
+            and len(one.frame) == 2
+        )
         fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.511)
         assert abs(0.511 - 0.5) > SELF_REVERSE_BARRIER_TOL
         two = table._admit_series(fwd, bwd).ok_value()
-        assert two.same_topology is False and len(two.frame) == 2
+        assert (
+            two.same_topology is False
+            and two.self_reverse_candidate is False
+            and len(two.frame) == 2
+        )
 
     def test_unequal_barriers_get_separate_estimates_without_comparison(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any

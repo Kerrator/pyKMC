@@ -106,6 +106,39 @@ without relaxing them. The Python configuration and native energy therefore
 refer to the same geometry when refinement begins. Fresh runs retain their
 initial minimization and adopt its returned coordinates and energy.
 
+## Directional event identity
+
+HTST/RPA admission starts with two reciprocal directional rows. Equal topology,
+saddle crops, barriers or prefactors alone do not establish self-reversal. A
+merge needs one species- and mass-preserving rigid transformation/permutation
+that maps the entire minimum/saddle/minimum triplet, including the full source
+before preprocessing and the full produced geometry before Hessian cropping.
+It must preserve actual free/crop sets, user and execution constraints, fixed
+reference positions, and the source's periodic lattice. Local grey coloring
+cannot waive these physical checks.
+
+The existing 0.01 eV barrier comparison and 5% accepted-frequency agreement are
+necessary conditions; the frequency tolerance remains uncalibrated. Rejected
+or unavailable estimates cannot prove a merge. The map search is conservative:
+a failed witness retains directions and does not prove mathematical
+inequivalence. Opaque force definitions and incomplete source provenance cannot
+authorize collapse. Reflections are supported only within the fingerprinted,
+parity-invariant pair-potential scope.
+
+A known forward duplicate can avoid a new worker request only after read-only
+validation of its current accepted producer and one full source map. Otherwise
+actual results are retained before final identity comparison, including events
+that arrived together in one batch. Proven merges redirect incoming aliases,
+retain both immutable producing records and the removed row's history, and
+allocate future logical IDs above surviving and archived IDs. Returned admitted
+frames contain only surviving resolved rows. Constant-mode admission keeps its
+original topology/saddle policy.
+
+Discarding both rows into an older pair also requires a coherent reciprocal
+pair with one canonical producing context, or a self-linked survivor after
+directly proving the new pair self-reverse. Separate approximate comparisons
+to one old estimate cannot replace the direct directional agreement test.
+
 ## Source-resolved endpoint constraints
 
 `ResolvedConstraints` can carry the source cell/PBC, event center identity and
