@@ -88,6 +88,11 @@ Recalculation resolves current initialized user constraints and AV policy while
 preserving the saved AV search center separately from the HTST moving atom.
 Triplets that would move a newly fixed atom remain unavailable.
 
+When initialized user constraints and the AV policy are unchanged, reload keeps
+the actual source-resolved restriction, including its original pre-search center.
+Relaxing minimum 1 does not move that center or redefine its fixed membership.
+Changes to masses or numerical settings still require current calculations.
+
 Restart recomputation requests all three full-system potential energies after
 preminimization and before cropping. It updates the directional barrier as well
 as the frequency; ordinary prefactor calls incur no extra energy evaluations.
@@ -95,6 +100,11 @@ The superseded calculation remains in the registry and history. Fresh opaque
 force-model results can be used in their producing context, but serialization
 does not make them reusable: a subsequent load needs a new calculation or an
 explicit fallback. Worker and transport failures still propagate.
+
+KMC restart initialization evaluates energy at the saved System coordinates
+without relaxing them. The Python configuration and native energy therefore
+refer to the same geometry when refinement begins. Fresh runs retain their
+initial minimization and adopt its returned coordinates and energy.
 
 ## Source-resolved endpoint constraints
 

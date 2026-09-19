@@ -781,7 +781,11 @@ class ReferenceEventTable:
                 if service.settings.nu0_min_hz <= nu0 <= service.settings.nu0_max_hz:
                     self._set_estimate(idx_ref, NU0_OK, nu0, "")
                 else:
-                    reason = "out_of_window (reload): current inclusive frequency window excludes estimate"
+                    reason = (
+                        f"out_of_window (reload): nu0 = {nu0:.4e} Hz outside "
+                        f"[{service.settings.nu0_min_hz:.4e}, "
+                        f"{service.settings.nu0_max_hz:.4e}] Hz"
+                    )
                     archive.retain(idx_ref, row, reason)
                     self._set_estimate(idx_ref, NU0_REJECTED, None, reason)
             else:
@@ -1784,6 +1788,16 @@ class ReferenceEventTable:
         self._recomputed.clear()
         for idx_ref in self.table["idx_ref"].tolist():
             self._ensure_current_estimate(int(idx_ref))
+        outside_window = self.table["nu0_reason"].str.startswith(
+            "out_of_window (reload):", na=False
+        )
+        if outside_window.any():
+            logger.warning(
+                "Reference table %s: %d accepted estimate(s) lie outside the "
+                "current nu0 window; using k0 fallback",
+                path,
+                int(outside_window.sum()),
+            )
 
     def _changed_settings(self, stored: Any) -> list[str]:
         """Compare stored kernel settings with the current configuration.
