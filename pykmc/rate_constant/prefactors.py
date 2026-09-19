@@ -44,6 +44,7 @@ import numpy as np
 from pykmc.htst.request import HTSTEventRequest, HTSTRequestError
 from pykmc.htst.result import EventPrefactors
 from pykmc.htst.settings import HTSTSettings
+from pykmc.physics import EnginePhysics, PhysicalDescriptor, ResolvedConstraints
 
 from .rate_constant import RateConstant
 from .units import thz_to_hz
@@ -170,6 +171,8 @@ class PrefactorService:
         rate_constant: RateConstant,
         *,
         species_masses: tuple[tuple[str, ...], tuple[float, ...]] | None = None,
+        engine_physics: EnginePhysics | None = None,
+        global_constraints: ResolvedConstraints | None = None,
     ) -> None:
         if not rate_constant.backend.requires_event_prefactors:
             raise ValueError(
@@ -188,10 +191,53 @@ class PrefactorService:
         self.species_masses = (
             None if species_masses is None else _validated_map(species_masses)
         )
+        if engine_physics is not None:
+            if not isinstance(engine_physics, EnginePhysics):
+                raise ValueError("engine_physics must be an EnginePhysics")
+            authoritative = (engine_physics.species, engine_physics.masses)
+            if self.species_masses is not None and self.species_masses != authoritative:
+                raise ValueError("preflight descriptor and species/masses disagree")
+            self.species_masses = authoritative
+        self.engine_physics = engine_physics
+        if global_constraints is not None and not isinstance(
+            global_constraints, ResolvedConstraints
+        ):
+            raise ValueError("global_constraints must be ResolvedConstraints")
+        self.global_constraints = global_constraints
+        self._descriptor = (
+            None
+            if self.species_masses is None
+            else PhysicalDescriptor.from_config(
+                config,
+                engine_physics
+                or EnginePhysics.capture(config.lammps, *self.species_masses),
+                self.settings,
+            )
+        )
         self.n_submitted = 0
         self.last_batch_wall_s = 0.0
         self.step_requests = 0
         self.step_wall_s = 0.0
+
+    def descriptor_for(self, types: Sequence[str]) -> PhysicalDescriptor:
+        """Return the shared physical contract, retaining absent potential slots."""
+        if self._descriptor is None:
+            from pykmc.engine.lammps import species_map
+
+            self.species_masses = species_map(list(types))
+            self._descriptor = PhysicalDescriptor.from_config(
+                self.config,
+                EnginePhysics.capture(self.config.lammps, *self.species_masses),
+                self.settings,
+            )
+        if not set(types).issubset(self._descriptor.engine.species):
+            raise HTSTRequestError("types are not in the engine species map")
+        return self._descriptor
+
+    @property
+    def current_descriptor(self) -> PhysicalDescriptor | None:
+        """Current context, never a claim about a previously saved estimate."""
+        return self._descriptor
 
     def reset_step_counters(self) -> None:
         """Zero the per-step request count and wall time (called at each KMC step)."""
@@ -209,6 +255,8 @@ class PrefactorService:
         cell: np.ndarray,
         pbc: Sequence[bool],
         center_index: int,
+        constraints: ResolvedConstraints | None = None,
+        atom_ids: Sequence[int] | None = None,
     ) -> HTSTEventRequest:
         """Build and validate one request from full-system geometry.
 
@@ -242,18 +290,21 @@ class PrefactorService:
 
         """
         symbols = tuple(str(t) for t in types)
-        if self.species_masses is not None:
-            species, masses = self.species_masses
-            unknown = sorted(set(symbols) - set(species))
-            if unknown:
-                raise HTSTRequestError(
-                    f"types {unknown} are not in the engine species map "
-                    f"{species}; the potential cannot describe them"
-                )
-        else:
-            from pykmc.engine.lammps import species_map  # lazy: LAMMPS-bound
-
-            species, masses = species_map(list(symbols))
+        descriptor = self.descriptor_for(symbols)
+        species, masses = descriptor.engine.species, descriptor.engine.masses
+        if constraints is not None and atom_ids is not None:
+            raise HTSTRequestError(
+                "pass resolved constraints or source atom_ids, not both"
+            )
+        if constraints is None:
+            constraints = (
+                self.global_constraints
+                if atom_ids is None and self.global_constraints is not None
+                else descriptor.resolve_constraints(min1_positions, symbols, atom_ids)
+            )
+        axes = tuple(pbc)
+        if len(axes) != 3 or not all(isinstance(p, (bool, np.bool_)) for p in axes):
+            raise HTSTRequestError("pbc must contain three bools")
         request = HTSTEventRequest(
             event_key=event_key,
             min1_positions=np.array(min1_positions, dtype=float, copy=True),
@@ -263,9 +314,11 @@ class PrefactorService:
             species=species,
             masses=masses,
             cell=np.array(cell, dtype=float, copy=True),
-            pbc=tuple(bool(p) for p in pbc),
-            center_index=int(center_index),
+            pbc=tuple(bool(p) for p in axes),
+            center_index=center_index,
             settings=self.settings,
+            descriptor=descriptor,
+            constraints=constraints,
         )
         request.validate()
         return request

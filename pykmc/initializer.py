@@ -94,7 +94,13 @@ class Initializer:
 
     def initialize_engine(self) -> None:
         """Start and initialize the engine workers (local and group)."""
+        from .physics import ResolvedConstraints
+
         system = self.kmc.system
+        # Resolve in the full source ordering before any native mutation.
+        self.kmc.global_constraints = ResolvedConstraints.resolve(
+            system.positions, system.types, self.kmc.config.frozen_atoms
+        )
         self.kmc.manager.broadcast("start")
         self.kmc.manager.broadcast("initialize_parameters")
         self.kmc.manager.broadcast(
@@ -165,6 +171,15 @@ class Initializer:
                 "htst_preflight report carries an inconsistent species/mass map: "
                 f"species {species}, masses {masses}"
             )
+        if "engine_physics" in report:
+            from .physics import EnginePhysics
+
+            physics = report["engine_physics"]
+            if not isinstance(physics, EnginePhysics) or (
+                physics.species,
+                physics.masses,
+            ) != (species, masses):
+                raise RuntimeError("htst_preflight descriptor and type map disagree")
         return {**report, "species": species, "masses": masses}
 
     def initialize_prefactor_service(self) -> None:
@@ -203,6 +218,8 @@ class Initializer:
             self.kmc.manager,
             self.kmc.rate_constant,
             species_masses=species_masses,
+            engine_physics=report.get("engine_physics"),
+            global_constraints=getattr(self.kmc, "global_constraints", None),
         )
         settings = self.kmc.prefactor_service.settings
         mass_map = ", ".join(

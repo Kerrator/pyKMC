@@ -28,6 +28,7 @@ from ..activevolume.active_volume import (
     require_orthorhombic_cell,
 )
 from ..atomic_environment import AtomicEnvironment
+from ..physics import EnginePhysics, ForceModel
 from ..result import (
     ErrorInfo,
     EventSearchOutput,
@@ -323,6 +324,7 @@ class FullSystem:
     masses: tuple[float, ...]
     cell: np.ndarray
     pbc: tuple[bool, bool, bool]
+    physics: EnginePhysics | None = None
 
     @property
     def natoms(self) -> int:
@@ -775,9 +777,17 @@ class LammpsEngine(Engine):
         ``clear``, ``initialize_parameters``, ``initialize_system``) counts as
         a completed rebuild.
         """
+        force_model = ForceModel.capture(self.config)
         self.lmp.command("pair_style {}".format(self.config.pair_style))
         self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
         self._refresh_full_system_masses()
+        if ForceModel.capture(self.config) != force_model:
+            raise RuntimeError("force-model contents changed during initialization")
+        if self.full_system is not None:
+            fs = self.full_system
+            self.full_system = replace(
+                fs, physics=EnginePhysics.capture(self.config, fs.species, fs.masses)
+            )
         self._cleared_since_init = False
 
     def _refresh_full_system_masses(self) -> None:

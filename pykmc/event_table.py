@@ -34,6 +34,7 @@ from .point_set_registration import simple_ira, check_match
 from .utils.geometry import compute_delr
 
 if TYPE_CHECKING:
+    from .physics import DescriptorComparison, PhysicalDescriptor
     from .event_recycling import Recycling
     from .htst.result import DirectionalPrefactor, EventPrefactors
     from .rate_constant.prefactors import PrefactorService
@@ -313,6 +314,30 @@ class ReferenceEventTable:
         self.prefactor_service = prefactor_service
         self.metadata: dict[str, Any] = {}
         self._initialize_table()
+
+    @property
+    def current_descriptor(self) -> PhysicalDescriptor | None:
+        """Return service context without assigning it to historical estimates."""
+        return (
+            None
+            if self.prefactor_service is None
+            else self.prefactor_service.current_descriptor
+        )
+
+    def compare_physics(
+        self, producing: PhysicalDescriptor | None
+    ) -> DescriptorComparison:
+        """Compare producing physics using the common descriptor contract.
+
+        This is a comparison interface. Persistence and selection callers must
+        separately preserve provenance and act on unknown/incompatible results.
+        """
+        from .physics import DescriptorComparison
+
+        current = self.current_descriptor
+        if current is None:
+            return DescriptorComparison("unknown", ("missing current descriptor",))
+        return current.compare(producing)
 
     def add_events(
         self, events: list[EventSearchOutput], pbc: Any = None
@@ -1732,6 +1757,8 @@ class ReferenceEventTable:
 
         """
         rc = self.config.rateconstant
+        descriptor = self.current_descriptor
+        numerical = {} if descriptor is None else descriptor.numerical_settings()
         return {
             "schema_version": TABLE_SCHEMA_VERSION,
             "style": rc.style,
@@ -1740,13 +1767,13 @@ class ReferenceEventTable:
             "T": float(rc.T),
             "k0": float(rc.k0),
             "settings": {
-                "free_radius": float(rc.free_radius),
-                "free_region_center": str(rc.free_region_center),
-                "fd_step": float(rc.fd_step),
-                "zone_radius": None
-                if rc.zone_radius is None
-                else float(rc.zone_radius),
-                "premin": bool(rc.premin),
+                "free_radius": numerical.get("free_radius", float(rc.free_radius)),
+                "free_region_center": numerical.get(
+                    "free_region_center", str(rc.free_region_center)
+                ),
+                "fd_step": numerical.get("fd_step", float(rc.fd_step)),
+                "zone_radius": numerical.get("zone_radius", rc.zone_radius),
+                "premin": numerical.get("premin", bool(rc.premin)),
                 "nu0_min_hz": thz_to_hz(rc.nu0_min_THz),
                 "nu0_max_hz": thz_to_hz(rc.nu0_max_THz),
             },

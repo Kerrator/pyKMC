@@ -76,6 +76,7 @@ from ..htst import (
 from ..htst import compute_event_prefactors as _kernel_compute_event_prefactors
 from .base import EngineExtension
 from .lammps import LammpsEngine
+from ..physics import ForceModel
 
 TMPDIR_PREFIX: str = "pykmc_htst_"
 """Prefix of the per-call ``tempfile.mkdtemp`` directory (tests count these)."""
@@ -169,6 +170,13 @@ class LammpsHTSTExtension(EngineExtension):
                 "htst_preflight: the search engine has no initialised system; "
                 "call initialize_system and initialize_potential first"
             )
+        physics = full_system.physics
+        if physics is None:
+            raise RuntimeError("htst_preflight needs initialized engine physics")
+        if ForceModel.capture(self.engine.config) != physics.force_model:
+            raise RuntimeError(
+                "force-model contents changed since engine initialization"
+            )
         scratch = self._new_scratch()
         try:
             scratch.start()
@@ -204,6 +212,7 @@ class LammpsHTSTExtension(EngineExtension):
                 "pair_style": str(self.engine.config.pair_style),
                 "species": full_system.species,
                 "masses": full_system.masses,
+                "engine_physics": physics,
             }
         finally:
             scratch.close()
@@ -253,6 +262,19 @@ class LammpsHTSTExtension(EngineExtension):
                 f"request must be an HTSTEventRequest, got {type(request).__name__}"
             )
         request.validate()
+        if request.descriptor is not None:
+            physics = request.descriptor.engine
+            if ForceModel.capture(self.engine.config) != physics.force_model:
+                raise HTSTRequestError(
+                    "request force model differs from scratch inputs"
+                )
+            if request.settings.premin and physics.premin_solver != (
+                str(self.engine.config.min_style),
+                str(self.engine.config.frz_min),
+            ):
+                raise HTSTRequestError(
+                    "request premin solver differs from scratch inputs"
+                )
         settings = request.settings
         if settings.zone_radius is not None and not (
             settings.zone_radius > settings.free_radius
@@ -351,6 +373,9 @@ class LammpsHTSTExtension(EngineExtension):
                     min2_positions=cropped[2],
                     types=crop_types,
                     center_index=int(np.searchsorted(zone, center)),
+                    constraints=None
+                    if request.constraints is None
+                    else request.constraints.crop(zone),
                 )
             return _kernel_compute_event_prefactors(
                 local_request,

@@ -8,6 +8,13 @@ from typing import Any
 import numpy as np
 
 from .settings import HTSTSettings
+from ..physics import (
+    CalculationIdentity,
+    PhysicalDescriptor,
+    ResolvedConstraints,
+    _digest,
+    _indices,
+)
 
 ORTHORHOMBIC_ATOL: float = 1.0e-8
 """Absolute tolerance (Å) below which off-diagonal cell entries count as zero."""
@@ -123,6 +130,8 @@ class HTSTEventRequest:
     pbc: tuple[bool, bool, bool]
     center_index: int
     settings: HTSTSettings
+    descriptor: PhysicalDescriptor | None = None
+    constraints: ResolvedConstraints | None = None
 
     def validate(self) -> None:
         """Check shapes, indices, finiteness, species membership and geometry.
@@ -221,6 +230,64 @@ class HTSTEventRequest:
             raise HTSTRequestError(
                 f"center_index {self.center_index} out of range for {n_atoms} atoms"
             )
+        if self.descriptor is not None:
+            if not isinstance(self.descriptor, PhysicalDescriptor):
+                raise HTSTRequestError("descriptor must be a PhysicalDescriptor")
+            if (self.species, self.masses) != (
+                self.descriptor.engine.species,
+                self.descriptor.engine.masses,
+            ):
+                raise HTSTRequestError(
+                    "request species/masses disagree with descriptor"
+                )
+            if any(
+                getattr(self.settings, key) != value
+                for key, value in self.descriptor.numerical
+            ):
+                raise HTSTRequestError("request settings disagree with descriptor")
+        if self.constraints is not None:
+            if not isinstance(self.constraints, ResolvedConstraints):
+                raise HTSTRequestError("constraints must be ResolvedConstraints")
+            try:
+                self.constraints.validate(n_atoms)
+            except ValueError as exc:
+                raise HTSTRequestError(str(exc)) from exc
+
+    def calculation_identity(
+        self, direction: str = "forward", free_indices: Any = None
+    ) -> CalculationIdentity:
+        """Snapshot full dependencies; a batch event key is not physical identity.
+
+        Call on the full request before cropping. A missing common free set or
+        descriptor remains explicit; this record alone never authorizes reuse.
+        """
+        self.validate()
+        if direction not in ("forward", "backward"):
+            raise HTSTRequestError("direction must be forward or backward")
+        n_atoms = len(self.types)
+        ids = self.constraints.atom_ids if self.constraints else tuple(range(n_atoms))
+        free = None if free_indices is None else _indices(free_indices, upper=n_atoms)
+        geometry = _digest(
+            (
+                np.asarray(self.min1_positions).tolist(),
+                np.asarray(self.saddle_positions).tolist(),
+                np.asarray(self.min2_positions).tolist(),
+                self.types,
+                self.species,
+                self.masses,
+                np.asarray(self.cell).tolist(),
+                tuple(bool(p) for p in self.pbc),
+            )
+        )
+        return CalculationIdentity(
+            self.descriptor.descriptor_id if self.descriptor else None,
+            direction,
+            geometry,
+            ids,
+            ids[self.center_index],
+            None if free is None else tuple(ids[i] for i in free),
+            self.constraints.constraint_id if self.constraints else None,
+        )
 
     def masses_per_atom(self) -> np.ndarray:
         """Return the ``(N,)`` per-atom masses in amu by mapping types through species.

@@ -106,6 +106,7 @@ class KMC:
         self.loggers = None
         self.system = None
         self.manager = manager
+        self.global_constraints = None
         # control.seed: one seeding of the Python and NumPy global generators
         # (central_atoms_research, the BKL draws, the basin exit draws); the
         # saddle search has its own stream (partn.zseed).
