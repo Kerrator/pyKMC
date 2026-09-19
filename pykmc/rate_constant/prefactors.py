@@ -452,9 +452,10 @@ class PrefactorService:
     def request_from_snapshot(self, snapshot, *, event_key: tuple) -> HTSTEventRequest:
         """Rebuild full saved source inputs under this run's physical authority.
 
-        Re-resolve the event AV restriction with the current radius and source
-        PBC. Initialized user identities and fixed reference positions remain
-        authoritative; a saved crop cannot supply missing source atoms.
+        Preserve an unchanged source-defined execution restriction, whose AV
+        center can precede relaxation of min1. Changed restriction policies
+        are resolved on the full source. Initialized user identities and fixed
+        reference positions remain authoritative; a crop lacks that source.
         """
         from pykmc.htst.provenance import RequestSnapshot
         from pykmc.physics import resolve_event_constraints
@@ -497,18 +498,42 @@ class PrefactorService:
                     "new AV policy needs an explicit source search center"
                 )
             av_center = ids.index(source.constraints.center_id)
-        try:
-            constraints = resolve_event_constraints(
-                self.config,
-                source.min1_positions,
-                source.types,
-                source.cell,
-                source.pbc,
-                av_center,
-                ids,
-                user_constraints=user,
-                active_volume=active,
+        def fixed_references(resolved):
+            return (
+                ()
+                if resolved is None
+                else tuple(sorted(zip(resolved.fixed_ids, resolved.fixed_positions)))
             )
+
+        saved = source.constraints
+        same_user = (
+            source.descriptor is not None
+            and source.descriptor.constraint_policy == descriptor.constraint_policy
+            and fixed_references(source.resolved_user_constraints())
+            == fixed_references(user)
+        )
+        same_av = saved is not None and (
+            (not active and saved.rmov is None)
+            or (active and saved.rmov == self.config.activevolume.rmov)
+        )
+        try:
+            if same_user and same_av:
+                # Search constraints were resolved before event relaxation.
+                # Recentring them on min1 changes the producing context even
+                # when the current policy and physical inputs are identical.
+                constraints = saved
+            else:
+                constraints = resolve_event_constraints(
+                    self.config,
+                    source.min1_positions,
+                    source.types,
+                    source.cell,
+                    source.pbc,
+                    av_center,
+                    ids,
+                    user_constraints=user,
+                    active_volume=active,
+                )
         except ValueError as exc:
             raise HTSTRequestError(str(exc)) from exc
         request = replace(
