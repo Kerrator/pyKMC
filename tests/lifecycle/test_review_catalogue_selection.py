@@ -34,6 +34,7 @@ from pykmc.event_recycling import DistanceRecycling
 from pykmc.event_table import ReferenceEventTable
 from pykmc.kmc import KMC
 from pykmc.result import Err, EventRefinementOutput, Ok
+from .protocol_producers import protocol_service
 
 
 def _config(*, basin: bool) -> Config:
@@ -130,6 +131,8 @@ def _run_invalidation_step(
     manager = SimpleNamespace(broadcast=lambda *args, **kwargs: None)
     sim = KMC(config, manager=manager)
     sim.system = system
+    # Unrefined rows need current dependency context, but cost no site Hessian.
+    sim.prefactor_service = protocol_service(config)
     sim.reference_table = ReferenceEventTable(config)
     sim.reference_table.table = _rows(incoming_alias=incoming_alias)
     sim.visited_environments = {"crystal"}
@@ -154,6 +157,7 @@ def _run_invalidation_step(
                     dE_forward=0.1,
                     num_reference_event=reference,
                     refined="F",  # No site Hessian is needed for this lifecycle test.
+                    crop_atom_ids=tuple(int(system.index[i]) for i in neighbors),
                 )
             )
         return SimpleNamespace(results=[], get_successes_results=lambda: outputs)
@@ -194,6 +198,7 @@ def _run_invalidation_step(
     monkeypatch.setattr(sim, "_close", lambda: None)
     monkeypatch.chdir(tmp_path)
     sim.run()
+    assert not sim.prefactor_service.manager.prefactor_requests
 
     assert attempts[0] == 2, "The intended rejected reference was never exercised"
     assert len(sim.loggers.selected_refs) == 1, "No coherent KMC step completed"

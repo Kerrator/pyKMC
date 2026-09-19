@@ -496,7 +496,7 @@
 
 - **`style`** : `Literal['displacement']`, mandatory
   <details><summary>Description</summary>
-  Method used to decide which events can be recycled. 'displacement' = central atom moved less than movement_thr AND is farther than distance_thr from the executed event.
+  Geometric filter for event recycling. 'displacement' requires the central atom to move less than movement_thr AND remain farther than distance_thr from the executed event. Both distances use the source's actual periodic axes. HTST/RPA rows must additionally pass full-source physical-dependency validation before refinement or selection; passing this geometric filter alone does not preserve a site frequency.
   </details>
 - **`movement_thr`** : `float`, default = `0.02`
   <details><summary>Description</summary>

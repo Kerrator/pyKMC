@@ -287,7 +287,11 @@ def test_crop_only_refinement_does_not_overwrite_valid_reference_with_fake_geome
     saddle = np.array([[0.1, 0.0, 0.0], [1.2, 0.0, 0.0]])
     final = np.array([[0.2, 0.0, 0.0], [1.3, 0.0, 0.0]])
     system = SimpleNamespace(
-        positions=positions, types=["Ni", "Ni"], cell=np.eye(3) * 10, pbc=[False] * 3
+        positions=positions,
+        types=["Ni", "Ni"],
+        cell=np.eye(3) * 10,
+        pbc=[False] * 3,
+        index=np.arange(2),
     )
     neighbors = SimpleNamespace(get_neighbors=lambda key, atom: np.array([0]))
 
@@ -325,6 +329,7 @@ def test_crop_only_refinement_does_not_overwrite_valid_reference_with_fake_geome
             refined="T",
             nu0_hz=expected.nu0_hz,
             nu0_status="ok",
+            crop_atom_ids=(0,),
         )
     )
     active.request_site_prefactors(system, neighbors)

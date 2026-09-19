@@ -2131,9 +2131,10 @@ class ActiveEventTable:
     ``refined == "T"`` row; success overrides the estimate (source ``site``),
     a scientific rejection keeps the row as it is (a valid inherited
     reference estimate, else ``k0``). ``nu0_site_attempted`` records the
-    attempt, not its success, so a recycled row is never re-attempted. A
-    row's geometry is never rebuilt in place: a changed geometry is a new row
-    built by :meth:`add_events` from its reference estimate.
+    attempt, not its success. An unchanged complete producing context keeps
+    that attempt; changed or unknown dependencies remove the row before it
+    can suppress refinement or enter selection. Rebuilding produces a new
+    row through :meth:`add_events`, with a current full saddle and crop IDs.
 
     Site geometry: the request is built from the current full minimum and the
     full pARTn-refined saddle that ``Refinement.execute`` hands over on
@@ -2144,8 +2145,9 @@ class ActiveEventTable:
     (:meth:`remove`, :meth:`drop_reference_events`,
     :meth:`prune_for_recycling`) keeps the store consistent, and the request
     path checks the stored crop against the full saddle before submitting
-    anything. A refined row whose producer handed over no full saddle (a
-    crop-only output) is not an error: it keeps its inherited estimate, is
+    anything. Crop identities are stable global atom IDs, so source or crop
+    ordering changes do not silently change correspondence. A refined row
+    with explicit crop IDs but no full saddle keeps its inherited estimate, is
     marked attempted and is counted as ``no_geometry`` (contracts section 7d,
     F1); no request is ever built from an ``rcut`` crop pasted into the
     minimum.
@@ -2261,6 +2263,14 @@ class ActiveEventTable:
             )
             self.remove([i for i in self.table.index if i not in selected.index])
             self._pending_site_rows.clear()
+            from dataclasses import replace
+
+            # Immediate use of fresh opaque physics is permitted only in its
+            # producing step. Equal opaque descriptors cannot justify recycling.
+            self._site_states = {
+                label: replace(state, fresh_service=None)
+                for label, state in self._site_states.items()
+            }
             self.validate_recycled(system, allow_pending=False)
         self._full_saddles = {}
         self._full_saddle_constraints = {}
@@ -2314,8 +2324,9 @@ class ActiveEventTable:
                 len(indices),
                 3,
             ):
-                raise ValueError(
-                    "active event crop and identities have different sizes"
+                raise RuntimeError(
+                    "stored crop does not match the current rcut mapping: "
+                    "crop and identities have different sizes"
                 )
         return indices
 
@@ -2396,7 +2407,7 @@ class ActiveEventTable:
                     state,
                     signature=row_signature(self.table.loc[label], state.center_id),
                 )
-            except (ValueError, TypeError, KeyError, IndexError):
+            except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
                 dropped.append(label)
         if dropped:
             self.remove(dropped)
@@ -2601,6 +2612,7 @@ class ActiveEventTable:
             self.prefactor_service.method,
             row_signature(self.table.loc[label], center_id),
             calculation,
+            fresh_service=self.prefactor_service,
         )
         self._pending_site_rows.discard(int(label))
 
@@ -2684,7 +2696,8 @@ class ActiveEventTable:
 
         Call after :meth:`remove_duplicates`, so duplicates never cost a
         Hessian. Only ``refined == "T"`` rows that have not been attempted
-        participate; ``"F"``/``"B"`` rows and recycled rows keep their values.
+        participate. All retained rows first pass the full-source dependency
+        guard; valid ``"F"``/``"B"`` approximations require no site Hessian.
 
         Geometry: the request carries the current full minimum as ``min1``
         and the full pARTn-refined saddle handed over by ``Refinement.execute``
@@ -2698,14 +2711,12 @@ class ActiveEventTable:
         ``rcut`` 6.3 Å, -31 % on Cu); the full saddle removes that bias and
         makes ``free_radius`` independent of ``rcut``.
 
-        Ordering invariant: a refined row stores its saddle and final
-        positions cropped by ``neighbors_list.get_neighbors("rcut",
-        atom_index)`` evaluated on the neighbour list refinement ran with,
-        in that list's order (``Refinement.refine_single`` crops with
-        ``ctx["neighbors"]`` and ``KMC._reconstruction_active_event`` reads
-        them back through the same call). The caller must therefore pass that
-        same neighbour list: the stored crop is checked against the full
-        saddle at those indices before any request is submitted.
+        Refinement records stable global crop IDs in the same order as its
+        saddle and final arrays. Requests and reconstruction resolve those IDs
+        against the current source, independent of neighbor-list ordering.
+        The stored crop is checked against the full saddle before submission;
+        changed crop membership invalidates a retained row. A legacy fresh
+        output can acquire IDs only when its full saddle proves the mapping.
 
         The full saddles are released once the batch has been submitted and
         resolved (also when a worker failure propagates).
@@ -2721,10 +2732,11 @@ class ActiveEventTable:
         Crop-only rows (contracts section 7d, F1): an eligible row whose
         producer handed over no full refined saddle keeps its inherited
         estimate untouched (``nu0``, ``nu0_status``, ``nu0_source``, ``k``,
-        ``k_prefactor``), is marked ``nu0_site_attempted`` so it is never
-        re-attempted, is counted under ``no_geometry`` and logged once at
-        info level; nothing is submitted for it. Only a crop that is present
-        but inconsistent with the full saddle is an error.
+        ``k_prefactor``), is marked ``nu0_site_attempted``, is counted under
+        ``no_geometry`` and logged once at info level; nothing is submitted
+        for it. Explicit crop IDs are required without a full saddle. The
+        fallback's current source is recorded without inventing a calculation.
+        Later changes invalidate it under the same dependency guard.
 
         Returns
         -------

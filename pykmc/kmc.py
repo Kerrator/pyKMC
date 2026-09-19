@@ -972,7 +972,7 @@ class KMC:
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
         try:
             neighbors = active_table.crop_indices(idx_selected_event, self.system)
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, RuntimeError) as exc:
             if (
                 not active_table.uses_prefactors
                 and "crop_atom_ids" not in active_table.table.columns

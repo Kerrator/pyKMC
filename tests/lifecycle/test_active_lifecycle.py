@@ -23,6 +23,7 @@ from pykmc.event_table import (
 from pykmc.rate_constant import create_rate_constant, rate_from_prefactor
 from pykmc.rate_constant.prefactors import PrefactorService
 from pykmc.result import EventRefinementOutput
+from .protocol_producers import protocol_event_prefactors
 from tests.lifecycle.conftest import (
     FakeManager,
     accepted,
@@ -82,6 +83,7 @@ def _refined(
         num_reference_event=ref,
         refined=refined,
         full_saddle_positions=full if full_saddle == "auto" else None,
+        crop_atom_ids=tuple(int(system.index[i]) for i in neighbors),
         **estimate,
     )
 
@@ -89,7 +91,9 @@ def _refined(
 def _service(config: Any, responder: Any) -> tuple[PrefactorService, FakeManager]:
     fake = FakeManager(responder)
     return (
-        PrefactorService(config, fake, create_rate_constant(config.rateconstant)),
+        PrefactorService(
+            config, fake, create_rate_constant(config.rateconstant), method="fd"
+        ),
         fake,
     )
 
@@ -655,12 +659,19 @@ class TestSiteRequests:
         )
         table.request_site_prefactors(system_single_type_fcc, neighbors_list)
         assert len(fake.prefactor_requests) == 2
+        # Preserve the original inheritance observation before the subsequent
+        # current-policy guard: 7e11 is below this fixture's default 1e12 bound.
+        assert table.table.iloc[0]["nu0"] == 7e11
+        assert 7e11 < service.settings.nu0_min_hz
         current["responder"] = next(outcomes)
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
         assert summary == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
         assert len(fake.prefactor_requests) == 2
-        assert table.table.iloc[0]["nu0"] == 7e11  # inherited value kept
-        assert math.isnan(table.table.iloc[1]["nu0"])
+        # R09 rechecks current admissibility before reuse. The disallowed
+        # inherited row is unavailable; the unchanged rejected row is not retried.
+        assert list(table.table["atom_index"].astype(int)) == [5]
+        assert math.isnan(table.table.iloc[0]["nu0"])
+        assert table.table.iloc[0]["nu0_source"] == "k0"
 
     def test_unrefined_rows_are_never_requested(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
@@ -704,7 +715,14 @@ class TestSiteRequests:
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
     ) -> None:
         """A row surviving pruning keeps its estimate and attempt flag."""
-        service, fake = _service(htst_config, _site_ok(5e12))
+        # This reuse assertion needs an actual immutable producing record;
+        # the isolated scalar/log tests retain their original naked workers.
+        service, fake = _service(
+            htst_config,
+            lambda request: protocol_event_prefactors(
+                request, accepted(5e12), skipped()
+            ),
+        )
         table = ActiveEventTable(htst_config, prefactor_service=service)
         table.add_events(
             [
@@ -725,8 +743,9 @@ class TestSiteRequests:
             ]
         )
         table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        # Simulate the recycler keeping the second row for the next step.
-        table.table = table.table.loc[[1]].reset_index(drop=True).copy()
+        # Use the real mutation boundary so producing context is remapped
+        # with the row; direct DataFrame replacement is not a valid producer.
+        table.remove(0)
         kept = table.table.iloc[0].copy()
         table.add_events(
             _refined(
@@ -735,6 +754,8 @@ class TestSiteRequests:
         )
         table.request_site_prefactors(system_single_type_fcc, neighbors_list)
         assert [r.center_index for r in fake.prefactor_requests] == [0, 40, 20]
+        assert int(table.table.iloc[0]["atom_index"]) == int(kept["atom_index"]) == 40
+        assert table.site_calculation(table.table.index[0]) is not None
         assert table.table.iloc[0]["nu0"] == kept["nu0"] == 5e12
         assert table.table.iloc[0]["nu0_source"] == "site"
         assert bool(table.table.iloc[0]["nu0_site_attempted"]) is True

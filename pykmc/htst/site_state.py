@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -50,6 +50,7 @@ class SiteState:
     method: str
     signature: tuple
     calculation: DirectionalCalculation | None = None
+    fresh_service: Any = field(default=None, compare=False, repr=False)
 
     @property
     def atom_ids(self) -> tuple[int, ...]:
@@ -84,7 +85,14 @@ class SiteState:
         ):
             return False
         descriptor = service.descriptor_for(types)
-        if descriptor.compare(self.source.descriptor).status != "compatible":
+        same_producing_context = (
+            self.fresh_service is service
+            and descriptor.descriptor_id == self.source.descriptor.descriptor_id
+        )
+        if (
+            descriptor.compare(self.source.descriptor).status != "compatible"
+            and not same_producing_context
+        ):
             return False
         settings = replace(
             service.settings,

@@ -101,6 +101,39 @@ force-model results can be used in their producing context, but serialization
 does not make them reusable: a subsequent load needs a new calculation or an
 explicit fallback. Worker and transport failures still propagate.
 
+## Active site estimates and recycling
+
+An unchanged event center does not establish unchanged local curvature.
+HTST/RPA active rows retain the full submitted source snapshot, initialized
+force-model and mass descriptor, actual numerical settings and restrictions,
+and stable atom correspondence. A site value also retains its actual immutable
+forward calculation. Its association covers the stored saddle and final crops,
+barrier, logical reference, status and frequency; replacing a row cannot silently
+transfer that calculation.
+
+Recycling validates these dependencies before refinement skips and before rate
+selection. Any full-source geometry change conservatively invalidates the row,
+including movement outside its stored crop. Changed masses, force-model
+identity, constraints, numerical settings or crop membership also invalidate it.
+The ordinary dispatcher can then rebuild a current full saddle and request a
+new site calculation. When full geometry is unavailable, an explicit crop-ID
+handoff can retain a labeled reference approximation or `k0` fallback; it cannot
+manufacture a full stationary saddle by overlaying the crop.
+
+Pure source or crop reordering preserves stable global IDs and needs no new
+Hessian. Temperature changes update rates using the current rate facade while
+retaining an otherwise valid frequency. The current inclusive frequency window
+still applies; widening a window retries a previously rejected site calculation,
+including one whose row temporarily used a valid reference approximation.
+
+Fresh nonreusable force-model results and explicit fallback contexts can be used
+by their producing service in the current step, subject to the same exact source
+and row checks. This transient allowance ends at pruning or a service change.
+An opaque descriptor remains nonreusable and cannot establish recycled validity.
+Coordinate representations differing by a periodic image may conservatively
+trigger rebuilding, while the displacement/distance filter itself respects the
+source's actual periodic axes.
+
 KMC restart initialization evaluates energy at the saved System coordinates
 without relaxing them. The Python configuration and native energy therefore
 refer to the same geometry when refinement begins. Fresh runs retain their

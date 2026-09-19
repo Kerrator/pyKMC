@@ -40,7 +40,11 @@ SEED = 2024
 HOP = np.array([1.2, 0.3, 0.0])
 
 
-from .protocol_producers import protocol_event_prefactors, protocol_patch
+from .protocol_producers import (
+    protocol_event_prefactors,
+    protocol_patch,
+    protocol_service,
+)
 
 
 class _Recorder:
@@ -182,6 +186,7 @@ def _refined(
         dE_forward=dE,
         num_reference_event=0,
         full_saddle_positions=full_saddle if estimate.get("refined") == "T" else None,
+        crop_atom_ids=tuple(int(system.index[i]) for i in neighbors),
         **estimate,
     )
 
@@ -1256,25 +1261,37 @@ class TestReconstructionPurgeLabels:
         kmc.reference_table.table = pd.DataFrame(
             {"idx_ref": [5, 9], "event_id": ["X", "Y"], "idx_backward": [7, 9]}
         )
-        table = ActiveEventTable(kmc.config)
-        crop = np.zeros((1, 3))
-        table.table = pd.DataFrame(
-            {
-                "atom_index": [0, 1, 2],
-                "saddle_positions": [crop, crop, crop],
-                "final_positions": [crop, crop, crop],
-                "energy_barrier": [0.5, 0.5, 0.5],
-                "k": [1.0, 1.0, 1.0],
-                "num_reference_event": [5, 7, 9],
-                "refined": ["T", "T", "T"],
-                "k_prefactor": [1.0, 1.0, 1.0],
-                "nu0": [np.nan, np.nan, np.nan],
-                "nu0_status": ["legacy", "legacy", "legacy"],
-                "nu0_reason": ["", "", ""],
-                "nu0_source": ["k0", "k0", "k0"],
-                "nu0_site_attempted": [True, True, True],
-            }
+        # Fresh public crop-only producer handoff, with explicit fallback
+        # context. Keep the real guard and the original purge/selection path.
+        service = protocol_service(kmc.config)
+        kmc.prefactor_service = service
+        kmc.neighbors_list = types.SimpleNamespace(
+            get_neighbors=lambda cutoff, atom: np.array([atom], dtype=int)
         )
+        table = ActiveEventTable(kmc.config, prefactor_service=service)
+        crop = np.zeros((1, 3))
+        table.add_events(
+            [
+                EventRefinementOutput(
+                    central_atom_index=atom,
+                    saddle_positions=crop.copy(),
+                    E_saddle=0.5,
+                    min2_positions=crop.copy(),
+                    dE_forward=0.5,
+                    num_reference_event=ref,
+                    refined="T",
+                    nu0_status="legacy",
+                    nu0_reason="",
+                    crop_atom_ids=(int(kmc.system.index[atom]),),
+                )
+                for atom, ref in enumerate((5, 7, 9))
+            ]
+        )
+        summary = table.request_site_prefactors(kmc.system, kmc.neighbors_list)
+        assert summary == {"attempted": 3, "ok": 0, "rejected": 0, "no_geometry": 3}
+        assert not service.manager.prefactor_requests
+        assert list(table.table["k_prefactor"]) == [1.0, 1.0, 1.0]
+        assert list(table.table["nu0_status"]) == ["legacy", "legacy", "legacy"]
 
         def select(active: ActiveEventTable) -> tuple[int, float, float]:
             refs = active.table["num_reference_event"].astype(int)
