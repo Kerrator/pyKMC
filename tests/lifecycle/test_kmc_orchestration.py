@@ -1224,3 +1224,74 @@ class TestOutputFormats:
             "dra_f",
             "Refined",
         ]
+
+
+class TestReconstructionPurgeLabels:
+    """The failed row is dropped by a label that is still valid (contracts section 7d, F4)."""
+
+    def test_dangling_row_is_removed_before_the_reference_purge_relabels(
+        self,
+        htst_config: Any,
+        system_single_type_fcc: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A dangling failed row must not cost a valid row through a stale label.
+
+        Catalogue: row 5 (links to the absent id 7) and row 9. Active rows:
+        ref 5, ref 7 (dangling: no catalogue entry) and ref 9. Selecting the
+        dangling row first fails; the purge of id 7 removes row 5 by closure
+        (7 itself has no row), drops the ref-5 active row and relabels the
+        table. The failed ref-7 row must be the one removed explicitly, so
+        the ref-9 row survives and is reconstructed.
+        """
+        kmc = KMC(htst_config, manager=FakeManager())
+        kmc.system = copy.deepcopy(system_single_type_fcc)
+        kmc.loggers = _Recorder()
+        kmc.reference_table = ReferenceEventTable(kmc.config)
+        kmc.reference_table.table = pd.DataFrame(
+            {"idx_ref": [5, 9], "event_id": ["X", "Y"], "idx_backward": [7, 9]}
+        )
+        table = ActiveEventTable(kmc.config)
+        crop = np.zeros((1, 3))
+        table.table = pd.DataFrame(
+            {
+                "atom_index": [0, 1, 2],
+                "saddle_positions": [crop, crop, crop],
+                "final_positions": [crop, crop, crop],
+                "energy_barrier": [0.5, 0.5, 0.5],
+                "k": [1.0, 1.0, 1.0],
+                "num_reference_event": [5, 7, 9],
+                "refined": ["T", "T", "T"],
+                "k_prefactor": [1.0, 1.0, 1.0],
+                "nu0": [np.nan, np.nan, np.nan],
+                "nu0_status": ["legacy", "legacy", "legacy"],
+                "nu0_reason": ["", "", ""],
+                "nu0_source": ["k0", "k0", "k0"],
+                "nu0_site_attempted": [True, True, True],
+            }
+        )
+
+        def select(active: ActiveEventTable) -> tuple[int, float, float]:
+            refs = active.table["num_reference_event"].astype(int)
+            dangling = active.table.index[refs == 7]
+            label = int(dangling[0]) if len(dangling) else int(active.table.index[0])
+            return label, 1.0, 1.0
+
+        def reconstruct(label: int, active: ActiveEventTable) -> Any:
+            ref = int(active.table.loc[label, "num_reference_event"])
+            if ref == 7:
+                return types.SimpleNamespace(
+                    is_ok=lambda: False,
+                    err_value=lambda: types.SimpleNamespace(message="boom"),
+                )
+            return types.SimpleNamespace(is_ok=lambda: True, ok_value=lambda: ref)
+
+        monkeypatch.setattr(kmc, "_select_event", select)
+        monkeypatch.setattr(kmc, "_reconstruction_active_event", reconstruct)
+        result, _, _, label, err_reference, err_ae = kmc.reconstruction(table)
+
+        assert result.is_ok() and result.ok_value() == 9
+        assert list(table.table["num_reference_event"].astype(int)) == [9]
+        assert int(table.table.loc[label, "num_reference_event"]) == 9
+        assert err_reference == [5] and err_ae == ["X"]
+        assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [9]

@@ -110,9 +110,11 @@ class Initializer:
             # 6): fails fast when LAMMPS lacks PHONON or the potential cannot
             # be initialised in a scratch instance. Constant style: no call.
             self.kmc.manager.broadcast("htst_preflight")
-            # ``broadcast`` returns nothing; the root worker's report (the
+            # ``broadcast`` returns nothing; one worker session's report (the
             # engine's authoritative species/mass map, contracts section 7d,
-            # N3) comes back through the Future of the same operation.
+            # N3) comes back through the Future of the same operation. Every
+            # session initialised the same potential, so the map is the same
+            # whichever session answers.
             self.kmc.htst_preflight = self._preflight_report(
                 self.kmc.manager.submit("htst_preflight").result()
             )
@@ -129,7 +131,7 @@ class Initializer:
 
     @staticmethod
     def _preflight_report(report: object) -> dict:
-        """Validate the root worker's ``htst_preflight`` report.
+        """Validate a worker session's ``htst_preflight`` report.
 
         Parameters
         ----------
@@ -146,12 +148,13 @@ class Initializer:
         RuntimeError
             If the report is not a mapping carrying a non-empty ``species``
             tuple and one mass per species (``None`` is what a non-root rank
-            returns; the manager only ever forwards the root's value).
+            of a session returns; the manager forwards the session root's
+            value).
 
         """
         if not isinstance(report, dict):
             raise RuntimeError(
-                "htst_preflight returned no report on the manager's root session "
+                "htst_preflight returned no report from the worker session "
                 f"(got {type(report).__name__}); the engine species/mass map is "
                 "required to build HTST requests"
             )

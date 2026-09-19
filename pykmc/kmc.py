@@ -910,10 +910,12 @@ class KMC:
                     ),
                 )
                 removed = self.reference_table.remove([num_ref_event])
-                dropped = active_table.drop_reference_events(removed.idx_refs)
+                dropped = 0
                 if num_ref_event not in removed.idx_refs:
                     # The failed row referenced no catalogue entry (a dangling
-                    # active row): drop it explicitly so the loop progresses.
+                    # active row): drop it explicitly, by its label, BEFORE the
+                    # purge below relabels the surviving rows, so the loop
+                    # progresses and no other row is hit by a stale label.
                     self.loggers.warning(
                         "log",
                         "\t :=> Reference event {} is not in the catalogue; "
@@ -921,6 +923,7 @@ class KMC:
                     )
                     active_table.remove(idx_selected_event)
                     dropped += 1
+                dropped += active_table.drop_reference_events(removed.idx_refs)
                 err_reference.extend(removed.idx_refs)
                 err_ae.extend(removed.event_ids)
                 self.loggers.info(
