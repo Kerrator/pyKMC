@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Literal
 
 from .settings import HTSTSettings
+from .provenance import CalculationProvenance
+from ..physics import CalculationIdentity, _digest
 
 
 class PrefactorRejection(str, Enum):
@@ -255,6 +257,49 @@ class DirectionalPrefactor:
 
 
 @dataclass(frozen=True)
+class DirectionalCalculation:
+    """An actual directional result bound to its immutable producing inputs."""
+
+    direction: Literal["forward", "backward"]
+    provenance: CalculationProvenance
+    estimate: DirectionalPrefactor
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        if self.direction not in ("forward", "backward"):
+            raise ValueError("direction must be forward or backward")
+        if not isinstance(self.provenance, CalculationProvenance):
+            raise ValueError("calculation needs producing provenance")
+        self.provenance.validate()
+        if not isinstance(self.estimate, DirectionalPrefactor) or self.estimate.skipped:
+            raise ValueError("calculation needs an actual directional estimate")
+        self.estimate.__post_init__()
+        if self.estimate.n_free != len(self.provenance.free_indices):
+            raise ValueError("estimate free count disagrees with producing free set")
+
+    @property
+    def identity(self) -> CalculationIdentity:
+        return self.provenance.directional_identity(self.direction)
+
+    @property
+    def descriptor_id(self) -> str | None:
+        descriptor = self.provenance.produced.descriptor
+        return None if descriptor is None else descriptor.descriptor_id
+
+    @property
+    def calculation_id(self) -> str:
+        return _digest(
+            (self.provenance.provenance_id, self.direction, asdict(self.estimate))
+        )
+
+    @property
+    def reusable(self) -> bool:
+        return self.provenance.reusable and self.estimate.ok
+
+
+@dataclass(frozen=True)
 class EventPrefactors:
     """Forward and backward Vineyard estimates of one event sharing one saddle.
 
@@ -281,6 +326,7 @@ class EventPrefactors:
     method: str
     n_free: int
     settings: HTSTSettings
+    provenance: CalculationProvenance | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         """Type-check the composite fields."""
@@ -298,10 +344,30 @@ class EventPrefactors:
             raise ValueError("n_free must be >= 0")
         if not isinstance(self.settings, HTSTSettings):
             raise ValueError("settings must be an HTSTSettings")
+        if self.provenance is not None:
+            if not isinstance(self.provenance, CalculationProvenance):
+                raise ValueError("provenance must be CalculationProvenance or None")
+            self.provenance.validate()
+            if self.provenance.method != self.method:
+                raise ValueError("result method disagrees with producing method")
+            if len(self.provenance.free_indices) != self.n_free:
+                raise ValueError("result free count disagrees with producing free set")
+            if self.provenance.produced.settings != self.settings:
+                raise ValueError("result settings disagree with producing settings")
+
+    def calculation(self, direction: str) -> DirectionalCalculation | None:
+        """Return truthful producing evidence, never inferred service context."""
+        if direction not in ("forward", "backward"):
+            raise ValueError("direction must be forward or backward")
+        estimate = getattr(self, direction)
+        if self.provenance is None or estimate.skipped:
+            return None
+        return DirectionalCalculation(direction, self.provenance, estimate)
 
 
 __all__ = [
     "DirectionalPrefactor",
+    "DirectionalCalculation",
     "EventPrefactors",
     "PrefactorRejected",
     "PrefactorRejection",

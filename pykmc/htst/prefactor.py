@@ -24,6 +24,7 @@ import numpy as np
 from .free_region import common_free_indices
 from .hessian import HessianFn
 from .normal_modes import ModeSpectrum, normal_modes_from_hessian
+from .provenance import CalculationProvenance
 from .request import HTSTEventRequest, HTSTRequestError
 from .result import (
     DirectionalPrefactor,
@@ -206,6 +207,9 @@ def compute_event_prefactors(
         raise ValueError(f"compute_backward must be a bool, got {compute_backward!r}")
 
     free = common_free_indices(request, free_indices)
+    provenance = CalculationProvenance.capture(
+        request, request, method=method, free_indices=free
+    )
 
     n_free = int(free.size)
     if n_free == 0:
@@ -229,6 +233,7 @@ def compute_event_prefactors(
             method=method,
             n_free=0,
             settings=request.settings,
+            provenance=provenance,
         )
 
     # The saddle Hessian is obtained and classified exactly once and shared.
@@ -261,6 +266,7 @@ def compute_event_prefactors(
             method=method,
             n_free=n_free,
             settings=request.settings,
+            provenance=provenance,
         )
 
     n_negative_saddle = sad_spec.n_negative
@@ -285,6 +291,7 @@ def compute_event_prefactors(
             method=method,
             n_free=n_free,
             settings=request.settings,
+            provenance=provenance,
         )
 
     forward = _direction(
@@ -305,6 +312,7 @@ def compute_event_prefactors(
         method=method,
         n_free=n_free,
         settings=request.settings,
+        provenance=provenance,
     )
 
 

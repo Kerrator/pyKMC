@@ -77,6 +77,7 @@ from ..htst import (
 )
 from ..htst import compute_event_prefactors as _kernel_compute_event_prefactors
 from ..htst.free_region import common_free_indices
+from ..htst.provenance import CalculationProvenance
 from .base import EngineExtension
 from .lammps import LammpsEngine
 from ..physics import EnginePhysics, ForceModel
@@ -357,6 +358,21 @@ class LammpsHTSTExtension(EngineExtension):
                         request.constraints.validate_positions(
                             geometry, cell=cell, pbc=request.pbc
                         )
+            # Persist full post-premin geometry before any zone crop. The
+            # kernel's local request cannot describe missing source neighbors.
+            produced_request = replace(
+                request,
+                min1_positions=geometries[0],
+                saddle_positions=geometries[1],
+                min2_positions=geometries[2],
+            )
+            provenance = CalculationProvenance.capture(
+                request,
+                produced_request,
+                method="lammps_eskm",
+                free_indices=free_global,
+                zone_indices=zone,
+            )
             if zone is None:
                 if not full_built:
                     self._build_scratch(
@@ -438,13 +454,14 @@ class LammpsHTSTExtension(EngineExtension):
                     )
                 return hessian(positions, free_indices)
 
-            return _kernel_compute_event_prefactors(
+            result = _kernel_compute_event_prefactors(
                 local_request,
                 stationary_hessian,
                 method="lammps_eskm",
                 free_indices=free_local,
                 compute_backward=compute_backward,
             )
+            return replace(result, provenance=provenance)
         finally:
             scratch.close()
 
