@@ -151,6 +151,10 @@ class Harness(LammpsEngine):
         self._cleared_since_init = False
         return True
 
+    def get_positions(self):
+        # The full-system failure transaction snapshots this unchanged source.
+        return POSITIONS.copy()
+
     def set_positions(self, positions):
         np.testing.assert_array_equal(positions, POSITIONS)
 

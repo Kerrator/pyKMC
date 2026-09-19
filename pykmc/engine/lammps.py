@@ -1132,19 +1132,14 @@ class LammpsEngine(Engine):
                 if not callback_errors:
                     callback_errors.append(exc)
             # Every native rank calls this fix, including ranks with no atoms.
-            # A rank-local soft stop would leave peers in native collectives.
+            # Retain errors until the configured finite native evaluation cap
+            # returns. A forced timeout would poison subsequent minimizations.
             failures = self._operation_failures(
                 callback_errors[0] if callback_errors else None
             )
             if any(failure is not None for failure in failures):
                 if not callback_failures:
                     callback_failures.extend(failures)
-                    stop = getattr(native, "force_timeout", None)
-                    if callable(stop):
-                        try:
-                            stop()
-                        except BaseException as stop_exc:
-                            callback_errors.append(stop_exc)
 
         original = None
         try:
@@ -1152,14 +1147,6 @@ class LammpsEngine(Engine):
             if not callable(getattr(native, "set_fix_external_callback", None)):
                 failure = RuntimeError(
                     "constrained pARTn requires LAMMPS fix external callbacks"
-                )
-            if (
-                self.comm is not None
-                and self.comm.Get_size() > 1
-                and not callable(getattr(native, "force_timeout", None))
-            ):
-                failure = RuntimeError(
-                    "parallel constrained pARTn requires a collective soft-stop API"
                 )
             self._raise_operation_failure(
                 failure, self._operation_failures(failure), "velocity preflight"

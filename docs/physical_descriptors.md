@@ -81,12 +81,14 @@ During constrained pARTn searches and refinements, force masking is followed by
 a temporary LAMMPS `fix external` callback that also zeros fixed-atom velocities.
 ARTn's perpendicular relaxation can otherwise rewrite velocities and allow FIRE
 to move fixed atoms despite zero forces. This requires the LAMMPS Python callback
-API; multi-rank engines also require its `force_timeout` soft-stop API. The
-callback uses current local atom tags after redistribution, leaves free and
+API. The callback uses current local atom tags after redistribution, leaves free and
 ghost velocities unchanged, and never projects returned coordinates. Worker
 failures are agreed across the engine communicator before native work resumes;
-only operation-owned callbacks and fixes are removed. A failed cleanup remains
-an explicit pending-restoration error.
+only operation-owned callbacks and fixes are removed. Callback failures remain
+recorded until the existing finite native minimization limit returns, then reject
+the result and restore the source. This can take the configured evaluation budget;
+it does not expire the native timer and poison later minimizations. A failed
+cleanup remains an explicit pending-restoration error.
 
 A reconstruction validates its claimed minimum/saddle/minimum against those
 references before protecting working pushes. Both endpoint dispatches receive the
