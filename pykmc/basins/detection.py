@@ -1,6 +1,35 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import Optional
+
+
+def resolve_linked_pair(
+    selected_event: pd.Series,
+    reference_table: pd.DataFrame,
+    *,
+    is_refined: bool = False,
+) -> tuple[pd.Series, pd.Series]:
+    """Resolve the unique canonical forward row and its declared reverse.
+
+    Logical IDs are independent of DataFrame labels and copied row metadata.
+    A reverse may be self-linked or shared by aliases; its link need not point
+    back to the selected forward.
+    """
+    forward_id = selected_event["num_reference_event" if is_refined else "idx_ref"]
+    forward_rows = reference_table[reference_table["idx_ref"] == forward_id]
+    if len(forward_rows) != 1:
+        raise ValueError(
+            f"Basin event {forward_id}: expected one forward row for logical "
+            f"idx_ref {forward_id}, found {len(forward_rows)}."
+        )
+    forward = forward_rows.iloc[0]
+    reverse_id = forward["idx_backward"]
+    reverse_rows = reference_table[reference_table["idx_ref"] == reverse_id]
+    if len(reverse_rows) != 1:
+        raise ValueError(
+            f"Basin event {forward_id}: expected one linked reverse row for "
+            f"logical idx_ref {reverse_id}, found {len(reverse_rows)}."
+        )
+    return forward, reverse_rows.iloc[0]
 
 
 class Detector(ABC):
@@ -18,13 +47,14 @@ class DetectorThreshold(Detector):
         pds_selected_active_event: pd.Series,
         df_reference_table: pd.DataFrame,
         energy_threshold: float,
-        is_refined: Optional[bool] = False,
-    ):
+        is_refined: bool = False,
+    ) -> bool:
         """Check if the current configuration is in a basin.
 
         Returns True if the active event's barrier is below `energy_threshold`
-        and if a corresponding backward event in the reference table also
-        has a barrier below this threshold.
+        and its explicitly linked reverse also has a barrier below this
+        threshold. Both logical identities must exist uniquely, even if the
+        forward barrier is already too high.
 
         Parameters
         ----------
@@ -34,44 +64,20 @@ class DetectorThreshold(Detector):
             A pandas DataFrame with all generic events.
         energy_threshold : float
             Energy threshold to considere the system in a basin.
-        idx_reference_event : Optional[int]
-            Index of the generic event in `df_reference_table` of the `pds_selected_active_event`.
+        is_refined : bool, optional
+            Resolve the active row's ``num_reference_event`` and retain its
+            refined forward barrier. Otherwise use the canonical generic row.
         """
 
-        dE_forward = pds_selected_active_event["energy_barrier"]
-
-        if dE_forward >= energy_threshold:
-            # not in a basin
-            return False
-
-        else:
-            # Need to check if a backward reaction with low energy barrier exists.
-
-            if is_refined:
-                # case where we need to find the generic event from the active one
-                idx_reference_event = pds_selected_active_event["num_reference_event"]
-
-                # generic event of the active one
-                # pds_generic_event_forward = df_reference_table.iloc[idx_reference_event]
-                pds_generic_event_forward = df_reference_table[
-                    df_reference_table["idx_ref"] == idx_reference_event
-                ].iloc[0]  # is a pd.Serie
-
-            else:
-                pds_generic_event_forward = pds_selected_active_event
-
-            # all possible generic backward events
-            df_backward_events = df_reference_table[
-                df_reference_table["event_id"] == pds_generic_event_forward["id_final"]
-            ]
-
-            # Should always have one (reversibility)
-            if df_backward_events.empty:
-                raise ValueError(
-                    "Basin detection: No backward event for the selected active event."
-                )
-
-            # Check if at least one backward event has a low energy barrier
-            dE_backward = df_backward_events["energy_barrier"].min()
-
-            return dE_backward < energy_threshold
+        forward, reverse = resolve_linked_pair(
+            pds_selected_active_event, df_reference_table, is_refined=is_refined
+        )
+        dE_forward = (
+            pds_selected_active_event["energy_barrier"]
+            if is_refined
+            else forward["energy_barrier"]
+        )
+        return bool(
+            dE_forward < energy_threshold
+            and reverse["energy_barrier"] < energy_threshold
+        )

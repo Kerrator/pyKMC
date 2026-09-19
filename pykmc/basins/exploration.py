@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pykmc import Config, ReferenceEventTable
 from typing import TYPE_CHECKING
 from .connectivity import StatesConnectivity, BasinStatesConnectivity
-from .detection import DetectorThreshold
+from .detection import DetectorThreshold, resolve_linked_pair
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -91,12 +91,12 @@ class BasinGenericEventExplorer(Explorer):
 
         # Loop over all applicable events :
         count = 0
-        for (
-            idx,
-            df_event,
-        ) in (
-            df_applicable_events.iterrows()
-        ):  # Note : idx is the original index of the self.reference_table.table
+        for _, selected_event in df_applicable_events.iterrows():
+            # Resolve canonical logical identities after the guarded subset
+            # lookup; neither copied metadata nor subset labels define a link.
+            df_event, reverse = resolve_linked_pair(
+                selected_event, self.reference_table.table
+            )
             # check if df_event leads to transient state
             is_transient = self.detector.detect(
                 df_event, self.reference_table.table, self.config.basin.energy_thr
@@ -104,16 +104,9 @@ class BasinGenericEventExplorer(Explorer):
             # All atoms on which we can apply the event :
             l_atoms = state.environment.get_atoms_with_id(df_event["event_id"])
             # Find backward info
-            backward_idx = self.reference_table.table.loc[idx].at["idx_backward"]
-            dE_backward = self.reference_table.table[
-                self.reference_table.table["idx_ref"] == backward_idx
-            ]["energy_barrier"].values[0]
-            #            dE_backward = self.reference_table.table.loc[backward_idx].at["energy_barrier"]
-            k_backward = self.reference_table.table[
-                self.reference_table.table["idx_ref"] == backward_idx
-            ]["k"].values[0]
-            # k_backward = self.reference_table.table.loc[backward_idx].at["k"]
-            ref_event = self.reference_table.table.loc[idx].at["idx_ref"]
+            dE_backward = reverse["energy_barrier"]
+            k_backward = reverse["k"]
+            ref_event = df_event["idx_ref"]
 
             # Loop over all atoms on which we can apply the event :
             for at in l_atoms:

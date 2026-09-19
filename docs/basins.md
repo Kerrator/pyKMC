@@ -24,6 +24,12 @@ The `[Basin]` section is intended for future extensions when multiple algorithms
 ## General Idea
 
 During a KMC step, if the selected event has both forward and backward barriers lower than `energy_thr`, a `Basin` object is created.
+The backward barrier belongs to the catalogue row explicitly linked by the
+selected event's logical reference ID. A refined active event retains its own
+forward barrier. Equality with the threshold is outside the basin. Missing or
+ambiguous logical links raise an error naming the affected IDs; self-links and
+directional aliases are supported. Exploration uses the same linked reverse
+for its classification and recorded backward barrier and rate.
 It explores the basin, computes the exit time, and determines the exit state.
 Once finished, the selected event in the KMC loop is replaced with the basin event.
 
@@ -81,4 +87,3 @@ The `Basin` object uses two additional components:
 
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
 If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
-
