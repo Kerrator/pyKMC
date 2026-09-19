@@ -5,6 +5,7 @@ import ctypes
 import functools
 import os
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 from .base import Engine
@@ -33,6 +34,7 @@ from ..physics import (
     ForceModel,
     ResolvedConstraints,
     validate_event_constraints,
+    _indices,
 )
 from ..result import (
     ErrorInfo,
@@ -549,6 +551,8 @@ class LammpsEngine(Engine):
         if cmd.strip() == "clear":
             self._cleared_since_init = True
         self.lmp.command(cmd)
+        if cmd.strip() == "clear":
+            self._forget_velocity_callbacks(self.lmp)
 
     # ------------------------------------------------------------------
     # Full-system memory and restore
@@ -711,6 +715,7 @@ class LammpsEngine(Engine):
         """Drop the handle while retaining the descriptor and pending marker."""
         if self.lmp is not None:
             self.lmp.close()
+            self._forget_velocity_callbacks(self.lmp)
             self.lmp = None
 
     @lammps_error_handler
@@ -1059,6 +1064,107 @@ class LammpsEngine(Engine):
     def _delete_frozen_group(self, atoms_frozen: bool) -> None:
         if atoms_frozen:
             self.lmp.command("group g_frozen delete")
+
+    def _forget_velocity_callbacks(self, native):
+        """Release owned Python callbacks only after their native fixes are gone."""
+        owned = getattr(self, "_velocity_callbacks", {})
+        for name, handle in tuple(owned.items()):
+            if handle is native:
+                handle.callback.pop(name, None)
+                del owned[name]
+
+    @contextmanager
+    def _fixed_velocity_guard(self, local_fixed_indices):
+        """Hold fixed velocities after ARTn, without projecting coordinates.
+
+        ARTn's perpendicular relaxation can replace native velocities even
+        when a later setforce fix removes its trial forces. FIRE then integrates
+        those velocities. This MIN_POST_FORCE callback closes that second
+        channel using current local native tags, including after redistribution.
+        """
+        native = self.lmp
+        fixed = _indices(local_fixed_indices, upper=int(native.get_natoms()))
+        if not fixed:
+            yield
+            return
+        if not callable(getattr(native, "set_fix_external_callback", None)):
+            raise RuntimeError(
+                "constrained pARTn requires LAMMPS fix external callbacks"
+            )
+        native_ids = np.asarray(fixed, dtype=np.int64) + 1
+        serial = getattr(self, "_velocity_serial", 0)
+        while True:
+            serial += 1
+            name = f"pykmc_artn_velocity_{serial}"
+            if not native.has_id("fix", name) and name not in native.callback:
+                break
+        self._velocity_serial = serial
+        owned = getattr(self, "_velocity_callbacks", None)
+        if owned is None:
+            owned = self._velocity_callbacks = {}
+        callback_errors = []
+
+        def hold_velocity(_caller, _step, nlocal, tags, _positions, added_force):
+            # ctypes cannot propagate an exception out of this callback. Keep
+            # the cause and reject the operation after native control returns.
+            try:
+                added_force.fill(0.0)
+                if not nlocal:
+                    return
+                velocity = native.numpy.extract_atom("v", nelem=nlocal, dim=3)
+                if velocity is None or velocity.shape[0] < nlocal:
+                    raise RuntimeError("native local velocities are unavailable")
+                selected = np.isin(np.asarray(tags), native_ids)
+                velocity[:nlocal][selected] = 0.0
+            except BaseException as exc:
+                if not callback_errors:
+                    callback_errors.append(exc)
+                    stop = getattr(native, "force_timeout", None)
+                    if callable(stop):
+                        try:
+                            stop()
+                        except BaseException as stop_exc:
+                            callback_errors.append(stop_exc)
+
+        original = None
+        try:
+            # Record ownership before allocation: a failing native command or
+            # callback registration may leave a partially installed resource.
+            owned[name] = native
+            native.command(f"fix {name} all external pf/callback 1 1")
+            native.set_fix_external_callback(name, hold_velocity)
+            yield
+            failures = [repr(callback_errors[0]) if callback_errors else None]
+            if self.comm is not None:
+                failures = self.comm.allgather(failures[0])
+            if callback_errors:
+                raise RuntimeError(
+                    "pARTn fixed-velocity callback failed"
+                ) from callback_errors[0]
+            if any(failure is not None for failure in failures):
+                raise RuntimeError(
+                    f"pARTn fixed-velocity callback failed on a worker: {failures}"
+                )
+        except BaseException as exc:
+            original = exc
+            raise
+        finally:
+            try:
+                if self.lmp is native and native.has_id("fix", name):
+                    native.command(f"unfix {name}")
+                # A closed handle or successful unfix cannot call Python again.
+                native.callback.pop(name, None)
+                owned.pop(name, None)
+            except BaseException as cleanup:
+                self._cleared_since_init = True
+                # Retain the callable while the native fix may still be live.
+                if original is None:
+                    raise
+                add_note = getattr(BaseException, "add_note", None)
+                if add_note is not None:
+                    add_note(
+                        original, f"Fixed-velocity unfix cleanup failed: {cleanup!r}"
+                    )
 
     # ------------------------------------------------------------------
     # Minimization
@@ -1424,7 +1530,13 @@ class LammpsEngine(Engine):
             artn.set("forc_thr", config.partn.forc_thr)
             artn.set("push_over", config.partn.push_over)
 
-            self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
+            fixed_rows = (
+                constraints.crop(atom_map).local_fixed_indices
+                if config.control.active_volume
+                else constraints.local_fixed_indices
+            )
+            with self._fixed_velocity_guard(fixed_rows):
+                self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
             self.lmp.command("unfix 10")
             if config.control.active_volume:
                 self.lmp.command("unfix f_buffer_post")
@@ -1678,7 +1790,15 @@ class LammpsEngine(Engine):
             if config.control.active_volume:
                 self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
             self.lmp.command("min_style fire")
-            self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}")
+            fixed_rows = (
+                constraints.crop(atom_map).local_fixed_indices
+                if config.control.active_volume
+                else constraints.local_fixed_indices
+            )
+            with self._fixed_velocity_guard(fixed_rows):
+                self.lmp.command(
+                    f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}"
+                )
             self.lmp.command("unfix 10")
             if config.control.active_volume:
                 self.lmp.command("unfix f_buffer_post")
