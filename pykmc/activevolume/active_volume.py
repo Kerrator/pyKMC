@@ -18,13 +18,9 @@ Standalone helpers without a descriptor use the engine's default alphabetical
 
 Supported geometry: orthorhombic cells only (``reset`` raises before touching
 the instance otherwise). ``define_AV`` selects atoms with minimum-image
-distances on every axis (``find_mic(..., pbc=True)``); on a slab this treats
-the non-periodic axis as periodic when picking AV members, while the crop's
-``boundary`` now follows the real pbc. When the vacuum gap on a non-periodic
-axis is smaller than ``ract`` the selection can pick atoms across the vacuum
-that do not interact across the crop's non-periodic boundary; ``define_AV``
-warns (``RuntimeWarning``) in that case. Changing the selection rule is a
-scientific change recorded as a follow-up, not part of this integration.
+distances along the source's actual periodic axes. Search, refinement and
+resolved endpoint constraints use that same boundary policy; a nonperiodic
+axis never captures atoms across a fictitious periodic image.
 
 Every position array handed to LAMMPS from here (``partn_search_AV``,
 ``partn_refine_AV``, ``redefine_atoms``, ``set_positions``) goes through the
@@ -35,7 +31,6 @@ any collective call instead of desynchronising a multi-rank instance.
 
 from __future__ import annotations
 
-import warnings
 from typing import Protocol, TypedDict
 
 import numpy as np
@@ -79,36 +74,6 @@ def require_orthorhombic_cell(cell: np.ndarray, op_name: str) -> None:
         )
 
 
-def _warn_thin_vacuum(
-    positions: np.ndarray, cell: np.ndarray, pbc: tuple[bool, bool, bool], r_a: float
-) -> None:
-    """Warn when a non-periodic axis has a vacuum gap thinner than ``ract``.
-
-    ``define_AV`` selects members with ``find_mic(pbc=True)`` on every axis
-    (the recorded selection rule). On a slab whose vacuum is thinner than
-    ``ract`` that rule can pick atoms on the far side of the vacuum which do
-    not interact across the crop's non-periodic (``f``) boundary. The
-    selection is unchanged; this only makes the case visible.
-    """
-    cell = np.asarray(cell, dtype=float)
-    positions = np.asarray(positions, dtype=float)
-    for axis in range(3):
-        if pbc[axis]:
-            continue
-        length = float(np.linalg.norm(cell[axis]))
-        gap = length - float(positions[:, axis].max() - positions[:, axis].min())
-        if gap < r_a:
-            warnings.warn(
-                f"active_volume.define_AV: axis {axis} is non-periodic but its "
-                f"vacuum gap ({gap:.2f} A) is smaller than ract ({r_a:.2f} A); the "
-                "minimum-image member selection may include atoms across the "
-                "vacuum that do not interact across the crop's non-periodic "
-                "boundary (recorded follow-up: pbc-aware selection)",
-                RuntimeWarning,
-                stacklevel=3,
-            )
-
-
 def define_AV(
     config: object,
     central_atom_idx: int,
@@ -118,9 +83,8 @@ def define_AV(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Select the active-volume members around ``central_atom_idx``.
 
-    Members are chosen with minimum-image distances on every axis. ``pbc`` is
-    only used to warn about a slab whose vacuum gap is thinner than ``ract``
-    (see ``_warn_thin_vacuum``); it never changes the selection.
+    Members use minimum-image distances only along the supplied periodic axes.
+    Standalone callers omitting ``pbc`` retain the fully periodic default.
     """
     # Defining parameters
     # Radius of whole active volume in Ang
@@ -130,8 +94,11 @@ def define_AV(
 
     # NEED TO ADD WARNING IF R_A<R_M
 
-    if pbc is not None and not all(pbc):
-        _warn_thin_vacuum(positions, cell, pbc, r_a)
+    axes = np.asarray((True, True, True) if pbc is None else pbc)
+    if axes.ndim == 0:
+        axes = np.repeat(axes, 3)
+    if axes.shape != (3,) or axes.dtype.kind != "b":
+        raise ValueError("active volume requires three boolean PBC axes")
 
     center = positions[central_atom_idx]
 
@@ -142,7 +109,7 @@ def define_AV(
 
     for i, pos in enumerate(positions):
         diff = pos - center
-        diff_mic, distance = find_mic(diff, cell, pbc=True)
+        diff_mic, distance = find_mic(diff, cell, pbc=axes)
         if np.abs(distance) <= r_m:
             inner_movable_idx.append(i)
             total_active_idx.append(i)  # Inner is also part of total active

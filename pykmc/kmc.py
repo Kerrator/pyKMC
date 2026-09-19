@@ -957,26 +957,38 @@ class KMC:
         )
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
-        # Move the system to the saddle point
-        self.system.update_positions(new_positions=saddle_positions, atom_idx=neighbors)
+        from .physics import resolve_event_constraints
+
+        constraints = resolve_event_constraints(
+            self.config,
+            self.system.positions,
+            self.system.types,
+            self.system.cell,
+            self.system.pbc,
+            central_atom,
+            self.system.index,
+        )
+        # Keep the live source untouched even if validation or minimization fails.
+        working = np.array(self.system.positions, copy=True)
+        working[neighbors] = saddle_positions
 
         # try to reconstruct
         result = Reconstruction(
-            self.config, self.manager, types=self.system.types
+            self.config,
+            self.manager,
+            types=self.system.types,
+            constraints=constraints,
+            pbc=self.system.pbc,
         ).reconstruct(
             supposed_initial_positions,
             supposed_final_positions,
-            self.system.positions,
+            working,
             self.system.cell,
             self.config.psr.matching_score_thr,
             neighbors,
         )
         # result with min1, saddle, min2 pos
 
-        # Back to original positions, in case reconstruction fails
-        self.system.update_positions(
-            new_positions=supposed_initial_positions, atom_idx=neighbors
-        )
         return result
 
     def _apply_event(

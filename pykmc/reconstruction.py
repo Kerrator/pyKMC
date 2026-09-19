@@ -13,10 +13,14 @@ import ase.geometry
 
 
 class Reconstruction:
-    def __init__(self, config: Config, manager: Manager, types=None) -> None:
+    def __init__(
+        self, config: Config, manager: Manager, types=None, constraints=None, pbc=True
+    ) -> None:
         self.config = config
         self.manager = manager  # Manager objet that can perform minimization and return minimized positions
         self.types = types
+        self.constraints = constraints
+        self.pbc = pbc
 
     def reconstruct(
         self,
@@ -60,6 +64,31 @@ class Reconstruction:
         if neighbors is None:  # len min1 == len min2 == len saddle pos
             neighbors = np.arange(len(saddle_positions))
 
+        if self.constraints is not None:
+            neighbors = np.asarray(neighbors)
+            if (
+                neighbors.ndim != 1
+                or neighbors.dtype.kind not in "iu"
+                or len(np.unique(neighbors)) != len(neighbors)
+                or np.any(neighbors < 0)
+                or np.any(neighbors >= len(saddle_positions))
+            ):
+                raise ValueError(
+                    "reconstruction neighbors must be unique local indices"
+                )
+            for endpoint in (supposed_min1_positions, supposed_min2_positions):
+                if np.shape(endpoint) != (len(neighbors), 3):
+                    raise ValueError(
+                        "reconstruction endpoint shape does not match neighbors"
+                    )
+            # A claimed stationary event must already obey its fixed references;
+            # projecting an incompatible event would silently change its physics.
+            self.constraints.validate_positions(saddle_positions)
+            for endpoint in (supposed_min1_positions, supposed_min2_positions):
+                full = np.array(saddle_positions, copy=True)
+                full[neighbors] = endpoint
+                self.constraints.validate_positions(full)
+
         # Saddle positions
         tmp_positions = copy.deepcopy(saddle_positions)
 
@@ -71,9 +100,17 @@ class Reconstruction:
             cell=cell,
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
+        if self.constraints is not None:
+            tmp_positions = self.constraints.protect_positions(tmp_positions)
+        constraint_kwargs = (
+            {} if self.constraints is None else {"constraints": self.constraints}
+        )
         # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = self.manager.group_minimize_with_results(
-            config=self.config, positions=tmp_positions, types=self.types
+            config=self.config,
+            positions=tmp_positions,
+            types=self.types,
+            **constraint_kwargs,
         )
         #        min1_pos, _ = future.result()
 
@@ -101,9 +138,14 @@ class Reconstruction:
                 cell=cell,
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
+            if self.constraints is not None:
+                tmp_positions = self.constraints.protect_positions(tmp_positions)
             # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
             min2_pos, min2_etot = self.manager.group_minimize_with_results(
-                config=self.config, positions=tmp_positions, types=self.types
+                config=self.config,
+                positions=tmp_positions,
+                types=self.types,
+                **constraint_kwargs,
             )
             #            min2_pos, _ = future.result()
 

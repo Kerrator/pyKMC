@@ -17,6 +17,7 @@ from pykmc import (
 from typing import Optional
 from ..utils import geometry
 from ..rate_constant import create_rate_constant
+from ..physics import resolve_event_constraints
 import pandas as pd
 import copy
 import numpy as np
@@ -122,6 +123,16 @@ class BasinsGenericEvents:
         )
         # Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
+        source = self.states[from_state].system
+        constraints = resolve_event_constraints(
+            self.config,
+            source.positions,
+            source.types,
+            source.cell,
+            source.pbc,
+            central_atom,
+            source.index,
+        )
 
         neighbors = self.states[from_state].neighbors_list.get_neighbors(
             "rcut", central_atom
@@ -327,8 +338,8 @@ class BasinsGenericEvents:
             positions=self.states[from_state].system.positions.copy(),
             types=self.states[from_state].system.types,
             cell=self.states[from_state].system.cell,
-            pbc=True,
-            index=np.arange(len(self.states[from_state].system.types)),
+            pbc=source.pbc,
+            index=source.index,
         )
         # new_system = copy.deepcopy(self.states[from_state].system)
 
@@ -390,22 +401,43 @@ class BasinsGenericEvents:
         neighbors = self.states[from_state].neighbors_list.get_neighbors(
             "rcut", central_atom
         )
+        # Validate the transformed event against source-fixed references before
+        # either branch overlays or protects a working array.
+        for vertex in (
+            supposed_initial_positions,
+            saddle_positions,
+            supposed_final_positions,
+        ):
+            full = np.array(source.positions, copy=True)
+            full[neighbors] = vertex
+            constraints.validate_positions(full)
 
         if self.config.basin.style == "global":
             new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
+            new_system.positions = constraints.protect_positions(new_system.positions)
             min2_pos, _ = self.manager.group_minimize_with_results(
-                config=self.config, positions=new_system.positions.copy()
+                config=self.config,
+                positions=new_system.positions.copy(),
+                types=source.types,
+                constraints=constraints,
             )
             new_system.update_positions(min2_pos)
 
         elif self.config.basin.style == "global/reconstruction":
             new_system.update_positions(saddle_positions, atom_idx=neighbors)
+            new_system.positions = constraints.protect_positions(new_system.positions)
 
             # Reconstruct the event
             # future = self.manager.minimize_with_results(self.config, positions=new_system.positions)
             # min_pos, _ = future.result()
 
-            result = Reconstruction(self.config, self.manager).reconstruct(
+            result = Reconstruction(
+                self.config,
+                self.manager,
+                types=source.types,
+                constraints=constraints,
+                pbc=source.pbc,
+            ).reconstruct(
                 supposed_initial_positions,
                 supposed_final_positions,
                 new_system.positions,

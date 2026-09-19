@@ -315,13 +315,27 @@ class ResolvedConstraints:
     atom_ids: tuple[int, ...]
     fixed_ids: tuple[int, ...]
     fixed_positions: tuple[tuple[float, float, float], ...]
+    cell: tuple[tuple[float, float, float], ...] | None = None
+    pbc: tuple[bool, bool, bool] | None = None
+    center_id: int | None = None
+    center_position: tuple[float, float, float] | None = None
+    rmov: float | None = None
 
     def __post_init__(self) -> None:
         self.validate(len(self.atom_ids))
 
     @classmethod
     def resolve(
-        cls, positions: Any, types: Any, region: Any = None, atom_ids: Any = None
+        cls,
+        positions: Any,
+        types: Any,
+        region: Any = None,
+        atom_ids: Any = None,
+        *,
+        cell: Any = None,
+        pbc: Any = None,
+        center_id: int | None = None,
+        rmov: float | None = None,
     ) -> ResolvedConstraints:
         pos = np.asarray(positions, dtype=float)
         if (
@@ -337,6 +351,25 @@ class ResolvedConstraints:
         ids = _indices(range(len(pos)) if atom_ids is None else atom_ids)
         if len(ids) != len(pos):
             raise ValueError("source identity count must match positions")
+        if (cell is None) != (pbc is None):
+            raise ValueError("constraint cell and PBC must be supplied together")
+        if cell is not None:
+            matrix = np.asarray(cell, dtype=float)
+            axes = np.asarray(pbc)
+            if axes.ndim == 0:
+                axes = np.repeat(axes, 3)
+            if (
+                matrix.shape != (3, 3)
+                or not np.all(np.isfinite(matrix))
+                or axes.shape != (3,)
+                or axes.dtype.kind != "b"
+                or abs(np.linalg.det(matrix)) == 0
+            ):
+                raise ValueError(
+                    "constraints require a finite cell and three boolean PBC axes"
+                )
+            cell = tuple(tuple(float(x) for x in row) for row in matrix)
+            pbc = tuple(bool(x) for x in axes)
         if region is None:
             indices = ()
         else:
@@ -348,11 +381,41 @@ class ResolvedConstraints:
                 for i, selected in enumerate(classify_region(region, pos, list(types)))
                 if selected == "in"
             )
+        center_position = None
+        if center_id is not None or rmov is not None:
+            if (
+                center_id is None
+                or rmov is None
+                or cell is None
+                or isinstance(center_id, (bool, np.bool_))
+                or not isinstance(center_id, Integral)
+                or center_id not in ids
+                or isinstance(rmov, (bool, np.bool_))
+                or not isinstance(rmov, Real)
+                or not math.isfinite(rmov)
+                or rmov < 0
+            ):
+                raise ValueError(
+                    "active-volume constraints require a source center, cell/PBC and finite radius"
+                )
+            from ase.geometry import find_mic
+
+            center_position = tuple(float(x) for x in pos[ids.index(center_id)])
+            _, distances = find_mic(pos - center_position, cell, pbc=pbc)
+            indices = tuple(
+                sorted(set(indices).union(np.flatnonzero(distances > rmov)))
+            )
+            center_id, rmov = int(center_id), float(rmov)
         return cls(
             ids,
             ids,
             tuple(ids[i] for i in indices),
             tuple(tuple(float(x) for x in pos[i]) for i in indices),
+            cell,
+            pbc,
+            center_id,
+            center_position,
+            rmov,
         )
 
     def validate(self, n_atoms: int) -> None:
@@ -390,6 +453,66 @@ class ResolvedConstraints:
             raise ValueError(
                 "fixed reference coordinates must be finite immutable triples"
             )
+        if (self.cell is None) != (self.pbc is None):
+            raise ValueError("constraint cell and PBC must be supplied together")
+        if self.cell is not None:
+            if (
+                not isinstance(self.cell, tuple)
+                or len(self.cell) != 3
+                or any(not isinstance(row, tuple) or len(row) != 3 for row in self.cell)
+                or not np.all(np.isfinite(self.cell))
+                or np.linalg.det(self.cell) == 0
+                or not isinstance(self.pbc, tuple)
+                or len(self.pbc) != 3
+                or any(not isinstance(x, bool) for x in self.pbc)
+            ):
+                raise ValueError("invalid immutable constraint cell/PBC")
+        if any(
+            x is not None for x in (self.center_id, self.center_position, self.rmov)
+        ):
+            if (
+                self.cell is None
+                or self.center_id not in source
+                or isinstance(self.center_id, bool)
+                or not isinstance(self.center_id, int)
+                or not isinstance(self.center_position, tuple)
+                or len(self.center_position) != 3
+                or not np.all(np.isfinite(self.center_position))
+                or isinstance(self.rmov, bool)
+                or not isinstance(self.rmov, Real)
+                or not math.isfinite(self.rmov)
+                or self.rmov < 0
+            ):
+                raise ValueError("invalid immutable active-volume context")
+
+    def _positions(self, positions: Any) -> np.ndarray:
+        pos = np.asarray(positions, dtype=float)
+        if pos.shape != (len(self.atom_ids), 3) or not np.all(np.isfinite(pos)):
+            raise ValueError("constraints require matching finite local positions")
+        return pos
+
+    def validate_positions(self, positions: Any) -> None:
+        """Reject an event that changes the source's fixed physical coordinates."""
+        pos = self._positions(positions)
+        fixed = dict(zip(self.fixed_ids, self.fixed_positions))
+        rows = self.local_fixed_indices
+        if not rows:
+            return
+        delta = pos[list(rows)] - [fixed[self.atom_ids[i]] for i in rows]
+        if self.cell is not None:
+            from ase.geometry import find_mic
+
+            delta, _ = find_mic(delta, self.cell, pbc=self.pbc)
+        if np.any(np.linalg.norm(delta, axis=1) > 1e-10):
+            raise ValueError("event changes fixed reference coordinates")
+
+    def protect_positions(self, positions: Any) -> np.ndarray:
+        """Protect a working push/overlay after validating the reference event."""
+        pos = self._positions(positions).copy()
+        fixed = dict(zip(self.fixed_ids, self.fixed_positions))
+        for i in self.local_fixed_indices:
+            pos[i] = fixed[self.atom_ids[i]]
+        return pos
 
     def crop(self, local_indices: Any) -> ResolvedConstraints:
         indices = _indices(local_indices, upper=len(self.atom_ids))
@@ -404,8 +527,36 @@ class ResolvedConstraints:
     @property
     def constraint_id(self) -> str:
         return _digest(
-            (self.source_ids, self.atom_ids, self.fixed_ids, self.fixed_positions)
+            (
+                self.source_ids,
+                self.atom_ids,
+                self.fixed_ids,
+                self.fixed_positions,
+                self.cell,
+                self.pbc,
+                self.center_id,
+                self.center_position,
+                self.rmov,
+            )
         )
+
+
+def resolve_event_constraints(
+    config, positions, types, cell, pbc, center_index, atom_ids=None
+):
+    """Resolve an event's user-plus-AV restriction from the unmodified source."""
+    ids = tuple(range(len(positions))) if atom_ids is None else tuple(atom_ids)
+    active = config.control.active_volume
+    return ResolvedConstraints.resolve(
+        positions,
+        types,
+        getattr(config, "frozen_atoms", None),
+        ids,
+        cell=cell,
+        pbc=pbc,
+        center_id=ids[center_index] if active else None,
+        rmov=config.activevolume.rmov if active else None,
+    )
 
 
 @dataclass(frozen=True)

@@ -383,12 +383,17 @@ def _slab_positions(gap: float) -> tuple[np.ndarray, np.ndarray]:
     return positions, cell
 
 
-def test_define_av_warns_when_slab_vacuum_is_thinner_than_ract() -> None:
-    """A non-periodic axis whose vacuum gap is below ``ract`` triggers a warning."""
-    cfg = _ResetCfg()  # ract = 6
-    positions, cell = _slab_positions(gap=4.0)
-    with pytest.warns(RuntimeWarning, match="axis 2 is non-periodic"):
-        av.define_AV(cfg, 0, positions, cell, pbc=(True, True, False))
+def test_define_av_respects_nonperiodic_axis_in_thin_cell() -> None:
+    """No fictitious image connects opposite faces of a nonperiodic thin axis."""
+    cfg = _ResetCfg()
+    cfg.activevolume.ract = 1.3
+    cfg.activevolume.rmov = 0.8
+    positions = np.array([[5.0, 5.0, 2.2], [5.0, 5.0, 0.2], [5.5, 5.0, 2.2]])
+    cell = np.diag([10.0, 10.0, 2.4])
+    _, nonperiodic, _ = av.define_AV(cfg, 0, positions, cell, pbc=(True, True, False))
+    _, periodic, _ = av.define_AV(cfg, 0, positions, cell, pbc=(True, True, True))
+    np.testing.assert_array_equal(nonperiodic, [0, 2])
+    np.testing.assert_array_equal(periodic, [0, 1, 2])
 
 
 def test_define_av_is_silent_for_thick_vacuum_or_periodic_axes() -> None:
@@ -406,13 +411,16 @@ def test_define_av_is_silent_for_thick_vacuum_or_periodic_axes() -> None:
 
 
 def test_partn_search_av_passes_engine_pbc_to_define_av() -> None:
-    """The crop entry point warns for a thin-vacuum slab remembered by the engine."""
+    """The crop uses the same actual-PBC membership as the source resolver."""
     pytest.importorskip("lammps")
-    positions, cell = _slab_positions(gap=4.0)
-    types = ["Ni"] * len(positions)
+    cfg = _ResetCfg()
+    cfg.activevolume.ract = 1.3
+    cfg.activevolume.rmov = 0.8
+    positions = np.array([[5.0, 5.0, 2.2], [5.0, 5.0, 0.2], [5.5, 5.0, 2.2]])
+    cell = np.diag([10.0, 10.0, 2.4])
     engine = _FakeEngine(full_system=SimpleNamespace(pbc=(True, True, False)))
-    with pytest.warns(RuntimeWarning, match="vacuum gap"):
-        av.partn_search_AV(engine, _ResetCfg(), 0, positions, cell, types)
+    atom_map, _ = av.partn_search_AV(engine, cfg, 0, positions, cell, ["Ni"] * 3)
+    np.testing.assert_array_equal(atom_map, [0, 2])
     assert "boundary p p f" in engine.commands
 
 

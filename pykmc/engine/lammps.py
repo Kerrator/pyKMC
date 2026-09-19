@@ -28,7 +28,7 @@ from ..activevolume.active_volume import (
     require_orthorhombic_cell,
 )
 from ..atomic_environment import AtomicEnvironment
-from ..physics import EnginePhysics, ForceModel
+from ..physics import EnginePhysics, ForceModel, ResolvedConstraints
 from ..result import (
     ErrorInfo,
     EventSearchOutput,
@@ -1052,9 +1052,16 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def minimize_with_results(
-        self, positions=None, config=None, types=None
+        self, positions=None, config=None, types=None, constraints=None
     ) -> tuple[np.ndarray, float] | None:
-        """Minimize and return (positions, total_energy). Pass config and types to enable frozen-atom support."""
+        """Minimize and return positions/energy.
+
+        Explicit source-resolved constraints make this an endpoint transaction:
+        return its result and restore entry coordinates, even after failure.
+        The payload is authoritative; never reclassify its mask after a push.
+        """
+        if constraints is not None:
+            return self._minimize_constrained(positions, constraints)
         if positions is not None:
             self.set_positions(positions=positions)
         atoms_frozen = (
@@ -1072,6 +1079,87 @@ class LammpsEngine(Engine):
             return new_positions, total_energy
         else:
             return None
+
+    def _minimize_constrained(self, positions, constraints):
+        if not isinstance(constraints, ResolvedConstraints):
+            raise ValueError("constraints must be a resolved source payload")
+        n_atoms = int(self.lmp.get_natoms())
+        constraints.validate(n_atoms)
+        if constraints.cell is not None and (
+            self.full_system is None
+            or not np.array_equal(constraints.cell, self.full_system.cell)
+            or constraints.pbc != tuple(self.full_system.pbc)
+        ):
+            raise ValueError("constraint source cell/PBC differs from native system")
+        if positions is not None:
+            constraints.validate_positions(positions)
+        entry = self.get_positions()
+        if self.comm is not None:
+            entry = self.comm.bcast(entry, root=0)
+        entry = np.array(entry, copy=True)
+        proposed = entry if positions is None else positions
+        constraints.validate_positions(proposed)
+        proposed = constraints.protect_positions(proposed)
+        # All ranks inspect identical native resource tables and use the same
+        # deterministic, collision-checked names. Existing user resources stay.
+        serial = getattr(self, "_constraint_serial", 0)
+        while True:
+            serial += 1
+            name = f"pykmc_endpoint_{serial}"
+            if not self.lmp.has_id("group", name) and not self.lmp.has_id("fix", name):
+                break
+        self._constraint_serial = serial
+        resources = []
+        original = None
+        try:
+            self.set_positions(proposed)
+            if constraints.local_fixed_indices:
+                ids = " ".join(str(i + 1) for i in constraints.local_fixed_indices)
+                resources.append(("group", name, f"group {name} delete"))
+                self.lmp.command(f"group {name} id {ids}")
+                resources.append(("fix", name, f"unfix {name}"))
+                self.lmp.command(f"fix {name} {name} setforce 0.0 0.0 0.0")
+            self.minimize()
+            result = self.get_positions()
+            if self.comm is not None:
+                result = self.comm.bcast(result, root=0)
+            constraints.validate_positions(result)
+            energy = self.get_total_energy(recompute=False)
+            if self._is_rank0:
+                return np.array(result, copy=True), energy
+            return None
+        except BaseException as exc:
+            original = exc
+            raise
+        finally:
+            failures = []
+            if self.lmp is None:
+                self._cleared_since_init = True
+                failures.append(
+                    RuntimeError(
+                        "endpoint handle closed; full-system replay is pending and native user resources were lost"
+                    )
+                )
+            else:
+                for kind, resource, command in reversed(resources):
+                    try:
+                        if self.lmp.has_id(kind, resource):
+                            self.lmp.command(command)
+                    except Exception as exc:
+                        failures.append(exc)
+                try:
+                    self.set_positions(entry)
+                    self.lmp.command("run 0 post no")
+                except Exception as exc:
+                    self._cleared_since_init = True
+                    failures.append(exc)
+            if failures:
+                self._cleared_since_init = True
+                if original is None:
+                    raise failures[0]
+                add_note = getattr(BaseException, "add_note", None)
+                if add_note is not None:
+                    add_note(original, f"Endpoint cleanup failures: {failures!r}")
 
     @lammps_error_handler
     def minimize_freeze_core(self, core_idx) -> None:

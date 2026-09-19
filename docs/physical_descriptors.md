@@ -60,3 +60,25 @@ prove whole-event equivalence. A stored estimate must keep its own producing
 provenance; attaching a service or saving a table must never establish missing
 provenance for that estimate. Geometry and constraint consumption, persistence
 policy, and whole-event matching remain separate consumers of this contract.
+
+## Source-resolved endpoint constraints
+
+`ResolvedConstraints` can carry the source cell/PBC, event center identity and
+coordinate, and movable radius alongside the immutable fixed references. Resolve
+the union of user constraints and outside-radius atoms before changing any source
+coordinates. Crop copies retain source context and map frozen global identities to
+local rows. Active-volume membership uses the source periodic axes.
+
+A reconstruction validates its claimed minimum/saddle/minimum against those
+references before protecting working pushes. Both endpoint dispatches receive the
+same payload and actual species labels. An explicit payload passed to
+`minimize_with_results` selects transactional behavior: it returns a detached
+endpoint and energy, removes only its own temporary native group/fix, and restores
+entry coordinates and computes. Ordinary initialization minimization retains its
+updating behavior. The live Python source is not changed during reconstruction.
+
+A secondary cleanup failure preserves the initiating exception and leaves a
+pending-restoration marker. A closed native handle cannot retain arbitrary user
+fixes: that path reports failure rather than claiming a complete resource replay.
+Endpoint relaxation restrictions remain distinct from the common vibrational
+free-coordinate selection.
