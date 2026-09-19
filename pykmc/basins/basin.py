@@ -123,16 +123,6 @@ class BasinsGenericEvents:
         )
         # Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
-        source = self.states[from_state].system
-        constraints = resolve_event_constraints(
-            self.config,
-            source.positions,
-            source.types,
-            source.cell,
-            source.pbc,
-            central_atom,
-            source.index,
-        )
 
         neighbors = self.states[from_state].neighbors_list.get_neighbors(
             "rcut", central_atom
@@ -332,6 +322,16 @@ class BasinsGenericEvents:
 
         # ENSURE FULL STATE FOR FROM STATE
         self.states[from_state].ensure_full_state(self.config)
+        source = self.states[from_state].system
+        constraints = resolve_event_constraints(
+            self.config,
+            source.positions,
+            source.types,
+            source.cell,
+            source.pbc,
+            central_atom,
+            source.index,
+        )
 
         # We start from the from_state
         new_system = System(
