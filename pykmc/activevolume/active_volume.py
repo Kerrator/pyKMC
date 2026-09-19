@@ -330,6 +330,7 @@ def partn_search_AV(
         central_atom_idx,
         constraints,
         user_constraints=user_constraints,
+        active_volume=True,
     )
     av_positions, av_idx, _ = define_AV(
         config, central_atom_idx, positions, cell, pbc=pbc
@@ -399,6 +400,7 @@ def partn_refine_AV(
         central_atom_idx,
         constraints,
         user_constraints=user_constraints,
+        active_volume=True,
     )
     proposed = np.array(positions, copy=True)
     proposed[saddle_idx] = saddle_positions

@@ -291,29 +291,21 @@ def _outer_shell_atom(
     return edge, (positions[edge] + 0.05 * u)[None, :]
 
 
-def test_partn_refine_av_places_saddle_atom_displaced_past_ract() -> None:
-    """An in-crop shell atom relaxed 0.05 A past ``ract`` is placed, not rejected.
-
-    Regression for the review of the first S4 pass: a saddle-distance check
-    (``> ract``) that the base never had turned this ordinary shell relaxation
-    into ``Err(REFINEMENT_INVALID_MINIMA)``, which the basin path treats as
-    fatal. Only membership in the crop is checked (the base's ``.item()``
-    crash case), and the saddle position is scattered as given.
-    """
+def test_partn_refine_av_rejects_fixed_shell_overlay_before_mutation() -> None:
+    """An AV buffer atom retains its source coordinate even inside the crop."""
     pytest.importorskip("lammps")
     types, positions, cell = _fcc_ni_cell(0)
     cfg = _ResetCfg(activevolume=_AVCfg(ract=5.6, rmov=3.0))
     edge, saddle = _outer_shell_atom(positions, cell, cfg.activevolume.ract)
-    _, d = av.find_mic(saddle[0] - positions[0], cell, pbc=True)
-    assert d > cfg.activevolume.ract, "fixture: the saddle must lie past ract"
+    _, distance = av.find_mic(saddle[0] - positions[0], cell, pbc=True)
+    assert distance > cfg.activevolume.ract
     engine = _FakeEngine()
-    _, atom_map, _ = av.partn_refine_AV(
-        engine, cfg, 0, positions.copy(), cell, types, np.array([edge]), saddle
-    )
-    crop_index = int(np.where(atom_map == edge)[0][0])
-    np.testing.assert_allclose(engine.lmp.last_scatter[crop_index], saddle[0])
-    assert f"group core id {crop_index + 1}" in engine.commands
-    assert isinstance(av.ActiveVolumeSaddleError("x"), ValueError)
+    with pytest.raises(ValueError, match="fixed reference"):
+        av.partn_refine_AV(
+            engine, cfg, 0, positions.copy(), cell, types, np.array([edge]), saddle
+        )
+    assert engine.commands == []
+    assert engine.lmp.last_scatter is None
 
 
 def test_partn_refine_av_rejects_nan_saddle_before_any_command() -> None:

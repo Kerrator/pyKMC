@@ -605,6 +605,7 @@ def resolve_event_constraints(
     atom_ids=None,
     *,
     user_constraints=None,
+    active_volume=None,
 ):
     """Resolve the AV shell without reclassifying initialized user constraints.
 
@@ -614,7 +615,7 @@ def resolve_event_constraints(
     """
     ids = _indices(range(len(positions)) if atom_ids is None else atom_ids)
     center_index = _indices((center_index,), upper=len(positions))[0]
-    active = config.control.active_volume
+    active = config.control.active_volume if active_volume is None else active_volume
     region = getattr(config, "frozen_atoms", None)
     resolved = ResolvedConstraints.resolve(
         positions,
@@ -665,6 +666,7 @@ def validate_event_constraints(
     constraints=None,
     *,
     user_constraints=None,
+    active_volume=None,
 ):
     """Validate a full-source execution payload before any native mutation.
 
@@ -673,6 +675,7 @@ def validate_event_constraints(
     shell is independently checked against this operation's actual source.
     """
     center_index = _indices((center_index,), upper=len(positions))[0]
+    active = config.control.active_volume if active_volume is None else active_volume
     if constraints is None:
         return resolve_event_constraints(
             config,
@@ -682,6 +685,7 @@ def validate_event_constraints(
             pbc,
             center_index,
             user_constraints=user_constraints,
+            active_volume=active,
         )
     if not isinstance(constraints, ResolvedConstraints):
         raise ValueError("constraints must be a resolved source payload")
@@ -724,7 +728,7 @@ def validate_event_constraints(
             pbc=pbc,
         )
     constraints.require_preserves(user_constraints, cell=cell, pbc=pbc)
-    if config.control.active_volume:
+    if active:
         expected = ResolvedConstraints.resolve(
             positions,
             types,
