@@ -13,6 +13,12 @@ masses after potential commands that may overwrite them. The remembered full
 descriptor remains available for restoration. Standalone mapping helpers with
 no descriptor retain the default alphabetical species/ASE mass convention.
 
+The native scatter boundary normalizes periodic images in the source cell
+before converting to LAMMPS coordinates. Different atoms may carry different
+integer image translations. Nonperiodic lattice directions retain their
+physical displacement; normalization neither reorders atoms nor modifies the
+input array. The AV refinement helper uses this same engine boundary.
+
 The force-model snapshot identifies the command definition and coefficient-file
 contents. Moving an identical file does not change its content identity. Editing
 a file at the same path does. The supported fingerprint parsers cover single-file

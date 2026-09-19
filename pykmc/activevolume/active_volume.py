@@ -583,6 +583,13 @@ def get_positions(engine):
 
 
 def set_positions(engine, positions):
+    # Real engines own the periodic-image and frame conversion boundary. AV
+    # crops retain the source cell, so refinement uses that same scatter path.
+    # Command-only helper engines retain the legacy guarded protocol below.
+    scatter = getattr(engine, "set_positions", None)
+    if scatter is not None:
+        scatter(positions)
+        return
     # Same symmetric finite/shape guard as LammpsEngine.set_positions.
     positions = _check_positions(
         positions, "active_volume.set_positions", natoms=int(engine.lmp.get_natoms())

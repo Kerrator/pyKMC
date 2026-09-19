@@ -289,6 +289,34 @@ def _require_positions(
     return arr
 
 
+def _normalize_periodic_positions(
+    positions: np.ndarray, cell: np.ndarray, pbc: tuple[bool, bool, bool]
+) -> np.ndarray:
+    """Remove periodic lattice translations in the source ASE cell frame.
+
+    Only periodic fractional components choose image shifts; nonperiodic
+    directions remain physical displacements. Subtracting lattice vectors
+    preserves atom ordering and avoids changing an already-normalized array.
+    The caller's array is never modified, including read-only views.
+    """
+    cell = np.asarray(cell, dtype=float)
+    periodic = np.asarray(pbc, dtype=bool)
+    if cell.shape != (3, 3) or not np.isfinite(cell).all():
+        raise ValueError("set_positions: cell must be a finite (3, 3) array")
+    if periodic.shape != (3,):
+        raise ValueError("set_positions: pbc must have three entries")
+    try:
+        fractional = np.linalg.solve(cell.T, positions.T).T
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("set_positions: cell must be nonsingular") from exc
+    if not np.isfinite(fractional).all():
+        raise ValueError("set_positions: periodic coordinates are not finite")
+    shifts = np.zeros_like(fractional)
+    shifts[:, periodic] = np.floor(fractional[:, periodic])
+    normalized = positions - shifts @ cell
+    return _require_finite_positions(normalized, "set_positions (normalized)")
+
+
 @dataclass(frozen=True, eq=False)
 class FullSystem:
     """What ``LammpsEngine`` remembers about the last fully initialised system.
@@ -822,12 +850,24 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def set_positions(self, positions: np.ndarray) -> None:
+        """Scatter ASE-frame positions after normalizing periodic images.
+
+        Equivalent images may be arbitrarily many supported cell translations
+        away. Normalize in the remembered source cell before native rotation;
+        nonperiodic lattice directions are never folded into the box.
+        """
         # Symmetric finite + shape guard on every rank before the collective
         # scatter (get_natoms is the global count, so all ranks agree).
         positions = _require_positions(
             positions, "set_positions", natoms=int(self.lmp.get_natoms())
         )
+        if self.full_system is None:
+            raise RuntimeError("set_positions: initialize_system must be called first")
+        positions = _normalize_periodic_positions(
+            positions, self.full_system.cell, self.full_system.pbc
+        )
         positions = self._positions_to_lammps(positions=positions)
+        positions = _require_finite_positions(positions, "set_positions (native frame)")
         positions = positions.flatten().astype(np.float64)
         positions = np.ascontiguousarray(positions)
         c_array = (ctypes.c_double * len(positions))(*positions)
