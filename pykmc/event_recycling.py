@@ -14,7 +14,7 @@ import pandas as pd
 
 from .event_table import ActiveEventTable
 from .system import System
-from .utils.geometry import minimum_image_distance, per_atom_displacement
+from .utils.geometry import minimum_image_displacement
 
 
 class Recycling(ABC):
@@ -91,7 +91,12 @@ class DistanceRecycling(Recycling):
 
         # Per-atom displacement magnitudes pre → post (PBC minimum-image).
         # Vectorized over the whole system; we'll index by atom_index below.
-        disp = per_atom_displacement(positions_pre, system.positions, system.cell)
+        disp = np.linalg.norm(
+            minimum_image_displacement(
+                system.positions - positions_pre, system.cell, system.pbc
+            ),
+            axis=1,
+        )
 
         # Reference point for the distance check: the just-executed event's
         # central atom (post-execution position).
@@ -112,8 +117,12 @@ class DistanceRecycling(Recycling):
             # (2) Distance check: this central atom must be FAR from the
             # executed event (PBC minimum-image).
             if (
-                minimum_image_distance(
-                    executed_pos, system.positions[atom_idx], system.cell
+                np.linalg.norm(
+                    minimum_image_displacement(
+                        system.positions[atom_idx] - executed_pos,
+                        system.cell,
+                        system.pbc,
+                    )
                 )
                 <= self.distance_thr
             ):
@@ -123,4 +132,5 @@ class DistanceRecycling(Recycling):
 
         if not keep_rows:
             return table.iloc[0:0].copy()
-        return table.loc[keep_rows].reset_index(drop=True).copy()
+        # ActiveEventTable owns the single relabel map for rows and side stores.
+        return table.loc[keep_rows].copy()

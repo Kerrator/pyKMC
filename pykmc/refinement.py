@@ -125,6 +125,9 @@ class Refinement:
             if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
+                res.ok_value().crop_atom_ids = tuple(
+                    int(self.system.index[i]) for i in ctx["neighbors"]
+                )
                 estimate = ctx["estimate"]
                 res.ok_value().nu0_hz = estimate["nu0_hz"]
                 res.ok_value().nu0_status = estimate["nu0_status"]

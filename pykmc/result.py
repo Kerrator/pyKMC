@@ -117,6 +117,7 @@ class ErrorType(Enum):
     REFINEMENT_INVALID_MINIMA = 32
     RECONSTRUCTION_INVALID_MIN1 = 41
     RECONSTRUCTION_INVALID_MIN2 = 42
+    RECONSTRUCTION_INVALID_EVENT_DATA = 43
     BASIN_TEXIT_NOT_FOUND = 51
 
 
@@ -215,6 +216,8 @@ class EventRefinementOutput:
     nu0_source: Optional[str] = None
     full_saddle_positions: Optional[np.ndarray] = None
     constraints: Optional["ResolvedConstraints"] = None
+    # Stable System.index identities, in saddle/final crop order.
+    crop_atom_ids: Optional[tuple[int, ...]] = None
 
 
 @dataclass

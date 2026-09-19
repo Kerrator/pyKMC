@@ -282,6 +282,9 @@ class KMC:
                 self.atomic_environment.atomic_environment_list
             )
             ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
+            self.active_table.validate_recycled(
+                self.system, self.neighbors_list, allow_pending=False
+            )
             refinement = self.execute_refinements(
                 subset_reference_event_table,
                 existing_pairs=self.active_table.existing_pairs(),
@@ -406,6 +409,9 @@ class KMC:
                         **self.reference_table.reference_estimate(exit_ref),
                     )
                     neighbors = result_basin.ok_value().neighbors
+                    tmp_event.crop_atom_ids = tuple(
+                        int(self.system.index[i]) for i in neighbors
+                    )
                     tmp_active_table.add_events(tmp_event)
                     # reconstruct event
                     result_basin_reconstruction = self._reconstruction_active_event(
@@ -852,6 +858,11 @@ class KMC:
             - float: total rate constant of the active events.
 
         """
+        active_table.validate_recycled(
+            self.system, self.neighbors_list, allow_pending=False
+        )
+        if active_table.table.empty:
+            raise ValueError("No active events with current physical dependencies")
         l_k = np.array(
             [active_table.table.loc[i].at["k"] for i in range(len(active_table.table))]
         )
@@ -898,6 +909,9 @@ class KMC:
 
         err_reference = []
         err_ae = []
+        active_table.validate_recycled(
+            self.system, self.neighbors_list, allow_pending=False
+        )
         while len(active_table.table) > 0:
             ##=>Select event
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
@@ -956,7 +970,21 @@ class KMC:
         self, idx_selected_event: int, active_table: AtomicEnvironment
     ):
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
-        neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
+        try:
+            neighbors = active_table.crop_indices(idx_selected_event, self.system)
+        except (ValueError, KeyError, TypeError) as exc:
+            if (
+                not active_table.uses_prefactors
+                and "crop_atom_ids" not in active_table.table.columns
+            ):
+                neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
+            else:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                        message=str(exc),
+                    )
+                )
         saddle_positions = copy.deepcopy(
             active_table.table.loc[idx_selected_event].at["saddle_positions"]
         )

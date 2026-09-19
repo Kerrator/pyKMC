@@ -2173,6 +2173,8 @@ class ActiveEventTable:
         # keyed by the row's current label (see the class notes).
         self._full_saddles: dict[int, np.ndarray] = {}
         self._full_saddle_constraints: dict[int, Any] = {}
+        self._site_states: dict[int, Any] = {}
+        self._pending_site_rows: set[int] = set()
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2200,6 +2202,8 @@ class ActiveEventTable:
     @property
     def rate_constant(self) -> RateConstant:
         """Return the rate facade of ``config.rateconstant`` (built on first use)."""
+        if self.prefactor_service is not None:
+            return self.prefactor_service.rate_constant
         if self._rate_constant is None:
             self._rate_constant = create_rate_constant(self.config.rateconstant)
         return self._rate_constant
@@ -2245,17 +2249,141 @@ class ActiveEventTable:
         attempted in the step that built them, so the transient full saddles
         are dropped here.
         """
-        self._full_saddles = {}
-        self._full_saddle_constraints = {}
         if self.recycler is None:
-            self.table = self.table.iloc[0:0].reset_index(drop=True)
+            self.remove(list(self.table.index))
         else:
-            self.table = self.recycler.select_recyclable(
+            selected = self.recycler.select_recyclable(
                 self,
                 executed_idx,
                 system,
                 positions_pre,
             )
+            self.remove([i for i in self.table.index if i not in selected.index])
+            self._pending_site_rows.clear()
+            self.validate_recycled(system, allow_pending=False)
+        self._full_saddles = {}
+        self._full_saddle_constraints = {}
+
+    def crop_indices(self, label, system, neighbors_list=None, *, capture=False):
+        """Resolve stored stable crop identities without using a new crop order."""
+        from .physics import _indices
+
+        row = self.table.loc[label]
+        ids = _indices(system.index)
+        stored = row.get("crop_atom_ids")
+        if stored is None or (isinstance(stored, float) and math.isnan(stored)):
+            if not capture or neighbors_list is None:
+                raise ValueError("active event has no stored crop identities")
+            indices = _indices(
+                neighbors_list.get_neighbors("rcut", int(row.atom_index)),
+                upper=len(ids),
+            )
+            stored = tuple(ids[i] for i in indices)
+            if "crop_atom_ids" not in self.table.columns:
+                self.table["crop_atom_ids"] = pd.Series(
+                    [None] * len(self.table), index=self.table.index, dtype=object
+                )
+            self.table.at[label, "crop_atom_ids"] = stored
+        stored = _indices(stored)
+        indices = np.array([ids.index(i) for i in stored], dtype=int)
+        if int(row.atom_index) not in indices:
+            raise ValueError("active event center is outside its stored crop")
+        for name in ("saddle_positions", "final_positions"):
+            if row[name] is not None and np.asarray(row[name]).shape != (
+                len(indices),
+                3,
+            ):
+                raise ValueError(
+                    "active event crop and identities have different sizes"
+                )
+        return indices
+
+    def site_calculation(self, label):
+        """Return the actual row-bound site producer, never a scalar reconstruction."""
+        from .htst.site_state import row_signature
+
+        state = self._site_states.get(int(label))
+        if state is None or label not in self.table.index:
+            return None
+        try:
+            return (
+                state.calculation
+                if row_signature(self.table.loc[label], state.center_id)
+                == state.signature
+                else None
+            )
+        except (ValueError, TypeError, KeyError):
+            return None
+
+    def validate_recycled(self, system, neighbors_list=None, *, allow_pending=True):
+        """Drop obsolete dependencies before refinement skips or rate selection.
+
+        A dropped pair can run through the normal refinement dispatcher again.
+        Fresh unattempted producer outputs are allowed only until their first
+        site/fallback context is captured. They are never exempt across a prune.
+        """
+        if not self.uses_prefactors or self.table.empty:
+            return 0
+        from .htst.site_state import row_signature
+        from dataclasses import replace
+
+        dropped = []
+        for label, row in self.table.iterrows():
+            state = self._site_states.get(int(label))
+            if state is None:
+                if (
+                    allow_pending
+                    and label in self._pending_site_rows
+                    and not bool(row["nu0_site_attempted"])
+                    and row["nu0_source"] != SOURCE_SITE
+                ):
+                    continue
+                dropped.append(label)
+                continue
+            try:
+                if not state.matches(row, system, self.prefactor_service):
+                    dropped.append(label)
+                    continue
+                self.table.at[label, "atom_index"] = list(system.index).index(
+                    state.center_id
+                )
+                if neighbors_list is not None:
+                    crop = self.crop_indices(label, system)
+                    current = neighbors_list.get_neighbors(
+                        "rcut", int(self.table.at[label, "atom_index"])
+                    )
+                    if set(crop) != set(current):
+                        dropped.append(label)
+                        continue
+                nu0 = float(row["nu0"]) if row["nu0_status"] == NU0_OK else None
+                if (
+                    nu0 is not None
+                    and not self.prefactor_service.settings.nu0_min_hz
+                    <= nu0
+                    <= self.prefactor_service.settings.nu0_max_hz
+                ):
+                    # Rebuild under the new acceptance policy; the old site
+                    # value must not become a reference estimate by relabeling.
+                    dropped.append(label)
+                    continue
+                rate = self.rate_constant.compute_rate(
+                    float(row["energy_barrier"]), nu0
+                )
+                self.table.loc[label, "k"] = rate.rate
+                self.table.loc[label, "k_prefactor"] = rate.prefactor
+                self._site_states[int(label)] = replace(
+                    state,
+                    signature=row_signature(self.table.loc[label], state.center_id),
+                )
+            except (ValueError, TypeError, KeyError, IndexError):
+                dropped.append(label)
+        if dropped:
+            self.remove(dropped)
+            logger.info(
+                "active table: invalidated %d rows with changed or unknown full-source dependencies",
+                len(dropped),
+            )
+        return len(dropped)
 
     def drop_reference_events(self, removed: Iterable[int]) -> int:
         """Drop every row whose ``num_reference_event`` left the catalogue.
@@ -2340,11 +2468,12 @@ class ActiveEventTable:
             # The full refined saddle travels beside the row (never in it) until
             # request_site_prefactors consumes it.
             for offset, output in enumerate(outputs):
+                self._pending_site_rows.add(first_label + offset)
                 full = output.full_saddle_positions
                 if full is not None:
                     self._full_saddles[first_label + offset] = np.asarray(
                         full, dtype=float
-                    )
+                    ).copy()
                     self._full_saddle_constraints[first_label + offset] = (
                         output.constraints
                     )
@@ -2374,6 +2503,7 @@ class ActiveEventTable:
                 "Input 'dfevents' must be a pandas Series or a list of pandas Series."
             )
 
+        self._remap_stores(list(self.table.index))
         self.table = pd.concat([self.table, df_to_add], ignore_index=True)
 
     def build_event_series(
@@ -2419,7 +2549,65 @@ class ActiveEventTable:
             dfactive["nu0_reason"] = reason
             dfactive["nu0_source"] = source
             dfactive["nu0_site_attempted"] = False
+        if event_refinement_output.crop_atom_ids is not None:
+            dfactive["crop_atom_ids"] = tuple(event_refinement_output.crop_atom_ids)
         return dfactive
+
+    def _capture_site_state(self, label, request, calculation=None):
+        from .htst.provenance import RequestSnapshot
+        from .htst.site_state import SiteState, row_signature
+
+        source = RequestSnapshot.capture(request)
+        if calculation is not None:
+            calculation.validate()
+            if (
+                calculation.direction != "forward"
+                or calculation.provenance.source != source
+            ):
+                raise RuntimeError(
+                    "site result does not belong to its submitted source"
+                )
+        center_id = source.constraints.atom_ids[source.center_index]
+        self._site_states[int(label)] = SiteState(
+            source,
+            self.prefactor_service.method,
+            row_signature(self.table.loc[label], center_id),
+            calculation,
+        )
+        self._pending_site_rows.discard(int(label))
+
+    def _site_request(self, label, system, saddle):
+        from .physics import resolve_event_constraints
+
+        atom = int(self.table.at[label, "atom_index"])
+        constraints = self._full_saddle_constraints.get(int(label))
+        if constraints is None:
+            constraints = resolve_event_constraints(
+                self.prefactor_service.config,
+                system.positions,
+                system.types,
+                system.cell,
+                system.pbc,
+                atom,
+                system.index,
+                user_constraints=self.prefactor_service.global_constraints,
+            )
+        return self.prefactor_service.build_request(
+            event_key=(
+                "site",
+                int(label),
+                atom,
+                int(self.table.at[label, "num_reference_event"]),
+            ),
+            min1_positions=system.positions,
+            saddle_positions=saddle,
+            min2_positions=system.positions,
+            types=system.types,
+            cell=system.cell,
+            pbc=system.pbc,
+            center_index=atom,
+            constraints=constraints,
+        )
 
     @staticmethod
     def _inherited_estimate(
@@ -2531,6 +2719,16 @@ class ActiveEventTable:
         if not self.uses_prefactors or len(self.table) == 0:
             return summary
         self._require_htst_columns("request_site_prefactors")
+        self.validate_recycled(system, neighbors_list)
+        if self.prefactor_service is not None:
+            # Even an unrefined reference approximation needs a full dependency
+            # context before it may suppress work in a later step. This is a
+            # fallback context, not a claim that its spectrum was calculated here.
+            for label, row in self.table.iterrows():
+                if row["refined"] != "T" and label in self._pending_site_rows:
+                    self.crop_indices(label, system, neighbors_list, capture=True)
+                    request = self._site_request(label, system, system.positions)
+                    self._capture_site_state(label, request)
         eligible = (self.table["refined"] == "T") & ~self.table[
             "nu0_site_attempted"
         ].astype(bool)
@@ -2547,12 +2745,11 @@ class ActiveEventTable:
         requests = []
         keys: list[tuple[Any, tuple]] = []
         no_geometry: list[Any] = []
+        submitted = {}
         try:
             for idx, row in rows.iterrows():
                 atom = int(row["atom_index"])
-                neighbors = np.asarray(
-                    neighbors_list.get_neighbors("rcut", atom), dtype=int
-                )
+                neighbors = self.crop_indices(idx, system, neighbors_list, capture=True)
                 saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
                 if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
                     raise RuntimeError(
@@ -2566,6 +2763,7 @@ class ActiveEventTable:
                     # Crop-only output: no stationary geometry to request a
                     # site Hessian from. The inherited estimate stands.
                     no_geometry.append(idx)
+                    submitted[idx] = self._site_request(idx, system, positions)
                     continue
                 if full_saddle.shape != positions.shape or not np.array_equal(
                     full_saddle[neighbors], saddle_crop
@@ -2576,20 +2774,10 @@ class ActiveEventTable:
                         "the site request must use the neighbour list refinement "
                         "cropped with"
                     )
-                key = ("site", int(idx), atom, int(row["num_reference_event"]))
-                requests.append(
-                    self.prefactor_service.build_request(
-                        event_key=key,
-                        min1_positions=positions,
-                        saddle_positions=full_saddle,
-                        min2_positions=positions,  # unused: forward only
-                        types=system.types,
-                        cell=system.cell,
-                        pbc=system.pbc,
-                        center_index=atom,
-                        constraints=self._full_saddle_constraints.get(int(idx)),
-                    )
-                )
+                request = self._site_request(idx, system, full_saddle)
+                key = request.event_key
+                requests.append(request)
+                submitted[idx] = request
                 keys.append((idx, key))
             results = self.prefactor_service.compute(requests, compute_backward=False)
         finally:
@@ -2597,9 +2785,11 @@ class ActiveEventTable:
             # a row is attempted at most once.
             self._full_saddles = {}
             self._full_saddle_constraints = {}
+            self._pending_site_rows.clear()
         wall = self.prefactor_service.last_batch_wall_s
         for idx in no_geometry:
             self.table.loc[idx, "nu0_site_attempted"] = True
+            self._capture_site_state(idx, submitted[idx])
             summary["attempted"] += 1
             summary["no_geometry"] += 1
             logger.info(
@@ -2613,6 +2803,11 @@ class ActiveEventTable:
         for idx, key in keys:
             pre = results[key]
             estimate = pre.forward
+            calculation = pre.calculation("forward")
+            if calculation is not None and calculation.estimate != estimate:
+                raise RuntimeError(
+                    "site result estimate and producing calculation disagree"
+                )
             self.table.loc[idx, "nu0_site_attempted"] = True
             summary["attempted"] += 1
             atom = int(self.table.loc[idx, "atom_index"])
@@ -2652,6 +2847,7 @@ class ActiveEventTable:
                     pre.n_free,
                     wall,
                 )
+            self._capture_site_state(idx, submitted[idx], calculation)
         return summary
 
     def prefactor_summary(self) -> dict[str, int]:
@@ -2687,8 +2883,20 @@ class ActiveEventTable:
         """
         dropped = {int(ind)} if np.isscalar(ind) else {int(i) for i in ind}
         kept = [label for label in self.table.index if int(label) not in dropped]
+        self._remap_stores(kept)
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
+
+    def _remap_stores(self, kept) -> None:
+        """Apply the same row-label map to every transient store."""
+        self._site_states = {
+            new: self._site_states[int(old)]
+            for new, old in enumerate(kept)
+            if int(old) in self._site_states
+        }
+        self._pending_site_rows = {
+            new for new, old in enumerate(kept) if int(old) in self._pending_site_rows
+        }
         if self._full_saddles:
             self._full_saddles = {
                 new: self._full_saddles[int(old)]
@@ -2704,6 +2912,39 @@ class ActiveEventTable:
 
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
+
+        from .physics import _indices
+
+        if neighbors_list is not None and self.uses_prefactors:
+            for label in list(self._pending_site_rows):
+                if label in self.table.index:
+                    self.crop_indices(
+                        label, neighbors_list.system, neighbors_list, capture=True
+                    )
+
+        def align(first, second, *, shared=False):
+            a, b = self.table.loc[first], self.table.loc[second]
+            left, right = np.asarray(a.saddle_positions), np.asarray(b.saddle_positions)
+            try:
+                ids_a, ids_b = _indices(a.crop_atom_ids), _indices(b.crop_atom_ids)
+            except (AttributeError, TypeError, ValueError):
+                if (
+                    not self.uses_prefactors
+                    and not shared
+                    and left.shape == right.shape
+                ):
+                    return left, right
+                return None
+            if left.shape != (len(ids_a), 3) or right.shape != (len(ids_b), 3):
+                return None
+            if not shared and set(ids_a) != set(ids_b):
+                return None
+            common = sorted(set(ids_a) & set(ids_b))
+            if not common:
+                return None
+            return left[[ids_a.index(i) for i in common]], right[
+                [ids_b.index(i) for i in common]
+            ]
 
         duplicates = []
         # 1. Check duplicates on central atoms : to be sure
@@ -2724,11 +2965,13 @@ class ActiveEventTable:
         # For each group, check duplicated by computing delr
 
         for idx, subset in grouped:
-            pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
             for jdx in subset.index:
                 if jdx <= idx:
                     continue  # dont compute twice
-                pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
+                aligned = align(idx, jdx)
+                if aligned is None:
+                    continue
+                pos_ref, pos_comp = aligned
                 delr = compute_delr(pos_ref, pos_comp, cell)
                 if delr < self.config.psr.matching_score_thr:
                     # print('Removing event with delr',delr)
@@ -2749,6 +2992,31 @@ class ActiveEventTable:
 
                 for i, idx in enumerate(indices):  # Loop over indice of subset
                     central_atom1 = subset.loc[idx, "atom_index"]
+                    if "crop_atom_ids" in self.table.columns:
+                        for jdx in indices[i + 1 :]:
+                            if central_atom1 == subset.loc[jdx, "atom_index"]:
+                                continue
+                            try:
+                                other_ids = _indices(
+                                    self.table.at[jdx, "crop_atom_ids"]
+                                )
+                                center_id = int(
+                                    neighbors_list.system.index[int(central_atom1)]
+                                )
+                            except (TypeError, ValueError, IndexError):
+                                continue
+                            if center_id not in other_ids:
+                                continue
+                            aligned = align(idx, jdx, shared=True)
+                            if (
+                                aligned is not None
+                                and compute_delr(
+                                    *aligned, cell, neighbors_list.system.pbc
+                                )
+                                < self.config.psr.matching_score_thr
+                            ):
+                                duplicates.append(jdx)
+                        continue
                     env1 = neighbors_list.get_neighbors(
                         "rcut", central_atom1
                     )  # list of atom in env1
