@@ -2278,6 +2278,18 @@ class ActiveEventTable:
                 neighbors_list.get_neighbors("rcut", int(row.atom_index)),
                 upper=len(ids),
             )
+            if self.uses_prefactors:
+                full = self._full_saddles.get(int(label))
+                if (
+                    full is None
+                    or np.asarray(full).shape != np.asarray(system.positions).shape
+                    or not np.array_equal(
+                        np.asarray(full)[list(indices)], row["saddle_positions"]
+                    )
+                ):
+                    raise ValueError(
+                        "active event without a full saddle must supply its crop atom identities"
+                    )
             stored = tuple(ids[i] for i in indices)
             if "crop_atom_ids" not in self.table.columns:
                 self.table["crop_atom_ids"] = pd.Series(
