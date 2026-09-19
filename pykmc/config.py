@@ -118,6 +118,8 @@ class ControlConfig(BaseModel):
 
     seed: Optional[int] = Field(
         default=None,
+        ge=0,
+        le=2**32 - 1,
         description="Reproducibility knob. When set, the Python `random` module and "
         "NumPy's global random generator are seeded once at KMC construction, so "
         "the choice of the atoms searched per new environment "
@@ -126,7 +128,7 @@ class ControlConfig(BaseModel):
         "list is sorted, so `PYTHONHASHSEED` is not needed. It does not seed "
         "the saddle-point search: pARTn's own stream is `[pARTn] zseed`, and the "
         "saddle instance a search returns can still differ between runs. "
-        "Defaults to None (unseeded).",
+        "Must be between 0 and 2**32 - 1, inclusive. Defaults to None (unseeded).",
     )
 
 

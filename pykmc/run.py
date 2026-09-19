@@ -5,6 +5,8 @@ from an input file, initializes the KMC simulation, and runs it.
 """
 
 import argparse
+import sys
+import traceback
 from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
@@ -50,10 +52,11 @@ def main() -> None:
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0
-        kmc = KMC(config, manager=manager)
         try:
+            kmc = KMC(config, manager=manager)
             kmc._initialize()
             kmc.run()
+            manager.shutdown()
         except SystemExit:
             # KMC._close chose the status (0 normal completion, 1 aborted
             # simulation) after shutting the workers down; the idempotent
@@ -64,11 +67,21 @@ def main() -> None:
             try:
                 manager.shutdown()
             except BaseException:
-                comm.Abort(1)
+                try:
+                    traceback.print_exc()
+                    sys.stderr.flush()
+                finally:
+                    comm.Abort(1)
                 raise
             raise
         except BaseException:
-            comm.Abort(1)
+            # MPI abort may terminate Python before the exception can reach
+            # its normal traceback handler. Preserve the initiating error.
+            try:
+                traceback.print_exc()
+                sys.stderr.flush()
+            finally:
+                comm.Abort(1)
             raise
 
 
