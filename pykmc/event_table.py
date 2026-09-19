@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("log")
 """HTST lifecycle diagnostics go to the KMC ``log`` logger (see ``pykmc.log``)."""
 
-TABLE_SCHEMA_VERSION: int = 1
+TABLE_SCHEMA_VERSION: int = 2
 """Version of the HTST reference-table metadata persisted next to the pickle."""
 
 REFERENCE_BASE_COLUMNS: tuple[str, ...] = (
@@ -313,6 +313,14 @@ class ReferenceEventTable:
         )
         self.prefactor_service = prefactor_service
         self.metadata: dict[str, Any] = {}
+        self._fresh_calculations: set[tuple[int, str]] = set()
+        self._resolved_contexts: dict[int, tuple] = {}
+        self._recomputed: dict[str, Any] = {}
+        self.prefactor_archive = None
+        if self.uses_prefactors:
+            from .htst.catalogue import PrefactorArchive
+
+            self.prefactor_archive = PrefactorArchive()
         self._initialize_table()
 
     @property
@@ -452,10 +460,17 @@ class ReferenceEventTable:
         wall = self.prefactor_service.last_batch_wall_s
         for fwd_id, bwd_id, admission, _ev in accepted:
             pre = results[(fwd_id, bwd_id)]
-            self._patch_row(fwd_id, pre.forward)
+            self._patch_row(
+                fwd_id, pre.forward, calculation=pre.calculation("forward"), fresh=True
+            )
             self._log_direction(fwd_id, "forward", pre.forward, pre.n_free, wall)
             if bwd_id is not None:
-                self._patch_row(bwd_id, pre.backward)
+                self._patch_row(
+                    bwd_id,
+                    pre.backward,
+                    calculation=pre.calculation("backward"),
+                    fresh=True,
+                )
                 self._log_direction(bwd_id, "backward", pre.backward, pre.n_free, wall)
             elif admission.self_reverse_candidate:
                 self._record_self_reverse(fwd_id, pre, wall)
@@ -608,7 +623,14 @@ class ReferenceEventTable:
             wall_s,
         )
 
-    def _patch_row(self, idx_ref: int, estimate: DirectionalPrefactor) -> None:
+    def _patch_row(
+        self,
+        idx_ref: int,
+        estimate: DirectionalPrefactor,
+        *,
+        calculation=None,
+        fresh: bool = False,
+    ) -> None:
         """Write one directional estimate on the row with logical id ``idx_ref``.
 
         ``k``, ``k_prefactor``, ``nu0``, ``nu0_status`` and ``nu0_reason`` are
@@ -638,6 +660,14 @@ class ReferenceEventTable:
         mask = self.table["idx_ref"] == idx_ref
         if not mask.any():
             raise ValueError(f"idx_ref {idx_ref} is not in the reference table")
+        if calculation is not None:
+            calculation.validate()
+            if calculation.estimate != estimate:
+                raise ValueError("estimate differs from its producing calculation")
+        archive = self.prefactor_archive
+        previous = self.table.loc[mask].iloc[0]
+        if previous["nu0_status"] != NU0_PENDING:
+            archive.retain(idx_ref, previous, "estimate superseded")
         dE = float(self.table.loc[mask, "energy_barrier"].iloc[0])
         nu0_hz = float(estimate.nu0_hz) if estimate.ok else None
         rc = self.rate_constant.compute_rate(dE, nu0_hz)
@@ -648,6 +678,173 @@ class ReferenceEventTable:
         self.table.loc[mask, "nu0_reason"] = (
             "" if estimate.ok else f"{estimate.reason_code.value}: {estimate.reason}"
         )
+        self._resolved_contexts.pop(int(idx_ref), None)
+        if calculation is None:
+            archive.references[int(idx_ref)] = None
+            if estimate.ok:
+                archive.retain(
+                    idx_ref,
+                    self.table.loc[mask].iloc[0],
+                    "missing producing calculation",
+                )
+                self._set_estimate(
+                    idx_ref, NU0_LEGACY, None, "legacy: missing producing calculation"
+                )
+        else:
+            archive.record(idx_ref, self.table.loc[mask].iloc[0], calculation)
+            if fresh:
+                self._fresh_calculations.add(
+                    (id(self.prefactor_service), calculation.calculation_id)
+                )
+
+    def _set_estimate(self, idx_ref, status, nu0, reason) -> None:
+        """Update every selectable rate field together, in the current rate policy."""
+        mask = self.table["idx_ref"] == idx_ref
+        barrier = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+        rate = self.rate_constant.compute_rate(barrier, nu0)
+        self.table.loc[mask, "nu0_status"] = status
+        self.table.loc[mask, "nu0"] = float("nan") if nu0 is None else float(nu0)
+        self.table.loc[mask, "nu0_reason"] = reason
+        self.table.loc[mask, "k_prefactor"] = rate.prefactor
+        self.table.loc[mask, "k"] = rate.rate
+
+    def _ensure_current_estimate(self, idx_ref: int) -> None:
+        """Validate producing context before reference inheritance or selection."""
+        from .htst.catalogue import row_digest
+        from .htst.provenance import RequestSnapshot
+        from .htst.request import HTSTRequestError
+        from .physics import _digest
+
+        mask = self.table["idx_ref"] == idx_ref
+        row = self.table.loc[mask].iloc[0]
+        archive = self.prefactor_archive
+        calculation = archive.calculation_for(idx_ref, row)
+        if calculation is None:
+            reason = "legacy: missing producing calculation or row correspondence"
+            archive.retain(idx_ref, row, reason)
+            # Preserve an existing scientific rejection/fallback diagnostic.
+            status = str(row["nu0_status"])
+            if status in (NU0_PENDING, NU0_OK):
+                status = NU0_LEGACY
+            prior = str(row["nu0_reason"])
+            self._set_estimate(idx_ref, status, None, prior or reason)
+            return
+        service = self.prefactor_service
+        if service is None:
+            archive.retain(idx_ref, row, "missing current prefactor service")
+            self._set_estimate(
+                idx_ref, NU0_STALE, None, "stale: missing current physical context"
+            )
+            return
+        try:
+            request = service.request_from_snapshot(
+                calculation.provenance.source, event_key=("reload", int(idx_ref))
+            )
+        except HTSTRequestError as exc:
+            reason = f"stale: cannot rebuild complete current source: {exc}"
+            archive.retain(idx_ref, row, reason)
+            self._set_estimate(idx_ref, NU0_STALE, None, reason)
+            return
+        signature = (
+            id(service),
+            RequestSnapshot.capture(request).snapshot_id,
+            service.method,
+            calculation.calculation_id,
+            row_digest(row),
+            float(self.config.rateconstant.T),
+            float(self.config.rateconstant.k0),
+        )
+        if self._resolved_contexts.get(int(idx_ref)) == signature:
+            return
+        comparison = self.compare_physics(calculation.provenance.produced.descriptor)
+        registered = archive.descriptors.get(calculation.descriptor_id)
+        fresh = (id(service), calculation.calculation_id) in self._fresh_calculations
+        physics_match = comparison.status == "compatible" or (
+            fresh and calculation.descriptor_id == request.descriptor.descriptor_id
+        )
+        context_match = service.calculation_context_matches(calculation, request)
+        compatible = registered is not None and physics_match and context_match
+        estimate = calculation.estimate
+        old_settings = calculation.provenance.produced.settings
+        window_changed = (old_settings.nu0_min_hz, old_settings.nu0_max_hz) != (
+            service.settings.nu0_min_hz,
+            service.settings.nu0_max_hz,
+        )
+        needs_window_recompute = (
+            not estimate.ok
+            and estimate.reason_code.value == "out_of_window"
+            and window_changed
+        )
+        if compatible and not needs_window_recompute:
+            if estimate.ok:
+                nu0 = float(estimate.nu0_hz)
+                if service.settings.nu0_min_hz <= nu0 <= service.settings.nu0_max_hz:
+                    self._set_estimate(idx_ref, NU0_OK, nu0, "")
+                else:
+                    reason = "out_of_window (reload): current inclusive frequency window excludes estimate"
+                    archive.retain(idx_ref, row, reason)
+                    self._set_estimate(idx_ref, NU0_REJECTED, None, reason)
+            else:
+                self._set_estimate(
+                    idx_ref,
+                    NU0_REJECTED,
+                    None,
+                    f"{estimate.reason_code.value}: {estimate.reason}",
+                )
+            self._resolved_contexts[int(idx_ref)] = signature
+            return
+        reason = "stale: " + "; ".join(
+            comparison.reasons or ("producing calculation context differs",)
+        )
+        archive.retain(idx_ref, row, reason)
+        self._set_estimate(idx_ref, NU0_STALE, None, reason)
+        # The old value is unavailable before dispatch. Both directions share
+        # one full-source recalculation, independent of sparse table labels.
+        request_id = _digest(
+            (id(service), RequestSnapshot.capture(request).snapshot_id, service.method)
+        )
+        if request_id not in self._recomputed:
+            self._recomputed[request_id] = service.compute(
+                [request], compute_backward=True, compute_energies=True
+            )[request.event_key]
+        result = self._recomputed[request_id]
+        current = result.calculation(calculation.direction)
+        if current is None:
+            self._set_estimate(
+                idx_ref,
+                NU0_STALE,
+                None,
+                "stale: worker returned no producing calculation",
+            )
+            self._resolved_contexts[int(idx_ref)] = signature
+            return
+        if (
+            current.provenance.source != RequestSnapshot.capture(request)
+            or current.provenance.method != service.method
+        ):
+            raise RuntimeError(
+                "recomputed prefactor does not describe the submitted current source"
+            )
+        if not service.calculation_context_matches(current, request):
+            raise RuntimeError(
+                "recomputed prefactor used a different free/crop or constraint context"
+            )
+        energies = current.provenance.energies
+        if energies is None:
+            self._set_estimate(
+                idx_ref,
+                NU0_STALE,
+                None,
+                "stale: recomputation lacks current full-system potential energies",
+            )
+            self._resolved_contexts[int(idx_ref)] = signature
+            return
+        minimum = energies[0] if calculation.direction == "forward" else energies[2]
+        self.table.loc[mask, "energy_barrier"] = float(energies[1] - minimum)
+        self._patch_row(idx_ref, current.estimate, calculation=current, fresh=True)
+        # Apply the current window and rate policy even to a worker whose
+        # numerical acceptance contract was implemented separately.
+        self._ensure_current_estimate(idx_ref)
 
     def prefactor_summary(self) -> dict[str, int]:
         """Count the reference rows per ``nu0_status`` (empty in constant mode).
@@ -690,6 +887,8 @@ class ReferenceEventTable:
         rows = self.table[self.table["idx_ref"] == idx_ref]
         if rows.empty:
             raise ValueError(f"idx_ref {idx_ref} is not in the reference table")
+        self._ensure_current_estimate(idx_ref)
+        rows = self.table[self.table["idx_ref"] == idx_ref]
         row = rows.iloc[0]
         status = str(row["nu0_status"])
         nu0 = row["nu0"]
@@ -698,7 +897,7 @@ class ReferenceEventTable:
             "nu0_hz": nu0_hz,
             "nu0_status": status,
             "nu0_reason": str(row["nu0_reason"]) if status != NU0_OK else "",
-            "nu0_source": SOURCE_REFERENCE,
+            "nu0_source": SOURCE_REFERENCE if status == NU0_OK else SOURCE_K0,
         }
 
     def _admit(
@@ -1432,257 +1631,116 @@ class ReferenceEventTable:
                 columns["nu0_reason"] = pd.Series(dtype="str")
             self.table = pd.DataFrame(columns)
 
+    def _validate_stored_estimates(self, df, path: str) -> None:
+        """Reject corrupt declared estimates before considering reuse policy."""
+        for _, row in df.iterrows():
+            status = row["nu0_status"]
+            if status not in NU0_STATUSES:
+                raise ValueError(
+                    f"reference table {path}: unknown nu0_status {status!r}"
+                )
+            if status != NU0_OK:
+                continue
+            value = row["nu0"]
+            if (
+                value is None
+                or isinstance(value, (bool, np.bool_))
+                or not math.isfinite(float(value))
+                or float(value) <= 0
+            ):
+                raise ValueError(
+                    f"reference table {path}: accepted nu0 must be finite and positive"
+                )
+            rate = self.rate_constant.compute_rate(
+                float(row["energy_barrier"]), float(value)
+            )
+            if not math.isclose(
+                rate.prefactor, float(row["k_prefactor"]), rel_tol=1e-9, abs_tol=0.0
+            ):
+                raise ValueError(
+                    f"reference table {path}: k_prefactor and nu0 disagree (edited or corrupted)"
+                )
+
     def _load(self, path: str) -> None:
-        """Load a pickled reference table deliberately, per style and provenance.
+        """Migrate unknown estimates; validate schema-2 producers before reuse.
 
-        Constant style: a constant-mode pickle is loaded exactly as the base
-        did (no new columns, no metadata, rates untouched). A pickle carrying
-        any HTST column (the complete set or a partial one such as the
-        donor-era ``k_prefactor`` + ``nu0`` pair) or metadata is stripped of
-        them and its rates are recomputed with ``k0`` at the current
-        temperature, with a warning: constant runs never reuse per-event
-        prefactors.
-
-        htst/rpa style: a table without the HTST columns, or with them but
-        without table-level metadata (Hz ``nu0`` of unknown provenance), is a
-        legacy table: every row gets ``nu0_status = "legacy"``, ``k_prefactor
-        = k0`` and ``k`` recomputed from ``energy_barrier`` at the current
-        temperature, and one warning is logged. A table with metadata is
-        validated (schema version and units) and its rates are recomputed
-        from the stored ``nu0`` (accepted rows, through the rate backend,
-        which must reproduce the stored ``k_prefactor``) or the current
-        ``k0`` (every other status) and ``energy_barrier`` at the current
-        temperature, so a temperature change on reload is never silently
-        ignored and a row whose ``k_prefactor`` disagrees with its ``nu0`` is
-        refused.
-
-        Compatibility policy (contracts section 7d, F2): the stored kernel
-        ``settings`` (:data:`RELOAD_SETTINGS`) are compared with the current
-        configuration; any difference invalidates every accepted row
-        (``nu0_status = "stale"``, ``nu0 = NaN``, ``nu0_reason`` naming every
-        changed setting, ``k_prefactor = k0``, ``k`` recomputed) with one
-        warning. Independently, the current inclusive acceptance window is
-        re-applied to every accepted row: a stored ``nu0`` outside
-        ``[nu0_min_hz, nu0_max_hz]`` becomes ``rejected`` with an
-        ``out_of_window (reload)`` reason and the ``k0`` fallback, with one
-        warning. A same-settings reload is unchanged. Stale and rejected rows
-        are never recomputed (a stored crop is not a full geometry), and
-        :meth:`save` keeps writing the current settings, which is truthful
-        because no retained numeric ``nu0`` was computed under other settings.
-
-        Parameters
-        ----------
-        path : str
-            Pickle file written by :meth:`save`.
-
-        Raises
-        ------
-        ValueError
-            If the metadata declares an unsupported schema version or units,
-            or if an accepted row's ``k_prefactor`` is not the resolution of
-            its ``nu0`` (or its status is outside the vocabulary).
-
+        Event crops always survive. A complete producing source can be rebuilt
+        under current physics; missing context uses explicit k0 fallback.
+        Saving never supplies the missing scientific evidence.
         """
         df = pd.read_pickle(path)
         metadata = dict(df.attrs) if df.attrs else {}
         df.attrs = {}
-        present_htst = [c for c in REFERENCE_HTST_COLUMNS if c in df.columns]
-        has_htst_columns = len(present_htst) == len(REFERENCE_HTST_COLUMNS)
-        k0 = self.config.rateconstant.k0
-        T = self.config.rateconstant.T
-
+        present = [name for name in REFERENCE_HTST_COLUMNS if name in df.columns]
         if not self.uses_prefactors:
-            # Any HTST provenance is dropped: the complete S6 column set, a
-            # partial one (the donor-era ``k_prefactor`` + ``nu0`` pair) or
-            # table metadata. A constant run never reuses per-event
-            # prefactors, whatever subset of them a pickle carries.
-            if present_htst or metadata:
+            if present or metadata:
                 logger.warning(
-                    "Reference table %s carries HTST prefactor data (columns: %s%s) "
-                    "but the run uses the constant style: dropping the HTST "
-                    "columns and recomputing every rate with k0 = %g ps^-1 at "
-                    "T = %g K",
+                    "Reference table %s carries HTST data; constant style drops it and recomputes rates",
                     path,
-                    ", ".join(present_htst) if present_htst else "none",
-                    "; table metadata" if metadata else "",
-                    k0,
-                    T,
                 )
-                df = df.drop(columns=present_htst)
+                df = df.drop(columns=present)
                 df["k"] = [
-                    rate_from_prefactor(k0, float(dE), T) for dE in df["energy_barrier"]
+                    self.rate_constant.compute_rate(float(barrier)).rate
+                    for barrier in df["energy_barrier"]
                 ]
             self.table = df
             return
+        from .htst.catalogue import PrefactorArchive
 
-        if not has_htst_columns or not metadata:
-            if has_htst_columns:
-                why = "no HTST metadata"
-            elif present_htst:
-                why = "incomplete HTST columns (" + ", ".join(present_htst) + ")"
-            else:
-                why = "no HTST columns"
-            logger.warning(
-                "Reference table %s is a legacy table (%s): every event gets "
-                "nu0_status = 'legacy', k_prefactor = k0 = %g ps^-1 and k "
-                "recomputed from its barrier at T = %g K; no prefactor of this "
-                "table is an HTST estimate",
-                path,
-                why,
-                k0,
-                T,
-            )
-            df["k_prefactor"] = float(k0)
-            if "nu0" not in df.columns:
-                df["nu0"] = float("nan")
-            df["nu0_status"] = NU0_LEGACY
-            df["nu0_reason"] = f"legacy table: {why}"
-            df["k"] = [
-                rate_from_prefactor(k0, float(dE), T) for dE in df["energy_barrier"]
-            ]
-            # Canonical layout: the HTST columns follow the others in schema order.
-            other = [c for c in df.columns if c not in REFERENCE_HTST_COLUMNS]
-            self.table = df[other + list(REFERENCE_HTST_COLUMNS)]
-            return
-
+        complete_columns = len(present) == len(REFERENCE_HTST_COLUMNS)
         version = metadata.get("schema_version")
-        if version != TABLE_SCHEMA_VERSION:
-            raise ValueError(
-                f"reference table {path} has schema_version {version!r}; this "
-                f"code reads version {TABLE_SCHEMA_VERSION}"
-            )
-        if metadata.get("nu0_units") != "Hz" or (
-            metadata.get("k_prefactor_units") != "ps^-1"
-        ):
-            raise ValueError(
-                f"reference table {path} declares nu0_units="
-                f"{metadata.get('nu0_units')!r} and k_prefactor_units="
-                f"{metadata.get('k_prefactor_units')!r}; expected 'Hz' and 'ps^-1' "
-                "(units are never inferred from magnitudes)"
-            )
-        if metadata.get("T") != T:
-            logger.info(
-                "Reference table %s was saved at T = %s K; rates recomputed at "
-                "T = %g K from the stored prefactors",
-                path,
-                metadata.get("T"),
-                T,
-            )
-        if metadata.get("k0") != k0:
-            logger.info(
-                "Reference table %s was saved with k0 = %s ps^-1; fallback rows "
-                "re-based on k0 = %g ps^-1",
-                path,
-                metadata.get("k0"),
-                k0,
-            )
-        changed = self._changed_settings(metadata.get("settings"))
-        settings = self.table_metadata()["settings"]
-        nu0_min_hz = float(settings["nu0_min_hz"])
-        nu0_max_hz = float(settings["nu0_max_hz"])
-        stale_reason = "stale: " + "; ".join(changed) + "; estimate discarded"
-        labels = df["idx_ref"] if "idx_ref" in df.columns else df.index
-        statuses: list[str] = []
-        reasons: list[str] = []
-        frequencies: list[float] = []
-        prefactors: list[float] = []
-        rates: list[float] = []
-        n_stale = 0
-        n_windowed = 0
-        for label, status, reason, k_prefactor, nu0, dE in zip(
-            labels,
-            df["nu0_status"],
-            df["nu0_reason"],
-            df["k_prefactor"],
-            df["nu0"],
-            df["energy_barrier"],
-            strict=True,
-        ):
-            if status not in NU0_STATUSES:
+        if metadata and complete_columns:
+            if version not in (1, TABLE_SCHEMA_VERSION):
                 raise ValueError(
-                    f"reference table {path}: event {label} has nu0_status "
-                    f"{status!r}; expected one of {NU0_STATUSES}"
+                    f"reference table {path} has unsupported schema_version {version!r}"
                 )
-            if status == NU0_OK:
-                if nu0 is None:
-                    raise ValueError(
-                        f"reference table {path}: event {label} has nu0_status "
-                        "'ok' but no nu0 value; an accepted estimate must carry "
-                        "its frequency in Hz"
+            if (
+                metadata.get("nu0_units") != "Hz"
+                or metadata.get("k_prefactor_units") != "ps^-1"
+            ):
+                raise ValueError(
+                    f"reference table {path}: expected nu0_units='Hz' and k_prefactor_units='ps^-1'"
+                )
+            self._validate_stored_estimates(df, path)
+        if complete_columns and version == TABLE_SCHEMA_VERSION:
+            self.prefactor_archive = PrefactorArchive.from_metadata(metadata)
+            for _, row in df.iterrows():
+                calculation = self.prefactor_archive.calculation_for(
+                    int(row["idx_ref"]), row
+                )
+                if (
+                    row["nu0_status"] == NU0_OK
+                    and calculation is not None
+                    and (
+                        not calculation.estimate.ok
+                        or float(row["nu0"]) != calculation.estimate.nu0_hz
                     )
-                nu0 = float(nu0)
-                if not math.isfinite(nu0) or nu0 <= 0.0:
-                    raise ValueError(
-                        f"reference table {path}: event {label} has nu0_status "
-                        f"'ok' but nu0 = {nu0!r} Hz; an accepted estimate must be "
-                        "a finite positive frequency"
-                    )
-                # Single conversion point: the stored prefactor must be the
-                # backend's own resolution of the stored frequency, otherwise
-                # k, k_prefactor and nu0 would disagree on the loaded row.
-                rc = self.rate_constant.compute_rate(float(dE), nu0)
-                if not math.isclose(
-                    rc.prefactor, float(k_prefactor), rel_tol=1e-9, abs_tol=0.0
                 ):
-                    raise ValueError(
-                        f"reference table {path}: event {label} stores k_prefactor "
-                        f"= {float(k_prefactor)!r} ps^-1 but its nu0 = {nu0!r} Hz "
-                        f"resolves to {rc.prefactor!r} ps^-1; k, k_prefactor and "
-                        "nu0 must agree (the table was edited or corrupted)"
-                    )
-                if changed:
-                    # Computed under other kernel settings: not comparable
-                    # with anything this run computes, and not recomputable
-                    # from the stored crop. Discarded, never relabelled.
-                    n_stale += 1
-                    status, reason, nu0 = NU0_STALE, stale_reason, float("nan")
-                    rc = self.rate_constant.compute_rate(float(dE))
-                elif nu0 < nu0_min_hz or nu0 > nu0_max_hz:
-                    n_windowed += 1
-                    status = NU0_REJECTED
-                    reason = (
-                        f"out_of_window (reload): nu0 = {nu0:.4e} Hz outside "
-                        f"[{nu0_min_hz:.4e}, {nu0_max_hz:.4e}] Hz"
-                    )
-                    nu0 = float("nan")
-                    rc = self.rate_constant.compute_rate(float(dE))
-            else:
-                rc = self.rate_constant.compute_rate(float(dE))  # k0 fallback
-            statuses.append(status)
-            reasons.append(reason)
-            frequencies.append(nu0)
-            prefactors.append(rc.prefactor)
-            rates.append(rc.rate)
-        if changed:
+                    raise ValueError("accepted row differs from its producing estimate")
+        else:
+            self.prefactor_archive = PrefactorArchive()
+            if metadata:
+                self.prefactor_archive.legacy_metadata.append(metadata)
+            reason = "legacy table: missing per-calculation producing provenance"
             logger.warning(
-                "Reference table %s was saved under different HTST kernel "
-                "settings (%s): %d accepted estimate(s) discarded (nu0_status = "
-                "'stale', k_prefactor = k0 = %g ps^-1, k recomputed at T = %g K); "
-                "stale rows are never recomputed from the stored crops",
+                "Reference table %s: %s; retaining geometry with k0 fallback",
                 path,
-                "; ".join(changed),
-                n_stale,
-                k0,
-                T,
+                reason,
             )
-        if n_windowed:
-            logger.warning(
-                "Reference table %s: %d accepted estimate(s) lie outside the "
-                "current nu0 window [%.4e, %.4e] Hz and are rejected on reload "
-                "(k_prefactor = k0 = %g ps^-1)",
-                path,
-                n_windowed,
-                nu0_min_hz,
-                nu0_max_hz,
-                k0,
-            )
-        df["nu0_status"] = statuses
-        df["nu0_reason"] = reasons
-        df["nu0"] = frequencies
-        df["k_prefactor"] = prefactors
-        df["k"] = rates
+            for _, row in df.iterrows():
+                self.prefactor_archive.retain(int(row["idx_ref"]), row, reason)
+            df["nu0"] = float("nan")
+            df["nu0_status"] = NU0_LEGACY
+            df["nu0_reason"] = reason
+            df["k_prefactor"] = float(self.config.rateconstant.k0)
+        other = [name for name in df.columns if name not in REFERENCE_HTST_COLUMNS]
+        self.table = df[other + list(REFERENCE_HTST_COLUMNS)]
         self.metadata = metadata
-        self.table = df
+        self._fresh_calculations.clear()
+        self._resolved_contexts.clear()
+        self._recomputed.clear()
+        for idx_ref in self.table["idx_ref"].tolist():
+            self._ensure_current_estimate(int(idx_ref))
 
     def _changed_settings(self, stored: Any) -> list[str]:
         """Compare stored kernel settings with the current configuration.
@@ -1772,6 +1830,12 @@ class ReferenceEventTable:
             "k_prefactor_units": "ps^-1",
             "T": float(rc.T),
             "k0": float(rc.k0),
+            "context_role": "serialization_policy",
+            **(
+                {}
+                if self.prefactor_archive is None
+                else self.prefactor_archive.metadata()
+            ),
             "settings": {
                 "free_radius": numerical.get("free_radius", float(rc.free_radius)),
                 "free_region_center": numerical.get(
@@ -1852,24 +1916,30 @@ class ReferenceEventTable:
         return report
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
-        """Save the reference event table to a pickle file.
+        """Serialize producing facts and current rate-policy metadata without work.
 
-        In the htst/rpa styles the table-level metadata of
-        :meth:`table_metadata` travels inside the pickle as
-        ``DataFrame.attrs`` (pandas persists ``attrs`` through
-        ``to_pickle``/``read_pickle``; ``concat`` drops them, which is why they
-        are re-attached here at every save). Constant-mode pickles carry no
-        attrs and are byte-identical to the base.
-
-        Parameters
-        ----------
-        outfile : str, optional
-            path to the output file, by default 'reference_table.pickle'.
-
+        An attached service is not a producer of old rows. Unknown numerical
+        values are preserved only in history, never made selectable by resave.
         """
-        if self.uses_prefactors:
-            self.table.attrs = self.table_metadata()
-        self.table.to_pickle(outfile)
+        if not self.uses_prefactors:
+            self.table.to_pickle(outfile)
+            return
+        frame = self.table.copy(deep=True)
+        self._validate_stored_estimates(frame, outfile)
+        for label, row in frame.iterrows():
+            idx_ref = int(row["idx_ref"])
+            if self.prefactor_archive.calculation_for(idx_ref, row) is None:
+                reason = "legacy: missing producing calculation or row correspondence"
+                self.prefactor_archive.retain(idx_ref, row, reason)
+                if row["nu0_status"] == NU0_OK:
+                    frame.loc[label, "nu0_status"] = NU0_LEGACY
+                    frame.loc[label, "nu0_reason"] = reason
+                frame.loc[label, "nu0"] = float("nan")
+                rate = self.rate_constant.compute_rate(float(row["energy_barrier"]))
+                frame.loc[label, "k_prefactor"] = rate.prefactor
+                frame.loc[label, "k"] = rate.rate
+        frame.attrs = self.table_metadata()
+        frame.to_pickle(outfile)
 
 
 class ActiveEventTable:

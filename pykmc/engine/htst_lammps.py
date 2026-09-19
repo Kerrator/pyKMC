@@ -223,7 +223,11 @@ class LammpsHTSTExtension(EngineExtension):
             scratch.close()
 
     def compute_event_prefactors(
-        self, request: HTSTEventRequest, *, compute_backward: bool = True
+        self,
+        request: HTSTEventRequest,
+        *,
+        compute_backward: bool = True,
+        compute_energies: bool = False,
     ) -> EventPrefactors | None:
         """Compute the forward and backward Vineyard prefactors of one event.
 
@@ -267,6 +271,8 @@ class LammpsHTSTExtension(EngineExtension):
                 f"request must be an HTSTEventRequest, got {type(request).__name__}"
             )
         request.validate()
+        if not isinstance(compute_energies, bool):
+            raise HTSTRequestError("compute_energies must be a bool")
         request = replace(request, user_constraints=request.resolved_user_constraints())
         if request.descriptor is not None:
             physics = request.descriptor.engine
@@ -334,7 +340,7 @@ class LammpsHTSTExtension(EngineExtension):
         try:
             scratch.start()
             full_built = False
-            if settings.premin:
+            if settings.premin or compute_energies:
                 self._build_scratch(
                     scratch,
                     types=request.types,
@@ -349,6 +355,7 @@ class LammpsHTSTExtension(EngineExtension):
                     check_premin=settings.premin,
                 )
                 full_built = True
+            if settings.premin:
                 geometries = [
                     self._premin(scratch, geometry, relaxation_locks)
                     for geometry in geometries
@@ -372,6 +379,14 @@ class LammpsHTSTExtension(EngineExtension):
                 method="lammps_eskm",
                 free_indices=free_global,
                 zone_indices=zone,
+                energies=(
+                    tuple(
+                        scratch.get_potential_energy(positions=geometry)
+                        for geometry in geometries
+                    )
+                    if compute_energies
+                    else None
+                ),
             )
             if zone is None:
                 if not full_built:

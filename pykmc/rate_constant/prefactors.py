@@ -180,6 +180,7 @@ class PrefactorService:
         species_masses: tuple[tuple[str, ...], tuple[float, ...]] | None = None,
         engine_physics: EnginePhysics | None = None,
         global_constraints: ResolvedConstraints | None = None,
+        method: str = "lammps_eskm",
     ) -> None:
         if not rate_constant.backend.requires_event_prefactors:
             raise ValueError(
@@ -211,6 +212,9 @@ class PrefactorService:
         ):
             raise ValueError("global_constraints must be ResolvedConstraints")
         self.global_constraints = global_constraints
+        if not isinstance(method, str) or not method:
+            raise ValueError("prefactor worker method must be a nonempty string")
+        self.method = method
         self._descriptor = (
             None
             if self.species_masses is None
@@ -346,7 +350,11 @@ class PrefactorService:
         return request
 
     def compute(
-        self, requests: Sequence[HTSTEventRequest], *, compute_backward: bool = True
+        self,
+        requests: Sequence[HTSTEventRequest],
+        *,
+        compute_backward: bool = True,
+        compute_energies: bool = False,
     ) -> dict[tuple, EventPrefactors]:
         """Submit every request, wait for all of them and map results by key.
 
@@ -384,6 +392,8 @@ class PrefactorService:
             raise ValueError(
                 f"compute_backward must be a bool, got {compute_backward!r}"
             )
+        if not isinstance(compute_energies, bool):
+            raise ValueError("compute_energies must be a bool")
         # Validate the complete batch before submitting any work. Requests may
         # come from another builder; they cannot replace this run's initialized
         # fixed references with an otherwise internally consistent snapshot.
@@ -408,6 +418,7 @@ class PrefactorService:
                     PREFACTOR_OPERATION,
                     request=req,
                     compute_backward=compute_backward,
+                    **({"compute_energies": True} if compute_energies else {}),
                 )
                 pending.append((req.event_key, future))
             self.n_submitted += len(pending)
@@ -437,6 +448,157 @@ class PrefactorService:
                 f"resolved {len(results)} results for {len(requests)} requests"
             )
         return results
+
+    def request_from_snapshot(self, snapshot, *, event_key: tuple) -> HTSTEventRequest:
+        """Rebuild full saved source inputs under this run's physical authority.
+
+        Re-resolve the event AV restriction with the current radius and source
+        PBC. Initialized user identities and fixed reference positions remain
+        authoritative; a saved crop cannot supply missing source atoms.
+        """
+        from pykmc.htst.provenance import RequestSnapshot
+        from pykmc.physics import resolve_event_constraints
+
+        if not isinstance(snapshot, RequestSnapshot):
+            raise HTSTRequestError("recomputation requires a source snapshot")
+        snapshot.validate()
+        if not snapshot.is_complete:
+            raise HTSTRequestError("recomputation requires the complete source")
+        source = snapshot.to_request(event_key=event_key)
+        descriptor = self.descriptor_for(source.types)
+        ids = (
+            source.constraints.atom_ids
+            if source.constraints is not None
+            else tuple(range(len(source.types)))
+        )
+        user = self.global_constraints
+        if user is None:
+            user = source.user_constraints
+            if user is not None and user.user_policy != descriptor.constraint_policy:
+                raise HTSTRequestError(
+                    "changed user policy needs initialized authority"
+                )
+            if user is None and descriptor.constraint_policy != "null":
+                raise HTSTRequestError("constrained recomputation needs user authority")
+        control = getattr(self.config, "control", None)
+        if (
+            control is None
+            and source.constraints is not None
+            and source.constraints.rmov is not None
+        ):
+            raise HTSTRequestError(
+                "AV recomputation needs the current operation policy"
+            )
+        active = bool(getattr(control, "active_volume", False))
+        av_center = source.center_index
+        if active:
+            if source.constraints is None or source.constraints.center_id is None:
+                raise HTSTRequestError(
+                    "new AV policy needs an explicit source search center"
+                )
+            av_center = ids.index(source.constraints.center_id)
+        try:
+            constraints = resolve_event_constraints(
+                self.config,
+                source.min1_positions,
+                source.types,
+                source.cell,
+                source.pbc,
+                av_center,
+                ids,
+                user_constraints=user,
+                active_volume=active,
+            )
+        except ValueError as exc:
+            raise HTSTRequestError(str(exc)) from exc
+        request = replace(
+            source,
+            descriptor=descriptor,
+            species=descriptor.engine.species,
+            masses=descriptor.engine.masses,
+            settings=self.settings,
+            constraints=constraints,
+            user_constraints=user,
+        )
+        request.validate()
+        return request
+
+    def calculation_context_matches(
+        self, calculation, request: HTSTEventRequest
+    ) -> bool:
+        """Compare actual masks, source correspondence, method and selections.
+
+        Descriptor comparison is separate, including its non-reusable status.
+        Acceptance windows do not define a new Hessian calculation.
+        """
+        from pykmc.htst.free_region import common_free_indices, select_free_indices
+
+        provenance = calculation.provenance
+        source = provenance.source.to_request()
+        if (
+            source.types != request.types
+            or source.pbc != request.pbc
+            or source.center_index != request.center_index
+            or any(
+                not np.array_equal(getattr(source, name), getattr(request, name))
+                for name in (
+                    "min1_positions",
+                    "saddle_positions",
+                    "min2_positions",
+                    "cell",
+                )
+            )
+        ):
+            return False
+
+        def restriction(req):
+            resolved = req.constraints
+            ids = (
+                tuple(range(len(req.types))) if resolved is None else resolved.atom_ids
+            )
+            fixed = (
+                ()
+                if resolved is None
+                else tuple(sorted(zip(resolved.fixed_ids, resolved.fixed_positions)))
+            )
+            av = (
+                None
+                if resolved is None or resolved.rmov is None
+                else (resolved.center_id, resolved.center_position, resolved.rmov)
+            )
+            user = req.resolved_user_constraints()
+            authority = (
+                ()
+                if user is None
+                else tuple(sorted(zip(user.fixed_ids, user.fixed_positions)))
+            )
+            return ids, fixed, av, authority
+
+        if provenance.method != self.method or restriction(source) != restriction(
+            request
+        ):
+            return False
+        free = tuple(int(i) for i in common_free_indices(request))
+        centring = (
+            request.saddle_positions
+            if request.settings.free_region_center == "saddle"
+            else request.min1_positions
+        )
+        zone = (
+            tuple(range(len(request.types)))
+            if request.settings.zone_radius is None or self.method != "lammps_eskm"
+            else tuple(
+                int(i)
+                for i in select_free_indices(
+                    centring,
+                    request.center_index,
+                    request.settings.zone_radius,
+                    request.cell,
+                    request.pbc,
+                )
+            )
+        )
+        return free == provenance.free_indices and zone == provenance.zone_indices
 
 
 __all__ = ["PREFACTOR_OPERATION", "PrefactorService", "settings_from_config"]
