@@ -13,6 +13,7 @@ from pykmc.htst import (
     HTSTGeometryError,
     HTSTRequestError,
     HTSTSettings,
+    compute_event_prefactors,
     default_masses_for_species,
     require_orthorhombic,
 )
@@ -100,6 +101,51 @@ def test_invalid_request_raises_request_error(field: str, value: Any) -> None:
     req = make_request(**{field: value})
     with pytest.raises(HTSTRequestError):
         req.validate()
+
+
+_UNHASHABLE_KEYS = {
+    "list": ([],),
+    "dict": ({},),
+    "nested-list": ("ref", 7, [1]),
+    "nested-dict": (("ref", {"a": 1}),),
+    "ndarray": (np.zeros(3),),
+}
+_HASHABLE_KEYS = {
+    "str-int-str": ("ref", 7, "forward"),
+    "ints": (1, 2, 3),
+    "float-str-negint": (1.5, "x", -2),
+    "nested-tuples": (("ref", 7), ("site", (3.0, "b"))),
+    "singleton": ("only",),
+}
+
+
+@pytest.mark.parametrize(
+    "event_key", list(_UNHASHABLE_KEYS.values()), ids=list(_UNHASHABLE_KEYS)
+)
+def test_unhashable_event_key_is_rejected_at_validate(event_key: tuple) -> None:
+    """An unhashable tuple fails ``validate()`` before any kernel or set/dict use."""
+    req = make_request(event_key=event_key)  # construction itself does not validate
+    with pytest.raises(HTSTRequestError, match="hashable"):
+        req.validate()
+
+    def never_called(positions: np.ndarray, free_indices: np.ndarray) -> np.ndarray:
+        raise AssertionError("hessian_fn must not run for an invalid request")
+
+    with pytest.raises(HTSTRequestError, match="hashable"):
+        compute_event_prefactors(req, never_called)
+
+
+@pytest.mark.parametrize(
+    "event_key", list(_HASHABLE_KEYS.values()), ids=list(_HASHABLE_KEYS)
+)
+def test_hashable_event_keys_validate_and_hash(event_key: tuple) -> None:
+    """Tuples of str/int/float/tuples validate, hash, and are echoed unchanged."""
+    req = make_request(event_key=event_key)
+    req.validate()
+    assert req.event_key is event_key
+    assert hash(req.event_key) == hash(event_key)
+    assert {req.event_key: "v"}[event_key] == "v"
+    assert len({req.event_key, event_key}) == 1
 
 
 def test_numpy_bools_and_numpy_scalar_masses_are_accepted() -> None:

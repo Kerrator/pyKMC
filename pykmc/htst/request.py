@@ -88,7 +88,9 @@ class HTSTEventRequest:
     Attributes
     ----------
     event_key : tuple
-        Hashable logical identity supplied by the caller and echoed back unchanged.
+        Hashable tuple (of str/int/float/tuples in practice) naming the event; it
+        is used as a dict/set key by the prefactor service and the catalogue and
+        is echoed back unchanged.
     min1_positions, saddle_positions, min2_positions : np.ndarray
         ``(N, 3)`` positions of the initial minimum, saddle and final minimum.
     types : tuple of str
@@ -129,7 +131,7 @@ class HTSTEventRequest:
         ------
         HTSTRequestError
             For any shape, index, finiteness, species-membership or mass-length
-            violation.
+            violation, or an ``event_key`` that is not a hashable tuple.
         HTSTGeometryError
             When the cell is not orthorhombic.
 
@@ -138,6 +140,13 @@ class HTSTEventRequest:
             raise HTSTRequestError(
                 f"event_key must be a tuple, got {type(self.event_key).__name__}"
             )
+        try:
+            hash(self.event_key)
+        except TypeError as exc:
+            raise HTSTRequestError(
+                "event_key must be a hashable tuple (it is used as a dict/set "
+                f"key), got {self.event_key!r}: {exc}"
+            ) from exc
         if not isinstance(self.settings, HTSTSettings):
             raise HTSTRequestError(
                 f"settings must be an HTSTSettings, got {type(self.settings).__name__}"

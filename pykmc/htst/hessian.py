@@ -16,7 +16,11 @@ import numpy as np
 from .request import HTSTRequestError
 
 ForcesFn = Callable[[np.ndarray], np.ndarray]
-"""``forces_fn(positions) -> forces``: full ``(N, 3)`` Å in, full ``(N, 3)`` eV/Å out."""
+"""``forces_fn(positions) -> forces``: full ``(N, 3)`` Å in, full ``(N, 3)`` eV/Å out.
+
+The returned array may be a buffer the callable reuses on its next call (a common
+native-adapter pattern); consumers in this package copy it before calling again.
+"""
 
 HessianFn = Callable[[np.ndarray, np.ndarray], np.ndarray]
 """``hessian_fn(positions, free_indices) -> H_mw``.
@@ -65,7 +69,10 @@ def mass_weighted_partial_hessian(
     Parameters
     ----------
     forces_fn : Callable
-        Maps full ``(N, 3)`` positions to full ``(N, 3)`` forces in eV/Å.
+        Maps full ``(N, 3)`` positions to full ``(N, 3)`` forces in eV/Å. The
+        returned array may be reused by the callable on its next call; it is
+        copied here before ``forces_fn`` is evaluated again, so a callable that
+        writes into and returns one preallocated buffer is valid.
     positions : array_like
         ``(N, 3)`` reference positions in Å.
     masses_per_atom : array_like
@@ -119,8 +126,10 @@ def mass_weighted_partial_hessian(
             pos_m = pos.copy()
             pos_p[atom, comp] += dx
             pos_m[atom, comp] -= dx
-            f_p = np.asarray(forces_fn(pos_p), dtype=float)
-            f_m = np.asarray(forces_fn(pos_m), dtype=float)
+            # Copy each result: the callable may hand back one reused buffer, and
+            # the second evaluation would otherwise overwrite the first.
+            f_p = np.array(forces_fn(pos_p), dtype=float, copy=True)
+            f_m = np.array(forces_fn(pos_m), dtype=float, copy=True)
             if f_p.shape != pos.shape or f_m.shape != pos.shape:
                 raise ValueError(
                     f"forces_fn must return shape {pos.shape}, got {f_p.shape} and "
@@ -141,7 +150,9 @@ def fd_hessian_fn(
     Parameters
     ----------
     forces_fn : Callable
-        Maps full ``(N, 3)`` positions to full ``(N, 3)`` forces in eV/Å.
+        Maps full ``(N, 3)`` positions to full ``(N, 3)`` forces in eV/Å; its
+        return value may be a reused buffer (see
+        :func:`mass_weighted_partial_hessian`).
     masses_per_atom : array_like
         ``(N,)`` masses in amu.
     fd_step : float

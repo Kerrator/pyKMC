@@ -140,6 +140,62 @@ def test_fd_hessian_fn_binds_masses_and_step() -> None:
     np.testing.assert_allclose(fn(eq, free), 0.4 * np.eye(3), atol=1.0e-9)
 
 
+def test_borrowed_force_buffer_matches_fresh_output() -> None:
+    """A callable that writes into and returns one reused buffer is a valid ``forces_fn``.
+
+    One-atom harmonic spring with ``K = 2`` eV/Å² and ``m = 4`` amu, so the
+    mass-weighted Hessian is ``0.5 * I``. The kernel must copy each force result
+    before the next evaluation overwrites the borrowed buffer; otherwise ``f_p``
+    and ``f_m`` alias and the derivative collapses to zero.
+    """
+    positions = np.zeros((1, 3))
+    masses = np.array([4.0])
+    free = np.array([0])
+    expected = 0.5 * np.eye(3)
+    buffer = np.zeros_like(positions)
+
+    def fresh_forces(pos: np.ndarray) -> np.ndarray:
+        return -2.0 * pos
+
+    def borrowed_forces(pos: np.ndarray) -> np.ndarray:
+        np.multiply(pos, -2.0, out=buffer)
+        return buffer
+
+    # The oracle really borrows: every call hands back the same object.
+    assert borrowed_forces(positions + 1.0) is borrowed_forces(positions - 1.0)
+
+    fresh = mass_weighted_partial_hessian(fresh_forces, positions, masses, free, 0.01)
+    np.testing.assert_allclose(fresh, expected, atol=1.0e-12)  # positive control
+    borrowed = mass_weighted_partial_hessian(
+        borrowed_forces, positions, masses, free, 0.01
+    )
+    np.testing.assert_allclose(borrowed, expected, atol=1.0e-12)
+    np.testing.assert_allclose(borrowed, fresh, atol=1.0e-12)
+    bound = fd_hessian_fn(borrowed_forces, masses, 0.01)
+    np.testing.assert_allclose(bound(positions, free), expected, atol=1.0e-12)
+
+
+def test_borrowed_force_buffer_on_coupled_morse_trimer() -> None:
+    """Off-diagonal coupling blocks survive a reused force buffer."""
+    forces, _ = _morse_forces_and_hessian(d_e=0.7, a=1.4, r0=2.5)
+    pos = np.array([[0.0, 0.0, 0.0], [2.6, 0.3, 0.0], [1.1, 2.4, 0.2]])
+    m = np.array([1.0, 3.0, 12.0])
+    free = np.array([0, 2])
+    buffer = np.zeros_like(pos)
+
+    def borrowed(p: np.ndarray) -> np.ndarray:
+        buffer[...] = forces(p)
+        return buffer
+
+    fresh = mass_weighted_partial_hessian(forces, pos, m, free, 1.0e-3)
+    assert np.any(fresh[:3, 3:] != 0.0)  # the free pair is genuinely coupled
+    np.testing.assert_allclose(
+        mass_weighted_partial_hessian(borrowed, pos, m, free, 1.0e-3),
+        fresh,
+        atol=1.0e-12,
+    )
+
+
 def test_invalid_inputs_raise() -> None:
     """Empty selection, bad step, bad masses and wrong force shapes are plumbing errors."""
     k = np.array([1.0, 2.0])
