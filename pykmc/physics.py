@@ -19,9 +19,22 @@ import numpy as np
 
 
 def _digest(value: Any) -> str:
+    def immutable_scalar(item: Any) -> Any:
+        if isinstance(item, np.integer):
+            return int(item)
+        if isinstance(item, np.floating):
+            return float(item)
+        if isinstance(item, np.bool_):
+            return bool(item)
+        raise TypeError(f"unsupported physical identity value: {type(item).__name__}")
+
     return hashlib.sha256(
         json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            default=immutable_scalar,
         ).encode()
     ).hexdigest()
 
