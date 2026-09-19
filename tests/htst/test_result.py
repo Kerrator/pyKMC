@@ -17,13 +17,14 @@ from pykmc.htst import (
 
 
 def test_rejection_enum_has_exactly_the_contract_members() -> None:
-    """The str-Enum carries the seven scientific rejection codes and nothing else."""
+    """The str-Enum carries the scientific rejection codes and nothing else."""
     assert {m.value for m in PrefactorRejection} == {
         "empty_free_region",
         "unstable_minimum",
         "saddle_not_first_order",
         "mode_count_mismatch",
         "nonfinite_hessian",
+        "nonstationary_geometry",
         "nonfinite_prefactor",
         "out_of_window",
     }
