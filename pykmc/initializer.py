@@ -102,9 +102,9 @@ class Initializer:
             system.positions,
             system.types,
             self.kmc.config.frozen_atoms,
-            system.index,
-            cell=system.cell,
-            pbc=system.pbc,
+            getattr(system, "index", None),
+            cell=getattr(system, "cell", None),
+            pbc=getattr(system, "pbc", None),
         )
         self.kmc.manager.broadcast("start")
         self.kmc.manager.broadcast("initialize_parameters")

@@ -430,7 +430,7 @@ class ReferenceEventTable:
                     "EventSearchOutput.types is required to build the HTST request "
                     f"of reference event {fwd_id}"
                 )
-            geometry = ev.prefactor_geometry or (
+            geometry = getattr(ev, "prefactor_geometry", None) or (
                 ev.min1_positions,
                 ev.saddle_positions,
                 ev.min2_positions,
@@ -445,7 +445,7 @@ class ReferenceEventTable:
                     cell=ev.cell,
                     pbc=pbc,
                     center_index=ev.move_atom_index,
-                    constraints=ev.constraints,
+                    constraints=getattr(ev, "constraints", None),
                 )
             )
         results = self.prefactor_service.compute(requests)

@@ -348,7 +348,7 @@ class BasinsGenericEvents:
             source.pbc,
             central_atom,
             source.index,
-            user_constraints=self.global_constraints,
+            user_constraints=getattr(self, "global_constraints", None),
         )
 
         # We start from the from_state
@@ -600,7 +600,7 @@ class BasinsGenericEvents:
                     tmp_system.pbc,
                     row["central_atom"],
                     tmp_system.index,
-                    user_constraints=self.global_constraints,
+                    user_constraints=getattr(self, "global_constraints", None),
                 )
                 proposed = tmp_system.positions.copy()
                 proposed[neighbors] = saddle_positions
@@ -617,7 +617,7 @@ class BasinsGenericEvents:
                         saddle_idx=neighbors.copy(),
                         saddle_positions=saddle_positions.copy(),
                         constraints=constraints,
-                        user_constraints=self.global_constraints,
+                        user_constraints=getattr(self, "global_constraints", None),
                     )
                 # Move system do saddle positions
                 else:
@@ -631,7 +631,7 @@ class BasinsGenericEvents:
                         cell=tmp_system.cell,
                         saddle_idx=neighbors.copy(),
                         constraints=constraints,
-                        user_constraints=self.global_constraints,
+                        user_constraints=getattr(self, "global_constraints", None),
                     )  # send copy not reference !
 
                 # save future in context :
