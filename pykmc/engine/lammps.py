@@ -1129,19 +1129,25 @@ class LammpsEngine(Engine):
         A failure of the restore itself must not replace the original
         exception (the first failure is the one to report), so it is turned
         into a ``RuntimeWarning`` naming both; ``system_is_cropped`` then
-        tells the caller whether the engine is still a crop.
+        tells the caller whether the engine is still a crop. A warning filter
+        that promotes warnings to errors must also preserve the first failure.
         """
         try:
             self.ensure_full_system(positions)
         except Exception as restore_exc:  # noqa: BLE001 - secondary failure
-            warnings.warn(
+            message = (
                 f"[LammpsEngine] {op_name} raised {type(original).__name__}: "
                 f"{original}; restoring the full system afterwards failed too "
                 f"({restore_exc!r}). The original exception is raised; the "
-                "engine may still be cropped (see system_is_cropped).",
-                RuntimeWarning,
-                stacklevel=3,
+                "engine may still be cropped (see system_is_cropped)."
             )
+            try:
+                warnings.warn(message, RuntimeWarning, stacklevel=3)
+            except RuntimeWarning:
+                # Python 3.10 has no exception notes; keep its original error too.
+                add_note = getattr(BaseException, "add_note", None)
+                if add_note is not None:
+                    add_note(original, message)
 
     @lammps_error_handler
     def partn_search(
