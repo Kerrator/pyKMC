@@ -498,6 +498,7 @@ class PrefactorService:
                     "new AV policy needs an explicit source search center"
                 )
             av_center = ids.index(source.constraints.center_id)
+
         def fixed_references(resolved):
             return (
                 ()

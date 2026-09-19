@@ -1653,14 +1653,19 @@ class ReferenceEventTable:
             if status != NU0_OK:
                 continue
             value = row["nu0"]
+            if value is None:
+                raise ValueError(
+                    f"reference table {path}: accepted estimate has no nu0 value; "
+                    "its frequency in Hz is required"
+                )
             if (
-                value is None
-                or isinstance(value, (bool, np.bool_))
+                isinstance(value, (bool, np.bool_))
                 or not math.isfinite(float(value))
                 or float(value) <= 0
             ):
                 raise ValueError(
-                    f"reference table {path}: accepted estimate nu0 must be finite and positive"
+                    f"reference table {path}: accepted estimate must be a finite "
+                    "positive frequency"
                 )
             rate = self.rate_constant.compute_rate(
                 float(row["energy_barrier"]), float(value)
@@ -1669,7 +1674,9 @@ class ReferenceEventTable:
                 rate.prefactor, float(row["k_prefactor"]), rel_tol=1e-9, abs_tol=0.0
             ):
                 raise ValueError(
-                    f"reference table {path}: k_prefactor and nu0 disagree (edited or corrupted)"
+                    f"reference table {path}: k_prefactor = {float(row['k_prefactor'])!r} "
+                    f"ps^-1 but its nu0 = {float(value)!r} Hz resolves to "
+                    f"{rate.prefactor!r} ps^-1 (edited or corrupted)"
                 )
 
     def _load(self, path: str) -> None:
@@ -1686,8 +1693,10 @@ class ReferenceEventTable:
         if not self.uses_prefactors:
             if present or metadata:
                 logger.warning(
-                    "Reference table %s carries HTST data; constant style drops it and recomputes rates",
+                    "Reference table %s carries HTST data (columns: %s); "
+                    "constant style drops it and recomputes rates",
                     path,
+                    ", ".join(present) if present else "none",
                 )
                 df = df.drop(columns=present)
                 df["k"] = [
@@ -1724,9 +1733,18 @@ class ReferenceEventTable:
                 or metadata.get("k_prefactor_units") != "ps^-1"
             ):
                 raise ValueError(
-                    f"reference table {path}: expected nu0_units='Hz' and k_prefactor_units='ps^-1'"
+                    f"reference table {path}: expected nu0_units='Hz' and "
+                    "k_prefactor_units='ps^-1' (units are never inferred from magnitudes)"
                 )
             self._validate_stored_estimates(df, path)
+            if metadata.get("T") != self.config.rateconstant.T:
+                logger.info(
+                    "Reference table %s was saved at T = %s K; rates recomputed "
+                    "at T = %g K after validating current prefactors",
+                    path,
+                    metadata.get("T"),
+                    self.config.rateconstant.T,
+                )
         if complete_columns and version == TABLE_SCHEMA_VERSION:
             self.prefactor_archive = PrefactorArchive.from_metadata(metadata)
             for _, row in df.iterrows():
