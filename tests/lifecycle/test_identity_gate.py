@@ -777,3 +777,148 @@ class TestConstantModeFixedSequence:
         for idx in (3, 5):
             row = table.table[table.table["idx_ref"] == idx].iloc[0]
             assert row["nu0"] == 4.0e12 and row["nu0_reason"] == ""
+
+
+class TestSameTopologyBarriersDecide:
+    """htst/rpa: same-topology admission is decided by the barriers (contracts 7d, F3)."""
+
+    def test_unequal_barriers_admit_two_directional_rows(
+        self, htst_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """0.5 / 0.7 eV with matching topologies and crops: two rows, reciprocal links."""
+        from pykmc.event_table import SELF_REVERSE_BARRIER_TOL
+
+        assert SELF_REVERSE_BARRIER_TOL == 0.01
+        table = ReferenceEventTable(htst_config)
+        fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.7)
+        assert fwd["event_id"] == fwd["id_final"]
+        assert table._saddle_crops_match(fwd, bwd)  # crops map: still two rows
+        admission = table._admit_series(fwd, bwd).ok_value()
+        assert admission.same_topology is False
+        assert admission.self_reverse_candidate is False
+        assert admission.reverse_idx_ref is None
+        assert len(admission.frame) == 2
+        table.add(admission.frame)
+        assert _links(table) == [(0, 1), (1, 0)]
+        assert list(table.table["energy_barrier"]) == [0.5, 0.7]
+        assert list(table.table["event_id"]) == [fwd["event_id"]] * 2
+
+    def test_gap_inside_the_tolerance_is_one_row_beyond_it_two(
+        self, htst_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """A 9 meV gap (minimiser noise) is one row; an 11 meV gap is two."""
+        from pykmc.event_table import SELF_REVERSE_BARRIER_TOL
+
+        table = ReferenceEventTable(htst_config)
+        fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.509)
+        assert abs(0.509 - 0.5) < SELF_REVERSE_BARRIER_TOL
+        one = table._admit_series(fwd, bwd).ok_value()
+        assert one.same_topology is True and len(one.frame) == 1
+        fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.511)
+        assert abs(0.511 - 0.5) > SELF_REVERSE_BARRIER_TOL
+        two = table._admit_series(fwd, bwd).ok_value()
+        assert two.same_topology is False and len(two.frame) == 2
+
+    def test_unequal_barriers_get_separate_estimates_without_comparison(
+        self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
+    ) -> None:
+        """Equal prefactors on both rows never collapse them; no self-reverse note."""
+        table, fake = _table_with_service(
+            htst_config, accepted(5.0e12), accepted(5.0e12)
+        )
+        pos = np.asarray(system_single_type_fcc.positions, dtype=float)
+        event = EventSearchOutput(
+            central_atom_index=0,
+            min1_positions=pos.copy(),
+            saddle_positions=pos.copy(),
+            min2_positions=pos.copy(),
+            dE_forward=0.5,
+            dE_backward=0.7,
+            move_atom_index=0,
+            cell=np.asarray(system_single_type_fcc.cell, dtype=float),
+            types=list(system_single_type_fcc.types),
+        )
+        results = table.add_events([event], pbc=system_single_type_fcc.pbc)
+        assert results[0].is_ok()
+        assert _links(table) == [(0, 1), (1, 0)]
+        assert len(fake.prefactor_requests) == 1
+        assert fake.prefactor_requests[0].event_key == (0, 1)
+        T = htst_config.rateconstant.T
+        forward = table.table[table.table["idx_ref"] == 0].iloc[0]
+        backward = table.table[table.table["idx_ref"] == 1].iloc[0]
+        for row, dE in ((forward, 0.5), (backward, 0.7)):
+            assert row["nu0"] == 5.0e12 and row["nu0_status"] == "ok"
+            assert row["nu0_reason"] == ""
+            assert row["energy_barrier"] == dE
+            assert row["k"] == rate_from_prefactor(5.0, dE, T)
+        assert forward["k"] > backward["k"]
+        assert table.prefactor_summary()["ok"] == 2
+        assert not [r for r in htst_log_records if r.levelno >= logging.WARNING]
+        assert not [r for r in htst_log_records if "self-reverse" in r.getMessage()]
+        assert table.max_idx_ref() == 2
+
+    def test_constant_mode_still_collapses_by_topology_alone(
+        self, constant_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """The base rule is untouched: constant mode keeps one row for 0.5 / 0.7 eV."""
+        table = ReferenceEventTable(constant_config)
+        fwd, bwd = _series(table, system_single_type_fcc, 0, 0.5, 0.7)
+        admission = table._admit_series(fwd, bwd).ok_value()
+        assert admission.same_topology is True
+        assert len(admission.frame) == 1
+        table.add(admission.frame)
+        assert _links(table) == [(0, 0)]
+
+
+class TestRemoveReport:
+    """``remove`` reports the complete removed set with its topologies (contracts 7d, F4)."""
+
+    @staticmethod
+    def _catalogue(table: ReferenceEventTable, system: Any) -> None:
+        """Insert 0 <-> 1 (A, B), 2 -> 0 (C) and 9 <-> 9 (D)."""
+        for idx_ref, idx_backward, topology in (
+            (0, 1, "A"),
+            (1, 0, "B"),
+            (2, 0, "C"),
+            (9, 9, "D"),
+        ):
+            row, _ = _series(table, system, 0, 0.5, 0.5)
+            row["event_id"] = topology
+            _insert(table, row, idx_ref=idx_ref, idx_backward=idx_backward)
+
+    def test_htst_remove_reports_the_closure_and_its_topologies(
+        self, htst_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """Removing 2 removes 0 and 1 as well; the report is sorted and aligned."""
+        from pykmc.event_table import RemovedReferences
+
+        table = ReferenceEventTable(htst_config)
+        self._catalogue(table, system_single_type_fcc)
+        removed = table.remove([2])
+        assert isinstance(removed, RemovedReferences)
+        assert removed.idx_refs == (0, 1, 2)
+        assert removed.event_ids == ("A", "B", "C")
+        assert len(removed) == 3
+        assert _links(table) == [(9, 9)]
+
+    def test_remove_of_an_unknown_id_reports_nothing(
+        self, htst_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """An id without a row removes nothing and reports an empty set."""
+        table = ReferenceEventTable(htst_config)
+        self._catalogue(table, system_single_type_fcc)
+        removed = table.remove([42])
+        assert removed.idx_refs == () and removed.event_ids == ()
+        assert len(removed) == 0
+        assert len(table.table) == 4
+
+    def test_constant_remove_reports_the_base_pair(
+        self, constant_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """Constant mode reports the base pair rule (no closure)."""
+        table = ReferenceEventTable(constant_config)
+        self._catalogue(table, system_single_type_fcc)
+        removed = table.remove([0])
+        assert removed.idx_refs == (0, 1)
+        assert removed.event_ids == ("A", "B")
+        assert _links(table) == [(2, 0), (9, 9)]  # base rule leaves the alias

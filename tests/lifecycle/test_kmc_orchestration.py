@@ -31,6 +31,7 @@ from pykmc.rate_constant.prefactors import PrefactorService
 from pykmc.result import EventRefinementOutput, EventSearchOutput, Ok
 from tests.lifecycle.conftest import (
     DATA_INPUT,
+    PREFLIGHT_REPORT,
     FakeManager,
     accepted,
     event_prefactors,
@@ -317,9 +318,29 @@ class TestComposition:
             manager = FakeManager()
             kmc = KMC(config, manager=manager)
             kmc.system = system_single_type_fcc
+            assert kmc.htst_preflight is None
             Initializer(kmc).initialize_engine()
             assert [op for op, _ in manager.broadcasts] == expected
             assert [op for op, _ in manager.group_calls] == expected[:4]
+            if expected[-1] == "htst_preflight":
+                # broadcast returns nothing: the root's report comes back
+                # through the Future of the same operation (N3).
+                assert [op for op, _ in manager.submitted] == ["htst_preflight"]
+                assert kmc.htst_preflight["species"] == ("Ni",)
+                assert kmc.htst_preflight["masses"] == (58.6934,)
+            else:
+                assert manager.submitted == []
+                assert kmc.htst_preflight is None
+
+    def test_initialize_engine_refuses_a_missing_preflight_report(
+        self, htst_config: Any, system_single_type_fcc: Any
+    ) -> None:
+        """A None (non-root) or mapless report is an error, never a silent ASE map."""
+        for report in (None, {"phonon": True}, {"species": ("Ni",), "masses": ()}):
+            kmc = KMC(htst_config, manager=FakeManager(preflight_report=report))
+            kmc.system = system_single_type_fcc
+            with pytest.raises(RuntimeError, match="htst_preflight"):
+                Initializer(kmc).initialize_engine()
 
     def test_prefactor_service_built_only_for_htst(
         self, constant_config: Any, htst_config: Any
@@ -327,9 +348,13 @@ class TestComposition:
         """The service exists for htst (with Hz settings) and is None for constant."""
         kmc = KMC(htst_config, manager=FakeManager())
         kmc.loggers = _Recorder()
+        with pytest.raises(RuntimeError, match="initialize_engine"):
+            Initializer(kmc).initialize_prefactor_service()  # no preflight yet
+        kmc.htst_preflight = dict(PREFLIGHT_REPORT)
         Initializer(kmc).initialize_prefactor_service()
         assert isinstance(kmc.prefactor_service, PrefactorService)
         assert kmc.prefactor_service.settings.nu0_min_hz == 1.0e12
+        assert kmc.prefactor_service.species_masses == (("Ni",), (58.6934,))
         Initializer(kmc).initialize_reference_table()
         assert kmc.reference_table.prefactor_service is kmc.prefactor_service
 
@@ -352,11 +377,13 @@ class TestComposition:
         config = htst_config.model_copy(update={"rateconstant": rate})
         kmc = KMC(config, manager=FakeManager())
         kmc.loggers = _Recorder()
+        kmc.htst_preflight = dict(PREFLIGHT_REPORT)
         Initializer(kmc).initialize_prefactor_service()
         assert not [m for _, m in kmc.loggers.messages if "rcut" in m]
         ready = [m for _, m in kmc.loggers.messages if "prefactor service ready" in m]
         assert len(ready) == 1
         assert "centred on the saddle geometry" in ready[0]
+        assert "engine masses (amu): Ni=58.6934" in ready[0]
 
 
 class TestExitStatus:
@@ -639,6 +666,18 @@ class TestSeed:
         assert ("log", "\t :=> 39 new atomic environments found") in (
             kmc.loggers.messages
         )
+
+    def test_atomic_environment_returns_new_ids_sorted(self) -> None:
+        """``AtomicEnvironment.get_new_environments`` itself sorts (contract 7c)."""
+        from pykmc.atomic_environment import AtomicEnvironment
+
+        ids = [f"env-{i:02d}-{'y' * (i % 5)}" for i in range(40)]
+        ae = AtomicEnvironment.__new__(AtomicEnvironment)
+        ae.atomic_environment_list = [ids[(7 * i) % 40] for i in range(200)] + ["cr"]
+        new = ae.get_new_environments({"cr", ids[3], ids[17]})
+        assert isinstance(new, list)
+        assert new == sorted(set(ids) - {ids[3], ids[17]}) and len(new) == 38
+        assert ae.get_new_environments(set(ids) | {"cr"}) == []
 
     def test_seed_reproduces_the_selection_across_hash_seeds(self) -> None:
         """Interpreters with different ``PYTHONHASHSEED`` pick the same atoms.
@@ -995,12 +1034,50 @@ class TestStepOrdering:
         assert manager.prefactor_backward_flags == [False, False]
         summary_lines = [m for n, m in log.messages if "site attempts this step=2" in m]
         assert len(summary_lines) == 1
-        assert "(ok=2, rejected=0)" in summary_lines[0]
+        assert "(ok=2, rejected=0, no_geometry=0)" in summary_lines[0]
+        assert "pending=0 stale=0;" in summary_lines[0]
         assert "hessian requests this step=2" in summary_lines[0]
         assert "prefactor wall=" in summary_lines[0] and summary_lines[0].endswith(" s")
         assert log.step_lines[0]["k"] in (
             rate_from_prefactor(6.0, 0.5, config.rateconstant.T),
             rate_from_prefactor(6.0, 0.7, config.rateconstant.T),
+        )
+
+    def test_crop_only_refined_rows_are_counted_as_no_geometry(
+        self,
+        system_single_type_fcc: Any,
+        fcc_neighbors: NeighborsList,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A refined row without its full saddle keeps its estimate; the step says so (F1)."""
+        config = _step_config("htst", k0=1.0)
+        manager = FakeManager(
+            lambda req: event_prefactors(req.event_key, accepted(6e12), accepted(6e12))
+        )
+        crop_only = _refined(
+            system_single_type_fcc,
+            fcc_neighbors,
+            0,
+            0.5,
+            refined="T",
+            nu0_hz=5e12,
+            nu0_status="ok",
+        )
+        crop_only.full_saddle_positions = None
+        sim, log, _ = _run_one_step(
+            config, system_single_type_fcc, manager, [crop_only], monkeypatch, tmp_path
+        )
+        assert manager.prefactor_requests == []
+        summary_lines = [m for n, m in log.messages if "HTST prefactors:" in m]
+        assert len(summary_lines) == 1
+        assert (
+            "site attempts this step=1 (ok=0, rejected=0, no_geometry=1)"
+            in (summary_lines[0])
+        )
+        assert "active sources reference=1 site=0 k0=0" in summary_lines[0]
+        assert log.step_lines[0]["k"] == rate_from_prefactor(
+            5.0, 0.5, config.rateconstant.T
         )
 
 

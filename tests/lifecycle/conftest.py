@@ -8,11 +8,13 @@ The doubles here stand in for the frozen cross-slice contracts:
   ``EventPrefactors`` a ``compute_event_prefactors`` worker operation returns;
 * :class:`FakeManager` mimics the slice of ``pykmc.manager.Manager`` the
   lifecycle code uses (``submit`` returning a ``Future`` and ``broadcast``),
-  resolving each request through a caller-supplied responder.
+  resolving each request through a caller-supplied responder and answering
+  a request-less ``submit("htst_preflight")`` with a canned report.
 """
 
 from __future__ import annotations
 
+import copy
 import threading
 from concurrent.futures import Future
 from typing import Any, Callable
@@ -28,6 +30,18 @@ from pykmc.htst.result import (
 from pykmc.htst.settings import HTSTSettings
 
 DATA_INPUT = "./tests/data/input.in"
+
+PREFLIGHT_REPORT: dict[str, Any] = {
+    "phonon": True,
+    "lammps_version": 0,
+    "pair_style": "fake",
+    "species": ("Ni",),
+    "masses": (58.6934,),
+}
+"""Default ``htst_preflight`` report of :class:`FakeManager` (the Ni test crystal)."""
+
+_DEFAULT_PREFLIGHT = object()
+"""Sentinel: ``FakeManager`` was built without an explicit preflight report."""
 
 
 def accepted(nu0_hz: float) -> DirectionalPrefactor:
@@ -87,6 +101,10 @@ class FakeManager:
         completion.
     expected : int
         Number of submissions the ``"reverse"`` mode waits for.
+    preflight_report : Any
+        What ``submit("htst_preflight").result()`` returns (a deep copy);
+        defaults to :data:`PREFLIGHT_REPORT`. Pass ``None`` explicitly to
+        mimic a non-root reply.
 
     """
 
@@ -95,8 +113,14 @@ class FakeManager:
         responder: Callable[[Any], Any] | None = None,
         completion: str = "immediate",
         expected: int = 0,
+        preflight_report: Any = _DEFAULT_PREFLIGHT,
     ) -> None:
         self.responder = responder
+        self.preflight_report = (
+            dict(PREFLIGHT_REPORT)
+            if preflight_report is _DEFAULT_PREFLIGHT
+            else preflight_report
+        )
         self.completion = completion
         self.expected = expected
         self.submitted: list[tuple[str, dict[str, Any]]] = []
@@ -121,6 +145,9 @@ class FakeManager:
         """Queue ``op_name`` and return its Future."""
         self.submitted.append((op_name, kwargs))
         future: Future = Future()
+        if op_name == "htst_preflight":
+            future.set_result(copy.deepcopy(self.preflight_report))
+            return future
         request = kwargs.get("request")
         if self.completion == "immediate":
             self._resolve(future, request)

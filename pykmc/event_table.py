@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -95,9 +96,35 @@ NU0_OK: str = "ok"
 NU0_REJECTED: str = "rejected"
 NU0_PENDING: str = "pending"
 NU0_LEGACY: str = "legacy"
-NU0_STATUSES: tuple[str, ...] = (NU0_OK, NU0_REJECTED, NU0_PENDING, NU0_LEGACY)
+NU0_STALE: str = "stale"
+NU0_STATUSES: tuple[str, ...] = (
+    NU0_OK,
+    NU0_REJECTED,
+    NU0_PENDING,
+    NU0_LEGACY,
+    NU0_STALE,
+)
 """``nu0_status`` values: accepted estimate, scientific rejection (``k0``),
-not yet resolved (``k0`` placeholder), loaded without provenance (``k0``)."""
+not yet resolved (``k0`` placeholder), loaded without provenance (``k0``),
+loaded under different kernel settings (``k0``; the stored estimate is
+discarded on reload, see :meth:`ReferenceEventTable._load`). Every consumer
+treats ``stale`` exactly like ``legacy``: there is no estimate to inherit."""
+
+RELOAD_SETTINGS: tuple[str, ...] = (
+    "free_radius",
+    "free_region_center",
+    "fd_step",
+    "zone_radius",
+    "premin",
+)
+"""Kernel settings compared on reload (contracts section 7d, F2).
+
+A stored table whose ``settings`` differ from the current configuration in any
+of these invalidates every accepted row (``stale``). The acceptance window is
+not a compatibility setting: it is re-applied to every accepted row on reload
+instead. A stored table written before ``free_region_center`` existed counts
+as ``"min1"`` (the centring of that era).
+"""
 
 SOURCE_REFERENCE: str = "reference"
 SOURCE_SITE: str = "site"
@@ -108,22 +135,44 @@ site-specific estimate at the refined saddle, or the ``k0`` fallback."""
 SELF_REVERSE_NU0_RTOL: float = 0.05
 """Relative tolerance under which two directional Vineyard prefactors count as equal.
 
-Used only by the htst/rpa directional identity gate: a self-reverse candidate
-(endpoint topologies match and the saddle crops map onto each other, the IRA
-check) is always one self-linked catalogue row carrying the forward estimate.
-When both directional prefactors were accepted and agree within this
-tolerance the row's ``nu0_reason`` stays empty; otherwise the backward value
-and the relative difference are recorded in ``nu0_reason`` and logged as a
-warning (no averaging, never a second row). For a genuinely self-reverse event
-the two minimum Hessians are related by the symmetry that maps min1 onto min2,
-so their spectra differ only by finite-difference and relaxation noise (well
+Used only by the htst/rpa directional identity gate, and only after the
+barriers have decided that a same-topology search is one self-reverse row
+(:data:`SELF_REVERSE_BARRIER_TOL`): when the saddle crops of that row also map
+onto each other (the IRA check) the row is a self-reverse candidate whose
+backward prefactor is compared with the forward one. When both directional
+prefactors were accepted and agree within this tolerance the row's
+``nu0_reason`` stays empty; otherwise the backward value and the relative
+difference are recorded in ``nu0_reason`` and logged as a warning (no
+averaging, never a second row). For a genuinely self-reverse event the two
+minimum Hessians are related by the symmetry that maps min1 onto min2, so
+their spectra differ only by finite-difference and relaxation noise (well
 below one percent); 5 % leaves room for that noise while flagging physically
-distinct spectra. The value is a documented constant, not a validated
-calibration.
+distinct spectra. Prefactor agreement never decides identity: it is a
+consistency check on a row whose identity the barriers established. The value
+is a documented constant, not a validated calibration.
+"""
+
+SELF_REVERSE_BARRIER_TOL: float = 0.01
+"""Barrier gap (eV) within which a same-topology search is one self-reverse row.
+
+htst/rpa admission of a search whose endpoint topologies match (``event_id ==
+id_final``) is decided by the barriers, never by the prefactors (contracts
+section 7d, F3): forward and backward barriers equal within this tolerance
+mean equal minimum energies, hence symmetry-equivalent minima, and the search
+is one self-linked row as in constant mode; a larger gap means two physically
+distinct minima of the same topology, and the search is two directional rows
+with reciprocal links and separate estimates. The value is a
+numerical-equality tolerance for minimiser noise on the two minimum energies,
+not a physical window.
 """
 
 SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
-"""Barrier gap (eV) below which same-topology directions may be the same event."""
+"""Barrier gap (eV) below which the IRA saddle-crop pre-check is attempted.
+
+Kept as the pre-check of :meth:`ReferenceEventTable._saddle_crops_match`; the
+identity of a same-topology search is decided by
+:data:`SELF_REVERSE_BARRIER_TOL`, which is far tighter.
+"""
 
 
 @dataclass(frozen=True)
@@ -140,9 +189,12 @@ class EventAdmission:
         forward row must link to; ``None`` when the frame carries its own
         reverse or the row is its own reverse.
     same_topology : bool
-        The endpoint topologies match (``event_id == id_final``): the frame is
-        one self-linked row in every style, so two rows sharing one
-        ``event_id`` are never created.
+        The frame is one self-linked row because the endpoint topologies
+        match (``event_id == id_final``) and, in htst/rpa, the two barriers
+        are equal within :data:`SELF_REVERSE_BARRIER_TOL` (constant mode
+        needs only the topology match). A same-topology search whose barriers
+        differ by more is admitted as two directional rows and carries
+        ``same_topology=False``: it is not a self-reverse event.
     self_reverse_candidate : bool
         htst/rpa only: ``same_topology`` and the saddle crops map onto each
         other (the IRA check). The backward prefactor of the search is then
@@ -155,6 +207,31 @@ class EventAdmission:
     reverse_idx_ref: int | None = None
     same_topology: bool = False
     self_reverse_candidate: bool = False
+
+
+@dataclass(frozen=True)
+class RemovedReferences:
+    """What :meth:`ReferenceEventTable.remove` took out of the catalogue.
+
+    Attributes
+    ----------
+    idx_refs : tuple[int, ...]
+        Every logical id that left the table, sorted ascending: the requested
+        ids, the rows their ``idx_backward`` named and, in htst/rpa, the
+        reverse-link closure. A requested id that had no row is not reported.
+    event_ids : tuple[str, ...]
+        ``event_id`` (initial topology) of each removed row, aligned with
+        ``idx_refs``; ``KMC.run`` forgets these topologies in
+        ``visited_environments``.
+
+    """
+
+    idx_refs: tuple[int, ...] = ()
+    event_ids: tuple[str, ...] = ()
+
+    def __len__(self) -> int:
+        """Return the number of removed rows."""
+        return len(self.idx_refs)
 
 
 def self_reverse_prefactors_agree(
@@ -774,14 +851,20 @@ class ReferenceEventTable:
 
         - a backward direction already in the catalogue links the forward row
           to that logical id instead of self-linking it;
-        - equal endpoint topologies are one self-linked row, as in constant
-          mode (two rows sharing one ``event_id`` would be applied twice per
-          site and break the basin explorer); when the saddle crops also map
-          onto each other (the IRA check, within
-          :data:`SAME_TOPOLOGY_BARRIER_TOL`) the row is a self-reverse
-          candidate whose backward prefactor is compared with the forward one
-          after resolution (:meth:`_record_self_reverse`), otherwise the
-          backward estimate is discarded.
+        - equal endpoint topologies whose barriers agree within
+          :data:`SELF_REVERSE_BARRIER_TOL` (equal minimum energies, hence
+          symmetry-equivalent minima) are one self-linked row, as in constant
+          mode; when the saddle crops also map onto each other (the IRA
+          check) the row is a self-reverse candidate whose backward prefactor
+          is compared with the forward one after resolution
+          (:meth:`_record_self_reverse`), otherwise the backward estimate is
+          discarded with a note (an IRA mismatch between symmetry-equivalent
+          minima is a matcher limitation, not a second event);
+        - equal endpoint topologies whose barriers differ by more are two
+          physically distinct minima: two directional rows with reciprocal
+          links and separate estimates (``same_topology=False``, no
+          candidate, no comparison). Equal prefactors never decide identity
+          (contracts section 7d, F3).
 
         Parameters
         ----------
@@ -810,7 +893,11 @@ class ReferenceEventTable:
             # Constant mode: unchanged base behaviour.
             if same_topology:
                 # We are sure that the backward reaction same as forward
-                return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
+                return Ok(
+                    EventAdmission(
+                        frame=dfevent_forward.to_frame().T, same_topology=True
+                    )
+                )
             if self.is_new_event(dfevent=dfevent_backward):
                 return Ok(
                     EventAdmission(
@@ -830,15 +917,22 @@ class ReferenceEventTable:
                 )
             )
         if same_topology:
-            return Ok(
-                EventAdmission(
-                    frame=dfevent_forward.to_frame().T,
-                    same_topology=True,
-                    self_reverse_candidate=self._saddle_crops_match(
-                        dfevent_forward, dfevent_backward
-                    ),
-                )
+            gap = abs(
+                float(dfevent_forward["energy_barrier"])
+                - float(dfevent_backward["energy_barrier"])
             )
+            if gap <= SELF_REVERSE_BARRIER_TOL:
+                return Ok(
+                    EventAdmission(
+                        frame=dfevent_forward.to_frame().T,
+                        same_topology=True,
+                        self_reverse_candidate=self._saddle_crops_match(
+                            dfevent_forward, dfevent_backward
+                        ),
+                    )
+                )
+            # Same topology, different minimum energies: two distinct minima
+            # of one topology, catalogued as two directional rows.
         return Ok(
             EventAdmission(frame=self._two_rows(dfevent_forward, dfevent_backward))
         )
@@ -1331,6 +1425,20 @@ class ReferenceEventTable:
         ignored and a row whose ``k_prefactor`` disagrees with its ``nu0`` is
         refused.
 
+        Compatibility policy (contracts section 7d, F2): the stored kernel
+        ``settings`` (:data:`RELOAD_SETTINGS`) are compared with the current
+        configuration; any difference invalidates every accepted row
+        (``nu0_status = "stale"``, ``nu0 = NaN``, ``nu0_reason`` naming every
+        changed setting, ``k_prefactor = k0``, ``k`` recomputed) with one
+        warning. Independently, the current inclusive acceptance window is
+        re-applied to every accepted row: a stored ``nu0`` outside
+        ``[nu0_min_hz, nu0_max_hz]`` becomes ``rejected`` with an
+        ``out_of_window (reload)`` reason and the ``k0`` fallback, with one
+        warning. A same-settings reload is unchanged. Stale and rejected rows
+        are never recomputed (a stored crop is not a full geometry), and
+        :meth:`save` keeps writing the current settings, which is truthful
+        because no retained numeric ``nu0`` was computed under other settings.
+
         Parameters
         ----------
         path : str
@@ -1437,12 +1545,23 @@ class ReferenceEventTable:
                 metadata.get("k0"),
                 k0,
             )
+        changed = self._changed_settings(metadata.get("settings"))
+        settings = self.table_metadata()["settings"]
+        nu0_min_hz = float(settings["nu0_min_hz"])
+        nu0_max_hz = float(settings["nu0_max_hz"])
+        stale_reason = "stale: " + "; ".join(changed) + "; estimate discarded"
         labels = df["idx_ref"] if "idx_ref" in df.columns else df.index
-        prefactors = []
-        rates = []
-        for label, status, k_prefactor, nu0, dE in zip(
+        statuses: list[str] = []
+        reasons: list[str] = []
+        frequencies: list[float] = []
+        prefactors: list[float] = []
+        rates: list[float] = []
+        n_stale = 0
+        n_windowed = 0
+        for label, status, reason, k_prefactor, nu0, dE in zip(
             labels,
             df["nu0_status"],
+            df["nu0_reason"],
             df["k_prefactor"],
             df["nu0"],
             df["energy_barrier"],
@@ -1480,14 +1599,126 @@ class ReferenceEventTable:
                         f"resolves to {rc.prefactor!r} ps^-1; k, k_prefactor and "
                         "nu0 must agree (the table was edited or corrupted)"
                     )
+                if changed:
+                    # Computed under other kernel settings: not comparable
+                    # with anything this run computes, and not recomputable
+                    # from the stored crop. Discarded, never relabelled.
+                    n_stale += 1
+                    status, reason, nu0 = NU0_STALE, stale_reason, float("nan")
+                    rc = self.rate_constant.compute_rate(float(dE))
+                elif nu0 < nu0_min_hz or nu0 > nu0_max_hz:
+                    n_windowed += 1
+                    status = NU0_REJECTED
+                    reason = (
+                        f"out_of_window (reload): nu0 = {nu0:.4e} Hz outside "
+                        f"[{nu0_min_hz:.4e}, {nu0_max_hz:.4e}] Hz"
+                    )
+                    nu0 = float("nan")
+                    rc = self.rate_constant.compute_rate(float(dE))
             else:
                 rc = self.rate_constant.compute_rate(float(dE))  # k0 fallback
+            statuses.append(status)
+            reasons.append(reason)
+            frequencies.append(nu0)
             prefactors.append(rc.prefactor)
             rates.append(rc.rate)
+        if changed:
+            logger.warning(
+                "Reference table %s was saved under different HTST kernel "
+                "settings (%s): %d accepted estimate(s) discarded (nu0_status = "
+                "'stale', k_prefactor = k0 = %g ps^-1, k recomputed at T = %g K); "
+                "stale rows are never recomputed from the stored crops",
+                path,
+                "; ".join(changed),
+                n_stale,
+                k0,
+                T,
+            )
+        if n_windowed:
+            logger.warning(
+                "Reference table %s: %d accepted estimate(s) lie outside the "
+                "current nu0 window [%.4e, %.4e] Hz and are rejected on reload "
+                "(k_prefactor = k0 = %g ps^-1)",
+                path,
+                n_windowed,
+                nu0_min_hz,
+                nu0_max_hz,
+                k0,
+            )
+        df["nu0_status"] = statuses
+        df["nu0_reason"] = reasons
+        df["nu0"] = frequencies
         df["k_prefactor"] = prefactors
         df["k"] = rates
         self.metadata = metadata
         self.table = df
+
+    def _changed_settings(self, stored: Any) -> list[str]:
+        """Compare stored kernel settings with the current configuration.
+
+        Parameters
+        ----------
+        stored : Any
+            The ``settings`` entry of a loaded table's metadata (a dict, or
+            anything else for a table without one).
+
+        Returns
+        -------
+        list[str]
+            One ``"<name> changed on reload (stored X, current Y)"`` entry per
+            setting of :data:`RELOAD_SETTINGS` that differs, in that order;
+            empty when the table is compatible. A missing
+            ``free_region_center`` counts as ``"min1"`` (tables written before
+            the saddle-centred default); any other missing setting counts as
+            changed (unknown provenance is never treated as compatible).
+
+        """
+        stored = dict(stored) if isinstance(stored, dict) else {}
+        current = self.table_metadata()["settings"]
+        changed: list[str] = []
+        for name in RELOAD_SETTINGS:
+            now = current[name]
+            if name in stored:
+                was = stored[name]
+            elif name == "free_region_center":
+                was = "min1"
+            else:
+                changed.append(
+                    f"{name} changed on reload (stored absent, current {now})"
+                )
+                continue
+            if not self._same_setting(was, now):
+                changed.append(
+                    f"{name} changed on reload (stored {was}, current {now})"
+                )
+        return changed
+
+    @staticmethod
+    def _same_setting(was: Any, now: Any) -> bool:
+        """Return True when a stored setting equals the current one.
+
+        Parameters
+        ----------
+        was : Any
+            The stored value.
+        now : Any
+            The current value.
+
+        Returns
+        -------
+        bool
+            Booleans compare as booleans, ``None`` only equals ``None``,
+            numbers compare within ``1e-12`` relative, everything else by
+            string.
+
+        """
+        if isinstance(was, bool) or isinstance(now, bool):
+            return isinstance(was, bool) and isinstance(now, bool) and was == now
+        if was is None or now is None:
+            return was is None and now is None
+        if isinstance(was, (int, float)) and isinstance(now, (int, float)):
+            return math.isclose(float(was), float(now), rel_tol=1e-12, abs_tol=0.0)
+        return str(was) == str(now)
 
     def table_metadata(self) -> dict[str, Any]:
         """Return the table-level HTST metadata persisted with the pickle.
@@ -1521,8 +1752,8 @@ class ReferenceEventTable:
             },
         }
 
-    def remove(self, idx_refs: list[int]) -> None:
-        """Remove events with ind == idx_ref as well as its backward event
+    def remove(self, idx_refs: list[int]) -> RemovedReferences:
+        """Remove events with ind == idx_ref as well as its backward event.
 
         Constant mode: exactly the base rule (the event and the row its
         ``idx_backward`` names; links are reciprocal or self there).
@@ -1539,8 +1770,17 @@ class ReferenceEventTable:
         ----------
         idx_refs : list[int]
             logical ids of the events to be removed
-        """
 
+        Returns
+        -------
+        RemovedReferences
+            The complete set of removed logical ids (sorted) with their
+            ``event_id``; ``KMC.reconstruction`` hands it to
+            :meth:`ActiveEventTable.drop_reference_events` so no active row
+            ever references a removed catalogue entry (contracts section 7d,
+            F4).
+
+        """
         idx_refs = set(idx_refs)  # make a set if there are doublons
 
         backward_refs = set(
@@ -1565,9 +1805,18 @@ class ReferenceEventTable:
                     break
                 all_refs = all_refs | dangling
 
-        self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
+        removed_mask = self.table["idx_ref"].isin(all_refs)
+        removed = self.table.loc[removed_mask]
+        ids = removed["idx_ref"].astype(int).to_numpy()
+        order = np.argsort(ids, kind="stable")
+        report = RemovedReferences(
+            idx_refs=tuple(int(i) for i in ids[order]),
+            event_ids=tuple(str(e) for e in removed["event_id"].to_numpy()[order]),
+        )
+        self.table = self.table[~removed_mask].reset_index(
             drop=True
         )  # keep event not (~) in all refs
+        return report
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
@@ -1628,9 +1877,14 @@ class ActiveEventTable:
     direction is computed). That array is kept in a transient side store keyed
     by row label, never in the DataFrame, and released as soon as the site
     batch has been submitted; every table mutation that relabels rows
-    (:meth:`remove`, :meth:`prune_for_recycling`) keeps the store consistent,
-    and the request path checks the stored crop against the full saddle before
-    submitting anything.
+    (:meth:`remove`, :meth:`drop_reference_events`,
+    :meth:`prune_for_recycling`) keeps the store consistent, and the request
+    path checks the stored crop against the full saddle before submitting
+    anything. A refined row whose producer handed over no full saddle (a
+    crop-only output) is not an error: it keeps its inherited estimate, is
+    marked attempted and is counted as ``no_geometry`` (contracts section 7d,
+    F1); no request is ever built from an ``rcut`` crop pasted into the
+    minimum.
 
     """
 
@@ -1736,6 +1990,40 @@ class ActiveEventTable:
                 system,
                 positions_pre,
             )
+
+    def drop_reference_events(self, removed: Iterable[int]) -> int:
+        """Drop every row whose ``num_reference_event`` left the catalogue.
+
+        Recycled rows are dropped too: a row is only as valid as its
+        reference. The surviving rows are relabelled ``0..n-1`` through
+        :meth:`remove`, so the transient full-saddle store follows them.
+
+        Parameters
+        ----------
+        removed : Iterable[int]
+            Logical ids removed from the reference table
+            (``RemovedReferences.idx_refs``).
+
+        Returns
+        -------
+        int
+            Number of rows dropped (logged when non-zero).
+
+        """
+        removed_ids = {int(i) for i in removed}
+        if not removed_ids or len(self.table) == 0:
+            return 0
+        mask = self.table["num_reference_event"].astype(int).isin(removed_ids)
+        labels = [int(label) for label in self.table.index[mask]]
+        if labels:
+            self.remove(labels)
+            logger.info(
+                "active table: dropped %d row(s) whose reference event was "
+                "removed (%s)",
+                len(labels),
+                sorted(removed_ids),
+            )
+        return len(labels)
 
     def existing_pairs(self) -> set[tuple[int, int]]:
         """Return `(atom_index, num_reference_event)` tuples already in the table.
@@ -1945,23 +2233,32 @@ class ActiveEventTable:
         neighbors_list : NeighborsList
             The neighbour list refinement cropped with.
 
+        Crop-only rows (contracts section 7d, F1): an eligible row whose
+        producer handed over no full refined saddle keeps its inherited
+        estimate untouched (``nu0``, ``nu0_status``, ``nu0_source``, ``k``,
+        ``k_prefactor``), is marked ``nu0_site_attempted`` so it is never
+        re-attempted, is counted under ``no_geometry`` and logged once at
+        info level; nothing is submitted for it. Only a crop that is present
+        but inconsistent with the full saddle is an error.
+
         Returns
         -------
         dict[str, int]
-            ``{"attempted", "ok", "rejected"}`` counts for this call (all zero
-            in constant mode or when nothing was eligible).
+            ``{"attempted", "ok", "rejected", "no_geometry"}`` counts for this
+            call (all zero in constant mode or when nothing was eligible);
+            ``attempted == ok + rejected + no_geometry``.
 
         Raises
         ------
         RuntimeError
-            If a row is eligible but no prefactor service is attached, if an
-            eligible row has no full refined saddle, or if a row's crop does
-            not match the full saddle at the current neighbour mapping.
+            If a row is eligible but no prefactor service is attached, or if a
+            row's crop does not match the full saddle at the current neighbour
+            mapping.
         ValueError
             If the table (a caller-supplied frame) lacks the HTST columns.
 
         """
-        summary = {"attempted": 0, "ok": 0, "rejected": 0}
+        summary = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
         if not self.uses_prefactors or len(self.table) == 0:
             return summary
         self._require_htst_columns("request_site_prefactors")
@@ -1980,6 +2277,7 @@ class ActiveEventTable:
         positions = np.asarray(system.positions, dtype=float)
         requests = []
         keys: list[tuple[Any, tuple]] = []
+        no_geometry: list[Any] = []
         try:
             for idx, row in rows.iterrows():
                 atom = int(row["atom_index"])
@@ -1996,13 +2294,10 @@ class ActiveEventTable:
                     )
                 full_saddle = self._full_saddles.get(int(idx))
                 if full_saddle is None:
-                    raise RuntimeError(
-                        f"active row {idx} (atom {atom}): refined row without its "
-                        "full refined saddle; site requests are built from "
-                        "EventRefinementOutput.full_saddle_positions, which "
-                        "Refinement.execute sets on refined outputs in the htst/rpa "
-                        "styles"
-                    )
+                    # Crop-only output: no stationary geometry to request a
+                    # site Hessian from. The inherited estimate stands.
+                    no_geometry.append(idx)
+                    continue
                 if full_saddle.shape != positions.shape or not np.array_equal(
                     full_saddle[neighbors], saddle_crop
                 ):
@@ -2032,6 +2327,18 @@ class ActiveEventTable:
             # a row is attempted at most once.
             self._full_saddles = {}
         wall = self.prefactor_service.last_batch_wall_s
+        for idx in no_geometry:
+            self.table.loc[idx, "nu0_site_attempted"] = True
+            summary["attempted"] += 1
+            summary["no_geometry"] += 1
+            logger.info(
+                "[htst] active event (atom %d, reference %d): no full refined "
+                "saddle available (crop-only refinement output); keeping the "
+                "inherited %s estimate, no site request submitted",
+                int(self.table.loc[idx, "atom_index"]),
+                int(self.table.loc[idx, "num_reference_event"]),
+                self.table.loc[idx, "nu0_source"],
+            )
         for idx, key in keys:
             pre = results[key]
             estimate = pre.forward

@@ -429,3 +429,272 @@ class TestSaveIsResilientToConcat:
         assert np.array_equal(
             pd.read_pickle(first)["idx_ref"].to_numpy(), np.array([0], dtype=object)
         )
+
+
+@pytest.fixture
+def log_records() -> Any:
+    """Collect every record the catalogue writes to the ``log`` logger."""
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Collect(level=logging.DEBUG)
+    logger = logging.getLogger("log")
+    previous = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+
+
+def _warnings(records: list[logging.LogRecord]) -> list[str]:
+    return [r.getMessage() for r in records if r.levelno == logging.WARNING]
+
+
+class TestReloadCompatibility:
+    """Contracts section 7d, F2: changed settings invalidate, the window re-applies."""
+
+    @staticmethod
+    def _saved(
+        config: Config, system: Any, tmp_path: Path, nu0: float = 5.0e12
+    ) -> Path:
+        """Save one accepted (id 12) and one rejected (id 3) row under ``config``."""
+        table = ReferenceEventTable(config)
+        _populate(table, system, [12, 3])
+        table._patch_row(12, accepted(nu0))
+        table._patch_row(3, rejected("unstable"))
+        out = tmp_path / "reference_table.pickle"
+        table.save(str(out))
+        return out
+
+    @staticmethod
+    def _row(table: ReferenceEventTable, idx_ref: int) -> Any:
+        return table.table[table.table["idx_ref"] == idx_ref].iloc[0]
+
+    def test_changed_free_region_center_marks_accepted_rows_stale(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """Stored saddle-centred, loaded min1: the accepted row is stale on k0."""
+        saved = self._saved(
+            _config("htst", k0=2.0, T=300.0, free_region_center="saddle"),
+            system_single_type_fcc,
+            tmp_path,
+        )
+        loaded = ReferenceEventTable(
+            _config("htst", str(saved), k0=2.0, T=300.0, free_region_center="min1")
+        )
+        stale = self._row(loaded, 12)
+        assert stale["nu0_status"] == "stale"
+        assert math.isnan(stale["nu0"])
+        assert stale["nu0_reason"] == (
+            "stale: free_region_center changed on reload (stored saddle, current "
+            "min1); estimate discarded"
+        )
+        assert stale["k_prefactor"] == 2.0
+        assert stale["k"] == rate_from_prefactor(
+            2.0, float(stale["energy_barrier"]), 300.0
+        )
+        rej = self._row(loaded, 3)
+        assert rej["nu0_status"] == "rejected"
+        assert rej["nu0_reason"] == "out_of_window: unstable"
+        assert loaded.prefactor_summary() == {
+            "ok": 0,
+            "rejected": 1,
+            "pending": 0,
+            "legacy": 0,
+            "stale": 1,
+        }
+        assert loaded.reference_estimate(12) == {
+            "nu0_hz": None,
+            "nu0_status": "stale",
+            "nu0_reason": stale["nu0_reason"],
+            "nu0_source": "reference",
+        }
+        warnings = _warnings(log_records)
+        assert len(warnings) == 1
+        assert (
+            "free_region_center changed on reload (stored saddle, current min1)"
+            in (warnings[0])
+        )
+        assert "1 accepted estimate(s) discarded" in warnings[0]
+        # Saving writes the current settings (no retained nu0 was computed
+        # under the old ones); a reload under the stored settings does not
+        # resurrect the discarded estimate.
+        resaved = tmp_path / "resaved.pickle"
+        loaded.save(str(resaved))
+        raw = pd.read_pickle(resaved)
+        assert raw.attrs["settings"]["free_region_center"] == "min1"
+        assert list(raw["nu0_status"]) == ["stale", "rejected"]
+        assert not pd.to_numeric(raw["nu0"], errors="coerce").notna().any()
+        again = ReferenceEventTable(
+            _config("htst", str(resaved), k0=2.0, T=300.0, free_region_center="min1")
+        )
+        assert list(again.table["nu0_status"]) == ["stale", "rejected"]
+        assert len(_warnings(log_records)) == 1  # same settings: no new warning
+
+    def test_pre_7c_table_without_the_centring_key_counts_as_min1(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """A stored table without ``free_region_center`` was min1-centred."""
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, free_region_center="min1"),
+            system_single_type_fcc,
+            tmp_path,
+        )
+        raw = pd.read_pickle(saved)
+        del raw.attrs["settings"]["free_region_center"]
+        pre_7c = tmp_path / "pre_7c.pickle"
+        raw.to_pickle(pre_7c)
+        assert "free_region_center" not in pd.read_pickle(pre_7c).attrs["settings"]
+
+        # Loaded under today's default (saddle): stale.
+        under_default = ReferenceEventTable(
+            _config("htst", str(pre_7c), k0=1.0, T=300.0)
+        )
+        assert under_default.config.rateconstant.free_region_center == "saddle"
+        stale = self._row(under_default, 12)
+        assert stale["nu0_status"] == "stale"
+        assert stale["nu0_reason"] == (
+            "stale: free_region_center changed on reload (stored min1, current "
+            "saddle); estimate discarded"
+        )
+        assert stale["k_prefactor"] == 1.0
+        assert len(_warnings(log_records)) == 1
+
+        # Loaded under min1 (its actual centring): compatible, estimate kept.
+        under_min1 = ReferenceEventTable(
+            _config("htst", str(pre_7c), k0=1.0, T=300.0, free_region_center="min1")
+        )
+        kept = self._row(under_min1, 12)
+        assert kept["nu0_status"] == "ok" and kept["nu0"] == 5.0e12
+        assert kept["k_prefactor"] == 5.0
+        assert len(_warnings(log_records)) == 1
+
+    def test_missing_setting_key_counts_as_changed(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """Unknown provenance is never compatible: an absent key invalidates."""
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0), system_single_type_fcc, tmp_path
+        )
+        raw = pd.read_pickle(saved)
+        del raw.attrs["settings"]["fd_step"]
+        raw.to_pickle(saved)
+        loaded = ReferenceEventTable(_config("htst", str(saved), k0=1.0, T=300.0))
+        stale = self._row(loaded, 12)
+        assert stale["nu0_status"] == "stale"
+        assert stale["nu0_reason"] == (
+            "stale: fd_step changed on reload (stored absent, current 0.01); "
+            "estimate discarded"
+        )
+
+    def test_every_changed_setting_is_named(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """Several differences produce one reason naming all of them, in order."""
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, free_radius=6.0, fd_step=0.01),
+            system_single_type_fcc,
+            tmp_path,
+        )
+        loaded = ReferenceEventTable(
+            _config(
+                "htst",
+                str(saved),
+                k0=1.0,
+                T=300.0,
+                free_radius=8.0,
+                fd_step=0.02,
+                zone_radius=12.0,
+                premin=True,
+            )
+        )
+        stale = self._row(loaded, 12)
+        assert stale["nu0_reason"] == (
+            "stale: free_radius changed on reload (stored 6.0, current 8.0); "
+            "fd_step changed on reload (stored 0.01, current 0.02); "
+            "zone_radius changed on reload (stored None, current 12.0); "
+            "premin changed on reload (stored False, current True); "
+            "estimate discarded"
+        )
+        assert len(_warnings(log_records)) == 1
+
+    def test_window_is_reapplied_with_its_own_reason_and_warning(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """The window is not a compatibility setting: rejected, not stale."""
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0),
+            system_single_type_fcc,
+            tmp_path,
+            nu0=20.0e12,
+        )
+        loaded = ReferenceEventTable(
+            _config("htst", str(saved), k0=1.0, T=300.0, nu0_max_THz=10.0)
+        )
+        rej = self._row(loaded, 12)
+        assert rej["nu0_status"] == "rejected"
+        assert math.isnan(rej["nu0"])
+        assert rej["nu0_reason"] == (
+            "out_of_window (reload): nu0 = 2.0000e+13 Hz outside "
+            "[1.0000e+12, 1.0000e+13] Hz"
+        )
+        assert rej["k_prefactor"] == 1.0
+        assert rej["k"] == rate_from_prefactor(1.0, float(rej["energy_barrier"]), 300.0)
+        assert loaded.prefactor_summary()["stale"] == 0
+        warnings = _warnings(log_records)
+        assert len(warnings) == 1
+        assert (
+            "1 accepted estimate(s) lie outside the current nu0 window" in warnings[0]
+        )
+        # Inclusive endpoints: a stored value exactly on the bound stays accepted.
+        bound_dir = tmp_path / "bound"
+        bound_dir.mkdir()
+        on_bound = self._saved(
+            _config("htst", k0=1.0, T=300.0),
+            system_single_type_fcc,
+            bound_dir,
+            nu0=10.0e12,
+        )
+        kept = ReferenceEventTable(
+            _config("htst", str(on_bound), k0=1.0, T=300.0, nu0_max_THz=10.0)
+        )
+        assert self._row(kept, 12)["nu0_status"] == "ok"
+
+    def test_stale_rows_survive_a_second_reload_and_seed_k0(
+        self, system_single_type_fcc: Any, tmp_path: Path
+    ) -> None:
+        """A stale row loads as stale (never recomputed) and inherits as k0."""
+        from pykmc.event_table import ActiveEventTable
+        from pykmc.result import EventRefinementOutput
+
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, fd_step=0.01),
+            system_single_type_fcc,
+            tmp_path,
+        )
+        config = _config("htst", str(saved), k0=1.0, T=300.0, fd_step=0.02)
+        loaded = ReferenceEventTable(config)
+        assert self._row(loaded, 12)["nu0_status"] == "stale"
+        active = ActiveEventTable(config)
+        active.add_events(
+            EventRefinementOutput(
+                central_atom_index=0,
+                saddle_positions=np.zeros((2, 3)),
+                E_saddle=0.5,
+                min2_positions=np.zeros((2, 3)),
+                dE_forward=0.5,
+                num_reference_event=12,
+                refined="F",
+                **loaded.reference_estimate(12),
+            )
+        )
+        row = active.table.iloc[0]
+        assert row["nu0_status"] == "stale" and row["nu0_source"] == "k0"
+        assert row["k_prefactor"] == 1.0 and math.isnan(row["nu0"])
+        assert row["nu0_reason"].startswith("stale: fd_step changed on reload")

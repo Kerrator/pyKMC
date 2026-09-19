@@ -115,6 +115,10 @@ class KMC:
             np.random.seed(int(seed))
         self.rate_constant = create_rate_constant(config.rateconstant)
         self.prefactor_service = None
+        # Root worker's ``htst_preflight`` report (species/mass map the
+        # live requests carry); set by Initializer.initialize_engine in
+        # the htst/rpa styles, None in the constant style.
+        self.htst_preflight: dict | None = None
         self.engine = None
         self.neighbors_list = None
         self.atomic_environment = None
@@ -320,11 +324,14 @@ class KMC:
                 self.system.types, self.reference_table, active_table
             )
             if len(err_reference) != 0:
+                # The catalogue and the active table were purged inside
+                # reconstruction(), before the surviving rows were re-selected;
+                # here only the union is logged and the topologies forgotten.
                 self.loggers.info(
                     "log",
-                    "\t :=> Removing reference event from which reconstruction failed.",
+                    "\t :=> Reference events removed after failed reconstructions "
+                    "this step: {}".format(sorted(set(err_reference))),
                 )
-                self.reference_table.remove(list(set(err_reference)))
                 self.loggers.info(
                     "log",
                     "\t :=> Removing topology from known environments from which reconstruction failed.",
@@ -734,19 +741,21 @@ class KMC:
         self.loggers.info(
             "log",
             "\t :=> HTST prefactors: reference ok={} rejected={} legacy={} "
-            "pending={}; active sources reference={} site={} k0={}; site "
-            "attempts this step={} (ok={}, rejected={}); hessian requests this "
-            "step={}, prefactor wall={:.3f} s".format(
+            "pending={} stale={}; active sources reference={} site={} k0={}; site "
+            "attempts this step={} (ok={}, rejected={}, no_geometry={}); hessian "
+            "requests this step={}, prefactor wall={:.3f} s".format(
                 ref.get("ok", 0),
                 ref.get("rejected", 0),
                 ref.get("legacy", 0),
                 ref.get("pending", 0),
+                ref.get("stale", 0),
                 act.get("reference", 0),
                 act.get("site", 0),
                 act.get("k0", 0),
                 site_summary.get("attempted", 0),
                 site_summary.get("ok", 0),
                 site_summary.get("rejected", 0),
+                site_summary.get("no_geometry", 0),
                 n_requests,
                 wall,
             ),
@@ -850,7 +859,32 @@ class KMC:
             )
         return idx_selected_event, delta_t, ktot
 
-    def reconstruction(self, active_table):
+    def reconstruction(self, active_table: ActiveEventTable) -> tuple:
+        """Select and reconstruct an active event, purging failures as they occur.
+
+        After a failed reconstruction the failed reference is removed from the
+        catalogue immediately (with its reverse-link closure), every active
+        row whose reference was removed is dropped (the failed row among
+        them, recycled rows included), and the selection continues on the
+        surviving rows. The catalogue and the active table are therefore
+        consistent when this returns: basin detection, the step log, the
+        events block, recycling and the basin explorer never dereference a
+        removed reference (contracts section 7d, F4).
+
+        Parameters
+        ----------
+        active_table : ActiveEventTable
+            The active table of the step; mutated in place on failures.
+
+        Returns
+        -------
+        tuple
+            ``(result, delta_t, ktot, idx_selected_event, err_reference,
+            err_ae)``: the successful reconstruction, its time increment and
+            total rate, the selected row label, every reference id removed
+            during this call and the removed rows' topologies.
+
+        """
         # TODO make a Result
 
         err_reference = []
@@ -866,23 +900,34 @@ class KMC:
             if result_reconstruction.is_ok():
                 break
             else:
-                num_ref_event = active_table.table.loc[idx_selected_event].at[
-                    "num_reference_event"
-                ]
+                num_ref_event = int(
+                    active_table.table.loc[idx_selected_event].at["num_reference_event"]
+                )
                 self.loggers.info(
                     "log",
                     "\t :=> Reconstruction fails (reference event {}) :  {}".format(
                         num_ref_event, result_reconstruction.err_value().message
                     ),
                 )
-                ae_topo = self.reference_table.table[
-                    self.reference_table.table["idx_ref"] == num_ref_event
-                ]["event_id"].values[0]
-                err_reference.append(num_ref_event)
-                err_ae.append(ae_topo)
-
-                self.loggers.info("log", "\t :=> Removing active event.")
-                active_table.remove(idx_selected_event)
+                removed = self.reference_table.remove([num_ref_event])
+                dropped = active_table.drop_reference_events(removed.idx_refs)
+                if num_ref_event not in removed.idx_refs:
+                    # The failed row referenced no catalogue entry (a dangling
+                    # active row): drop it explicitly so the loop progresses.
+                    self.loggers.warning(
+                        "log",
+                        "\t :=> Reference event {} is not in the catalogue; "
+                        "removing the failed active event only.".format(num_ref_event),
+                    )
+                    active_table.remove(idx_selected_event)
+                    dropped += 1
+                err_reference.extend(removed.idx_refs)
+                err_ae.extend(removed.event_ids)
+                self.loggers.info(
+                    "log",
+                    "\t :=> Removing reference events {} (reverse-link closure) "
+                    "and {} active rows.".format(list(removed.idx_refs), dropped),
+                )
         else:
             self.loggers.error("log", "All event reconstuctions failed.")
             self._close(failed=True)

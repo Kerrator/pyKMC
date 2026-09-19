@@ -96,11 +96,29 @@ class AtomicEnvironment:
         return [i for i, e in enumerate(self.atomic_environment_list) if e == id]
 
     def get_new_environments(self, visited_environments: set[str]) -> list[str]:
-        """
-        Return list of atomic environment ID that are in the current self.environment_list but not in visited_environments
+        """Return the environment ids of the current system not yet visited.
+
+        The ids are returned sorted: the set difference alone would follow
+        the per-process string hash (random on every rank under ``mpirun``),
+        and ``central_atoms_research`` draws from this list, so a sorted
+        order is what makes ``control.seed`` reproducible without
+        ``PYTHONHASHSEED`` (contracts section 7c).
+
+        Parameters
+        ----------
+        visited_environments : set[str]
+            Ids already explored.
+
+        Returns
+        -------
+        list[str]
+            The unvisited ids of ``atomic_environment_list``, sorted.
+
         """
         # return list([]) #Set if you want to only test refinements
-        return list(set(self.atomic_environment_list).difference(visited_environments))
+        return sorted(
+            set(self.atomic_environment_list).difference(visited_environments)
+        )
 
     def compute_region(
         self,

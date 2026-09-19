@@ -7,9 +7,12 @@ shared by the reference and active event tables. It is the only place that:
   (:func:`pykmc.rate_constant.thz_to_hz`, exactly once, into a frozen
   :class:`~pykmc.htst.settings.HTSTSettings`);
 - builds :class:`~pykmc.htst.request.HTSTEventRequest` objects from the full
-  system geometry, taking the potential species order and masses from the one
-  species rule (:func:`pykmc.engine.lammps.species_map`, imported lazily so the
-  constant path never imports LAMMPS);
+  system geometry, taking the potential species order and masses from the
+  engine's authoritative map when the service was built with one
+  (``species_masses``, the root worker's ``htst_preflight`` report in a live
+  run) and otherwise from the one species rule
+  (:func:`pykmc.engine.lammps.species_map`, ASE masses, imported lazily so
+  the constant path never imports LAMMPS; the offline/test path);
 - fans the requests out through ``Manager.submit("compute_event_prefactors",
   request=..., compute_backward=...)`` (one job per accepted event; both
   directions for a reference event, the forward direction only for a site
@@ -31,13 +34,14 @@ Nothing in the constant path imports this module.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from pykmc.htst.request import HTSTEventRequest
+from pykmc.htst.request import HTSTEventRequest, HTSTRequestError
 from pykmc.htst.result import EventPrefactors
 from pykmc.htst.settings import HTSTSettings
 
@@ -78,6 +82,49 @@ def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
     )
 
 
+def _validated_map(
+    species_masses: tuple[tuple[str, ...], tuple[float, ...]],
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Normalise and validate an engine ``(species, masses)`` map.
+
+    Parameters
+    ----------
+    species_masses : tuple[tuple[str, ...], tuple[float, ...]]
+        Species in potential order and one finite positive mass (amu) each.
+
+    Returns
+    -------
+    tuple[tuple[str, ...], tuple[float, ...]]
+        The map as tuples of ``str`` and ``float``.
+
+    Raises
+    ------
+    ValueError
+        If the pair is malformed: not two sequences, empty, unequal lengths,
+        duplicate species, or a non-finite or non-positive mass.
+
+    """
+    try:
+        raw_species, raw_masses = species_masses
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "species_masses must be a (species, masses) pair of sequences"
+        ) from exc
+    species = tuple(str(s) for s in raw_species)
+    masses = tuple(float(m) for m in raw_masses)
+    if not species:
+        raise ValueError("species_masses: the species tuple is empty")
+    if len(species) != len(masses):
+        raise ValueError(
+            f"species_masses: {len(species)} species but {len(masses)} masses"
+        )
+    if len(set(species)) != len(species):
+        raise ValueError(f"species_masses: duplicate species in {species}")
+    if not all(math.isfinite(m) and m > 0.0 for m in masses):
+        raise ValueError(f"species_masses: masses must be finite and > 0, got {masses}")
+    return species, masses
+
+
 class PrefactorService:
     """Build HTST requests and resolve them through the manager, in batches.
 
@@ -91,11 +138,19 @@ class PrefactorService:
         The rate facade of the run; its backend must require per-event
         prefactors (htst/rpa), otherwise building the service is an error
         because the constant path must never construct one.
+    species_masses : tuple[tuple[str, ...], tuple[float, ...]] or None, optional
+        The engine's authoritative ``(species, masses)`` map, in potential
+        species order (``htst_preflight`` returns it). When set, every request
+        carries it and each ``types`` entry must be one of its species; when
+        ``None`` the map is derived from ``types`` through ``species_map``
+        (ASE masses). Contracts section 7d, N3.
 
     Attributes
     ----------
     settings : HTSTSettings
         Kernel settings shared by every request of the run.
+    species_masses : tuple[tuple[str, ...], tuple[float, ...]] or None
+        The map given at construction (validated), or ``None``.
     n_submitted : int
         Total number of requests submitted so far (diagnostics).
     last_batch_wall_s : float
@@ -109,7 +164,12 @@ class PrefactorService:
     """
 
     def __init__(
-        self, config: Config, manager: Any, rate_constant: RateConstant
+        self,
+        config: Config,
+        manager: Any,
+        rate_constant: RateConstant,
+        *,
+        species_masses: tuple[tuple[str, ...], tuple[float, ...]] | None = None,
     ) -> None:
         if not rate_constant.backend.requires_event_prefactors:
             raise ValueError(
@@ -125,6 +185,9 @@ class PrefactorService:
         self.manager = manager
         self.rate_constant = rate_constant
         self.settings = settings_from_config(config.rateconstant)
+        self.species_masses = (
+            None if species_masses is None else _validated_map(species_masses)
+        )
         self.n_submitted = 0
         self.last_batch_wall_s = 0.0
         self.step_requests = 0
@@ -170,11 +233,27 @@ class PrefactorService:
         HTSTEventRequest
             The validated request.
 
-        """
-        from pykmc.engine.lammps import species_map  # lazy: LAMMPS-bound module
+        Raises
+        ------
+        HTSTRequestError
+            If the service carries an engine map and a symbol of ``types`` is
+            not one of its species (the request cannot describe that atom),
+            or if the request fails validation.
 
+        """
         symbols = tuple(str(t) for t in types)
-        species, masses = species_map(list(symbols))
+        if self.species_masses is not None:
+            species, masses = self.species_masses
+            unknown = sorted(set(symbols) - set(species))
+            if unknown:
+                raise HTSTRequestError(
+                    f"types {unknown} are not in the engine species map "
+                    f"{species}; the potential cannot describe them"
+                )
+        else:
+            from pykmc.engine.lammps import species_map  # lazy: LAMMPS-bound
+
+            species, masses = species_map(list(symbols))
         request = HTSTEventRequest(
             event_key=event_key,
             min1_positions=np.array(min1_positions, dtype=float, copy=True),

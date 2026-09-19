@@ -311,3 +311,74 @@ class TestCompute:
             )
         assert service.step_requests == 1
         assert service.step_wall_s >= 0.0
+
+
+class TestSpeciesMasses:
+    """An engine map given at construction is authoritative for every request (N3)."""
+
+    def test_override_reaches_the_request_in_engine_order(self) -> None:
+        """Species order and masses are the engine's, not the alphabetical ASE map."""
+        config = _config("htst", k0=1.0, T=300.0)
+        engine_map = (("Ni", "Fe", "Cr"), (60.0, 56.0, 52.0))
+        service = PrefactorService(
+            config,
+            FakeManager(),
+            create_rate_constant(config.rateconstant),
+            species_masses=engine_map,
+        )
+        assert service.species_masses == engine_map
+        req = service.build_request(event_key=("evt",), **_geometry())
+        assert req.species == ("Ni", "Fe", "Cr")
+        assert req.masses == (60.0, 56.0, 52.0)
+        assert list(req.masses_per_atom()[:2]) == [60.0, 56.0]
+
+    def test_no_map_uses_the_one_species_rule(self) -> None:
+        """Without a map the offline path derives ASE masses from ``types``."""
+        config = _config("htst", k0=1.0, T=300.0)
+        service = _service(config, FakeManager())
+        assert service.species_masses is None
+        req = service.build_request(event_key=("evt",), **_geometry())
+        assert req.species == ("Fe", "Ni")
+        assert req.masses[1] == pytest.approx(
+            float(atomic_masses[atomic_numbers["Ni"]])
+        )
+
+    def test_type_outside_the_map_is_a_request_error(self) -> None:
+        """An atom the potential cannot describe is refused before submission.
+
+        The exception is ``HTSTRequestError`` (a ``ValueError`` subclass).
+        """
+        config = _config("htst", k0=1.0, T=300.0)
+        fake = FakeManager()
+        service = PrefactorService(
+            config,
+            fake,
+            create_rate_constant(config.rateconstant),
+            species_masses=(("Fe",), (56.0,)),
+        )
+        with pytest.raises(HTSTRequestError, match="not in the engine species map"):
+            service.build_request(event_key=("evt",), **_geometry())
+        assert fake.submitted == []
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            (("Ni",), (1.0, 2.0)),
+            ((), ()),
+            (("Ni", "Ni"), (1.0, 2.0)),
+            (("Ni",), (0.0,)),
+            (("Ni",), (float("nan"),)),
+            "NiFe",
+        ],
+        ids=["length", "empty", "duplicate", "zero-mass", "nan-mass", "not-a-pair"],
+    )
+    def test_malformed_map_is_refused_at_construction(self, bad: Any) -> None:
+        """A malformed map is a ``ValueError`` when the service is built."""
+        config = _config("htst", k0=1.0, T=300.0)
+        with pytest.raises(ValueError, match="species_masses"):
+            PrefactorService(
+                config,
+                FakeManager(),
+                create_rate_constant(config.rateconstant),
+                species_masses=bad,  # type: ignore[arg-type]
+            )

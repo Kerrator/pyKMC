@@ -264,6 +264,7 @@ class TestResolutionCompletesInsideAddEvents:
             "rejected": 1,
             "pending": 0,
             "legacy": 0,
+            "stale": 0,
         }
 
     def test_reference_estimate_seeds_refinement(
@@ -371,6 +372,7 @@ class TestSelfReverseThroughAddEvents:
             "rejected": 0,
             "pending": 0,
             "legacy": 0,
+            "stale": 0,
         }
 
 

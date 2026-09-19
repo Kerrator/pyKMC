@@ -110,6 +110,12 @@ class Initializer:
             # 6): fails fast when LAMMPS lacks PHONON or the potential cannot
             # be initialised in a scratch instance. Constant style: no call.
             self.kmc.manager.broadcast("htst_preflight")
+            # ``broadcast`` returns nothing; the root worker's report (the
+            # engine's authoritative species/mass map, contracts section 7d,
+            # N3) comes back through the Future of the same operation.
+            self.kmc.htst_preflight = self._preflight_report(
+                self.kmc.manager.submit("htst_preflight").result()
+            )
         self.kmc.manager.submit_group("start")
         self.kmc.manager.submit_group("initialize_parameters")
         self.kmc.manager.submit_group(
@@ -121,28 +127,89 @@ class Initializer:
         )
         self.kmc.manager.submit_group("initialize_potential")
 
+    @staticmethod
+    def _preflight_report(report: object) -> dict:
+        """Validate the root worker's ``htst_preflight`` report.
+
+        Parameters
+        ----------
+        report : object
+            The value the manager returned for ``htst_preflight``.
+
+        Returns
+        -------
+        dict
+            The report, with ``species`` and ``masses`` as tuples.
+
+        Raises
+        ------
+        RuntimeError
+            If the report is not a mapping carrying a non-empty ``species``
+            tuple and one mass per species (``None`` is what a non-root rank
+            returns; the manager only ever forwards the root's value).
+
+        """
+        if not isinstance(report, dict):
+            raise RuntimeError(
+                "htst_preflight returned no report on the manager's root session "
+                f"(got {type(report).__name__}); the engine species/mass map is "
+                "required to build HTST requests"
+            )
+        species = tuple(str(s) for s in report.get("species", ()))
+        masses = tuple(float(m) for m in report.get("masses", ()))
+        if not species or len(species) != len(masses):
+            raise RuntimeError(
+                "htst_preflight report carries an inconsistent species/mass map: "
+                f"species {species}, masses {masses}"
+            )
+        return {**report, "species": species, "masses": masses}
+
     def initialize_prefactor_service(self) -> None:
         """Build the per-event prefactor service for the htst/rpa styles.
 
         The constant style leaves ``kmc.prefactor_service`` as ``None`` and
         never imports the HTST modules. Site-specific requests are built from
         the full pARTn-refined saddle (``ActiveEventTable.request_site_prefactors``),
-        so ``free_radius`` is independent of the ``rcut`` crop radius.
+        so ``free_radius`` is independent of the ``rcut`` crop radius. The
+        service carries the engine's species/mass map from the preflight
+        report kept by :meth:`initialize_engine`, so every live request
+        describes the potential's masses (contracts section 7d, N3).
+
+        Raises
+        ------
+        RuntimeError
+            In the htst/rpa styles, if :meth:`initialize_engine` has not
+            stored a preflight report (``kmc.htst_preflight`` is ``None``).
+
         """
         if not self.kmc.uses_event_prefactors:
             self.kmc.prefactor_service = None
             return
         from .rate_constant.prefactors import PrefactorService  # htst path only
 
+        report = self.kmc.htst_preflight
+        if report is None:
+            raise RuntimeError(
+                "initialize_prefactor_service needs the htst_preflight report "
+                "(kmc.htst_preflight is None): run Initializer.initialize_engine "
+                "first so the service carries the engine's species/mass map"
+            )
+        species_masses = (tuple(report["species"]), tuple(report["masses"]))
         self.kmc.prefactor_service = PrefactorService(
-            self.kmc.config, self.kmc.manager, self.kmc.rate_constant
+            self.kmc.config,
+            self.kmc.manager,
+            self.kmc.rate_constant,
+            species_masses=species_masses,
         )
         settings = self.kmc.prefactor_service.settings
+        mass_map = ", ".join(
+            "{}={:g}".format(s, m) for s, m in zip(*species_masses, strict=True)
+        )
         self.kmc.loggers.info(
             "log",
             ":=> HTST prefactor service ready (style {}, free_radius {} A centred "
             "on the {} geometry, fd_step {} A, nu0 window [{:.3e}, {:.3e}] Hz, "
-            "k0 fallback {} ps^-1)".format(
+            "k0 fallback {} ps^-1, engine masses (amu): {})".format(
                 self.kmc.config.rateconstant.style,
                 settings.free_radius,
                 settings.free_region_center,
@@ -150,6 +217,7 @@ class Initializer:
                 settings.nu0_min_hz,
                 settings.nu0_max_hz,
                 self.kmc.config.rateconstant.k0,
+                mass_map,
             ),
         )
 

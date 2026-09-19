@@ -36,10 +36,12 @@ SCRATCH_ID_MIN = 1_000_000
 N_STEPS = 3
 SUMMARY_RE = re.compile(
     r"HTST prefactors: reference ok=(?P<ref_ok>\d+) rejected=(?P<ref_rejected>\d+) "
-    r"legacy=(?P<ref_legacy>\d+) pending=(?P<ref_pending>\d+); "
+    r"legacy=(?P<ref_legacy>\d+) pending=(?P<ref_pending>\d+) "
+    r"stale=(?P<ref_stale>\d+); "
     r"active sources reference=(?P<src_reference>\d+) site=(?P<src_site>\d+) "
     r"k0=(?P<src_k0>\d+); site attempts this step=(?P<attempted>\d+) "
-    r"\(ok=(?P<site_ok>\d+), rejected=(?P<site_rejected>\d+)\)"
+    r"\(ok=(?P<site_ok>\d+), rejected=(?P<site_rejected>\d+), "
+    r"no_geometry=(?P<no_geometry>\d+)\)"
 )
 """The per-step line written by ``KMC._log_htst_step_summary``."""
 
@@ -221,13 +223,15 @@ def _assert_htst_summaries(log: str) -> None:
     for step, counts in enumerate(summaries, start=1):
         assert counts["ref_pending"] == 0, (step, counts)
         assert counts["ref_legacy"] == 0, (step, counts)
+        assert counts["ref_stale"] == 0, (step, counts)
         assert counts["src_k0"] == 0, f"step {step}: active rows on k0: {counts}"
         assert counts["src_site"] + counts["src_reference"] >= 1, (step, counts)
         assert counts["site_rejected"] == 0, (step, counts)
-        assert counts["attempted"] == counts["site_ok"] + counts["site_rejected"], (
-            step,
-            counts,
-        )
+        # every refined row of a live run carries its full saddle
+        assert counts["no_geometry"] == 0, (step, counts)
+        assert counts["attempted"] == (
+            counts["site_ok"] + counts["site_rejected"] + counts["no_geometry"]
+        ), (step, counts)
     assert any(counts["site_ok"] >= 1 for counts in summaries), summaries
     assert "site prefactor rejected" not in log
 

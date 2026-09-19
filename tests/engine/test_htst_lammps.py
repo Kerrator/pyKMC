@@ -973,6 +973,117 @@ class TestLammpsHTSTSerial:
         assert report["species"] == ("Fe", "Ni")
         assert len(report["masses"]) == 2
 
+    # -- authoritative masses (contracts section 7d, N3) ----------------------
+
+    def test_engine_mass_override_reaches_the_request_and_scales_nu0(
+        self, sw_config: _SWConfig, si_hop: dict[str, Any]
+    ) -> None:
+        """The preflight species/mass map is what every live request carries.
+
+        ``initialize_system(species=("Si",), masses=(30.0,))`` on the SW
+        potential (its file sets no masses) keeps 30 amu; ``htst_preflight``
+        reports it; a ``PrefactorService`` built with that map issues a
+        request carrying 30 amu; the extension's forward ``nu0`` scales by
+        ``sqrt(m_default / 30)`` relative to the default-mass request (the
+        Vineyard ratio scales as ``m**-1/2`` for a single species), and the
+        FD replay with ``request.masses_per_atom()`` agrees with eskm as the
+        existing oracle does. ``m_default`` is the ASE mass the offline path
+        emits (28.085 in this ASE; the contract's 28.0855 to 1e-4).
+        """
+        from mpi4py import MPI
+
+        from pykmc.config import Config, RateConstantConfig
+        from pykmc.rate_constant import create_rate_constant
+        from pykmc.rate_constant.prefactors import PrefactorService
+        from tests.lifecycle.conftest import FakeManager
+
+        types = [str(t) for t in si_hop["types"]]
+        engine = LammpsEngine(config=sw_config, comm=None, engine_id=0)
+        engine.start()
+        try:
+            engine.initialize_parameters()
+            engine.initialize_system(
+                types=types,
+                positions=si_hop["min1_positions"],
+                cell=si_hop["cell"],
+                pbc=_ALL_PERIODIC,
+                species=("Si",),
+                masses=(30.0,),
+            )
+            engine.initialize_potential()
+            assert engine.full_system.masses == (30.0,)
+            ext = LammpsHTSTExtension(engine)
+            report = ext.htst_preflight()
+            assert report["species"] == ("Si",) and report["masses"] == (30.0,)
+
+            base = Config.from_ini_file(str(_ROOT / "tests" / "data" / "input.in"))
+            config = base.model_copy(
+                update={
+                    "rateconstant": RateConstantConfig(
+                        style="htst", k0=1.0, free_radius=4.0
+                    )
+                }
+            )
+            rate = create_rate_constant(config.rateconstant)
+            geometry = dict(
+                min1_positions=si_hop["min1_positions"],
+                saddle_positions=si_hop["saddle_positions"],
+                min2_positions=si_hop["min2_positions"],
+                types=types,
+                cell=si_hop["cell"],
+                pbc=_ALL_PERIODIC,
+                center_index=int(si_hop["central_atom_idx"]),
+            )
+            live = PrefactorService(
+                config,
+                FakeManager(ext.compute_event_prefactors),
+                rate,
+                species_masses=(report["species"], report["masses"]),
+            )
+            heavy_request = live.build_request(event_key=("mass", 30), **geometry)
+            assert heavy_request.species == ("Si",)
+            assert heavy_request.masses == (30.0,)
+            assert np.all(heavy_request.masses_per_atom() == 30.0)
+            offline = PrefactorService(
+                config, FakeManager(ext.compute_event_prefactors), rate
+            )
+            default_request = offline.build_request(
+                event_key=("mass", "ase"), **geometry
+            )
+            m_default = float(default_request.masses[0])
+            assert m_default == pytest.approx(28.0855, rel=1e-4)
+
+            heavy = live.compute([heavy_request])[heavy_request.event_key]
+            light = offline.compute([default_request])[default_request.event_key]
+            assert heavy.forward.ok and light.forward.ok
+            assert heavy.n_free == light.n_free == 19
+            assert heavy.forward.nu0_hz / light.forward.nu0_hz == pytest.approx(
+                np.sqrt(m_default / 30.0), rel=1e-6
+            )
+
+            scratch = LammpsEngine(config=sw_config, comm=MPI.COMM_SELF, engine_id=9)
+            scratch.start()
+            try:
+                _initialize(scratch, types, si_hop["min1_positions"], si_hop["cell"])
+                fd = compute_event_prefactors(
+                    heavy_request,
+                    fd_hessian_fn(
+                        lambda p: scratch.get_forces(positions=p),
+                        heavy_request.masses_per_atom(),
+                        heavy_request.settings.fd_step,
+                    ),
+                )
+            finally:
+                scratch.close()
+            assert fd.method == "fd" and heavy.method == "lammps_eskm"
+            assert fd.forward.ok
+            assert heavy.forward.nu0_hz / fd.forward.nu0_hz == pytest.approx(
+                1.0, rel=1e-9
+            )
+        finally:
+            engine.close()
+        assert _count_tmpdirs() == 0
+
 
 @pytest.mark.mpi
 class TestLammpsHTSTEngineMPI:

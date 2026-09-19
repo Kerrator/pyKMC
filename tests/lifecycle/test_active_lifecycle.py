@@ -280,7 +280,7 @@ class TestSiteRequests:
             )
         )
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 1, "ok": 1, "rejected": 0}
+        assert summary == {"attempted": 1, "ok": 1, "rejected": 0, "no_geometry": 0}
         row = table.table.iloc[0]
         T = htst_config.rateconstant.T
         assert row["nu0"] == 5.0e12
@@ -332,18 +332,96 @@ class TestSiteRequests:
         assert req.types == tuple(system_single_type_fcc.types)
         assert req.pbc == tuple(bool(p) for p in system_single_type_fcc.pbc)
 
-    def test_missing_full_saddle_is_an_error(
+    def test_missing_full_saddle_keeps_the_inherited_estimate(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
     ) -> None:
-        """A refined row without its full saddle cannot be requested from a crop."""
-        service, fake = _service(htst_config, _site_ok(5.0e12))
-        table = ActiveEventTable(htst_config, prefactor_service=service)
-        table.add_events(
-            _refined(system_single_type_fcc, neighbors_list, 0, full_saddle="none")
-        )
-        with pytest.raises(RuntimeError, match="full refined saddle"):
-            table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        """A crop-only refined row is no error: inherited estimate, no request (F1)."""
+        import logging
+
+        records: list[logging.LogRecord] = []
+
+        class _Collect(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = _Collect(level=logging.DEBUG)
+        logger = logging.getLogger("log")
+        previous = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        try:
+            service, fake = _service(htst_config, _site_ok(5.0e12))
+            table = ActiveEventTable(htst_config, prefactor_service=service)
+            table.add_events(
+                [
+                    _refined(
+                        system_single_type_fcc,
+                        neighbors_list,
+                        0,
+                        full_saddle="none",
+                        nu0_hz=7.0e11,
+                        nu0_status="ok",
+                    ),
+                    _refined(
+                        system_single_type_fcc,
+                        neighbors_list,
+                        5,
+                        ref=3,
+                        full_saddle="none",
+                        nu0_hz=None,
+                        nu0_status="rejected",
+                        nu0_reason="unstable_minimum: x",
+                    ),
+                ]
+            )
+            before = table.table.copy(deep=True)
+            summary = table.request_site_prefactors(
+                system_single_type_fcc, neighbors_list
+            )
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(previous)
+        assert summary == {"attempted": 2, "ok": 0, "rejected": 0, "no_geometry": 2}
         assert fake.prefactor_requests == []
+        assert fake.submitted == []
+        for column in (
+            "nu0",
+            "nu0_status",
+            "nu0_source",
+            "nu0_reason",
+            "k",
+            "k_prefactor",
+        ):
+            assert list(table.table[column].astype(object)) == list(
+                before[column].astype(object)
+            ) or (
+                column == "nu0"
+                and all(
+                    math.isnan(v) for v in (table.table[column][1], before[column][1])
+                )
+                and table.table[column][0] == before[column][0]
+            ), column
+        assert list(table.table["nu0_site_attempted"]) == [True, True]
+        assert list(table.table["nu0_source"]) == ["reference", "k0"]
+        assert table.table.iloc[0]["nu0"] == 7.0e11
+        assert table.prefactor_summary()["site_attempted"] == 2
+        _assert_consistent(table, htst_config)
+        lines = [
+            r.getMessage()
+            for r in records
+            if "no full refined saddle available" in r.getMessage()
+        ]
+        assert len(lines) == 2
+        assert lines[0].startswith("[htst] active event (atom 0, reference 0)")
+        assert "keeping the inherited reference estimate" in lines[0]
+        assert "keeping the inherited k0 estimate" in lines[1]
+        assert all(
+            r.levelno == logging.INFO for r in records if r.getMessage() in lines
+        )
+        # never re-attempted, still no request
+        again = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert again == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        assert fake.submitted == []
 
     def test_crop_inconsistent_with_the_full_saddle_is_an_error(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
@@ -518,7 +596,7 @@ class TestSiteRequests:
         )
         k_before = table.table.iloc[0]["k"]
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 1, "ok": 0, "rejected": 1}
+        assert summary == {"attempted": 1, "ok": 0, "rejected": 1, "no_geometry": 0}
         row = table.table.iloc[0]
         assert row["nu0"] == 7.0e11 and row["k_prefactor"] == 0.7
         assert row["k"] == k_before
@@ -579,7 +657,7 @@ class TestSiteRequests:
         assert len(fake.prefactor_requests) == 2
         current["responder"] = next(outcomes)
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 0, "ok": 0, "rejected": 0}
+        assert summary == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
         assert len(fake.prefactor_requests) == 2
         assert table.table.iloc[0]["nu0"] == 7e11  # inherited value kept
         assert math.isnan(table.table.iloc[1]["nu0"])
@@ -699,5 +777,78 @@ class TestSiteRequests:
             "attempted": 0,
             "ok": 0,
             "rejected": 0,
+            "no_geometry": 0,
         }
         assert table.prefactor_summary() == {}
+
+
+class TestDropReferenceEvents:
+    """``drop_reference_events`` keeps the active table in step with the catalogue (F4)."""
+
+    def test_drops_rows_of_removed_references_and_relabels(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """Every row whose reference was removed goes; survivors are relabelled."""
+        service, fake = _service(htst_config, _site_ok(5.0e12))
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        outs = [
+            _refined(
+                system_single_type_fcc,
+                neighbors_list,
+                atom,
+                ref=ref,
+                nu0_hz=7e11,
+                nu0_status="ok",
+            )
+            for atom, ref in ((0, 2), (5, 1), (9, 9), (14, 0))
+        ]
+        table.add_events(outs)
+        assert sorted(table._full_saddles) == [0, 1, 2, 3]
+        assert table.drop_reference_events((0, 1, 2)) == 3
+        assert list(table.table.index) == [0]
+        assert list(table.table["atom_index"]) == [9]
+        assert list(table.table["num_reference_event"]) == [9]
+        assert sorted(table._full_saddles) == [0]
+        assert np.array_equal(table._full_saddles[0], outs[2].full_saddle_positions)
+        assert table.drop_reference_events([]) == 0
+        assert table.drop_reference_events([2]) == 0
+        table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert [r.center_index for r in fake.prefactor_requests] == [9]
+        assert np.array_equal(
+            fake.prefactor_requests[0].saddle_positions, outs[2].full_saddle_positions
+        )
+
+    def test_recycled_rows_are_dropped_too(
+        self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """An attempted (recycled) row is only as valid as its reference."""
+        service, _ = _service(htst_config, _site_ok(5.0e12))
+        table = ActiveEventTable(htst_config, prefactor_service=service)
+        table.add_events(
+            [
+                _refined(system_single_type_fcc, neighbors_list, 0, ref=4),
+                _refined(system_single_type_fcc, neighbors_list, 5, ref=6),
+            ]
+        )
+        table.request_site_prefactors(system_single_type_fcc, neighbors_list)
+        assert list(table.table["nu0_site_attempted"]) == [True, True]
+        assert table.drop_reference_events({4}) == 1
+        assert list(table.table["num_reference_event"]) == [6]
+        assert list(table.table.index) == [0]
+
+    def test_constant_mode_table_is_handled_the_same_way(
+        self, constant_config: Any, system_single_type_fcc: Any, neighbors_list: Any
+    ) -> None:
+        """No HTST columns are needed: the drop is keyed on the reference id only."""
+        table = ActiveEventTable(constant_config)
+        table.add_events(
+            [
+                _refined(system_single_type_fcc, neighbors_list, 0, ref=1),
+                _refined(system_single_type_fcc, neighbors_list, 5, ref=2),
+                _refined(system_single_type_fcc, neighbors_list, 9, ref=1),
+            ]
+        )
+        assert table.drop_reference_events([1]) == 2
+        assert list(table.table["atom_index"]) == [5]
+        assert list(table.table.index) == [0]
+        assert ActiveEventTable(constant_config).drop_reference_events([1]) == 0
