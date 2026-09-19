@@ -83,16 +83,17 @@ def species_map(
 ) -> tuple[tuple[str, ...], tuple[float, ...]]:
     """Return the potential species order and the masses LAMMPS is given.
 
-    This is the single rule that maps chemical symbols to LAMMPS atom types
-    for the whole code base: species are ``sorted(set(types))`` (alphabetical),
+    This is the default rule for chemical symbols without an explicit map:
+    species are ``sorted(set(types))`` (alphabetical),
     species ``i`` (0-based) is LAMMPS type ``i + 1`` and its mass is the ASE
     standard atomic mass in amu. ``LammpsEngine.initialize_system`` and the
-    active-volume crop (``activevolume.active_volume.map_types``) both use it,
-    so an integer type means the same species in every LAMMPS instance built
-    from the same full-system ``types``.
+    standalone active-volume helpers both use it. Real active-volume crops
+    instead reuse the initialized full-system descriptor, preserving explicit
+    species order, absent slots and post-potential masses.
 
     Consequently the elements of a multi-element ``pair_coeff`` **must be
-    listed in this alphabetical order** (for example ``* * NiFeCr.eam Cr Ni``
+    listed in this alphabetical order when this default map is used**
+    (for example ``* * NiFeCr.eam Cr Ni``
     for a Ni/Cr system), and ``types`` must be the *full* system's symbols:
     a crop that holds only a subset of the species still needs the full map.
 

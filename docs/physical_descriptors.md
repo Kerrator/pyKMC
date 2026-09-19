@@ -6,6 +6,13 @@ snapshot preserves the complete potential species order and actual masses after
 potential initialization, including species with no atoms in a crop. A request
 must agree with that snapshot before a scratch engine is created.
 
+Active-volume search and refinement use the initialized full-system species
+order and masses when rebuilding their shared native engine. They retain every
+potential type slot, including absent species, and reapply the authoritative
+masses after potential commands that may overwrite them. The remembered full
+descriptor remains available for restoration. Standalone mapping helpers with
+no descriptor retain the default alphabetical species/ASE mass convention.
+
 The force-model snapshot identifies the command definition and coefficient-file
 contents. Moving an identical file does not change its content identity. Editing
 a file at the same path does. The supported fingerprint parsers cover single-file

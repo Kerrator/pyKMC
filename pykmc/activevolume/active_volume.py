@@ -10,10 +10,11 @@ crop around a central atom (``define_AV``); ``LammpsEngine.partn_search`` /
   global index of crop atom ``i``;
 - **LAMMPS id**: ``crop index + 1`` inside the cropped instance.
 
-Species/type/mass identity is the engine's single rule (``species_map`` /
-``types_to_int`` in ``pykmc.engine.lammps``): the crop always allocates the
-*full* species set and sets one mass per species, even when the crop holds a
-subset of the species.
+Species/type/mass identity comes from the initialized engine's full-system
+descriptor. The crop retains its ordered species slots and authoritative
+masses, including species absent from the crop or even the source atom list.
+Standalone helpers without a descriptor use the engine's default alphabetical
+``species_map`` rule.
 
 Supported geometry: orthorhombic cells only (``reset`` raises before touching
 the instance otherwise). ``define_AV`` selects atoms with minimum-image
@@ -216,21 +217,31 @@ class _CommandEngine(Protocol):
 
 def map_types(
     types: list[str] | np.ndarray,
+    *,
+    species: tuple[str, ...] | None = None,
+    masses: tuple[float, ...] | None = None,
 ) -> tuple[np.ndarray, dict[str, TypeEntry]]:
     """Map element symbols to LAMMPS integer types.
 
-    Delegates to the engine's single rule (``species_map`` / ``types_to_int``
-    in ``pykmc.engine.lammps``: alphabetical ``sorted(set(types))``, ASE
-    masses), so an integer type means the same species in the active-volume
-    engine as in the main engine. ``types`` must be the full-system species
-    list: the box size and the integer refs follow its species set, which
-    ``pair_coeff`` was written against and which is assumed fixed for the
-    run. Returns the per-atom integer types and the
-    ``{symbol: {"ref": int, "mass": float}}`` map.
+    Supply the full-system ``species`` and ``masses`` together to retain
+    authoritative type order, absent slots and isotope masses. Validation
+    shares the engine's explicit-map rules and happens before any native
+    mutation. Without an explicit map, use alphabetical species and ASE
+    masses from the full source ``types`` for standalone helper callers.
+    Returns per-atom integer types and a ``{symbol: {"ref", "mass"}}`` map.
     """
-    from ..engine.lammps import species_map, types_to_int
+    from ..engine.lammps import (
+        _validate_species_override,
+        species_map,
+        types_to_int,
+    )
 
-    species, masses = species_map(types)
+    if (species is None) != (masses is None):
+        raise ValueError("map_types: species and masses must be given together")
+    if species is None:
+        species, masses = species_map(types)
+    else:
+        species, masses = _validate_species_override(species, masses)
     map_type: dict[str, TypeEntry] = {
         symbol: {"ref": i + 1, "mass": mass}
         for i, (symbol, mass) in enumerate(zip(species, masses, strict=True))
@@ -254,6 +265,8 @@ def reset(
     cell: np.ndarray,
     map_type: dict[str, TypeEntry],
     pbc: tuple[bool, bool, bool] | None = None,
+    *,
+    preserve_masses: bool = False,
 ) -> None:
     """Clear the LAMMPS instance and rebuild an empty box for the active volume.
 
@@ -268,6 +281,10 @@ def reset(
     remembered full system (``engine.full_system.pbc``) and falls back to
     fully periodic for engines without one. A non-orthorhombic ``cell`` raises
     ``ValueError`` before anything is cleared.
+
+    With ``preserve_masses=True``, reapply the supplied authoritative masses
+    after ``pair_coeff`` too: EAM potentials may overwrite masses when read.
+    The real crop entry points use this when a full-system map is available.
     """
     require_orthorhombic_cell(cell, "active_volume.reset")
     if pbc is None:
@@ -281,6 +298,9 @@ def reset(
     for entry in map_type.values():
         engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
     initialize_potential(engine, config)
+    if preserve_masses:
+        for entry in map_type.values():
+            engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
 
 
 def clear(engine):
@@ -321,9 +341,19 @@ def partn_search_AV(
     positions = _check_positions(
         positions, "active_volume.partn_search_AV", natoms=len(type)
     )
-    int_types, map_type = map_types(type)
+    full = getattr(engine, "full_system", None)
+    species = getattr(full, "species", None)
+    masses = getattr(full, "masses", None)
+    int_types, map_type = map_types(type, species=species, masses=masses)
     pbc = _engine_pbc(engine)
-    reset(engine, config, cell, map_type=map_type, pbc=pbc)
+    reset(
+        engine,
+        config,
+        cell,
+        map_type=map_type,
+        pbc=pbc,
+        preserve_masses=species is not None,
+    )
     av_positions, av_idx, buffer_idx = define_AV(
         config, central_atom_idx, positions, cell, pbc=pbc
     )
