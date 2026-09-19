@@ -1295,6 +1295,10 @@ class LammpsEngine(Engine):
             self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
             self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
             self._apply_frozen_fix("f_frozen_post", atoms_frozen)
+            if config.control.active_volume:
+                # ARTn replaces forces with trial displacements after f_buffer
+                # runs. Keep the buffer fixed through that second force update.
+                self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
             self.lmp.command("min_style fire")
 
             artn.reset_input()
@@ -1333,6 +1337,8 @@ class LammpsEngine(Engine):
 
             self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
             self.lmp.command("unfix 10")
+            if config.control.active_volume:
+                self.lmp.command("unfix f_buffer_post")
             self._remove_frozen_fix("f_frozen_post", atoms_frozen)
             self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
             self._delete_frozen_group(atoms_frozen)
@@ -1559,9 +1565,13 @@ class LammpsEngine(Engine):
             result = None
             self.lmp.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
             self._apply_frozen_fix("f_frozen_post", atoms_frozen)
+            if config.control.active_volume:
+                self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
             self.lmp.command("min_style fire")
             self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}")
             self.lmp.command("unfix 10")
+            if config.control.active_volume:
+                self.lmp.command("unfix f_buffer_post")
             self._remove_frozen_fix("f_frozen_post", atoms_frozen)
 
             if self._is_rank0:
