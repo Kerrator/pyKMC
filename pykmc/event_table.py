@@ -134,74 +134,32 @@ SOURCE_K0: str = "k0"
 site-specific estimate at the refined saddle, or the ``k0`` fallback."""
 
 SELF_REVERSE_NU0_RTOL: float = 0.05
-"""Relative tolerance under which two directional Vineyard prefactors count as equal.
+"""Required agreement of two accepted directional Vineyard frequencies.
 
-Used only by the htst/rpa directional identity gate, and only after the
-barriers have decided that a same-topology search is one self-reverse row
-(:data:`SELF_REVERSE_BARRIER_TOL`): when the saddle crops of that row also map
-onto each other (the IRA check) the row is a self-reverse candidate whose
-backward prefactor is compared with the forward one. When both directional
-prefactors were accepted and agree within this tolerance the row's
-``nu0_reason`` stays empty; otherwise the backward value and the relative
-difference are recorded in ``nu0_reason`` and logged as a warning (no
-averaging, never a second row). For a genuinely self-reverse event the two
-minimum Hessians are related by the symmetry that maps min1 onto min2, so
-their spectra differ only by finite-difference and relaxation noise (well
-below one percent); 5 % leaves room for that noise while flagging physically
-distinct spectra. Prefactor agreement never decides identity: it is a
-consistency check on a row whose identity the barriers established. The value
-is a documented constant, not a validated calibration.
+This existing 5% tolerance is not a validated calibration. Frequency agreement
+alone never proves identity: one map must preserve the complete physical event,
+its constraints and actual vibrational selection. Estimates are never averaged.
 """
 
 SELF_REVERSE_BARRIER_TOL: float = 0.01
-"""Barrier gap (eV) within which a same-topology search is one self-reverse row.
+"""Maximum barrier gap (eV) for a proposed directional merge.
 
-htst/rpa admission of a search whose endpoint topologies match (``event_id ==
-id_final``) is decided by the barriers, never by the prefactors (contracts
-section 7d, F3): forward and backward barriers equal within this tolerance
-mean equal minimum energies, hence symmetry-equivalent minima, and the search
-is one self-linked row as in constant mode; a larger gap means two physically
-distinct minima of the same topology, and the search is two directional rows
-with reciprocal links and separate estimates. The value is a
-numerical-equality tolerance for minimiser noise on the two minimum energies,
-not a physical window.
+This numerical equality gate is necessary, but equal barriers do not establish
+symmetry-equivalent minima. Unproven events retain reciprocal directional rows.
 """
 
 SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
-"""Barrier gap (eV) below which the IRA saddle-crop pre-check is attempted.
-
-Kept as the pre-check of :meth:`ReferenceEventTable._saddle_crops_match`; the
-identity of a same-topology search is decided by
-:data:`SELF_REVERSE_BARRIER_TOL`, which is far tighter.
-"""
+"""Coarse barrier window (eV) for a geometric lookup; not an identity proof."""
 
 
 @dataclass(frozen=True)
 class EventAdmission:
-    """Outcome of admitting one search result into the reference catalogue.
+    """Provisional rows and candidate links, before actual prefactor resolution.
 
-    Attributes
-    ----------
-    frame : pd.DataFrame
-        One (forward only) or two (forward, backward) event rows whose logical
-        ids ``idx_ref``/``idx_backward`` are still unassigned (``-1``).
-    reverse_idx_ref : int or None
-        Logical id of an already catalogued reverse event that the single
-        forward row must link to; ``None`` when the frame carries its own
-        reverse or the row is its own reverse.
-    same_topology : bool
-        The frame is one self-linked row because the endpoint topologies
-        match (``event_id == id_final``) and, in htst/rpa, the two barriers
-        are equal within :data:`SELF_REVERSE_BARRIER_TOL` (constant mode
-        needs only the topology match). A same-topology search whose barriers
-        differ by more is admitted as two directional rows and carries
-        ``same_topology=False``: it is not a self-reverse event.
-    self_reverse_candidate : bool
-        htst/rpa only: ``same_topology`` and the saddle crops map onto each
-        other (the IRA check). The backward prefactor of the search is then
-        compared with the forward one and the outcome recorded on the single
-        row; see :meth:`ReferenceEventTable._record_self_reverse`.
-
+    HTST/RPA retain two reciprocal rows. ``reverse_idx_ref`` proposes an
+    existing backward row for post-resolution comparison; ``same_topology``
+    and ``self_reverse_candidate`` propose self-reversal only. None of these
+    flags authorizes collapse. Constant mode keeps its original row policy.
     """
 
     frame: pd.DataFrame
@@ -297,9 +255,9 @@ class ReferenceEventTable:
     request per accepted event (both directions) is submitted; rows are
     patched by logical id; the batch is resolved before :meth:`add_events`
     returns, so refinement never reads an unresolved reference ``k``. A
-    self-reverse event is one self-linked row carrying the forward estimate;
-    its backward estimate is only compared and recorded (see
-    :meth:`_record_self_reverse`).
+    self-reverse candidate starts with two rows. Only accepted, agreeing
+    estimates and a common full physical map permit collapse; both original
+    producing records remain in the archive.
 
     """
 
@@ -363,14 +321,21 @@ class ReferenceEventTable:
         Returns
         -------
         list[Result[pd.DataFrame, ErrorInfo]]
-            One result per event: the admitted rows (as returned by admission,
-            before prefactor resolution) or the rejection.
+            One result per event: surviving resolved rows or the rejection.
 
         """
         results_is_valid_events = []
         accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
+            request = None
+            if (
+                self.uses_prefactors
+                and self.prefactor_service is not None
+                and pbc is not None
+                and ev.types is not None
+            ):
+                request = self._event_request(ev, pbc, event_key=())
             res = self._admit(
                 min1_positions=ev.min1_positions,
                 saddle_positions=ev.saddle_positions,
@@ -380,6 +345,7 @@ class ReferenceEventTable:
                 dE_backward=ev.dE_backward,
                 cell=ev.cell,
                 types=ev.types,
+                request=request,
             )
             if res.is_ok():
                 admission = res.ok_value()
@@ -395,8 +361,35 @@ class ReferenceEventTable:
 
         if self.uses_prefactors and accepted:
             self._resolve_prefactors(accepted, pbc)
+            # Resolution can merge a proven reverse. Return only surviving,
+            # resolved rows and their current links, not provisional frames.
+            results_is_valid_events = [
+                Ok(self.table[self.table.idx_ref.isin(res.ok_value().idx_ref)].copy())
+                if res.is_ok()
+                else res
+                for res in results_is_valid_events
+            ]
 
         return results_is_valid_events
+
+    def _event_request(self, ev, pbc, *, event_key):
+        """Build the same full physical source for lookup and calculation."""
+        geometry = getattr(ev, "prefactor_geometry", None) or (
+            ev.min1_positions,
+            ev.saddle_positions,
+            ev.min2_positions,
+        )
+        return self.prefactor_service.build_request(
+            event_key=event_key,
+            min1_positions=geometry[0],
+            saddle_positions=geometry[1],
+            min2_positions=geometry[2],
+            types=ev.types,
+            cell=ev.cell,
+            pbc=pbc,
+            center_index=ev.move_atom_index,
+            constraints=getattr(ev, "constraints", None),
+        )
 
     def _resolve_prefactors(
         self,
@@ -438,24 +431,7 @@ class ReferenceEventTable:
                     "EventSearchOutput.types is required to build the HTST request "
                     f"of reference event {fwd_id}"
                 )
-            geometry = getattr(ev, "prefactor_geometry", None) or (
-                ev.min1_positions,
-                ev.saddle_positions,
-                ev.min2_positions,
-            )
-            requests.append(
-                self.prefactor_service.build_request(
-                    event_key=(fwd_id, bwd_id),
-                    min1_positions=geometry[0],
-                    saddle_positions=geometry[1],
-                    min2_positions=geometry[2],
-                    types=ev.types,
-                    cell=ev.cell,
-                    pbc=pbc,
-                    center_index=ev.move_atom_index,
-                    constraints=getattr(ev, "constraints", None),
-                )
-            )
+            requests.append(self._event_request(ev, pbc, event_key=(fwd_id, bwd_id)))
         results = self.prefactor_service.compute(requests)
         wall = self.prefactor_service.last_batch_wall_s
         for fwd_id, bwd_id, admission, _ev in accepted:
@@ -472,22 +448,10 @@ class ReferenceEventTable:
                     fresh=True,
                 )
                 self._log_direction(bwd_id, "backward", pre.backward, pre.n_free, wall)
-            elif admission.self_reverse_candidate:
-                self._record_self_reverse(fwd_id, pre, wall)
-            elif admission.same_topology:
-                # Equal endpoint topologies whose saddle crops do not map onto
-                # each other: one self-linked row as in constant mode; the
-                # backward estimate describes a different local geometry and
-                # is not compared with the forward one.
-                logger.info(
-                    "[htst] reference event %d: equal endpoint topologies but the "
-                    "saddle crops do not map onto each other; single self-linked "
-                    "row kept, backward estimate of this search discarded "
-                    "(n_free %d, batch %.3f s)",
-                    fwd_id,
-                    pre.n_free,
-                    wall,
-                )
+                if admission.reverse_idx_ref is not None:
+                    self._finalize_known_reverse(bwd_id, admission.reverse_idx_ref)
+                elif admission.self_reverse_candidate:
+                    self._record_self_reverse(fwd_id, bwd_id, pre, wall)
             else:
                 # The reverse is already catalogued; its own estimate stands.
                 logger.info(
@@ -559,66 +523,178 @@ class ReferenceEventTable:
                 wall_s,
             )
 
-    def _record_self_reverse(
-        self, idx_ref: int, pre: EventPrefactors, wall_s: float
-    ) -> None:
-        """Compare the backward estimate of a self-reverse row with its forward one.
+    def _eligible_identity_calculation(self, idx_ref):
+        """Read-only current acceptance check; identity lookup never launches work."""
+        from .htst.request import HTSTRequestError
 
-        The row already carries the forward estimate (:meth:`_patch_row`).
-        Agreement within :data:`SELF_REVERSE_NU0_RTOL` leaves ``nu0_reason``
-        untouched; a disagreement, a rejected backward direction or a rejected
-        forward direction is appended to ``nu0_reason`` and logged as a
-        warning. The estimate itself is never changed (no averaging) and no
-        second row is created. Both outcomes are the only report of the
-        backward estimate, so their log lines carry ``n_free`` and the wall
-        time of the batch like every other ``[htst]`` reference line.
+        rows = self.table[self.table.idx_ref == idx_ref]
+        service = self.prefactor_service
+        if len(rows) != 1 or service is None:
+            return None
+        row = rows.iloc[0]
+        calculation = self.prefactor_archive.calculation_for(idx_ref, row)
+        if (
+            calculation is None
+            or not calculation.estimate.ok
+            or row.nu0_status != NU0_OK
+        ):
+            return None
+        nu0 = calculation.estimate.nu0_hz
+        if (
+            not np.isfinite(row.nu0)
+            or float(row.nu0) != nu0
+            or not service.settings.nu0_min_hz <= nu0 <= service.settings.nu0_max_hz
+            or self.prefactor_archive.descriptors.get(calculation.descriptor_id) is None
+            or self.compare_physics(calculation.provenance.produced.descriptor).status
+            != "compatible"
+        ):
+            return None
+        try:
+            current = service.request_from_snapshot(
+                calculation.provenance.source, event_key=("identity", idx_ref)
+            )
+        except HTSTRequestError:
+            return None
+        return (
+            calculation
+            if service.calculation_context_matches(calculation, current)
+            else None
+        )
 
-        Parameters
-        ----------
-        idx_ref : int
-            Logical id of the single self-linked row.
-        pre : EventPrefactors
-            The resolved pair of directional estimates of the search.
-        wall_s : float
-            Wall time (s) of the batch that produced the estimates.
+    def _matching_whole_event(self, event, request, direction):
+        """Strengthen a topology/barrier candidate to one full physical map."""
+        from .htst.event_identity import request_matches_calculation
 
-        """
+        if request is None:
+            return None
+        subset = self.table[
+            (self.table.event_id == event.event_id)
+            & ((self.table.energy_barrier - float(event.energy_barrier)).abs() <= 0.25)
+        ]
+        for idx_ref in subset.idx_ref:
+            row = subset[subset.idx_ref == idx_ref].iloc[0]
+            if (
+                abs(float(row.energy_barrier) - float(event.energy_barrier))
+                > SELF_REVERSE_BARRIER_TOL
+            ):
+                continue
+            calculation = self._eligible_identity_calculation(int(idx_ref))
+            if calculation is not None and request_matches_calculation(
+                request,
+                direction,
+                calculation,
+                method=self.prefactor_service.method,
+                tolerance=self.config.psr.matching_score_thr,
+                kmax_factor=self.config.ira.kmax_factor,
+            ):
+                return int(idx_ref)
+        return None
+
+    def _merge_direction(self, discarded, survivor):
+        """Redirect every alias while keeping both original producing records."""
+        mask = self.table.idx_ref == discarded
+        row = self.table.loc[mask].iloc[0]
+        self.prefactor_archive.retain(
+            discarded, row, f"whole-event equivalent to reference {survivor}"
+        )
+        self.table.loc[self.table.idx_backward == discarded, "idx_backward"] = survivor
+        self.table = self.table.loc[~mask].copy()
+        self._resolved_contexts.pop(discarded, None)
+
+    def finalize_self_reverse(self, fwd_id, bwd_id, *, prefactors):
+        """Collapse only the actual resolved pair with one full reversal witness."""
+        from .htst.event_identity import calculations_equivalent
+
+        if not self.uses_prefactors or fwd_id == bwd_id:
+            return False
+        first = self._eligible_identity_calculation(fwd_id)
+        second = self._eligible_identity_calculation(bwd_id)
+        if (
+            first is None
+            or second is None
+            or first != prefactors.calculation("forward")
+            or second != prefactors.calculation("backward")
+            or not self_reverse_prefactors_agree(first.estimate, second.estimate)
+        ):
+            return False
+        fwd = self.table[self.table.idx_ref == fwd_id].iloc[0]
+        bwd = self.table[self.table.idx_ref == bwd_id].iloc[0]
+        if (
+            int(fwd.idx_backward) != bwd_id
+            or int(bwd.idx_backward) != fwd_id
+            or fwd.event_id != fwd.id_final
+            or abs(float(fwd.energy_barrier) - float(bwd.energy_barrier))
+            > SELF_REVERSE_BARRIER_TOL
+            or not calculations_equivalent(
+                first,
+                second,
+                tolerance=self.config.psr.matching_score_thr,
+                kmax_factor=self.config.ira.kmax_factor,
+            )
+        ):
+            return False
+        self._merge_direction(bwd_id, fwd_id)
+        return True
+
+    def _finalize_known_reverse(self, bwd_id, known_id):
+        """A known reverse also needs agreement of the actual new producer."""
+        from .htst.event_identity import calculations_equivalent
+
+        first = self._eligible_identity_calculation(bwd_id)
+        second = self._eligible_identity_calculation(known_id)
+        new_row = self.table[self.table.idx_ref == bwd_id].iloc[0]
+        old_row = self.table[self.table.idx_ref == known_id].iloc[0]
+        if (
+            first is not None
+            and second is not None
+            and abs(float(new_row.energy_barrier) - float(old_row.energy_barrier))
+            <= SELF_REVERSE_BARRIER_TOL
+            and self_reverse_prefactors_agree(first.estimate, second.estimate)
+            and calculations_equivalent(
+                first,
+                second,
+                tolerance=self.config.psr.matching_score_thr,
+                kmax_factor=self.config.ira.kmax_factor,
+            )
+        ):
+            self._merge_direction(bwd_id, known_id)
+            return True
+        logger.info(
+            "[htst] reverse candidate %d is unproven; retaining both directions including %d",
+            known_id,
+            bwd_id,
+        )
+        return False
+
+    def _record_self_reverse(self, idx_ref, bwd_id, pre, wall_s):
+        """Finalize a candidate, preserving each directional estimate on failure."""
+        if self.finalize_self_reverse(idx_ref, bwd_id, prefactors=pre):
+            logger.info(
+                "[htst] reference event %d: whole-event self-reverse, backward nu0 = %.4e Hz agrees within %.0f%% (n_free %d, batch %.3f s)",
+                idx_ref,
+                pre.backward.nu0_hz,
+                100.0 * SELF_REVERSE_NU0_RTOL,
+                pre.n_free,
+                wall_s,
+            )
+            return
         fwd, bwd = pre.forward, pre.backward
         if fwd.ok and bwd.ok:
-            if self_reverse_prefactors_agree(fwd, bwd):
-                logger.info(
-                    "[htst] reference event %d: self-reverse, backward nu0 = "
-                    "%.4e Hz agrees with the forward estimate within %.0f%% "
-                    "(n_free %d, batch %.3f s)",
-                    idx_ref,
-                    bwd.nu0_hz,
-                    100.0 * SELF_REVERSE_NU0_RTOL,
-                    pre.n_free,
-                    wall_s,
-                )
-                return
             differs = 100.0 * abs(fwd.nu0_hz - bwd.nu0_hz) / fwd.nu0_hz
-            note = f"self-reverse: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
+            note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
         elif bwd.ok:
-            note = (
-                f"self-reverse: backward nu0 = {bwd.nu0_hz:.4e} Hz (forward rejected)"
-            )
+            note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz (forward rejected)"
         elif bwd.skipped:
-            note = "self-reverse: backward prefactor not requested"
+            note = "self-reverse unproven: backward prefactor not requested"
         else:
-            note = (
-                "self-reverse: backward prefactor rejected "
-                f"({bwd.reason_code.value}: {bwd.reason})"
-            )
-        mask = self.table["idx_ref"] == idx_ref
+            note = f"self-reverse unproven: backward prefactor rejected ({bwd.reason_code.value}: {bwd.reason})"
+        mask = self.table.idx_ref == idx_ref
         current = str(self.table.loc[mask, "nu0_reason"].iloc[0])
         self.table.loc[mask, "nu0_reason"] = f"{current}; {note}" if current else note
         logger.warning(
-            "[htst] reference event %d: %s; the single self-linked row keeps the "
-            "forward estimate (%s) (n_free %d, batch %.3f s)",
+            "[htst] reference event %d: %s; retaining both directions (n_free %d, batch %.3f s)",
             idx_ref,
             note,
-            f"nu0 = {fwd.nu0_hz:.4e} Hz" if fwd.ok else "k0 fallback",
             pre.n_free,
             wall_s,
         )
@@ -914,6 +990,8 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        *,
+        request=None,
     ) -> Result[EventAdmission, ErrorInfo]:
         """Apply the energy gates, build the directional series and admit them.
 
@@ -1009,7 +1087,9 @@ class ReferenceEventTable:
                 cell=cell,
                 types=types,
             )
-            return self._admit_series(dfevent_forward, dfevent_backward)
+            return self._admit_series(
+                dfevent_forward, dfevent_backward, request=request
+            )
 
     def is_valid_new_event(
         self,
@@ -1067,66 +1147,37 @@ class ReferenceEventTable:
         return res
 
     def _admit_series(
-        self, dfevent_forward: pd.Series, dfevent_backward: pd.Series
+        self,
+        dfevent_forward: pd.Series,
+        dfevent_backward: pd.Series,
+        *,
+        request=None,
     ) -> Result[EventAdmission, ErrorInfo]:
-        """Decide how the forward/backward series of one search enter the catalogue.
+        """Retain provisional directions until full physical identity is proven.
 
-        Constant mode reproduces the base admission exactly:
-
-        - forward already catalogued (:meth:`find_matching_event`) -> rejected;
-        - equal endpoint topologies (``event_id == id_final``) -> one
-          self-linked forward row, no geometric check;
-        - otherwise both rows when the backward is new, else the forward only
-          (self-linked by :meth:`add`).
-
-        htst/rpa mode keeps the same energy and duplicate rules but treats the
-        directional identity as a scientific decision (architecture rule
-        "Direction identity is a scientific review gate"):
-
-        - a backward direction already in the catalogue links the forward row
-          to that logical id instead of self-linking it;
-        - equal endpoint topologies whose barriers agree within
-          :data:`SELF_REVERSE_BARRIER_TOL` (equal minimum energies, hence
-          symmetry-equivalent minima) are one self-linked row, as in constant
-          mode; when the saddle crops also map onto each other (the IRA
-          check) the row is a self-reverse candidate whose backward prefactor
-          is compared with the forward one after resolution
-          (:meth:`_record_self_reverse`), otherwise the backward estimate is
-          discarded with a note (an IRA mismatch between symmetry-equivalent
-          minima is a matcher limitation, not a second event);
-        - equal endpoint topologies whose barriers differ by more are two
-          physically distinct minima: two directional rows with reciprocal
-          links and separate estimates (``same_topology=False``, no
-          candidate, no comparison). Equal prefactors never decide identity
-          (contracts section 7d, F3).
-
-        Parameters
-        ----------
-        dfevent_forward : pd.Series
-            Forward event series from :meth:`_build_event_series`.
-        dfevent_backward : pd.Series
-            Backward event series from :meth:`_build_event_series`.
-
-        Returns
-        -------
-        Result[EventAdmission, ErrorInfo]
-            The admitted rows and their linking metadata, or the rejection.
-
+        Constant mode retains its original topology/saddle admission policy.
+        HTST/RPA may reject an exact known whole event without recalculation;
+        otherwise both rows carry their own actual result before any merge.
+        Missing full request/provenance is not evidence of equivalence.
         """
-        if self.find_matching_event(dfevent_forward) is not None:
+        duplicate = (
+            self._matching_whole_event(dfevent_forward, request, "forward")
+            if self.uses_prefactors
+            else self.find_matching_event(dfevent_forward)
+        )
+        if duplicate is not None:
             return Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_NEW,
                     message="Found event already in reference table",
-                    details="Same topology",
+                    details="Same whole event"
+                    if self.uses_prefactors
+                    else "Same topology",
                 )
             )
         same_topology = dfevent_forward["event_id"] == dfevent_forward["id_final"]
-
         if not self.uses_prefactors:
-            # Constant mode: unchanged base behaviour.
             if same_topology:
-                # We are sure that the backward reaction same as forward
                 return Ok(
                     EventAdmission(
                         frame=dfevent_forward.to_frame().T, same_topology=True
@@ -1138,37 +1189,23 @@ class ReferenceEventTable:
                         frame=self._two_rows(dfevent_forward, dfevent_backward)
                     )
                 )
-            # backward is already known: forward only (self-linked by add)
             return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
 
-        # htst/rpa: directional identity gate.
-        reverse_idx_ref = self.find_matching_event(dfevent_backward)
-        if reverse_idx_ref is not None:
-            return Ok(
-                EventAdmission(
-                    frame=dfevent_forward.to_frame().T,
-                    reverse_idx_ref=reverse_idx_ref,
-                )
-            )
-        if same_topology:
-            gap = abs(
-                float(dfevent_forward["energy_barrier"])
-                - float(dfevent_backward["energy_barrier"])
-            )
-            if gap <= SELF_REVERSE_BARRIER_TOL:
-                return Ok(
-                    EventAdmission(
-                        frame=dfevent_forward.to_frame().T,
-                        same_topology=True,
-                        self_reverse_candidate=self._saddle_crops_match(
-                            dfevent_forward, dfevent_backward
-                        ),
-                    )
-                )
-            # Same topology, different minimum energies: two distinct minima
-            # of one topology, catalogued as two directional rows.
+        reverse_idx_ref = self._matching_whole_event(
+            dfevent_backward, request, "backward"
+        )
+        gap = abs(
+            float(dfevent_forward.energy_barrier)
+            - float(dfevent_backward.energy_barrier)
+        )
+        candidate = same_topology and gap <= SELF_REVERSE_BARRIER_TOL
         return Ok(
-            EventAdmission(frame=self._two_rows(dfevent_forward, dfevent_backward))
+            EventAdmission(
+                frame=self._two_rows(dfevent_forward, dfevent_backward),
+                reverse_idx_ref=reverse_idx_ref,
+                same_topology=candidate,
+                self_reverse_candidate=candidate,
+            )
         )
 
     @staticmethod
@@ -1184,33 +1221,10 @@ class ReferenceEventTable:
     def _saddle_crops_match(
         self, dfevent_forward: pd.Series, dfevent_backward: pd.Series
     ) -> bool:
-        """Return True when the two directional saddle crops map onto each other.
+        """Coarse saddle-crop proposal, never proof of whole-event identity.
 
-        This is the geometric self-reverse check of the base admission code
-        (IRA match of the forward saddle crop against the backward one,
-        accepted through ``psr.matching_score_thr``), applied only when the
-        two barriers lie within :data:`SAME_TOPOLOGY_BARRIER_TOL`. On the
-        base it sat behind an unreachable branch; the htst/rpa gate uses it to
-        decide whether the backward prefactor of a same-topology search
-        describes the same saddle crop (and is compared with the forward one)
-        or a different one (and is discarded). Species are fed
-        to IRA exactly as :meth:`find_matching_event` does: the local element
-        types in ``full`` colouring mode, a single grey label otherwise, so a
-        species-swapped pair of directional crops is never a candidate in
-        full mode.
-
-        Parameters
-        ----------
-        dfevent_forward : pd.Series
-            Forward event series.
-        dfevent_backward : pd.Series
-            Backward event series.
-
-        Returns
-        -------
-        bool
-            Whether the crops match.
-
+        Kept for geometric diagnostics and compatibility with classification
+        callers. HTST/RPA admission and collapse require full physical maps.
         """
         gap = abs(
             float(dfevent_forward["energy_barrier"])
@@ -1606,11 +1620,12 @@ class ReferenceEventTable:
         return dfevent_forward, dfevent_backward
 
     def max_idx_ref(self) -> int:
-        """Return max value of idx_ref"""
-        if len(self.table) == 0:
-            return 0
-        else:
-            return int(self.table["idx_ref"].max()) + 1
+        """Allocate above surviving and archived logical IDs in prefactor modes."""
+        ids = [int(i) for i in self.table.idx_ref]
+        if self.uses_prefactors:
+            ids.extend(self.prefactor_archive.references)
+            ids.extend(self.prefactor_archive.history)
+        return max(ids, default=-1) + 1
 
     def _initialize_table(self) -> None:
         """Initialize the reference event table.
