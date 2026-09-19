@@ -23,6 +23,7 @@ class PrefactorRejection(str, Enum):
     SADDLE_NOT_FIRST_ORDER = "saddle_not_first_order"
     MODE_COUNT_MISMATCH = "mode_count_mismatch"
     NONFINITE_HESSIAN = "nonfinite_hessian"
+    NONSTATIONARY_GEOMETRY = "nonstationary_geometry"
     NONFINITE_PREFACTOR = "nonfinite_prefactor"
     OUT_OF_WINDOW = "out_of_window"
 

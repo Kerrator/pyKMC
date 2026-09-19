@@ -71,6 +71,8 @@ from ..htst import (
     HessianFn,
     HTSTEventRequest,
     HTSTRequestError,
+    PrefactorRejected,
+    PrefactorRejection,
     select_free_indices,
 )
 from ..htst import compute_event_prefactors as _kernel_compute_event_prefactors
@@ -252,7 +254,7 @@ class LammpsHTSTExtension(EngineExtension):
 
         Notes
         -----
-        Scientific rejections (unstable minimum, non-first-order saddle,
+        Scientific rejections (nonstationary geometry, unstable minimum, non-first-order saddle,
         non-finite Hessian, out-of-window prefactor) are returned as
         ``status="rejected"`` per direction by the kernel; they never raise.
 
@@ -264,6 +266,7 @@ class LammpsHTSTExtension(EngineExtension):
                 f"request must be an HTSTEventRequest, got {type(request).__name__}"
             )
         request.validate()
+        request = replace(request, user_constraints=request.resolved_user_constraints())
         if request.descriptor is not None:
             physics = request.descriptor.engine
             if ForceModel.capture(self.engine.config) != physics.force_model:
@@ -413,9 +416,29 @@ class LammpsHTSTExtension(EngineExtension):
                     if request.constraints is None
                     else request.constraints.crop(zone),
                 )
+            hessian = self._hessian_fn(scratch, settings.fd_step)
+
+            def stationary_hessian(positions, free_indices):
+                # Check the undisplaced geometry, after premin/crop and with
+                # every temporary force fix removed. Frozen reaction forces
+                # are physical and do not invalidate constrained stationarity.
+                forces = np.asarray(scratch.get_forces(positions=positions))
+                if forces.shape != positions.shape:
+                    raise ValueError("native forces must match the geometry shape")
+                norms = np.linalg.norm(forces[free_indices], axis=1)
+                largest = float(np.max(norms))
+                if not np.all(np.isfinite(norms)) or largest > settings.force_tol:
+                    raise PrefactorRejected(
+                        PrefactorRejection.NONSTATIONARY_GEOMETRY,
+                        f"maximum free-atom force norm {largest!r} eV/Å exceeds "
+                        f"stationarity tolerance {settings.force_tol} eV/Å "
+                        "or is nonfinite",
+                    )
+                return hessian(positions, free_indices)
+
             return _kernel_compute_event_prefactors(
                 local_request,
-                self._hessian_fn(scratch, settings.fd_step),
+                stationary_hessian,
                 method="lammps_eskm",
                 free_indices=free_local,
                 compute_backward=compute_backward,

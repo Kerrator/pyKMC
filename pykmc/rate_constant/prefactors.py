@@ -37,6 +37,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -75,6 +76,7 @@ def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
     return HTSTSettings(
         free_radius=rate_config.free_radius,
         fd_step=rate_config.fd_step,
+        force_tol=rate_config.force_tol,
         zone_radius=rate_config.zone_radius,
         premin=rate_config.premin,
         nu0_min_hz=thz_to_hz(rate_config.nu0_min_THz),
@@ -297,11 +299,20 @@ class PrefactorService:
                 "pass resolved constraints or source atom_ids, not both"
             )
         if constraints is None:
-            constraints = (
-                self.global_constraints
-                if atom_ids is None and self.global_constraints is not None
-                else descriptor.resolve_constraints(min1_positions, symbols, atom_ids)
-            )
+            if self.global_constraints is not None:
+                constraints = self.global_constraints
+                if atom_ids is not None:
+                    try:
+                        rows = [constraints.atom_ids.index(i) for i in atom_ids]
+                        constraints = constraints.crop(rows)
+                    except ValueError as exc:
+                        raise HTSTRequestError(
+                            "atom_ids must map to the initialized source"
+                        ) from exc
+            else:
+                constraints = descriptor.resolve_constraints(
+                    min1_positions, symbols, atom_ids
+                )
         axes = tuple(pbc)
         if len(axes) != 3 or not all(isinstance(p, (bool, np.bool_)) for p in axes):
             raise HTSTRequestError("pbc must contain three bools")
@@ -319,8 +330,12 @@ class PrefactorService:
             settings=self.settings,
             descriptor=descriptor,
             constraints=constraints,
+            user_constraints=self.global_constraints,
         )
         request.validate()
+        # Freeze a stateless policy resolution before downstream premin/crop.
+        # A supplied AV union may add locks, never replace the known user mask.
+        request = replace(request, user_constraints=request.resolved_user_constraints())
         return request
 
     def compute(
@@ -362,6 +377,22 @@ class PrefactorService:
             raise ValueError(
                 f"compute_backward must be a bool, got {compute_backward!r}"
             )
+        # Validate the complete batch before submitting any work. Requests may
+        # come from another builder; they cannot replace this run's initialized
+        # fixed references with an otherwise internally consistent snapshot.
+        for req in requests:
+            req.validate()
+            if self.global_constraints is not None:
+                if req.constraints is None:
+                    raise HTSTRequestError(
+                        "initialized constraints need an execution mask"
+                    )
+                try:
+                    req.constraints.require_preserves(
+                        self.global_constraints, cell=req.cell, pbc=req.pbc
+                    )
+                except ValueError as exc:
+                    raise HTSTRequestError(str(exc)) from exc
         start = time.perf_counter()
         pending: list[tuple[tuple, Any]] = []
         try:

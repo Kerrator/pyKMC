@@ -595,6 +595,15 @@ class RateConstantConfig(BaseModel):
         description="HTST: central finite-difference displacement (Angstrom) used to "
         "build the Hessian.",
     )
+    force_tol: float = Field(
+        default=0.005,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: maximum raw force norm (eV/Angstrom) on any atom of "
+        "the common vibrational set at each stationary geometry, after premin "
+        "and cropping. Fixed-atom reaction forces are excluded. Larger or "
+        "nonfinite forces reject the native prefactor calculation.",
+    )
     zone_radius: Optional[float] = Field(
         default=None,
         gt=0.0,
@@ -631,6 +640,14 @@ class RateConstantConfig(BaseModel):
         """Accept the INI spelling ``None`` for an absent ``zone_radius``."""
         if v is None or (isinstance(v, str) and v.strip().lower() == "none"):
             return None
+        return v
+
+    @field_validator("force_tol", mode="before")
+    @classmethod
+    def _require_force_tolerance_number(cls, v: Any) -> Any:
+        """Do not interpret a boolean as a force tolerance."""
+        if isinstance(v, bool):
+            raise ValueError("force_tol must be a finite positive number, not bool")
         return v
 
     @model_validator(mode="after")

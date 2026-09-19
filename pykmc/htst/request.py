@@ -13,7 +13,6 @@ from ..physics import (
     PhysicalDescriptor,
     ResolvedConstraints,
     _digest,
-    _indices,
 )
 
 ORTHORHOMBIC_ATOL: float = 1.0e-8
@@ -116,6 +115,12 @@ class HTSTEventRequest:
         Global index of the moving atom; centre of the free region.
     settings : HTSTSettings
         Validated numerical settings.
+    constraints : ResolvedConstraints, optional
+        Execution mask, including any user and active-volume fixed atoms.
+    user_constraints : ResolvedConstraints, optional
+        Immutable initialized user mask and references in the full source.
+        Execution masks may add restrictions but must preserve this authority,
+        including fixed atoms outside a later crop.
 
     """
 
@@ -132,6 +137,7 @@ class HTSTEventRequest:
     settings: HTSTSettings
     descriptor: PhysicalDescriptor | None = None
     constraints: ResolvedConstraints | None = None
+    user_constraints: ResolvedConstraints | None = None
 
     def validate(self) -> None:
         """Check shapes, indices, finiteness, species membership and geometry.
@@ -256,6 +262,60 @@ class HTSTEventRequest:
                     )
             except ValueError as exc:
                 raise HTSTRequestError(str(exc)) from exc
+        user = self.resolved_user_constraints()
+        if user is not None:
+            if self.constraints is None:
+                raise HTSTRequestError("user constraints need an execution mask")
+            try:
+                user.validate(len(user.atom_ids))
+                if set(user.atom_ids) != set(user.source_ids):
+                    raise ValueError(
+                        "user constraint authority must retain the full source"
+                    )
+                self.constraints.require_preserves(user, cell=cell, pbc=self.pbc)
+            except ValueError as exc:
+                raise HTSTRequestError(str(exc)) from exc
+
+    def resolved_user_constraints(self) -> ResolvedConstraints | None:
+        """Return user authority before any relaxation or crop.
+
+        The service supplies its initialized snapshot. A stateless direct full
+        request may instead declare min1 as its original source; resolve its
+        descriptor policy in source_ids order once, then carry the result into
+        derived requests. A crop lacks the full source and cannot reconstruct
+        that authority from its remaining rows.
+        """
+        if self.user_constraints is not None:
+            if not isinstance(self.user_constraints, ResolvedConstraints):
+                raise HTSTRequestError("user_constraints must be ResolvedConstraints")
+            if self.descriptor is not None and (
+                self.user_constraints.user_policy != self.descriptor.constraint_policy
+            ):
+                raise HTSTRequestError(
+                    "user source authority has a different or unknown policy"
+                )
+            return self.user_constraints
+        if self.descriptor is None or self.descriptor.constraint_policy == "null":
+            return None
+        if not isinstance(self.constraints, ResolvedConstraints):
+            raise HTSTRequestError(
+                "constrained descriptor needs resolved source constraints"
+            )
+        source = self.constraints.source_ids
+        local = self.constraints.atom_ids
+        if set(local) != set(source):
+            raise HTSTRequestError(
+                "cropped constrained request needs user source authority"
+            )
+        rows = [local.index(identity) for identity in source]
+        try:
+            return self.descriptor.resolve_constraints(
+                np.asarray(self.min1_positions)[rows],
+                tuple(self.types[i] for i in rows),
+                source,
+            )
+        except ValueError as exc:
+            raise HTSTRequestError(str(exc)) from exc
 
     def calculation_identity(
         self, direction: str = "forward", free_indices: Any = None
@@ -270,7 +330,12 @@ class HTSTEventRequest:
             raise HTSTRequestError("direction must be forward or backward")
         n_atoms = len(self.types)
         ids = self.constraints.atom_ids if self.constraints else tuple(range(n_atoms))
-        free = None if free_indices is None else _indices(free_indices, upper=n_atoms)
+        if free_indices is None:
+            free = None
+        else:
+            from .free_region import common_free_indices
+
+            free = tuple(int(i) for i in common_free_indices(self, free_indices))
         geometry = _digest(
             (
                 np.asarray(self.min1_positions).tolist(),

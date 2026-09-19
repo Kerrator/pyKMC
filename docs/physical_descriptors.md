@@ -98,3 +98,32 @@ This changes mixed/open-boundary geometry and neighbor membership from the old
 all-periodic assumption. Fully periodic image equivalence remains supported.
 It does not establish basin acceleration or constrained HTST acceptance by
 itself; those require their own numerical and integration checks.
+
+## Constrained HTST calculations
+
+The request carries the initialized user constraint snapshot separately from
+its execution mask. The user snapshot records the policy that resolved it;
+a different or unknown policy cannot establish authority for a descriptor.
+The execution mask may add AV locks, but must preserve all user-fixed source
+identities and reference coordinates, including atoms outside a crop. Service
+requests remap initialized constraints by source identity when rows are
+permuted. A stateless full request can declare minimum 1 as its original source;
+resolve that policy before relaxation or cropping and retain the snapshot.
+
+All three event geometries must obey the immutable fixed coordinates, allowing
+only images along the actual periodic axes. Preminimization holds the union of
+the event core and fixed atoms. Every Hessian instead uses one common core
+selection with fixed atoms removed, including for explicit free selections.
+An empty common set returns an unavailable estimate. Fixed atoms are never
+finite-displaced by the Hessian calculation.
+
+The native event adapter checks raw forces after preminimization and cropping,
+before the undisplaced saddle and each requested minimum reaches the Hessian.
+The largest Euclidean force norm on a common free atom must be at most
+`[rateconstant] force_tol`, a finite positive value in eV/Angstrom (default
+0.005). Fixed atoms may carry reaction forces. Above-limit or nonfinite free
+forces return `nonstationary_geometry` for affected directions; the saddle must
+also have exactly one unstable common-subspace mode. This is a finite force
+convergence criterion, recorded in the producing descriptor. It does not imply
+exact zero force. Low-level derivative helpers and the generic Hessian-only
+kernel cannot check stationarity; their callers must establish it separately.

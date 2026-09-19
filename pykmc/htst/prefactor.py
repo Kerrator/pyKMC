@@ -147,6 +147,9 @@ def compute_event_prefactors(
         direction(s) that need that geometry. Called exactly once for the saddle,
         then once per requested minimum only when the saddle is a first-order
         saddle.
+        This Hessian-only interface cannot establish force stationarity. The
+        caller must do so on the same common free atoms and geometries; the
+        native LAMMPS event adapter performs that check with ``force_tol``.
     method : str, optional
         Label recorded on the result, e.g. ``"fd"`` or ``"lammps_eskm"``.
     free_indices : array_like, optional
@@ -157,8 +160,8 @@ def compute_event_prefactors(
         the original model, whose backward direction then sees a boundary
         centred on the mover's initial position). One selection feeds every
         Hessian of the event after removing source-constrained rows. Explicit
-        selections cannot re-enable a fixed atom. An empty selection rejects both directions with
-        ``EMPTY_FREE_REGION``.
+        selections cannot re-enable a fixed atom. An empty selection rejects
+        both directions with ``EMPTY_FREE_REGION``.
     compute_backward : bool, optional
         ``False`` skips the ``min2`` Hessian entirely: the backward direction is
         returned as ``status="skipped"`` (``reason="not requested"``, no

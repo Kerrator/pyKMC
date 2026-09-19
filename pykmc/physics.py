@@ -208,6 +208,7 @@ class PhysicalDescriptor:
             "zone_radius",
             "premin",
             "zero_mode_tol",
+            "force_tol",
         }
         if (
             len(self.numerical) != len(required)
@@ -240,6 +241,7 @@ class PhysicalDescriptor:
                 "zone_radius",
                 "premin",
                 "zero_mode_tol",
+                "force_tol",
             )
         )
         region = getattr(config, "frozen_atoms", None)
@@ -320,6 +322,7 @@ class ResolvedConstraints:
     center_id: int | None = None
     center_position: tuple[float, float, float] | None = None
     rmov: float | None = None
+    user_policy: str | None = None
 
     def __post_init__(self) -> None:
         self.validate(len(self.atom_ids))
@@ -416,9 +419,19 @@ class ResolvedConstraints:
             center_id,
             center_position,
             rmov,
+            json.dumps(
+                None if region is None else region.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
         )
 
     def validate(self, n_atoms: int) -> None:
+        if self.user_policy is not None:
+            if not isinstance(self.user_policy, str):
+                raise ValueError("constraint user policy must be serialized JSON")
+            json.loads(self.user_policy)
         if not all(
             isinstance(v, tuple)
             for v in (
@@ -535,6 +548,23 @@ class ResolvedConstraints:
             pos[i] = fixed[self.atom_ids[i]]
         return pos
 
+    def require_preserves(
+        self, required: ResolvedConstraints, *, cell: Any, pbc: Any
+    ) -> None:
+        """Require a union mask to retain authoritative user IDs and references."""
+        if self.source_ids != required.source_ids:
+            raise ValueError("constraint source ordering differs from user authority")
+        references = dict(zip(self.fixed_ids, self.fixed_positions))
+        if not set(required.fixed_ids).issubset(references):
+            raise ValueError("event constraints omit user-fixed source identities")
+        # Include references outside a crop: cropping changes atom_ids, never
+        # the authoritative full-source fixed mask or its physical coordinates.
+        reference_view = replace(required, atom_ids=required.fixed_ids)
+        positions = np.array(
+            [references[i] for i in required.fixed_ids], dtype=float
+        ).reshape((-1, 3))
+        reference_view.validate_positions(positions, cell=cell, pbc=pbc)
+
     def crop(self, local_indices: Any) -> ResolvedConstraints:
         indices = _indices(local_indices, upper=len(self.atom_ids))
         return replace(self, atom_ids=tuple(self.atom_ids[i] for i in indices))
@@ -558,6 +588,7 @@ class ResolvedConstraints:
                 self.center_id,
                 self.center_position,
                 self.rmov,
+                self.user_policy,
             )
         )
 

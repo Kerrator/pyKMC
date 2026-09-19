@@ -56,6 +56,11 @@ class HTSTSettings:
     zero_mode_tol : float
         Eigenvalue tolerance in eV / (amu Å²): ``lambda < -tol`` is unstable,
         ``|lambda| <= tol`` is a zero mode, ``lambda > tol`` is stable.
+    force_tol : float
+        Native stationary-geometry tolerance in eV/Å: the largest raw force
+        norm on any atom in the common vibrational set must not exceed this.
+        Fixed atoms may carry reaction forces. Hessian-only callbacks cannot
+        check forces; their callers must establish stationarity separately.
 
     Notes
     -----
@@ -73,6 +78,7 @@ class HTSTSettings:
     nu0_max_hz: float = 1.0e14
     zero_mode_tol: float = 1.0e-6
     free_region_center: Literal["saddle", "min1"] = "saddle"
+    force_tol: float = 0.005
 
     def __post_init__(self) -> None:
         """Validate finiteness, positivity and the window; store reals as float."""
@@ -88,6 +94,7 @@ class HTSTSettings:
                 f"{self.free_region_center!r}"
             )
         self._store("fd_step", _require_finite_positive("fd_step", self.fd_step))
+        self._store("force_tol", _require_finite_positive("force_tol", self.force_tol))
         if self.zone_radius is not None:
             self._store(
                 "zone_radius", _require_finite_positive("zone_radius", self.zone_radius)
