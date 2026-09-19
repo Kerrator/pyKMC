@@ -366,17 +366,27 @@ class BasinsGenericEvents:
         if sym_idx != 0:
             sym_matrices = ref_event["sym_matrix"]
             sym_matrix = sym_matrices[sym_idx]
-            supposed_initial_positions = geometry.transform_positions(
-                supposed_initial_positions,
-                sym_matrix,
-                0,
-                ref_event["sym_perm"][sym_idx],
+            # Symmetries describe event displacements around the unchanged
+            # initial configuration, as in unique_symmetries and Refinement.
+            # Rotating absolute coordinates about zero displaces the whole
+            # patch when the reference is not centered at the origin.
+            saddle_positions = (
+                supposed_initial_positions
+                + geometry.transform_positions(
+                    saddle_positions - supposed_initial_positions,
+                    sym_matrix,
+                    0,
+                    ref_event["sym_perm"][sym_idx],
+                )
             )
-            saddle_positions = geometry.transform_positions(
-                saddle_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
-            )
-            supposed_final_positions = geometry.transform_positions(
-                supposed_final_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
+            supposed_final_positions = (
+                supposed_initial_positions
+                + geometry.transform_positions(
+                    supposed_final_positions - supposed_initial_positions,
+                    sym_matrix,
+                    0,
+                    ref_event["sym_perm"][sym_idx],
+                )
             )
         supposed_initial_positions = geometry.transform_positions(
             supposed_initial_positions,
@@ -547,8 +557,9 @@ class BasinsGenericEvents:
                 if row["sym"] != 0:
                     sym_matrices = ref_event["sym_matrix"]
                     sym_matrix = sym_matrices[row["sym"]]
-                    saddle_positions = geometry.transform_positions(
-                        saddle_positions,
+                    initial_positions = np.asarray(ref_event["initial_positions"])
+                    saddle_positions = initial_positions + geometry.transform_positions(
+                        saddle_positions - initial_positions,
                         sym_matrix,
                         0,
                         ref_event["sym_perm"][row["sym"]],
