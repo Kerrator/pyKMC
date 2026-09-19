@@ -418,7 +418,9 @@ class LammpsHTSTExtension(EngineExtension):
                 )
             hessian = self._hessian_fn(scratch, settings.fd_step)
 
-            def stationary_hessian(positions, free_indices):
+            def stationary_hessian(
+                positions: np.ndarray, free_indices: np.ndarray
+            ) -> np.ndarray:
                 # Check the undisplaced geometry, after premin/crop and with
                 # every temporary force fix removed. Frozen reaction forces
                 # are physical and do not invalidate constrained stationarity.

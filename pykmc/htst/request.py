@@ -112,7 +112,7 @@ class HTSTEventRequest:
         Periodicity per axis (Python or NumPy bools, so ``tuple(atoms.pbc)``
         from ASE is accepted; ``0``/``1`` are not).
     center_index : int
-        Global index of the moving atom; centre of the free region.
+        Request row of the moving atom; centre of the free region.
     settings : HTSTSettings
         Validated numerical settings.
     constraints : ResolvedConstraints, optional

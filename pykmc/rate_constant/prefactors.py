@@ -45,7 +45,12 @@ import numpy as np
 from pykmc.htst.request import HTSTEventRequest, HTSTRequestError
 from pykmc.htst.result import EventPrefactors
 from pykmc.htst.settings import HTSTSettings
-from pykmc.physics import EnginePhysics, PhysicalDescriptor, ResolvedConstraints
+from pykmc.physics import (
+    EnginePhysics,
+    PhysicalDescriptor,
+    ResolvedConstraints,
+    _indices,
+)
 
 from .rate_constant import RateConstant
 from .units import thz_to_hz
@@ -303,7 +308,9 @@ class PrefactorService:
                 constraints = self.global_constraints
                 if atom_ids is not None:
                     try:
-                        rows = [constraints.atom_ids.index(i) for i in atom_ids]
+                        rows = [
+                            constraints.atom_ids.index(i) for i in _indices(atom_ids)
+                        ]
                         constraints = constraints.crop(rows)
                     except ValueError as exc:
                         raise HTSTRequestError(

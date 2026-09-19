@@ -311,6 +311,8 @@ class ResolvedConstraints:
     ``source_ids`` names the full ordering; ``atom_ids`` names local rows, including
     after a crop. Frozen coordinates stay in the source frame. This endpoint
     restriction is separate from the Hessian's common free-atom set.
+    ``user_policy`` records the original resolver policy before an AV union;
+    ``None`` denotes unknown policy for a manually constructed legacy payload.
     """
 
     source_ids: tuple[int, ...]

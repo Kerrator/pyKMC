@@ -216,6 +216,32 @@ def hessian_geometries(monkeypatch: pytest.MonkeyPatch) -> list[np.ndarray]:
     return captured
 
 
+@pytest.fixture
+def raw_force_evaluations(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Record actual undisplaced native force checks; forward every real call.
+
+    This observes stationarity before the eskm boundary without faking forces,
+    changing geometry, changing minimization or increasing force_tol.
+    """
+    captured: list[dict[str, Any]] = []
+    original = LammpsEngine.get_forces
+
+    def spy(self, positions=None, recompute=True):
+        result = original(self, positions=positions, recompute=recompute)
+        if result is not None:
+            geometry = self.get_positions() if positions is None else positions
+            captured.append(
+                {
+                    "positions": np.array(geometry, dtype=float, copy=True),
+                    "forces": np.array(result, dtype=float, copy=True),
+                }
+            )
+        return result
+
+    monkeypatch.setattr(LammpsEngine, "get_forces", spy)
+    return captured
+
+
 def _assert_all_closed(created: list[LammpsEngine], expected: int) -> None:
     """Exactly ``expected`` scratch engines were created and every one is closed."""
     assert len(created) == expected
@@ -469,6 +495,9 @@ class TestLammpsHTSTSerial:
         search_engine: LammpsEngine,
         si_hop: dict[str, Any],
         hop_request: Callable[..., HTSTEventRequest],
+        hessian_geometries: list[np.ndarray],
+        raw_force_evaluations: list[dict[str, Any]],
+        scratch_log: list[LammpsEngine],
     ) -> None:
         """A site request from the full refined saddle equals the reference; a crop does not.
 
@@ -483,6 +512,7 @@ class TestLammpsHTSTSerial:
         the SW cutoff see an unrelaxed boundary); the bias vanishes only from
         ``rcut`` 10 A on.
         """
+        before = _engine_state(search_engine)
         ext = LammpsHTSTExtension(search_engine)
         full_system = search_engine.full_system
         reference = ext.compute_event_prefactors(hop_request(free_radius=6.0))
@@ -516,15 +546,72 @@ class TestLammpsHTSTSerial:
         crop = select_free_indices(min1, center, rcut, si_hop["cell"], _ALL_PERIODIC)
         pasted = min1.copy()
         pasted[crop] = saddle[crop]
-        old = ext.compute_event_prefactors(
-            site_request(pasted, ("site", "crop")), compute_backward=False
+        pasted_request = site_request(pasted, ("site", "crop"))
+        matrices_before = len(hessian_geometries)
+        rejected = ext.compute_event_prefactors(pasted_request, compute_backward=False)
+        assert rejected.forward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        assert rejected.forward.nu0_hz is None
+        assert rejected.backward.skipped
+        assert len(hessian_geometries) == matrices_before
+        observed = raw_force_evaluations[-1]
+        np.testing.assert_array_equal(observed["positions"], pasted)
+        free = select_free_indices(
+            pasted,
+            center,
+            pasted_request.settings.free_radius,
+            pasted_request.cell,
+            pasted_request.pbc,
         )
+        norms = np.linalg.norm(observed["forces"][free], axis=1)
+        assert np.isfinite(norms).all()
+        assert float(norms.max()) > pasted_request.settings.force_tol
+
+        # Historical curvature-only diagnostic of a NONSTATIONARY geometry.
+        # The actual native operation above rejected it before any matrix.
+        # Preserve the old measured frequency bias using the real low-level
+        # eskm matrix and generic Hessian-only kernel; never relax the threshold.
+        diagnostic = ext._new_scratch()
+        try:
+            diagnostic.start()
+            ext._build_scratch(
+                diagnostic,
+                types=pasted_request.types,
+                positions=pasted_request.min1_positions,
+                cell=pasted_request.cell,
+                pbc=pasted_request.pbc,
+                species=pasted_request.species,
+                masses=pasted_request.masses,
+            )
+            old = compute_event_prefactors(
+                pasted_request,
+                ext._hessian_fn(diagnostic, pasted_request.settings.fd_step),
+                method="nonstationary_diagnostic_lammps_eskm",
+                free_indices=free,
+                compute_backward=False,
+            )
+        finally:
+            diagnostic.close()
+        assert old.method == "nonstationary_diagnostic_lammps_eskm"
         assert old.forward.ok
         bias = old.forward.nu0_hz / reference.forward.nu0_hz - 1.0
         assert abs(bias) > 0.01, (
             bias
         )  # the old construction is biased (measured -14.8 %)
         assert bias == pytest.approx(-0.148, abs=0.01)
+
+        print(
+            {
+                "diagnostic": "nonstationary_pasted_saddle_curvature_only",
+                "maximum_free_force": float(norms.max()),
+                "force_tol": pasted_request.settings.force_tol,
+                "native_status": rejected.forward.reason_code.value,
+                "reference_nu0_hz": reference.forward.nu0_hz,
+                "diagnostic_nu0_hz": old.forward.nu0_hz,
+                "diagnostic_relative_bias": bias,
+            }
+        )
+        _assert_state_unchanged(search_engine, before)
+        _assert_all_closed(scratch_log, 4)
 
     def test_fd_and_eskm_prefactors_agree_on_fixture(
         self,
@@ -620,7 +707,10 @@ class TestLammpsHTSTSerial:
         _assert_all_closed(scratch_log, 2)
 
     def test_zone_crop_keeps_species_absent_from_the_crop(
-        self, scratch_log: list[LammpsEngine]
+        self,
+        scratch_log: list[LammpsEngine],
+        hessian_geometries: list[np.ndarray],
+        raw_force_evaluations: list[dict[str, Any]],
     ) -> None:
         """A crop holding only Ni keeps the full ('Fe', 'Ni') map and masses."""
         atoms = bulk("Ni", crystalstructure="fcc", a=3.524, cubic=True).repeat(4)
@@ -655,9 +745,29 @@ class TestLammpsHTSTSerial:
             result = ext.compute_event_prefactors(request)
         finally:
             engine.close()
-        # Identical geometries: the saddle is a minimum, so both are rejected.
-        assert result.forward.reason_code is PrefactorRejection.SADDLE_NOT_FIRST_ORDER
-        assert result.backward.reason_code is PrefactorRejection.SADDLE_NOT_FIRST_ORDER
+        # The unchanged truncated LJ fixture is not stationary: this earlier
+        # physical rejection now precedes any saddle-spectrum classification.
+        assert result.forward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        assert result.backward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        assert hessian_geometries == []
+        assert len(raw_force_evaluations) == 1
+        observed = raw_force_evaluations[0]
+        zone = select_free_indices(positions, center, 6.0, cell, _ALL_PERIODIC)
+        free_global = select_free_indices(positions, center, 2.6, cell, _ALL_PERIODIC)
+        free_local = np.searchsorted(zone, free_global)
+        np.testing.assert_array_equal(zone[free_local], free_global)
+        np.testing.assert_array_equal(observed["positions"], positions[zone])
+        norms = np.linalg.norm(observed["forces"][free_local], axis=1)
+        assert np.isfinite(norms).all()
+        assert float(norms.max()) > request.settings.force_tol
+        print(
+            {
+                "fixture": "truncated_lj_species_map",
+                "maximum_free_force": float(norms.max()),
+                "force_tol": request.settings.force_tol,
+                "native_status": result.forward.reason_code.value,
+            }
+        )
         crop = scratch_log[-1].full_system
         assert "Fe" not in crop.types  # the Fe atom is outside the zone
         assert crop.species == ("Fe", "Ni")
@@ -728,7 +838,10 @@ class TestLammpsHTSTSerial:
             assert with_premin.nu0_hz != without.nu0_hz
 
     def test_premin_relaxes_a_displaced_surrounding_atom(
-        self, sw_config: _SWConfig, hessian_geometries: list[np.ndarray]
+        self,
+        sw_config: _SWConfig,
+        hessian_geometries: list[np.ndarray],
+        raw_force_evaluations: list[dict[str, Any]],
     ) -> None:
         """A surrounding atom displaced by 0.1 Å is pulled back; the core stays.
 
@@ -761,9 +874,25 @@ class TestLammpsHTSTSerial:
             result = ext.compute_event_prefactors(request)
         finally:
             engine.close()
-        assert result.forward.reason_code is PrefactorRejection.SADDLE_NOT_FIRST_ORDER
-        # The saddle geometry (first Hessian) was pre-relaxed before the verdict.
-        relaxed = hessian_geometries[0]
+        assert result.forward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        assert result.backward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        assert hessian_geometries == []
+        assert len(raw_force_evaluations) == 1
+        # Observe the actual post-premin geometry at the raw-force boundary.
+        # The matrix is correctly never requested for this residual core force.
+        observed = raw_force_evaluations[0]
+        relaxed = observed["positions"]
+        norms = np.linalg.norm(observed["forces"][core], axis=1)
+        assert np.isfinite(norms).all()
+        assert float(norms.max()) > request.settings.force_tol
+        print(
+            {
+                "fixture": "displaced_surroundings_after_premin",
+                "maximum_free_force": float(norms.max()),
+                "force_tol": request.settings.force_tol,
+                "native_status": result.forward.reason_code.value,
+            }
+        )
         assert np.array_equal(relaxed[core], displaced[core])
         # frz_min is loose ("1e-4 1e-6 100 1000"): most, not all, of the way back.
         assert np.linalg.norm(relaxed[outside] - positions[outside]) < 0.05
@@ -790,9 +919,9 @@ class TestLammpsHTSTSerial:
         _assert_all_closed(scratch_log, 1)
         assert _count_tmpdirs() == tmp_before
         _assert_state_unchanged(search_engine, before)
-        with pytest.raises(RuntimeError, match="could not be initialised"):
+        with pytest.raises(RuntimeError, match="force-model contents changed"):
             ext.htst_preflight()
-        _assert_all_closed(scratch_log, 2)
+        _assert_all_closed(scratch_log, 1)
 
     def test_lammps_error_inside_dynamical_matrix_cleans_up(
         self,
@@ -1019,9 +1148,17 @@ class TestLammpsHTSTSerial:
             base = Config.from_ini_file(str(_ROOT / "tests" / "data" / "input.in"))
             config = base.model_copy(
                 update={
+                    "lammps": base.lammps.model_copy(
+                        update={
+                            "pair_style": sw_config.pair_style,
+                            "pair_coeff": sw_config.pair_coeff,
+                            "min_style": sw_config.min_style,
+                            "frz_min": sw_config.frz_min,
+                        }
+                    ),
                     "rateconstant": RateConstantConfig(
                         style="htst", k0=1.0, free_radius=4.0
-                    )
+                    ),
                 }
             )
             rate = create_rate_constant(config.rateconstant)

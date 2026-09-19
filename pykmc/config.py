@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator, ValidationError, field_v
 import configparser
 from typing import Any, ClassVar, Literal
 from dataclasses import dataclass
+from numbers import Real
 
 
 @dataclass
@@ -646,7 +647,7 @@ class RateConstantConfig(BaseModel):
     @classmethod
     def _require_force_tolerance_number(cls, v: Any) -> Any:
         """Do not interpret a boolean as a force tolerance."""
-        if isinstance(v, bool):
+        if not isinstance(v, (str, Real)) or isinstance(v, bool):
             raise ValueError("force_tol must be a finite positive number, not bool")
         return v
 
