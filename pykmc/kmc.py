@@ -1017,22 +1017,21 @@ class KMC:
         self.system.update_positions(new_positions)
 
     def minimize_system(self, positions=None) -> None:
-        """Minimize the system and update its positions."""
+        """Relax a fresh system, or evaluate the saved geometry on restart."""
         if self.config.control.restart_file is None:
             self.loggers.info("log", ":=> Minimizing the system")
+            new_positions, total_energy = self.manager.group_minimize_with_results(
+                config=self.config, positions=positions, types=self.system.types
+            )
+            self.system.update_positions(new_positions)
+            self.total_energy = total_energy
         else:
             self.loggers.info("log", ":=> Computing energies")
-        new_positions, total_energy = self.manager.group_minimize_with_results(
-            config=self.config, positions=positions, types=self.system.types
-        )
-        # TEST
-        # future = self.manager.minimize_with_results(self.config, positions=positions)
-        # new_positions, total_energy = future.result()
-        # np.savetxt('before_min.dat', self.system.positions)
-        # np.savetxt('after_min.dat', new_positions)
-        if self.config.control.restart_file is None:
-            self.system.update_positions(new_positions)
-        self.total_energy = total_energy
+            # A restart retains its saved configuration. Its energy and the
+            # group engine must describe that same source before refinement.
+            self.total_energy = self.manager.group_get_total_energy(
+                positions=self.system.positions
+            )
         self.potential_energy = self.manager.group_get_potential_energy()
 
     def get_info_atomic_environments(
