@@ -540,17 +540,32 @@ def scratch_spy(monkeypatch, cfg):
         calls.append(("create",))
         return scratch
 
-    sentinel = object()
+    results = []
 
     def kernel(local_request, hessian, **kwargs):
         local_request.validate()
         calls.append(("kernel", local_request, kwargs))
-        return sentinel
+        from pykmc.htst.result import DirectionalPrefactor, EventPrefactors
+
+        n_free = len(kwargs["free_indices"])
+        estimate = DirectionalPrefactor.accepted(
+            1e12, n_free=n_free, n_positive_min=3 * n_free, n_negative_saddle=1
+        )
+        result = EventPrefactors(
+            local_request.event_key,
+            estimate,
+            estimate,
+            kwargs["method"],
+            n_free,
+            local_request.settings,
+        )
+        results.append(result)
+        return result
 
     monkeypatch.setattr(extension, "_new_scratch", create)
     monkeypatch.setattr(extension, "_hessian_fn", lambda *args: None)
     monkeypatch.setattr(adapter, "_kernel_compute_event_prefactors", kernel)
-    return extension, calls, sentinel
+    return extension, calls, results
 
 
 @pytest.mark.parametrize("zone_radius", [None, 3.0])
@@ -569,8 +584,17 @@ def test_native_adapter_transports_descriptor_and_crop_mapping_without_native_ca
         }
     )
     req = request(service(module, cfg, object()))
-    extension, calls, sentinel = scratch_spy(monkeypatch, cfg)
-    assert extension.compute_event_prefactors(req) is sentinel
+    extension, calls, results = scratch_spy(monkeypatch, cfg)
+    result = extension.compute_event_prefactors(req)
+    assert result == results[0]
+    assert result.forward == results[0].forward
+    assert result.backward == results[0].backward
+    assert result.provenance.source.is_complete
+    assert result.provenance.produced.is_complete
+    assert (
+        result.provenance.source.to_request().calculation_identity()
+        == req.calculation_identity()
+    )
     assert [call[0] for call in calls] == [
         "create",
         "start",
