@@ -625,18 +625,25 @@ class BasinsGenericEvents:
         # Loop over all other system in self.states to see if system is already known
 
         for state_index, state_data in self.states.items():
+            if not np.array_equal(
+                system.cell, state_data.system.cell
+            ) or not np.array_equal(system.pbc, state_data.system.pbc):
+                continue
             are_equivalent = self.are_structures_equivalent(
                 system.positions,
                 system.types,
                 state_data.system.positions,
                 state_data.system.types,
                 cell=system.cell,
+                pbc=system.pbc,
             )
             if are_equivalent:
                 return state_index
         return -1
 
-    def are_structures_equivalent(self, pos1, typ1, pos2, typ2, cell, tol=0.3):
+    def are_structures_equivalent(
+        self, pos1, typ1, pos2, typ2, cell, tol=0.3, pbc=True
+    ):
 
         if len(pos1) != len(pos2):
             return False
@@ -649,9 +656,10 @@ class BasinsGenericEvents:
         ):
             return False
 
-        box = np.diag(cell).tolist()
-        tree2 = cKDTree(pos2, boxsize=box)
-        distances, _ = tree2.query(pos1, k=1)
+        query, box = geometry.periodic_tree_inputs(pos1, cell, pbc)
+        stored, _ = geometry.periodic_tree_inputs(pos2, cell, pbc)
+        tree2 = cKDTree(stored, boxsize=box)
+        distances, _ = tree2.query(query, k=1)
 
         return np.max(distances) < tol
 

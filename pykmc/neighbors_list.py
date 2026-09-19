@@ -2,7 +2,7 @@
 
 from scipy.spatial import cKDTree
 from .system import System
-from .utils.geometry import normalize_pbc, wrap_positions
+from .utils.geometry import periodic_tree_inputs
 import numpy as np
 
 
@@ -37,21 +37,9 @@ class NeighborsList:
     def _build_neighbors_list(self) -> None:
         """Build and populates the `neighbors_list`."""
         # Construct the kdTree
-        axes = normalize_pbc(self.system.pbc)
-        cell = np.asarray(self.system.cell, dtype=float)
-        if cell.shape != (3, 3) or not np.isfinite(cell).all():
-            raise ValueError("neighbor lists require a finite orthorhombic cell")
-        lengths = np.diag(cell)
-        if not np.allclose(cell, np.diag(lengths), rtol=0, atol=1e-12):
-            raise ValueError("neighbor lists support orthorhombic cells only")
-        if np.any(lengths[axes] <= 0):
-            raise ValueError("periodic cell lengths must be positive")
-        positions = wrap_positions(self.system.positions, cell, axes)
-        # cKDTree uses zero boxsize for open axes, including negative positions.
-        # A value infinitesimally below zero may round to L during wrapping.
-        for axis in np.flatnonzero(axes):
-            positions[positions[:, axis] >= lengths[axis], axis] = 0.0
-        box = np.where(axes, lengths, 0.0)
+        positions, box = periodic_tree_inputs(
+            self.system.positions, self.system.cell, self.system.pbc
+        )
         tree = cKDTree(positions, boxsize=box)
 
         # Find first neighbors and atoms in environments

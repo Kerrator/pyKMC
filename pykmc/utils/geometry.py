@@ -10,6 +10,7 @@ __all__ = [
     "normalize_pbc",
     "wrap_positions",
     "minimum_image_displacement",
+    "periodic_tree_inputs",
 ]
 import ase.geometry
 import numpy as np
@@ -51,6 +52,27 @@ def minimum_image_displacement(
     if cell is None or not axes.any():
         return values
     return ase.geometry.find_mic(values, cell=cell, pbc=axes)[0]
+
+
+def periodic_tree_inputs(
+    positions: np.ndarray, cell: np.ndarray, pbc: bool | np.ndarray = True
+) -> tuple[np.ndarray, np.ndarray]:
+    """Prepare orthorhombic coordinates and cKDTree box sizes with open axes."""
+    axes = normalize_pbc(pbc)
+    cell = np.asarray(cell, dtype=float)
+    if cell.shape != (3, 3) or not np.isfinite(cell).all():
+        raise ValueError("neighbor queries require a finite orthorhombic cell")
+    lengths = np.diag(cell)
+    if not np.allclose(cell, np.diag(lengths), rtol=0, atol=1e-12):
+        raise ValueError("neighbor queries support orthorhombic cells only")
+    if np.any(lengths[axes] <= 0):
+        raise ValueError("periodic cell lengths must be positive")
+    values = wrap_positions(positions, cell, axes)
+    # A value infinitesimally below zero may round to L during wrapping.
+    for axis in np.flatnonzero(axes):
+        values[values[:, axis] >= lengths[axis], axis] = 0.0
+    # cKDTree uses zero boxsize for open axes, including negative positions.
+    return values, np.where(axes, lengths, 0.0)
 
 
 def transform_positions(
