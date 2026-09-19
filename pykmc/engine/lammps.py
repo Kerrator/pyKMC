@@ -1519,13 +1519,15 @@ class LammpsEngine(Engine):
                     constraints,
                     user_constraints,
                 )
+                if not active:
+                    self._validate_search_result(result, constraints)
         except BaseException as exc:
             if active:
                 self._restore_after_failure(positions, exc, "partn_search")
             raise
         if active:
             self.ensure_full_system(positions)
-        self._validate_search_result(result, constraints)
+            self._validate_search_result(result, constraints)
         return result
 
     def _resolve_search_constraints(
@@ -1806,13 +1808,15 @@ class LammpsEngine(Engine):
                     constraints,
                     user_constraints,
                 )
+                if not active:
+                    self._validate_search_result(result, constraints)
         except BaseException as exc:
             if active:
                 self._restore_after_failure(positions, exc, "partn_refine")
             raise
         if active:
             self.ensure_full_system(positions)
-        self._validate_search_result(result, constraints)
+            self._validate_search_result(result, constraints)
         return result
 
     def _partn_refine_impl(
