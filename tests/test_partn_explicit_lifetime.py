@@ -1,10 +1,9 @@
-"""Public engine ordering/cleanup protocol; no LAMMPS or pARTn instance.
+"""Independent explicit ARTn-owner lifetime oracle; no native launch.
 
-Native commands and the pARTn object are explicit recording substitutes.
-Actual public search/refine methods, their implementation bodies, make_AV,
-frozen helper decisions and exception/restoration dispatch execute unchanged.
-This tests command ordering only; the unchanged native LJ5 gate must prove
-that native coordinates/returned tau obey the fixed-buffer contract.
+Recorder and public-call seams derive from frozen buffer protocol v3. The real
+public search/refine implementation bodies run. Extract returns independent
+copies exactly as installed pypARTn.get_data does; destroy poisons only internal
+native-like backing. Strong references deliberately prevent garbage collection.
 """
 
 from types import SimpleNamespace
@@ -98,10 +97,6 @@ class FakeARTn:
         self.recorder = recorder
         self.lib = SimpleNamespace(_name="recorded-partn-not-a-library")
 
-    def destroy(self):
-        # Lifecycle adapter: provide the installed explicit-destroy API.
-        pass
-
     def reset_input(self):
         pass
 
@@ -129,7 +124,7 @@ class FakeARTn:
 
 
 class Harness(LammpsEngine):
-    name = "r04_partn_buffer_order_protocol_v4"
+    name = "r04_partn_explicit_lifetime_protocol_v1"
 
     def __init__(self, recorder):
         # Deliberately bypass native allocation; all code under review is
@@ -248,70 +243,151 @@ def invoke(engine, cfg, operation):
     return getattr(engine, f"partn_{operation}")(**kwargs)
 
 
-def assert_buffer_brackets_every_artn(recorder):
-    assert recorder.minimizations, "no actual implementation minimization boundary"
-    for attempt, fixes in enumerate(recorder.minimizations):
-        artn = [i for i, (_, spec) in enumerate(fixes) if spec[1] == "artn"]
-        assert len(artn) == 1, (attempt, fixes)
-        buffer = [
-            i
-            for i, (_, spec) in enumerate(fixes)
-            if spec[:2] == ("buffer", "setforce")
-            and tuple(float(v) for v in spec[2:]) == (0.0, 0.0, 0.0)
-        ]
-        assert any(i < artn[0] for i in buffer), (
-            "buffer physical forces must be zero before pARTn observes them",
-            attempt,
-            fixes,
-        )
-        assert any(i > artn[0] for i in buffer), (
-            "pARTn-generated buffer forces need a subsequent setforce constraint",
-            attempt,
-            fixes,
-        )
+class DestructionFailure(RuntimeError):
+    pass
 
 
-@pytest.mark.parametrize("operation", ["search", "refine"])
-@pytest.mark.parametrize("outcome", ["ok", "err", "raise"])
-def test_public_av_artn_has_pre_and_post_buffer_constraints_and_restores(
-    monkeypatch, operation, outcome
-):
-    engine, cfg, recorder = setup(monkeypatch, outcome)
-    descriptor = engine.full_system
-    if outcome == "raise":
-        with pytest.raises(
-            MinimizeFailure, match="injected pARTn minimization failure"
+class OwnedARTn(FakeARTn):
+    def __init__(self, recorder, destroy_fails=False):
+        super().__init__(recorder)
+        self._alive = True
+        self.destroy_calls = 0
+        self.history = []
+        self.destroy_problem = DestructionFailure("explicit destroy failed sentinel")
+        self.destroy_fails = destroy_fails
+        self.tau = {}
+        for name, displacement in (
+            ("tau_min1", 0.0),
+            ("tau_sad", 0.03),
+            ("tau_min2", 0.06),
         ):
-            invoke(engine, cfg, operation)
-    else:
-        result = invoke(engine, cfg, operation)
-        assert result.is_ok() == (outcome == "ok")
-    # The public success/Err/exception path must all request source replay.
-    assert len(engine.restore_calls) == 1
-    np.testing.assert_array_equal(engine.restore_calls[0], POSITIONS)
-    assert engine.full_system is descriptor
-    assert not engine._cleared_since_init
-    assert recorder.fixes == {} and recorder.groups == {"all"}
-    assert recorder.callback == {}, "owned Python callbacks must be cleaned too"
-    assert_buffer_brackets_every_artn(recorder)
+            self.tau[name] = POSITIONS.copy()
+            self.tau[name][0, 0] += displacement
+        self.expected = {name: value.copy() for name, value in self.tau.items()}
+
+    def get_error(self):
+        assert self._alive, "error extraction must precede explicit destruction"
+        self.history.append("get_error")
+        return super().get_error()
+
+    def extract(self, name):
+        assert self._alive, "data extraction must precede explicit destruction"
+        self.history.append(f"extract:{name}")
+        if name in self.tau:
+            # Real pypARTn.get_data makes a hard copy before freeing C data.
+            return self.tau[name].copy()
+        return super().extract(name)
+
+    def destroy(self):
+        self.destroy_calls += 1
+        self.history.append("destroy")
+        if self.destroy_fails:
+            raise self.destroy_problem
+        assert self._alive, "this operation must explicitly destroy its owner once"
+        for value in self.tau.values():
+            value.fill(np.nan)
+        self._alive = False
 
 
-def test_refinement_reinstalls_post_constraint_after_artn_on_every_retry(monkeypatch):
-    engine, cfg, recorder = setup(monkeypatch, "retry")
-    assert invoke(engine, cfg, "refine").is_ok()
-    assert len(recorder.minimizations) == 2
-    assert_buffer_brackets_every_artn(recorder)
-    assert len(engine.restore_calls) == 1
-    assert recorder.fixes == {} and recorder.groups == {"all"}
-    assert recorder.callback == {}, "owned Python callbacks must be cleaned too"
+def owned_setup(monkeypatch, outcome, active=True, destroy_fails=False):
+    engine, cfg, recorder = setup(monkeypatch, outcome, active_volume=active)
+    owned = []
+
+    def factory(**kwargs):
+        assert kwargs == {"engine": "lmp"}
+        obj = OwnedARTn(recorder, destroy_fails=destroy_fails)
+        owned.append(obj)  # Strong ownership excludes __del__/GC as a solution.
+        return obj
+
+    monkeypatch.setattr(engine_module, "pypARTn", SimpleNamespace(artn=factory))
+    return engine, cfg, recorder, owned
 
 
 @pytest.mark.parametrize("operation", ["search", "refine"])
-def test_non_av_operations_do_not_introduce_buffer_resources(monkeypatch, operation):
-    engine, cfg, recorder = setup(monkeypatch, "ok", active_volume=False)
-    assert invoke(engine, cfg, operation).is_ok()
-    assert len(recorder.minimizations) == 1
-    assert all(spec[0] != "buffer" for _, spec in recorder.minimizations[0])
-    assert recorder.fixes == {} and recorder.groups == {"all"}
-    assert recorder.callback == {}, "owned Python callbacks must be cleaned too"
-    assert engine.restore_calls == []
+def test_retained_exception_does_not_retain_live_artn_run_state(monkeypatch, operation):
+    engine, cfg, recorder, owned = owned_setup(monkeypatch, "raise")
+    retained = []
+    try:
+        invoke(engine, cfg, operation)
+    except MinimizeFailure as exc:
+        retained.append(exc)
+    assert len(retained) == 1 and retained[0].__traceback__ is not None
+    assert recorder.minimizations and len(owned) == 1
+    assert owned[0].destroy_calls == 1, (
+        "cleanup must not depend on traceback collection"
+    )
+    assert not owned[0]._alive
+    assert owned[0].history[-1] == "destroy"
+    assert all(np.isnan(value).all() for value in owned[0].tau.values())
+    assert len(engine.restore_calls) == 1
+    assert recorder.fixes == {} and recorder.callback == {}
+
+
+@pytest.mark.parametrize("operation", ["search", "refine"])
+@pytest.mark.parametrize("active", [True, False], ids=["av", "full-system"])
+def test_success_extracts_outputs_before_destroy_and_keeps_independent_copies(
+    monkeypatch, operation, active
+):
+    engine, cfg, recorder, owned = owned_setup(monkeypatch, "ok", active=active)
+    result = invoke(engine, cfg, operation)
+    assert result.is_ok()
+    assert recorder.minimizations and len(owned) == 1
+    obj = owned[0]
+    assert obj.destroy_calls == 1 and not obj._alive
+    assert obj.history[-1] == "destroy"
+    assert all(np.isnan(value).all() for value in obj.tau.values())
+    output = result.ok_value()
+    fields = {"saddle_positions": "tau_sad"}
+    if operation == "search":
+        fields.update(min1_positions="tau_min1", min2_positions="tau_min2")
+        assert output.dE_forward == pytest.approx(0.2)
+        assert output.dE_backward == pytest.approx(0.2)
+    else:
+        assert output.E_saddle == pytest.approx(0.2 if active else -0.8)
+    for field, native_field in fields.items():
+        assert f"extract:{native_field}" in obj.history
+        np.testing.assert_array_equal(
+            getattr(output, field), obj.expected[native_field]
+        )
+        assert not np.shares_memory(getattr(output, field), obj.tau[native_field])
+
+
+@pytest.mark.parametrize("operation", ["search", "refine"])
+def test_err_return_also_destroys_owned_artn_state(monkeypatch, operation):
+    engine, cfg, recorder, owned = owned_setup(monkeypatch, "err")
+    result = invoke(engine, cfg, operation)
+    assert result.is_err()
+    assert recorder.minimizations and len(owned) == 1
+    assert owned[0].destroy_calls == 1 and not owned[0]._alive
+    assert "get_error" in owned[0].history[:-1]
+    assert owned[0].history[-1] == "destroy"
+
+
+@pytest.mark.parametrize("operation", ["search", "refine"])
+def test_destroy_failure_preserves_retained_initiating_exception(
+    monkeypatch, operation
+):
+    engine, cfg, recorder, owned = owned_setup(monkeypatch, "raise", destroy_fails=True)
+    retained = []
+    try:
+        invoke(engine, cfg, operation)
+    except MinimizeFailure as exc:
+        retained.append(exc)
+    assert len(retained) == 1 and retained[0].__traceback__ is not None
+    assert recorder.minimizations and len(owned) == 1
+    assert owned[0].destroy_calls == 1
+    assert "injected pARTn minimization failure" in str(retained[0])
+    if hasattr(BaseException, "add_note"):
+        assert "explicit destroy failed sentinel" in " ".join(retained[0].__notes__)
+
+
+@pytest.mark.parametrize("operation", ["search", "refine"])
+def test_destroy_failure_after_success_rejects_instead_of_returning_ok(
+    monkeypatch, operation
+):
+    engine, cfg, recorder, owned = owned_setup(monkeypatch, "ok", destroy_fails=True)
+    with pytest.raises(DestructionFailure) as caught:
+        invoke(engine, cfg, operation)
+    assert recorder.minimizations and len(owned) == 1
+    assert owned[0].destroy_calls == 1
+    assert caught.value is owned[0].destroy_problem

@@ -90,6 +90,14 @@ the result and restore the source. This can take the configured evaluation budge
 it does not expire the native timer and poison later minimizations. A failed
 cleanup remains an explicit pending-restoration error.
 
+Each operation explicitly destroys its owned pARTn wrapper after copying output
+arrays, including when an exception is retained by the caller. Relying on Python
+garbage collection can leave native Lanczos state alive and corrupt a later
+refinement. Full-system failures also remove their temporary pARTn/frozen groups
+and restore native entry coordinates; incompatible returned fixed coordinates
+are checked inside that transaction. Active-volume calls retain full source
+replay on every exit path.
+
 A reconstruction validates its claimed minimum/saddle/minimum against those
 references before protecting working pushes. Both endpoint dispatches receive the
 same payload and actual species labels. An explicit payload passed to
