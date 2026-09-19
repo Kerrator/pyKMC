@@ -975,7 +975,7 @@ class KMC:
         except (ValueError, KeyError, TypeError, RuntimeError) as exc:
             if (
                 not active_table.uses_prefactors
-                and "crop_atom_ids" not in active_table.table.columns
+                and not active_table.has_crop_correspondence(idx_selected_event)
             ):
                 neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
             else:

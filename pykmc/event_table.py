@@ -2275,6 +2275,15 @@ class ActiveEventTable:
         self._full_saddles = {}
         self._full_saddle_constraints = {}
 
+    def has_crop_correspondence(self, label: int) -> bool:
+        """Distinguish absent legacy metadata from invalid declared identities."""
+        if int(label) in self._constant_crop_ids:
+            return True
+        stored = self.table.loc[label].get("crop_atom_ids")
+        return stored is not None and not (
+            isinstance(stored, float) and math.isnan(stored)
+        )
+
     def crop_indices(self, label, system, neighbors_list=None, *, capture=False):
         """Resolve stored stable crop identities without using a new crop order."""
         from .physics import _indices
