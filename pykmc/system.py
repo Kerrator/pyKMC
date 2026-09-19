@@ -7,7 +7,7 @@ boundary conditions.
 from __future__ import annotations
 from ase.io import read
 import numpy as np
-import ase.geometry
+from .utils.geometry import normalize_pbc, wrap_positions
 
 
 class System:
@@ -40,7 +40,7 @@ class System:
         types: np.ndarray | None = None,
         positions: np.ndarray | float = None,
         cell: np.ndarray | None = None,
-        pbc: np.ndarray | None = None,
+        pbc: bool | np.ndarray | None = None,
         index: np.ndarray | None = None,
     ) -> None:
         self.types = types
@@ -48,6 +48,15 @@ class System:
         self.cell = cell
         self.pbc = pbc
         self.index = index
+
+    @property
+    def pbc(self) -> np.ndarray:
+        """Three-axis boundary flags; an unspecified empty system is nonperiodic."""
+        return self._pbc
+
+    @pbc.setter
+    def pbc(self, value: bool | np.ndarray | None) -> None:
+        self._pbc = normalize_pbc(False if value is None else value)
 
     @classmethod
     def create_from_file(cls, file_path: str) -> System:
@@ -100,8 +109,8 @@ class System:
 
         This method allows updating either all atomic positions or a subset
         of them specified by their indices. After updating, positions are
-        wrapped back into the simulation cell if PBC are enabled, and any
-        small negative coordinates are clamped to zero.
+        wrapped back into the simulation cell only along periodic axes.
+        Nonperiodic coordinates, including negative values, are preserved.
 
         Parameters
         ----------
@@ -118,25 +127,15 @@ class System:
         Notes
         -----
         - Positions are wrapped using `self.wrap_positions` based on `self.cell` and `self.pbc`.
-        - Small negative position values are set to zero to prevent issues with
-          spatial search algorithms (e.g., KD-trees) due to floating-point inaccuracies.
+        - Validation and wrapping finish before the stored positions change.
 
         """
         if atom_idx is None:
-            self.positions = new_positions
-            self.positions = self.wrap_positions(
-                self.positions, cell=self.cell, pbc=self.pbc
-            )
-            # Clamp small negative positions to zero to avoid issues with KD-trees.
-            # This handles floating-point inaccuracies that might result in values like -1e-10.
-            self.positions[self.positions < 0] = 0
-
+            proposed = np.array(new_positions, dtype=float, copy=True)
         else:
-            self.positions[atom_idx] = new_positions
-            self.positions = self.wrap_positions(
-                self.positions, cell=self.cell, pbc=self.pbc
-            )
-            self.positions[self.positions < 0] = 0
+            proposed = np.array(self.positions, dtype=float, copy=True)
+            proposed[atom_idx] = new_positions
+        self.positions = self.wrap_positions(proposed, cell=self.cell, pbc=self.pbc)
 
     def wrap_positions(
         self, positions: np.ndarray, cell: np.ndarray, pbc: bool | np.ndarray = True
@@ -165,4 +164,4 @@ class System:
         ase.geometry.wrap_positions : Refer to ASE documentation for full details.
 
         """
-        return ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=pbc)
+        return wrap_positions(positions=positions, cell=cell, pbc=pbc)

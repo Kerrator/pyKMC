@@ -119,13 +119,16 @@ class EventSearch:
         )
         displacement = np.array([dx, dy, dz])
         event_search_output.min1_positions = translate(
-            event_search_output.min1_positions, displacement, cell
+            event_search_output.min1_positions, displacement, cell, pbc=self.system.pbc
         )
         event_search_output.saddle_positions = translate(
-            event_search_output.saddle_positions, displacement, cell
+            event_search_output.saddle_positions,
+            displacement,
+            cell,
+            pbc=self.system.pbc,
         )
         event_search_output.min2_positions = translate(
-            event_search_output.min2_positions, displacement, cell
+            event_search_output.min2_positions, displacement, cell, pbc=self.system.pbc
         )
         event_search_output.cell = cell
         return event_search_output

@@ -7,6 +7,7 @@ from .config import Config
 from .system import System
 import pandas as pd
 from .neighbors_list import NeighborsList
+from .utils.geometry import minimum_image_displacement
 
 
 class PointSetRegistration:
@@ -97,48 +98,11 @@ class PointSetRegistration:
             typ1 = ["X"] * len(coords1)
             typ2 = ["X"] * nat2
 
-        # unwrap if close to cell limits :
-        alat = self.system.cell[0][0]
-        for i in range(len(coords1)):
-            if (
-                np.linalg.norm(
-                    coords1[i][0] - self.system.positions[central_atom_index][0]
-                )
-                > alat / 2
-            ):
-                coords1[i][0] = (
-                    coords1[i][0]
-                    + np.sign(
-                        self.system.positions[central_atom_index][0] - coords1[i][0]
-                    )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][1] - self.system.positions[central_atom_index][1]
-                )
-                > alat / 2
-            ):
-                coords1[i][1] = (
-                    coords1[i][1]
-                    + np.sign(
-                        self.system.positions[central_atom_index][1] - coords1[i][1]
-                    )
-                    * alat
-                )
-            if (
-                np.linalg.norm(
-                    coords1[i][2] - self.system.positions[central_atom_index][2]
-                )
-                > alat / 2
-            ):
-                coords1[i][2] = (
-                    coords1[i][2]
-                    + np.sign(
-                        self.system.positions[central_atom_index][2] - coords1[i][2]
-                    )
-                    * alat
-                )
+        # Match the actual source neighborhood: open axes have no images.
+        center = self.system.positions[central_atom_index]
+        coords1 = center + minimum_image_displacement(
+            coords1 - center, self.system.cell, self.system.pbc
+        )
         nat1 = len(coords1)
         kmax_factor = self.config.ira.kmax_factor
 

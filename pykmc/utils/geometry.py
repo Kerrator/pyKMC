@@ -7,9 +7,50 @@ __all__ = [
     "compute_delr",
     "per_atom_displacement",
     "minimum_image_distance",
+    "normalize_pbc",
+    "wrap_positions",
+    "minimum_image_displacement",
 ]
 import ase.geometry
 import numpy as np
+
+
+def normalize_pbc(pbc: bool | np.ndarray) -> np.ndarray:
+    """Return an owned three-axis boolean array, rejecting ambiguous shapes."""
+    axes = np.asarray(pbc)
+    if axes.ndim == 0 and axes.dtype.kind == "b":
+        return np.full(3, bool(axes), dtype=bool)
+    if axes.shape != (3,) or axes.dtype.kind != "b":
+        raise ValueError("PBC must be a boolean scalar or three boolean axes")
+    return axes.copy()
+
+
+def wrap_positions(
+    positions: np.ndarray, cell: np.ndarray, pbc: bool | np.ndarray = True
+) -> np.ndarray:
+    """Wrap periodic coordinates without changing open-axis displacements."""
+    axes = normalize_pbc(pbc)
+    values = np.array(positions, dtype=float, copy=True)
+    if values.ndim != 2 or values.shape[1] != 3 or not np.isfinite(values).all():
+        raise ValueError("positions must be a finite (N, 3) array")
+    if not axes.any():
+        return values
+    # eps=0 keeps periodic orthorhombic coordinates in [0, L), without a
+    # Cartesian clamp that would destroy negative nonperiodic coordinates.
+    return ase.geometry.wrap_positions(values, cell=cell, pbc=axes, eps=0)
+
+
+def minimum_image_displacement(
+    displacement: np.ndarray, cell: np.ndarray | None, pbc: bool | np.ndarray = True
+) -> np.ndarray:
+    """Return displacement vectors using only the declared periodic axes."""
+    axes = normalize_pbc(pbc)
+    values = np.array(displacement, dtype=float, copy=True)
+    if not np.isfinite(values).all() or values.shape[-1:] != (3,):
+        raise ValueError("displacement must contain finite three-vectors")
+    if cell is None or not axes.any():
+        return values
+    return ase.geometry.find_mic(values, cell=cell, pbc=axes)[0]
 
 
 def transform_positions(
@@ -42,7 +83,10 @@ def transform_positions(
 
 
 def translate(
-    positions: np.ndarray, displacement: np.ndarray, cell: np.ndarray
+    positions: np.ndarray,
+    displacement: np.ndarray,
+    cell: np.ndarray,
+    pbc: bool | np.ndarray = True,
 ) -> np.ndarray:
     """Translate atomic positions by a displacement vector and apply periodic wrapping.
 
@@ -61,54 +105,27 @@ def translate(
         Translated and wrapped atomic positions, same shape as the input `positions`.
 
     """
-    positions += displacement
-    positions = ase.geometry.wrap_positions(positions=positions, cell=cell, pbc=True)
-    positions[positions < 0] = 0
-    return positions
+    return wrap_positions(np.asarray(positions) + displacement, cell=cell, pbc=pbc)
 
 
-def push_towards(current_positions, target_positions, fraction=0.1, cell=None):
-    displacement = target_positions - current_positions
-
-    if cell is not None:
-        box = np.diag(cell)
-        displacement -= np.round(displacement / box) * box
-        # unwrap target
-        target_positions_unwrapped = current_positions + displacement
-    else:
-        target_positions_unwrapped = target_positions
-
-    new_positions = current_positions + fraction * (
-        target_positions_unwrapped - current_positions
+def push_towards(
+    current_positions, target_positions, fraction=0.1, cell=None, pbc=True
+):
+    displacement = minimum_image_displacement(
+        np.asarray(target_positions) - current_positions, cell, pbc
     )
-
+    new_positions = np.asarray(current_positions) + fraction * displacement
     if cell is not None:
-        new_positions = ase.geometry.wrap_positions(
-            positions=new_positions, cell=cell, pbc=[True, True, True]
-        )
+        new_positions = wrap_positions(new_positions, cell=cell, pbc=pbc)
     return new_positions
 
 
-def compute_delr(positions_1, positions_2, cell=None):
-    displacements = positions_2 - positions_1
-
-    if cell is not None:
-        cell_lengths = np.linalg.norm(cell, axis=1)
-
-        # apply pbc
-
-        for i in range(3):
-            displacements[:, i] -= cell_lengths[i] * np.round(
-                displacements[:, i] / cell_lengths[i]
-            )
-
-    # Calcul des normes des déplacements
+def compute_delr(positions_1, positions_2, cell=None, pbc=True):
+    displacements = minimum_image_displacement(
+        np.asarray(positions_2) - positions_1, cell, pbc
+    )
     distances = np.linalg.norm(displacements, axis=1)
-
-    # Retour du déplacement maximum
-    delr = np.max(distances)
-
-    return delr
+    return np.max(distances)
 
 
 def per_atom_displacement(

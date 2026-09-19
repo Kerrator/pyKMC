@@ -504,8 +504,8 @@ class BasinsGenericEvents:
                     positions=self.states[row["state"]].system.positions.copy(),
                     types=self.states[row["state"]].system.types,
                     cell=self.states[row["state"]].system.cell,
-                    pbc=True,
-                    index=np.arange(len(self.states[row["state"]].system.types)),
+                    pbc=self.states[row["state"]].system.pbc,
+                    index=self.states[row["state"]].system.index,
                 )
                 # get tmp_system energy
                 future1 = self.manager.get_total_energy(

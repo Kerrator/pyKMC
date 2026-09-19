@@ -5,8 +5,12 @@ from pykmc import Config
 from pykmc.result import Result, Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
 import numpy as np
 import copy
-from pykmc.utils.geometry import push_towards, compute_delr
-import ase.geometry
+from pykmc.utils.geometry import (
+    push_towards,
+    compute_delr,
+    normalize_pbc,
+    wrap_positions,
+)
 
 # TODO: Use it in KMC
 # TODO: Clean reconstruct/split the method
@@ -20,7 +24,7 @@ class Reconstruction:
         self.manager = manager  # Manager objet that can perform minimization and return minimized positions
         self.types = types
         self.constraints = constraints
-        self.pbc = pbc
+        self.pbc = normalize_pbc(pbc)
 
     def reconstruct(
         self,
@@ -61,6 +65,7 @@ class Reconstruction:
             typically the neighors list of the in the atomic environment of the atom on which we apply the event
         """
 
+        axes = normalize_pbc(self.pbc)
         if neighbors is None:  # len min1 == len min2 == len saddle pos
             neighbors = np.arange(len(saddle_positions))
 
@@ -98,6 +103,7 @@ class Reconstruction:
             supposed_min1_positions,
             fraction=self.config.reconstruction.push_fraction,
             cell=cell,
+            pbc=axes,
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
         if self.constraints is not None:
@@ -115,9 +121,9 @@ class Reconstruction:
         #        min1_pos, _ = future.result()
 
         # compaire min1_pos with system current positions
-        t1 = ase.geometry.wrap_positions(positions=min1_pos, cell=cell, pbc=True)
+        t1 = wrap_positions(positions=min1_pos, cell=cell, pbc=axes)
         delr1 = compute_delr(
-            supposed_min1_positions, t1[neighbors], cell
+            supposed_min1_positions, t1[neighbors], cell, pbc=axes
         )  # I guess we need to be carefull here, if atom_modify sort 0 it's ok
         if delr1 > self.config.psr.matching_score_thr:
             return Err(
@@ -136,6 +142,7 @@ class Reconstruction:
                 supposed_min2_positions,
                 fraction=self.config.reconstruction.push_fraction,
                 cell=cell,
+                pbc=axes,
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
             if self.constraints is not None:
@@ -150,9 +157,9 @@ class Reconstruction:
             #            min2_pos, _ = future.result()
 
             # Compare min2pos with expected final_positions
-            t2 = ase.geometry.wrap_positions(positions=min2_pos, cell=cell, pbc=True)
+            t2 = wrap_positions(positions=min2_pos, cell=cell, pbc=axes)
             # delr2 = compute_delr(supposed_min2_positions, min2_pos[neighbors], cell)
-            delr2 = compute_delr(supposed_min2_positions, t2[neighbors], cell)
+            delr2 = compute_delr(supposed_min2_positions, t2[neighbors], cell, pbc=axes)
             if delr2 > self.config.psr.matching_score_thr:
                 return Err(
                     ErrorInfo(

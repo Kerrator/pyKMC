@@ -82,3 +82,19 @@ pending-restoration marker. A closed native handle cannot retain arbitrary user
 fixes: that path reports failure rather than claiming a complete resource replay.
 Endpoint relaxation restrictions remain distinct from the common vibrational
 free-coordinate selection.
+
+## Periodic axes during reconstruction
+
+`System` normalizes a boolean PBC scalar to three axes and copies boolean
+three-axis inputs. Invalid shapes or nonboolean flags reject before position
+updates. An unspecified empty system starts nonperiodic. Position updates,
+reference-event recentering, neighbor membership, PSR unwrapping, refinement
+geometry and both reconstruction pushes/comparisons use the source axes.
+Negative coordinates on a nonperiodic axis are physical coordinates and remain
+unchanged by wrapping. A whole-box displacement on such an axis is not an
+equivalent image. Neighbor lists continue to require orthorhombic cells.
+
+This changes mixed/open-boundary geometry and neighbor membership from the old
+all-periodic assumption. Fully periodic image equivalence remains supported.
+It does not establish basin acceleration or constrained HTST acceptance by
+itself; those require their own numerical and integration checks.
