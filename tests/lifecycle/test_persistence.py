@@ -17,7 +17,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-
 from pykmc.config import Config, RateConstantConfig
 from pykmc.event_table import (
     REFERENCE_BASE_COLUMNS,
@@ -27,6 +26,8 @@ from pykmc.event_table import (
 )
 from pykmc.rate_constant import rate_from_prefactor
 from tests.lifecycle.conftest import DATA_INPUT, accepted, rejected
+
+from .protocol_producers import archived_frequency, protocol_patch, protocol_table
 
 LEGACY_PICKLE = Path("tests/data/reference_table_Cu_fake.pickle")
 
@@ -41,6 +42,7 @@ def _config(style: str, path: str | None = None, **rate: Any) -> Config:
 
 def _populate(table: ReferenceEventTable, system: Any, ids: list[int]) -> None:
     """Insert one trivial row per id (sparse, non-contiguous) with pending status."""
+    table._protocol_source = system
     pos = system.positions
     for n, idx in enumerate(ids):
         fwd, _ = table._build_event_series(
@@ -66,10 +68,10 @@ class TestHtstRoundTrip:
     ) -> None:
         """Ids, statuses, Hz nu0, ps^-1 prefactors and metadata come back."""
         config = _config("htst", k0=2.0, T=400.0)
-        table = ReferenceEventTable(config)
+        table = protocol_table(config)
         _populate(table, system_single_type_fcc, [12, 3, 7])
-        table._patch_row(12, accepted(5.0e12))
-        table._patch_row(3, rejected("unstable"))
+        protocol_patch(table, 12, accepted(5.0e12))
+        protocol_patch(table, 3, rejected("unstable"))
         # id 7 stays pending (never resolved)
         out = tmp_path / "reference_table.pickle"
         table.save(str(out))
@@ -83,12 +85,12 @@ class TestHtstRoundTrip:
         assert raw.attrs["settings"]["nu0_min_hz"] == 1.0e12
         assert raw.attrs["settings"]["nu0_max_hz"] == 1.0e14
 
-        loaded = ReferenceEventTable(_config("htst", str(out), k0=2.0, T=400.0))
+        loaded = protocol_table(_config("htst", str(out), k0=2.0, T=400.0))
         assert list(loaded.table.columns) == list(REFERENCE_BASE_COLUMNS) + list(
             REFERENCE_HTST_COLUMNS
         )
         assert list(loaded.table["idx_ref"]) == [12, 3, 7]
-        assert list(loaded.table["nu0_status"]) == ["ok", "rejected", "pending"]
+        assert list(loaded.table["nu0_status"]) == ["ok", "rejected", "legacy"]
         assert loaded.metadata["T"] == 400.0
         ok, rej, pend = (loaded.table.iloc[i] for i in range(3))
         assert ok["nu0"] == 5.0e12 and ok["k_prefactor"] == 5.0
@@ -106,15 +108,15 @@ class TestHtstRoundTrip:
         self, system_single_type_fcc: Any, tmp_path: Path, caplog: Any
     ) -> None:
         """Reloading at another T recomputes k from k_prefactor and the barrier."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0, 1])
-        table._patch_row(0, accepted(5.0e12))
-        table._patch_row(1, rejected("x"))
+        protocol_patch(table, 0, accepted(5.0e12))
+        protocol_patch(table, 1, rejected("x"))
         out = tmp_path / "ref.pickle"
         table.save(str(out))
 
         with caplog.at_level(logging.INFO, logger="log"):
-            loaded = ReferenceEventTable(_config("htst", str(out), k0=1.0, T=600.0))
+            loaded = protocol_table(_config("htst", str(out), k0=1.0, T=600.0))
         r0, r1 = loaded.table.iloc[0], loaded.table.iloc[1]
         assert r0["k"] == rate_from_prefactor(5.0, float(r0["energy_barrier"]), 600.0)
         assert r1["k"] == rate_from_prefactor(1.0, float(r1["energy_barrier"]), 600.0)
@@ -126,14 +128,14 @@ class TestHtstRoundTrip:
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:
         """Rejected rows take the current k0; accepted rows keep their nu0."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0, 1])
-        table._patch_row(0, accepted(5.0e12))
-        table._patch_row(1, rejected("x"))
+        protocol_patch(table, 0, accepted(5.0e12))
+        protocol_patch(table, 1, rejected("x"))
         out = tmp_path / "ref.pickle"
         table.save(str(out))
 
-        loaded = ReferenceEventTable(_config("htst", str(out), k0=3.0, T=300.0))
+        loaded = protocol_table(_config("htst", str(out), k0=3.0, T=300.0))
         assert loaded.table.iloc[0]["k_prefactor"] == 5.0
         assert loaded.table.iloc[1]["k_prefactor"] == 3.0
         assert loaded.table.iloc[1]["k"] == rate_from_prefactor(
@@ -144,9 +146,9 @@ class TestHtstRoundTrip:
         self, system: Any, tmp_path: Path, nu0_hz: float = 5.0e12
     ) -> Path:
         """Save an htst table with one accepted row and return the pickle path."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system, [0])
-        table._patch_row(0, accepted(nu0_hz))
+        protocol_patch(table, 0, accepted(nu0_hz))
         out = tmp_path / "ref.pickle"
         table.save(str(out))
         return out
@@ -162,14 +164,14 @@ class TestHtstRoundTrip:
         df.attrs = attrs
         df.to_pickle(out)
         with pytest.raises(ValueError, match="k_prefactor = 99.0 .* resolves to 5.0"):
-            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+            protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
 
     def test_consistent_ok_row_loads_through_the_backend(
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:
         """The resolution of nu0 reproduces the stored prefactor bit for bit."""
         out = self._saved_ok_table(system_single_type_fcc, tmp_path, nu0_hz=7.3e12)
-        loaded = ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+        loaded = protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
         row = loaded.table.iloc[0]
         assert row["k_prefactor"] == 7.3e12 * 1.0e-12
         assert row["k"] == rate_from_prefactor(
@@ -187,7 +189,7 @@ class TestHtstRoundTrip:
         df.attrs = attrs
         df.to_pickle(out)
         with pytest.raises(ValueError, match="finite positive frequency"):
-            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+            protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
 
     def test_ok_row_with_none_nu0_is_refused_as_value_error(
         self, system_single_type_fcc: Any, tmp_path: Path
@@ -201,7 +203,7 @@ class TestHtstRoundTrip:
         df.attrs = attrs
         df.to_pickle(out)
         with pytest.raises(ValueError, match="no nu0 value"):
-            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+            protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
 
     def test_unknown_status_is_refused(
         self, system_single_type_fcc: Any, tmp_path: Path
@@ -214,17 +216,17 @@ class TestHtstRoundTrip:
         df.attrs = attrs
         df.to_pickle(out)
         with pytest.raises(ValueError, match="nu0_status 'accepted'"):
-            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+            protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
 
     def test_rpa_and_htst_metadata_style(self, tmp_path: Path) -> None:
         """The persisted style names the backend that produced the table."""
-        table = ReferenceEventTable(_config("rpa", k0=1.0, T=300.0))
+        table = protocol_table(_config("rpa", k0=1.0, T=300.0))
         assert table.table_metadata()["style"] == "rpa"
 
     @pytest.mark.parametrize(
         "patch,match",
         [
-            ({"schema_version": 2}, "schema_version"),
+            ({"schema_version": 999}, "schema_version"),
             ({"nu0_units": "THz"}, "units are never inferred"),
             ({"k_prefactor_units": "Hz"}, "units are never inferred"),
         ],
@@ -237,16 +239,16 @@ class TestHtstRoundTrip:
         tmp_path: Path,
     ) -> None:
         """Unknown versions or units are errors, not guesses."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0])
-        table._patch_row(0, accepted(5.0e12))
+        protocol_patch(table, 0, accepted(5.0e12))
         out = tmp_path / "ref.pickle"
         table.save(str(out))
         df = pd.read_pickle(out)
         df.attrs = {**df.attrs, **patch}
         df.to_pickle(out)
         with pytest.raises(ValueError, match=match):
-            ReferenceEventTable(_config("htst", str(out), k0=1.0, T=300.0))
+            protocol_table(_config("htst", str(out), k0=1.0, T=300.0))
 
 
 def _donor_era_pickle(
@@ -258,7 +260,7 @@ def _donor_era_pickle(
     through the Hz frequency (``hz_to_per_ps``), as the pre-S6 HTST branches
     persisted their tables.
     """
-    table = ReferenceEventTable(_config("constant", k0=1.0, T=T))
+    table = protocol_table(_config("constant", k0=1.0, T=T))
     _populate(table, system, [0, 1])
     df = table.table.copy()
     prefactor = nu0_hz * 1.0e-12
@@ -283,25 +285,28 @@ class TestLegacyLoad:
         out = tmp_path / "donor.pickle"
         _donor_era_pickle(system_single_type_fcc, out)
         with caplog.at_level(logging.WARNING, logger="log"):
-            loaded = ReferenceEventTable(_config("htst", str(out), k0=2.0, T=300.0))
+            loaded = protocol_table(_config("htst", str(out), k0=2.0, T=300.0))
         assert list(loaded.table.columns) == list(REFERENCE_BASE_COLUMNS) + list(
             REFERENCE_HTST_COLUMNS
         )
         assert set(loaded.table["nu0_status"]) == {"legacy"}
         assert set(loaded.table["k_prefactor"]) == {2.0}
-        assert set(loaded.table["nu0"]) == {5.0e12}  # diagnostic only
+        assert loaded.table["nu0"].isna().all()
+        assert all(
+            archived_frequency(loaded, int(i), 5.0e12) for i in loaded.table["idx_ref"]
+        )
         for _, row in loaded.table.iterrows():
             assert row["k"] == rate_from_prefactor(
                 2.0, float(row["energy_barrier"]), 300.0
             )
-            assert "incomplete HTST columns (k_prefactor, nu0)" in row["nu0_reason"]
+            assert "producing provenance" in row["nu0_reason"]
         assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
 
     def test_constant_pickle_in_htst_mode(self, caplog: Any) -> None:
         """No HTST columns: status legacy, k_prefactor k0, k recomputed, one warning."""
         config = _config("htst", str(LEGACY_PICKLE), k0=2.0, T=500.0)
         with caplog.at_level(logging.WARNING, logger="log"):
-            table = ReferenceEventTable(config)
+            table = protocol_table(config)
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
         assert "legacy" in warnings[0].getMessage()
@@ -321,21 +326,22 @@ class TestLegacyLoad:
         self, system_single_type_fcc: Any, tmp_path: Path, caplog: Any
     ) -> None:
         """Hz nu0 without table metadata is not trusted as an estimate."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0])
-        table._patch_row(0, accepted(5.0e12))
+        protocol_patch(table, 0, accepted(5.0e12))
         out = tmp_path / "ref.pickle"
         table.table.to_pickle(out)  # bypass save(): no attrs
         assert pd.read_pickle(out).attrs == {}
 
         with caplog.at_level(logging.WARNING, logger="log"):
-            loaded = ReferenceEventTable(_config("htst", str(out), k0=1.5, T=300.0))
+            loaded = protocol_table(_config("htst", str(out), k0=1.5, T=300.0))
         row = loaded.table.iloc[0]
         assert row["nu0_status"] == "legacy"
         assert row["k_prefactor"] == 1.5
-        assert row["nu0"] == 5.0e12  # kept as a diagnostic, not used
+        assert math.isnan(row["nu0"])
+        assert archived_frequency(loaded, 0, 5.0e12)
         assert row["k"] == rate_from_prefactor(1.5, float(row["energy_barrier"]), 300.0)
-        assert "no HTST metadata" in row["nu0_reason"]
+        assert "producing provenance" in row["nu0_reason"]
         assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
 
 
@@ -344,7 +350,7 @@ class TestConstantModeUnchanged:
 
     def test_constant_pickle_loads_as_the_base_loader(self) -> None:
         """A constant run reads a constant pickle byte for byte like pd.read_pickle."""
-        table = ReferenceEventTable(_config("constant", str(LEGACY_PICKLE), k0=1.0))
+        table = protocol_table(_config("constant", str(LEGACY_PICKLE), k0=1.0))
         base = pd.read_pickle(LEGACY_PICKLE)
         pd.testing.assert_frame_equal(table.table, base)
         assert table.table.attrs == {}
@@ -354,7 +360,7 @@ class TestConstantModeUnchanged:
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:
         """The saved bytes equal a plain to_pickle of the same frame."""
-        table = ReferenceEventTable(_config("constant", k0=1.0, T=300.0))
+        table = protocol_table(_config("constant", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0, 1])
         out = tmp_path / "ref.pickle"
         table.save(str(out))
@@ -368,14 +374,14 @@ class TestConstantModeUnchanged:
         self, system_single_type_fcc: Any, tmp_path: Path, caplog: Any
     ) -> None:
         """A constant run never reuses per-event prefactors from an HTST pickle."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0])
-        table._patch_row(0, accepted(5.0e12))
+        protocol_patch(table, 0, accepted(5.0e12))
         out = tmp_path / "ref.pickle"
         table.save(str(out))
 
         with caplog.at_level(logging.WARNING, logger="log"):
-            loaded = ReferenceEventTable(_config("constant", str(out), k0=4.0, T=300.0))
+            loaded = protocol_table(_config("constant", str(out), k0=4.0, T=300.0))
         assert list(loaded.table.columns) == list(REFERENCE_BASE_COLUMNS)
         assert loaded.table.attrs == {}
         row = loaded.table.iloc[0]
@@ -394,7 +400,7 @@ class TestConstantModeUnchanged:
         out = tmp_path / "donor.pickle"
         donor = _donor_era_pickle(system_single_type_fcc, out, nu0_hz=5.0e12, T=300.0)
         with caplog.at_level(logging.WARNING, logger="log"):
-            loaded = ReferenceEventTable(_config("constant", str(out), k0=1.0, T=300.0))
+            loaded = protocol_table(_config("constant", str(out), k0=1.0, T=300.0))
         assert list(loaded.table.columns) == list(REFERENCE_BASE_COLUMNS)
         assert loaded.table.attrs == {}
         for (_, row), (_, before) in zip(
@@ -416,7 +422,7 @@ class TestSaveIsResilientToConcat:
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:
         """Rows appended after a save still produce a pickle with metadata."""
-        table = ReferenceEventTable(_config("htst", k0=1.0, T=300.0))
+        table = protocol_table(_config("htst", k0=1.0, T=300.0))
         _populate(table, system_single_type_fcc, [0])
         first = tmp_path / "a.pickle"
         table.save(str(first))
@@ -461,13 +467,18 @@ class TestReloadCompatibility:
 
     @staticmethod
     def _saved(
-        config: Config, system: Any, tmp_path: Path, nu0: float = 5.0e12
+        config: Config,
+        system: Any,
+        tmp_path: Path,
+        nu0: float = 5.0e12,
+        *,
+        incomplete: bool = False,
     ) -> Path:
         """Save one accepted (id 12) and one rejected (id 3) row under ``config``."""
-        table = ReferenceEventTable(config)
+        table = protocol_table(config)
         _populate(table, system, [12, 3])
-        table._patch_row(12, accepted(nu0))
-        table._patch_row(3, rejected("unstable"))
+        protocol_patch(table, 12, accepted(nu0), incomplete=incomplete)
+        protocol_patch(table, 3, rejected("unstable"))
         out = tmp_path / "reference_table.pickle"
         table.save(str(out))
         return out
@@ -479,22 +490,26 @@ class TestReloadCompatibility:
     def test_changed_free_region_center_marks_accepted_rows_stale(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
     ) -> None:
-        """Stored saddle-centred, loaded min1: the accepted row is stale on k0."""
+        """An explicitly partial producer cannot be recomputed after center changes."""
         saved = self._saved(
             _config("htst", k0=2.0, T=300.0, free_region_center="saddle"),
             system_single_type_fcc,
             tmp_path,
+            incomplete=True,
         )
-        loaded = ReferenceEventTable(
+        original = pd.read_pickle(saved)
+        loaded = protocol_table(
             _config("htst", str(saved), k0=2.0, T=300.0, free_region_center="min1")
         )
         stale = self._row(loaded, 12)
         assert stale["nu0_status"] == "stale"
         assert math.isnan(stale["nu0"])
-        assert stale["nu0_reason"] == (
-            "stale: free_region_center changed on reload (stored saddle, current "
-            "min1); estimate discarded"
-        )
+        assert "complete source" in stale["nu0_reason"]
+        assert loaded._changed_settings(original.attrs["settings"]) == [
+            "free_region_center changed on reload (stored saddle, current min1)"
+        ]
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert not loaded.prefactor_service.manager.prefactor_requests
         assert stale["k_prefactor"] == 2.0
         assert stale["k"] == rate_from_prefactor(
             2.0, float(stale["energy_barrier"]), 300.0
@@ -513,34 +528,25 @@ class TestReloadCompatibility:
             "nu0_hz": None,
             "nu0_status": "stale",
             "nu0_reason": stale["nu0_reason"],
-            "nu0_source": "reference",
+            "nu0_source": "k0",
         }
-        warnings = _warnings(log_records)
-        assert len(warnings) == 1
-        assert (
-            "free_region_center changed on reload (stored saddle, current min1)"
-            in (warnings[0])
-        )
-        assert "1 accepted estimate(s) discarded" in warnings[0]
-        # Saving writes the current settings (no retained nu0 was computed
-        # under the old ones); a reload under the stored settings does not
-        # resurrect the discarded estimate.
         resaved = tmp_path / "resaved.pickle"
         loaded.save(str(resaved))
         raw = pd.read_pickle(resaved)
         assert raw.attrs["settings"]["free_region_center"] == "min1"
         assert list(raw["nu0_status"]) == ["stale", "rejected"]
         assert not pd.to_numeric(raw["nu0"], errors="coerce").notna().any()
-        again = ReferenceEventTable(
+        again = protocol_table(
             _config("htst", str(resaved), k0=2.0, T=300.0, free_region_center="min1")
         )
         assert list(again.table["nu0_status"]) == ["stale", "rejected"]
-        assert len(_warnings(log_records)) == 1  # same settings: no new warning
+        assert archived_frequency(again, 12, 5.0e12)
+        assert not again.prefactor_service.manager.prefactor_requests
 
     def test_pre_7c_table_without_the_centring_key_counts_as_min1(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
     ) -> None:
-        """A stored table without ``free_region_center`` was min1-centred."""
+        """A legacy center default cannot establish missing producing provenance."""
         saved = self._saved(
             _config("htst", k0=1.0, T=300.0, free_region_center="min1"),
             system_single_type_fcc,
@@ -548,61 +554,88 @@ class TestReloadCompatibility:
         )
         raw = pd.read_pickle(saved)
         del raw.attrs["settings"]["free_region_center"]
+        raw.attrs["schema_version"] = 1
+        for key in (
+            "descriptors",
+            "calculations",
+            "estimate_references",
+            "estimate_history",
+            "legacy_metadata",
+        ):
+            raw.attrs.pop(key, None)
         pre_7c = tmp_path / "pre_7c.pickle"
         raw.to_pickle(pre_7c)
         assert "free_region_center" not in pd.read_pickle(pre_7c).attrs["settings"]
-
-        # Loaded under today's default (saddle): stale.
-        under_default = ReferenceEventTable(
-            _config("htst", str(pre_7c), k0=1.0, T=300.0)
-        )
+        under_default = protocol_table(_config("htst", str(pre_7c), k0=1.0, T=300.0))
         assert under_default.config.rateconstant.free_region_center == "saddle"
+        assert under_default._changed_settings(raw.attrs["settings"]) == [
+            "free_region_center changed on reload (stored min1, current saddle)"
+        ]
         stale = self._row(under_default, 12)
-        assert stale["nu0_status"] == "stale"
-        assert stale["nu0_reason"] == (
-            "stale: free_region_center changed on reload (stored min1, current "
-            "saddle); estimate discarded"
-        )
-        assert stale["k_prefactor"] == 1.0
+        assert stale["nu0_status"] == "legacy"
+        assert "producing provenance" in stale["nu0_reason"]
+        assert stale["k_prefactor"] == 1.0 and math.isnan(stale["nu0"])
+        assert archived_frequency(under_default, 12, 5.0e12)
         assert len(_warnings(log_records)) == 1
-
-        # Loaded under min1 (its actual centring): compatible, estimate kept.
-        under_min1 = ReferenceEventTable(
+        under_min1 = protocol_table(
             _config("htst", str(pre_7c), k0=1.0, T=300.0, free_region_center="min1")
         )
         kept = self._row(under_min1, 12)
-        assert kept["nu0_status"] == "ok" and kept["nu0"] == 5.0e12
-        assert kept["k_prefactor"] == 5.0
-        assert len(_warnings(log_records)) == 1
+        assert kept["nu0_status"] == "legacy" and math.isnan(kept["nu0"])
+        assert kept["k_prefactor"] == 1.0
+        assert archived_frequency(under_min1, 12, 5.0e12)
+        assert len(_warnings(log_records)) == 2
+        assert not under_default.prefactor_service.manager.prefactor_requests
+        assert not under_min1.prefactor_service.manager.prefactor_requests
 
     def test_missing_setting_key_counts_as_changed(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
     ) -> None:
-        """Unknown provenance is never compatible: an absent key invalidates."""
+        """A schema-1 table missing a setting remains unknown with old data retained."""
         saved = self._saved(
-            _config("htst", k0=1.0, T=300.0), system_single_type_fcc, tmp_path
+            _config("htst", k0=1.0, T=300.0),
+            system_single_type_fcc,
+            tmp_path,
         )
         raw = pd.read_pickle(saved)
         del raw.attrs["settings"]["fd_step"]
+        raw.attrs["schema_version"] = 1
+        for key in (
+            "descriptors",
+            "calculations",
+            "estimate_references",
+            "estimate_history",
+            "legacy_metadata",
+        ):
+            raw.attrs.pop(key, None)
         raw.to_pickle(saved)
-        loaded = ReferenceEventTable(_config("htst", str(saved), k0=1.0, T=300.0))
+        loaded = protocol_table(_config("htst", str(saved), k0=1.0, T=300.0))
         stale = self._row(loaded, 12)
-        assert stale["nu0_status"] == "stale"
-        assert stale["nu0_reason"] == (
-            "stale: fd_step changed on reload (stored absent, current 0.01); "
-            "estimate discarded"
+        assert stale["nu0_status"] == "legacy"
+        assert "producing provenance" in stale["nu0_reason"]
+        assert loaded._changed_settings(raw.attrs["settings"]) == [
+            "fd_step changed on reload (stored absent, current 0.01)"
+        ]
+        assert math.isnan(stale["nu0"]) and stale["k_prefactor"] == 1.0
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert (
+            loaded.prefactor_archive.legacy_metadata[0]["settings"]
+            == raw.attrs["settings"]
         )
+        assert not loaded.prefactor_service.manager.prefactor_requests
 
     def test_every_changed_setting_is_named(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
     ) -> None:
-        """Several differences produce one reason naming all of them, in order."""
+        """Known setting differences survive even when partial source blocks rebuild."""
         saved = self._saved(
             _config("htst", k0=1.0, T=300.0, free_radius=6.0, fd_step=0.01),
             system_single_type_fcc,
             tmp_path,
+            incomplete=True,
         )
-        loaded = ReferenceEventTable(
+        original = pd.read_pickle(saved)
+        loaded = protocol_table(
             _config(
                 "htst",
                 str(saved),
@@ -615,14 +648,16 @@ class TestReloadCompatibility:
             )
         )
         stale = self._row(loaded, 12)
-        assert stale["nu0_reason"] == (
-            "stale: free_radius changed on reload (stored 6.0, current 8.0); "
-            "fd_step changed on reload (stored 0.01, current 0.02); "
-            "zone_radius changed on reload (stored None, current 12.0); "
-            "premin changed on reload (stored False, current True); "
-            "estimate discarded"
-        )
-        assert len(_warnings(log_records)) == 1
+        assert stale["nu0_status"] == "stale"
+        assert "complete source" in stale["nu0_reason"]
+        assert loaded._changed_settings(original.attrs["settings"]) == [
+            "free_radius changed on reload (stored 6.0, current 8.0)",
+            "fd_step changed on reload (stored 0.01, current 0.02)",
+            "zone_radius changed on reload (stored None, current 12.0)",
+            "premin changed on reload (stored False, current True)",
+        ]
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert not loaded.prefactor_service.manager.prefactor_requests
 
     def test_window_is_reapplied_with_its_own_reason_and_warning(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
@@ -634,7 +669,7 @@ class TestReloadCompatibility:
             tmp_path,
             nu0=20.0e12,
         )
-        loaded = ReferenceEventTable(
+        loaded = protocol_table(
             _config("htst", str(saved), k0=1.0, T=300.0, nu0_max_THz=10.0)
         )
         rej = self._row(loaded, 12)
@@ -661,7 +696,7 @@ class TestReloadCompatibility:
             bound_dir,
             nu0=10.0e12,
         )
-        kept = ReferenceEventTable(
+        kept = protocol_table(
             _config("htst", str(on_bound), k0=1.0, T=300.0, nu0_max_THz=10.0)
         )
         assert self._row(kept, 12)["nu0_status"] == "ok"
@@ -669,7 +704,7 @@ class TestReloadCompatibility:
     def test_stale_rows_survive_a_second_reload_and_seed_k0(
         self, system_single_type_fcc: Any, tmp_path: Path
     ) -> None:
-        """A stale row loads as stale (never recomputed) and inherits as k0."""
+        """An explicitly partial source stays stale on repeated reload and seeds k0."""
         from pykmc.event_table import ActiveEventTable
         from pykmc.result import EventRefinementOutput
 
@@ -677,10 +712,18 @@ class TestReloadCompatibility:
             _config("htst", k0=1.0, T=300.0, fd_step=0.01),
             system_single_type_fcc,
             tmp_path,
+            incomplete=True,
         )
         config = _config("htst", str(saved), k0=1.0, T=300.0, fd_step=0.02)
-        loaded = ReferenceEventTable(config)
+        loaded = protocol_table(config)
         assert self._row(loaded, 12)["nu0_status"] == "stale"
+        resaved = tmp_path / "still-stale.pickle"
+        loaded.save(str(resaved))
+        config = _config("htst", str(resaved), k0=1.0, T=300.0, fd_step=0.02)
+        loaded = protocol_table(config)
+        assert self._row(loaded, 12)["nu0_status"] == "stale"
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert not loaded.prefactor_service.manager.prefactor_requests
         active = ActiveEventTable(config)
         active.add_events(
             EventRefinementOutput(
@@ -697,4 +740,4 @@ class TestReloadCompatibility:
         row = active.table.iloc[0]
         assert row["nu0_status"] == "stale" and row["nu0_source"] == "k0"
         assert row["k_prefactor"] == 1.0 and math.isnan(row["nu0"])
-        assert row["nu0_reason"].startswith("stale: fd_step changed on reload")
+        assert "complete source" in row["nu0_reason"]

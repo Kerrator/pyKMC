@@ -19,10 +19,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import pytest
-
 import pykmc.run as run_module
-from pykmc import NeighborsList
+import pytest
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
 from pykmc.initializer import Initializer
 from pykmc.kmc import KMC
@@ -34,11 +32,15 @@ from tests.lifecycle.conftest import (
     PREFLIGHT_REPORT,
     FakeManager,
     accepted,
-    event_prefactors,
 )
+
+from pykmc import NeighborsList
 
 SEED = 2024
 HOP = np.array([1.2, 0.3, 0.0])
+
+
+from .protocol_producers import protocol_event_prefactors, protocol_patch
 
 
 class _Recorder:
@@ -155,7 +157,8 @@ def _dummy_reference_row(table: ReferenceEventTable, system: Any) -> None:
     fwd["idx_backward"] = 0
     table.table = pd.concat([table.table, fwd.to_frame().T], ignore_index=True)
     if table.uses_prefactors:
-        table._patch_row(0, accepted(5.0e12))
+        table._protocol_source = system
+        protocol_patch(table, 0, accepted(5.0e12))
 
 
 def _refined(
@@ -199,7 +202,9 @@ def _run_one_step(
     sim.system = system
     sim.loggers = _Recorder()
     if sim.uses_event_prefactors:
-        sim.prefactor_service = PrefactorService(config, manager, sim.rate_constant)
+        sim.prefactor_service = PrefactorService(
+            config, manager, sim.rate_constant, method="fd"
+        )
     sim.reference_table = ReferenceEventTable(
         config, prefactor_service=sim.prefactor_service
     )
@@ -925,7 +930,7 @@ class TestStepOrdering:
         """When refinement runs, every reference row is already resolved."""
         config = _step_config("htst", k0=1.0)
         manager = FakeManager(
-            lambda req: event_prefactors(req.event_key, accepted(5e12), accepted(3e12))
+            lambda req: protocol_event_prefactors(req, accepted(5e12), accepted(3e12))
         )
         pos = np.asarray(system_single_type_fcc.positions, dtype=float)
         min2 = pos.copy()
@@ -997,7 +1002,7 @@ class TestStepOrdering:
         """Duplicate refined rows are removed before the site batch is submitted."""
         config = _step_config("htst", k0=1.0)
         manager = FakeManager(
-            lambda req: event_prefactors(req.event_key, accepted(6e12), accepted(6e12))
+            lambda req: protocol_event_prefactors(req, accepted(6e12), accepted(6e12))
         )
         dup = _refined(
             system_single_type_fcc,
@@ -1053,7 +1058,7 @@ class TestStepOrdering:
         """A refined row without its full saddle keeps its estimate; the step says so (F1)."""
         config = _step_config("htst", k0=1.0)
         manager = FakeManager(
-            lambda req: event_prefactors(req.event_key, accepted(6e12), accepted(6e12))
+            lambda req: protocol_event_prefactors(req, accepted(6e12), accepted(6e12))
         )
         crop_only = _refined(
             system_single_type_fcc,

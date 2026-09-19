@@ -25,6 +25,7 @@ Adapter: the pack's ``AnalyticManager`` is the repository ``FakeManager``
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -32,8 +33,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-
-import pykmc
 from pykmc.config import Config, RateConstantConfig
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
 from pykmc.htst.prefactor import compute_event_prefactors
@@ -42,6 +41,14 @@ from pykmc.rate_constant import create_rate_constant
 from pykmc.rate_constant.prefactors import PrefactorService
 from pykmc.result import EventRefinementOutput, EventSearchOutput
 from tests.lifecycle.conftest import FakeManager
+
+import pykmc
+
+from .protocol_producers import (
+    archived_frequency,
+    protocol_event_prefactors,
+    protocol_table,
+)
 
 
 def config(path: str | None = None, **settings: Any) -> Config:
@@ -98,16 +105,47 @@ def row(barrier: float = 0.5) -> pd.Series:
     )
 
 
-def saved_table(tmp_path: Path, nu0: float = 20e12) -> Path:
-    """Save one accepted row computed under ``free_radius=6, fd_step=0.01``."""
-    table = ReferenceEventTable(config(free_radius=6.0, fd_step=0.01))
-    table.add(row().to_frame().T)
-    table._patch_row(
-        0,
-        DirectionalPrefactor.accepted(
-            nu0, n_free=3, n_positive_min=9, n_negative_saddle=1
-        ),
+def saved_table(
+    tmp_path: Path, nu0: float = 20e12, *, incomplete: bool = False
+) -> Path:
+    """Save a declared synthetic full-request protocol result for policy tests.
+
+    The three-row geometry is explicitly the whole unit fixture. Frequencies
+    are supplied unit values; the separate analytic catalogue oracle computes
+    its own numerical estimates. Incomplete variants declare one unavailable
+    original source row and must never support speculative recomputation.
+    """
+    table = protocol_table(config(free_radius=6.0, fd_step=0.01))
+    item = row()
+    table.add(item.to_frame().T)
+    request = table.prefactor_service.build_request(
+        event_key=("synthetic-policy-row", 0),
+        min1_positions=item["initial_positions"],
+        saddle_positions=item["saddle_positions"],
+        min2_positions=item["final_positions"],
+        types=item["types"],
+        cell=np.eye(3) * 10,
+        pbc=(False,) * 3,
+        center_index=0,
     )
+    if incomplete:
+        request = replace(
+            request,
+            constraints=replace(request.constraints, source_ids=(0, 1, 2, 3)),
+            user_constraints=None,
+        )
+    estimate = DirectionalPrefactor.accepted(
+        nu0,
+        n_free=3,
+        n_positive_min=9,
+        n_negative_saddle=1,
+    )
+    result = protocol_event_prefactors(request, estimate, estimate)
+    table._patch_row(
+        0, result.forward, calculation=result.calculation("forward"), fresh=True
+    )
+    assert table.table.iloc[0]["nu0_status"] == "ok"
+    assert result.provenance.source.is_complete is (not incomplete)
     path = tmp_path / "original.pickle"
     table.save(str(path))
     return path
@@ -118,7 +156,7 @@ def load_or_explicit_rejection(
 ) -> ReferenceEventTable | None:
     """Permit a deliberate compatibility error, never an arbitrary failure."""
     try:
-        return ReferenceEventTable(config(str(path), **settings))
+        return protocol_table(config(str(path), **settings))
     except ValueError as exc:
         message = str(exc).lower()
         assert any(term in message for term in diagnostic_terms), (
@@ -173,7 +211,7 @@ def test_changed_settings_do_not_reuse_or_relabel_cached_spectra(
     tmp_path: Path, changed: dict[str, Any]
 ) -> None:
     """F2: a changed kernel setting invalidates the cached estimate truthfully."""
-    path = saved_table(tmp_path)
+    path = saved_table(tmp_path, incomplete=True)
     original = pd.read_pickle(path)
     settings = {"free_radius": 6.0, "fd_step": 0.01, **changed}
     loaded = load_or_explicit_rejection(path, tuple(changed), **settings)
@@ -181,6 +219,8 @@ def test_changed_settings_do_not_reuse_or_relabel_cached_spectra(
         return
     # No service was attached, so no scientific recalculation can have occurred.
     assert_invalidated_fallback(loaded)
+    assert archived_frequency(loaded, 0, 20e12)
+    assert not loaded.prefactor_service.manager.prefactor_requests
     resaved = tmp_path / "resaved.pickle"
     loaded.save(str(resaved))
     after = pd.read_pickle(resaved)
@@ -217,6 +257,8 @@ def test_reload_rechecks_current_acceptance_window(
     if loaded is None:
         return
     assert_invalidated_fallback(loaded)
+    assert archived_frequency(loaded, 0, 20e12)
+    assert not loaded.prefactor_service.manager.prefactor_requests
 
 
 def test_same_settings_reload_preserves_accepted_frequency_and_provenance(
@@ -225,7 +267,7 @@ def test_same_settings_reload_preserves_accepted_frequency_and_provenance(
     """Positive control: rejecting or discarding every cache is not a fix."""
     path = saved_table(tmp_path, nu0=20e12)
     original = pd.read_pickle(path)
-    loaded = ReferenceEventTable(config(str(path), free_radius=6.0, fd_step=0.01))
+    loaded = protocol_table(config(str(path), free_radius=6.0, fd_step=0.01))
     cached = loaded.table.iloc[0]
     assert cached["nu0_status"] == "ok"
     assert float(cached["nu0"]) == pytest.approx(20e12)
@@ -256,7 +298,9 @@ def test_crop_only_refinement_does_not_overwrite_valid_reference_with_fake_geome
         return np.eye(3) * 2.0
 
     manager = FakeManager(lambda req: compute_event_prefactors(req, hessian))
-    service = PrefactorService(cfg, manager, create_rate_constant(cfg.rateconstant))
+    service = PrefactorService(
+        cfg, manager, create_rate_constant(cfg.rateconstant), method="fd"
+    )
     request = service.build_request(
         event_key=("full-geometry-reference",),
         min1_positions=positions,
@@ -315,7 +359,9 @@ def admit_with_analytic_hessian(
         return np.diag(diagonal)
 
     manager = FakeManager(lambda req: compute_event_prefactors(req, hessian))
-    service = PrefactorService(cfg, manager, create_rate_constant(cfg.rateconstant))
+    service = PrefactorService(
+        cfg, manager, create_rate_constant(cfg.rateconstant), method="fd"
+    )
     table = ReferenceEventTable(cfg, prefactor_service=service)
     search = EventSearchOutput(
         central_atom_index=0,

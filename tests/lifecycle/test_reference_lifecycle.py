@@ -13,7 +13,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-
 from pykmc.event_table import (
     REFERENCE_BASE_COLUMNS,
     REFERENCE_HTST_COLUMNS,
@@ -25,9 +24,10 @@ from pykmc.result import EventSearchOutput
 from tests.lifecycle.conftest import (
     FakeManager,
     accepted,
-    event_prefactors,
     rejected,
 )
+
+from .protocol_producers import protocol_event_prefactors, protocol_patch
 
 HOP = np.array([1.2, 0.3, 0.0])
 
@@ -67,10 +67,12 @@ def _table_with_service(
 
     def responder(req: Any) -> Any:
         fwd, bwd = responses[req.event_key]
-        return event_prefactors(req.event_key, fwd, bwd)
+        return protocol_event_prefactors(req, fwd, bwd)
 
     fake = FakeManager(responder)
-    service = PrefactorService(config, fake, create_rate_constant(config.rateconstant))
+    service = PrefactorService(
+        config, fake, create_rate_constant(config.rateconstant), method="fd"
+    )
     return ReferenceEventTable(config, prefactor_service=service), fake
 
 
@@ -316,7 +318,8 @@ class TestPatchByLogicalId:
         _insert(table, series(1.6), 7)
         assert list(table.table["idx_ref"]) == [12, 3, 7]
 
-        table._patch_row(3, accepted(4.0e12))
+        table._protocol_source = system_single_type_fcc
+        protocol_patch(table, 3, accepted(4.0e12))
 
         patched = table.table.iloc[1]
         assert int(patched["idx_ref"]) == 3

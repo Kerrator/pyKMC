@@ -22,26 +22,27 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-
 from pykmc.event_table import (
     SELF_REVERSE_NU0_RTOL,
     ReferenceEventTable,
     self_reverse_prefactors_agree,
 )
+
+# Contract 7c (Diagnostics): every [htst] reference line ends with the free-atom
+# count and the wall time of the batch that produced it.
+from pykmc.htst.free_region import common_free_indices
 from pykmc.rate_constant import create_rate_constant, rate_from_prefactor
 from pykmc.rate_constant.prefactors import PrefactorService
 from pykmc.result import EventSearchOutput
 from tests.lifecycle.conftest import (
     FakeManager,
     accepted,
-    event_prefactors,
     rejected,
     skipped,
 )
 
+from .protocol_producers import protocol_event_prefactors
 
-# Contract 7c (Diagnostics): every [htst] reference line ends with the free-atom
-# count and the wall time of the batch that produced it.
 _BATCH_SUFFIX = re.compile(r"\(n_free (\d+), batch (\d+\.\d{3}) s\)$")
 
 
@@ -138,8 +139,10 @@ def _table_with_service(
     config: Any, forward: Any, backward: Any
 ) -> tuple[ReferenceEventTable, FakeManager]:
     """Build a reference table whose fake worker answers every request with the pair."""
-    fake = FakeManager(lambda req: event_prefactors(req.event_key, forward, backward))
-    service = PrefactorService(config, fake, create_rate_constant(config.rateconstant))
+    fake = FakeManager(lambda req: protocol_event_prefactors(req, forward, backward))
+    service = PrefactorService(
+        config, fake, create_rate_constant(config.rateconstant), method="fd"
+    )
     return ReferenceEventTable(config, prefactor_service=service), fake
 
 
@@ -368,7 +371,9 @@ class TestSelfReverseRecording:
         report of the backward estimate of the single self-linked row) both
         end with the ``(n_free N, batch T s)`` suffix of contract 7c.
         """
-        table, _ = _table_with_service(htst_config, accepted(5.0e12), accepted(5.0e12))
+        table, fake = _table_with_service(
+            htst_config, accepted(5.0e12), accepted(5.0e12)
+        )
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
@@ -389,7 +394,9 @@ class TestSelfReverseRecording:
         for line in lines:
             match = _BATCH_SUFFIX.search(line)
             assert match is not None, line
-            assert match.group(1) == "5"
+            assert int(match.group(1)) == len(
+                common_free_indices(fake.prefactor_requests[0])
+            )
             assert float(match.group(2)) >= 0.0
 
     @pytest.mark.parametrize(
@@ -410,7 +417,7 @@ class TestSelfReverseRecording:
         expected: str,
     ) -> None:
         """The discrepancy warning is a reference line too: it ends with the suffix."""
-        table, _ = _table_with_service(htst_config, forward, backward)
+        table, fake = _table_with_service(htst_config, forward, backward)
         table.add_events(
             [_trivial_event(system_single_type_fcc)], pbc=system_single_type_fcc.pbc
         )
@@ -422,7 +429,9 @@ class TestSelfReverseRecording:
         assert expected in warnings[0]
         match = _BATCH_SUFFIX.search(warnings[0])
         assert match is not None, warnings[0]
-        assert match.group(1) == "5"
+        assert int(match.group(1)) == len(
+            common_free_indices(fake.prefactor_requests[0])
+        )
 
 
 class TestLinkingNotesCarryBatchData:
@@ -461,7 +470,9 @@ class TestLinkingNotesCarryBatchData:
         )
         match = _BATCH_SUFFIX.search(notes[0])
         assert match is not None, notes[0]
-        assert match.group(1) == "5"
+        assert int(match.group(1)) == len(
+            common_free_indices(fake.prefactor_requests[0])
+        )
 
     def test_reverse_already_catalogued_note_carries_n_free_and_batch_time(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
@@ -493,7 +504,9 @@ class TestLinkingNotesCarryBatchData:
         )
         match = _BATCH_SUFFIX.search(notes[0])
         assert match is not None, notes[0]
-        assert match.group(1) == "5"
+        assert int(match.group(1)) == len(
+            common_free_indices(fake.prefactor_requests[0])
+        )
 
 
 class TestReverseAlreadyCatalogued:
