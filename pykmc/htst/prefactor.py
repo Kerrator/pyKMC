@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from .free_region import select_free_indices
+from .free_region import common_free_indices
 from .hessian import HessianFn
 from .normal_modes import ModeSpectrum, normal_modes_from_hessian
 from .request import HTSTEventRequest, HTSTRequestError
@@ -150,13 +150,14 @@ def compute_event_prefactors(
     method : str, optional
         Label recorded on the result, e.g. ``"fd"`` or ``"lammps_eskm"``.
     free_indices : array_like, optional
-        Caller-supplied free selection (global indices) overriding the sphere of
+        Caller-supplied free selection (request rows) overriding the sphere of
         radius ``settings.free_radius`` around ``center_index`` in the geometry
         named by ``settings.free_region_center`` (the saddle by default, so the
         selection is the same seen from either minimum; ``"min1"`` reproduces
         the original model, whose backward direction then sees a boundary
         centred on the mover's initial position). One selection feeds every
-        Hessian of the event. An empty selection rejects both directions with
+        Hessian of the event after removing source-constrained rows. Explicit
+        selections cannot re-enable a fixed atom. An empty selection rejects both directions with
         ``EMPTY_FREE_REGION``.
     compute_backward : bool, optional
         ``False`` skips the ``min2`` Hessian entirely: the backward direction is
@@ -196,28 +197,12 @@ def compute_event_prefactors(
     min1 = np.asarray(request.min1_positions, dtype=float)
     saddle = np.asarray(request.saddle_positions, dtype=float)
     min2 = np.asarray(request.min2_positions, dtype=float)
-    n_atoms = min1.shape[0]
     center = int(request.center_index)
 
     if not isinstance(compute_backward, bool):
         raise ValueError(f"compute_backward must be a bool, got {compute_backward!r}")
 
-    if free_indices is None:
-        centring = saddle if request.settings.free_region_center == "saddle" else min1
-        free = select_free_indices(
-            centring, center, request.settings.free_radius, request.cell, request.pbc
-        )
-    else:
-        free = np.asarray(free_indices)
-        if free.ndim != 1:
-            raise ValueError(f"free_indices must be one-dimensional, got {free.shape}")
-        if free.size and not np.issubdtype(free.dtype, np.integer):
-            raise ValueError(f"free_indices must be integers, got dtype {free.dtype}")
-        free = np.sort(free.astype(int))
-        if free.size and (free[0] < 0 or free[-1] >= n_atoms):
-            raise ValueError(f"free_indices out of range for {n_atoms} atoms: {free}")
-        if free.size and len(np.unique(free)) != free.size:
-            raise ValueError(f"free_indices contains duplicates: {free}")
+    free = common_free_indices(request, free_indices)
 
     n_free = int(free.size)
     if n_free == 0:

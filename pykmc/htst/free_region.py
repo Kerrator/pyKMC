@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .request import HTSTRequestError, require_orthorhombic
+from .request import HTSTEventRequest, HTSTRequestError, require_orthorhombic
 
 
 def select_free_indices(
@@ -115,4 +115,43 @@ def select_free_indices(
     return np.sort(inside.astype(int))
 
 
-__all__ = ["select_free_indices"]
+def common_free_indices(
+    request: HTSTEventRequest, free_indices: Any = None
+) -> np.ndarray:
+    """Select one vibrational set from a validated request, excluding fixed rows.
+
+    Explicit selections override the sphere, never the source constraints.
+    Returned indices name request rows; constraint identities may be unrelated
+    global IDs or a noncontiguous crop of the source ordering.
+    """
+    n_atoms = len(request.types)
+    if free_indices is None:
+        positions = (
+            request.saddle_positions
+            if request.settings.free_region_center == "saddle"
+            else request.min1_positions
+        )
+        free = select_free_indices(
+            positions,
+            request.center_index,
+            request.settings.free_radius,
+            request.cell,
+            request.pbc,
+        )
+    else:
+        free = np.asarray(free_indices)
+        if free.ndim != 1:
+            raise ValueError(f"free_indices must be one-dimensional, got {free.shape}")
+        if free.size and not np.issubdtype(free.dtype, np.integer):
+            raise ValueError(f"free_indices must be integers, got dtype {free.dtype}")
+        free = np.sort(free.astype(int))
+        if free.size and (free[0] < 0 or free[-1] >= n_atoms):
+            raise ValueError(f"free_indices out of range for {n_atoms} atoms: {free}")
+        if free.size and len(np.unique(free)) != free.size:
+            raise ValueError(f"free_indices contains duplicates: {free}")
+    if request.constraints is not None:
+        free = free[~np.isin(free, request.constraints.local_fixed_indices)]
+    return free
+
+
+__all__ = ["common_free_indices", "select_free_indices"]

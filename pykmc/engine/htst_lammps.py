@@ -47,7 +47,7 @@ Only the forward direction can be requested (``compute_backward=False``): the
 Premin
 ------
 With ``settings.premin`` the surroundings of each geometry are relaxed with the
-event core (the free atoms) frozen, using ``config.frz_min`` through
+event core and the source's fixed atoms frozen, using ``config.frz_min`` through
 ``LammpsEngine.minimize_freeze_core``, before that geometry's Hessian. The
 relaxation always runs on the full system, before any crop, so that no shell atom
 is relaxed against vacuum. Core positions are unchanged by construction (their
@@ -74,6 +74,7 @@ from ..htst import (
     select_free_indices,
 )
 from ..htst import compute_event_prefactors as _kernel_compute_event_prefactors
+from ..htst.free_region import common_free_indices
 from .base import EngineExtension
 from .lammps import LammpsEngine
 from ..physics import EnginePhysics, ForceModel
@@ -293,14 +294,31 @@ class LammpsHTSTExtension(EngineExtension):
         cell = np.asarray(request.cell, dtype=float)
         center = int(request.center_index)
         # One common free set for the three Hessians, selected in the centring
-        # geometry (saddle by default, min1 for the original model); premin
-        # freezes exactly these atoms so the selection cannot drift with the
-        # relaxed surroundings. The zone is selected on the same geometry so
+        # geometry (saddle by default, min1 for the original model). The
+        # vibrational set excludes fixed rows; premin instead locks the union
+        # of the core and fixed rows. The zone uses the same geometry so
         # that the free set is a subset of the zone (checked below).
         centring = saddle if settings.free_region_center == "saddle" else min1
-        free_global = select_free_indices(
+        core_global = select_free_indices(
             centring, center, settings.free_radius, cell, request.pbc
         )
+        free_global = common_free_indices(request, core_global)
+        fixed_global = (
+            ()
+            if request.constraints is None
+            else request.constraints.local_fixed_indices
+        )
+        relaxation_locks = np.union1d(core_global, fixed_global).astype(int)
+        if free_global.size == 0:
+            # The kernel owns the unavailable/skipped result. No scratch engine
+            # or matrix is needed when constraints leave no vibrational DOFs.
+            return _kernel_compute_event_prefactors(
+                request,
+                lambda positions, indices: np.empty((0, 0)),
+                method="lammps_eskm",
+                free_indices=free_global,
+                compute_backward=compute_backward,
+            )
         zone: np.ndarray | None = None
         if settings.zone_radius is not None:
             zone = select_free_indices(
@@ -328,9 +346,14 @@ class LammpsHTSTExtension(EngineExtension):
                 )
                 full_built = True
                 geometries = [
-                    self._premin(scratch, geometry, free_global)
+                    self._premin(scratch, geometry, relaxation_locks)
                     for geometry in geometries
                 ]
+                if request.constraints is not None:
+                    for geometry in geometries:
+                        request.constraints.validate_positions(
+                            geometry, cell=cell, pbc=request.pbc
+                        )
             if zone is None:
                 if not full_built:
                     self._build_scratch(

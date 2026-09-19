@@ -491,18 +491,39 @@ class ResolvedConstraints:
             raise ValueError("constraints require matching finite local positions")
         return pos
 
-    def validate_positions(self, positions: Any) -> None:
+    def validate_positions(
+        self, positions: Any, *, cell: Any = None, pbc: Any = None
+    ) -> None:
         """Reject an event that changes the source's fixed physical coordinates."""
         pos = self._positions(positions)
+        if (cell is None) != (pbc is None):
+            raise ValueError("constraint validation needs cell and PBC together")
+        if cell is not None:
+            matrix = np.asarray(cell, dtype=float)
+            axes = np.asarray(pbc)
+            if (
+                matrix.shape != (3, 3)
+                or not np.all(np.isfinite(matrix))
+                or axes.shape != (3,)
+                or axes.dtype.kind != "b"
+            ):
+                raise ValueError("invalid constraint validation cell/PBC")
+            if self.cell is not None and (
+                not np.array_equal(matrix, self.cell)
+                or not np.array_equal(axes, self.pbc)
+            ):
+                raise ValueError("constraint cell/PBC differs from event context")
+        else:
+            matrix, axes = self.cell, self.pbc
         fixed = dict(zip(self.fixed_ids, self.fixed_positions))
         rows = self.local_fixed_indices
         if not rows:
             return
         delta = pos[list(rows)] - [fixed[self.atom_ids[i]] for i in rows]
-        if self.cell is not None:
+        if matrix is not None:
             from ase.geometry import find_mic
 
-            delta, _ = find_mic(delta, self.cell, pbc=self.pbc)
+            delta, _ = find_mic(delta, matrix, pbc=axes)
         if np.any(np.linalg.norm(delta, axis=1) > 1e-10):
             raise ValueError("event changes fixed reference coordinates")
 

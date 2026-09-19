@@ -250,6 +250,10 @@ class HTSTEventRequest:
                 raise HTSTRequestError("constraints must be ResolvedConstraints")
             try:
                 self.constraints.validate(n_atoms)
+                for geometry in (min1, sad, min2):
+                    self.constraints.validate_positions(
+                        geometry, cell=cell, pbc=self.pbc
+                    )
             except ValueError as exc:
                 raise HTSTRequestError(str(exc)) from exc
 
