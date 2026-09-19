@@ -469,8 +469,20 @@ class ReferenceEventTable:
                     bwd_id, before=fwd_id
                 )
                 if known_forward is not None and known_backward is not None:
-                    self._merge_direction(fwd_id, known_forward)
-                    self._merge_direction(bwd_id, known_backward)
+                    if self._coherent_existing_pair(
+                        fwd_id, bwd_id, known_forward, known_backward, pre
+                    ):
+                        self._merge_direction(fwd_id, known_forward)
+                        self._merge_direction(bwd_id, known_backward)
+                    else:
+                        logger.info(
+                            "[htst] reference event %d: existing directional matches "
+                            "do not prove one equivalent pair; retaining both directions "
+                            "(n_free %d, batch %.3f s)",
+                            fwd_id,
+                            pre.n_free,
+                            wall,
+                        )
                 elif known_backward is not None:
                     self._merge_direction(bwd_id, known_backward)
                     logger.info(
@@ -665,6 +677,48 @@ class ReferenceEventTable:
             return False
         self._merge_direction(bwd_id, fwd_id)
         return True
+
+    def _coherent_existing_pair(
+        self, fwd_id, bwd_id, known_forward, known_backward, pre
+    ):
+        """Do not splice independent pairs or make approximate equality transitive."""
+        from .htst.event_identity import calculations_equivalent
+
+        old_fwd = self.table[self.table.idx_ref == known_forward].iloc[0]
+        old_bwd = self.table[self.table.idx_ref == known_backward].iloc[0]
+        if (
+            int(old_fwd.idx_backward) != known_backward
+            or int(old_bwd.idx_backward) != known_forward
+        ):
+            return False
+        if known_forward == known_backward:
+            fwd = self.table[self.table.idx_ref == fwd_id].iloc[0]
+            bwd = self.table[self.table.idx_ref == bwd_id].iloc[0]
+            # Each new value may be close to the old value while the new
+            # pair itself fails the barrier or spectral equality requirement.
+            return (
+                fwd.event_id == fwd.id_final
+                and abs(float(fwd.energy_barrier) - float(bwd.energy_barrier))
+                <= SELF_REVERSE_BARRIER_TOL
+                and self_reverse_prefactors_agree(pre.forward, pre.backward)
+                and calculations_equivalent(
+                    pre.calculation("forward"),
+                    pre.calculation("backward"),
+                    tolerance=self.config.psr.matching_score_thr,
+                    kmax_factor=self.config.ira.kmax_factor,
+                )
+            )
+        first = self._eligible_identity_calculation(known_forward)
+        second = self._eligible_identity_calculation(known_backward)
+        # With one canonical producing context and opposite directions, the
+        # first full-triplet witness also maps the entire reversed triplet.
+        # Different producers need a stronger joint proof; retain the new pair.
+        return (
+            first is not None
+            and second is not None
+            and first.provenance == second.provenance
+            and first.direction != second.direction
+        )
 
     def _matching_resolved_direction(self, idx_ref, *, before):
         """Find an older, current accepted producer after this batch resolves.
