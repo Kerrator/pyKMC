@@ -7,7 +7,7 @@ a transport key can stand in for the full source needed for recomputation.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 import math
 from typing import Any
 
@@ -26,6 +26,23 @@ from ..physics import (
 
 def _coordinates(value: Any) -> tuple[tuple[float, ...], ...]:
     return tuple(tuple(float(x) for x in row) for row in np.asarray(value))
+
+
+def _require_immutable(value: Any) -> None:
+    """Reject mutable leaves, including scalar arrays hidden inside tuples."""
+    if value is None or isinstance(
+        value, (str, int, float, bool, np.integer, np.floating, np.bool_)
+    ):
+        return
+    if isinstance(value, tuple):
+        for item in value:
+            _require_immutable(item)
+        return
+    if is_dataclass(value) and value.__dataclass_params__.frozen:
+        for item in fields(value):
+            _require_immutable(getattr(value, item.name))
+        return
+    raise ValueError("snapshot context must contain only immutable scalar values")
 
 
 @dataclass(frozen=True)
@@ -90,6 +107,7 @@ class RequestSnapshot:
 
     def validate(self) -> None:
         """Validate immutable storage, also when reading a persisted object."""
+        _require_immutable(self)
         for name in ("min1_positions", "saddle_positions", "min2_positions", "cell"):
             values = getattr(self, name)
             if not isinstance(values, tuple) or any(
