@@ -356,7 +356,7 @@ def test_success_extracts_outputs_before_destroy_and_keeps_independent_copies(
 def test_err_return_also_destroys_owned_artn_state(monkeypatch, operation):
     engine, cfg, recorder, owned = owned_setup(monkeypatch, "err")
     result = invoke(engine, cfg, operation)
-    assert result.is_err()
+    assert not result.is_ok()
     assert recorder.minimizations and len(owned) == 1
     assert owned[0].destroy_calls == 1 and not owned[0]._alive
     assert "get_error" in owned[0].history[:-1]
