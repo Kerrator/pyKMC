@@ -2280,15 +2280,21 @@ class ActiveEventTable:
             )
             if self.uses_prefactors:
                 full = self._full_saddles.get(int(label))
-                if (
-                    full is None
-                    or np.asarray(full).shape != np.asarray(system.positions).shape
-                    or not np.array_equal(
-                        np.asarray(full)[list(indices)], row["saddle_positions"]
-                    )
-                ):
+                if full is None:
                     raise ValueError(
                         "active event without a full saddle must supply its crop atom identities"
+                    )
+                if np.asarray(row["saddle_positions"]).shape != (len(indices), 3):
+                    raise RuntimeError(
+                        "stored crop does not match the current rcut mapping"
+                    )
+                if np.asarray(full).shape != np.asarray(
+                    system.positions
+                ).shape or not np.array_equal(
+                    np.asarray(full)[list(indices)], row["saddle_positions"]
+                ):
+                    raise RuntimeError(
+                        "stored crop is not the full refined saddle at the current rcut mapping"
                     )
             stored = tuple(ids[i] for i in indices)
             if "crop_atom_ids" not in self.table.columns:
