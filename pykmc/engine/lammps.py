@@ -1346,6 +1346,31 @@ class LammpsEngine(Engine):
     # pARTn search and refinement
     # ------------------------------------------------------------------
 
+    def _destroy_artn(self, artn, original):
+        """Release native run state even when a traceback retains its owner.
+
+        The Python ARTn wrapper normally destroys process-local Fortran state
+        in __del__. A retained exception retains the implementation frame and
+        that wrapper, so garbage collection cannot define the next run's state.
+        All result arrays have been copied before this cleanup runs.
+        """
+        failure = None
+        if artn is not None:
+            try:
+                artn.destroy()
+            except BaseException as exc:
+                failure = exc
+        failures = self._operation_failures(failure)
+        if any(value is not None for value in failures):
+            self._cleared_since_init = True
+            if original is None:
+                self._raise_operation_failure(
+                    failure, failures, "native ARTn destruction"
+                )
+            add_note = getattr(BaseException, "add_note", None)
+            if add_note is not None:
+                add_note(original, f"Native ARTn destruction failed: {failures}")
+
     @contextmanager
     def _partn_resource_scope(self, active):
         """Clean full-system ARTn resources after a constrained failure.
@@ -1584,174 +1609,191 @@ class LammpsEngine(Engine):
         constraints=None,
         user_constraints=None,
     ) -> Ok | Err | None:
-        original_stdout_fd = os.dup(1)
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, 1)
+        artn = None
+        original = None
         try:
-            print("Central Atom", central_atom_idx)
-            if config.control.active_volume:
-                atom_map, central_lammps_id = partn_search_AV(
-                    self,
-                    config,
-                    central_atom_idx,
-                    positions,
-                    cell,
-                    types,
-                    constraints=constraints,
-                    user_constraints=user_constraints,
+            original_stdout_fd = os.dup(1)
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, 1)
+            try:
+                print("Central Atom", central_atom_idx)
+                if config.control.active_volume:
+                    atom_map, central_lammps_id = partn_search_AV(
+                        self,
+                        config,
+                        central_atom_idx,
+                        positions,
+                        cell,
+                        types,
+                        constraints=constraints,
+                        user_constraints=user_constraints,
+                    )
+                else:
+                    atom_map = None
+                    central_lammps_id = [central_atom_idx + 1]
+                    if positions is not None:
+                        self.set_positions(positions=positions)
+
+                delr_threshold = config.eventsearch.delr_thr
+
+                artn = pypARTn.artn(engine="lmp")
+
+                self.lmp.command(f"plugin load {artn.lib._name}")
+                atoms_frozen = (
+                    False
+                    if config.control.active_volume
+                    else self._make_frozen_group(config, positions, types, constraints)
                 )
-            else:
-                atom_map = None
-                central_lammps_id = [central_atom_idx + 1]
-                if positions is not None:
-                    self.set_positions(positions=positions)
+                self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
+                self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
+                self._apply_frozen_fix("f_frozen_post", atoms_frozen)
+                if config.control.active_volume:
+                    # ARTn replaces forces with trial displacements after f_buffer
+                    # runs. Keep the buffer fixed through that second force update.
+                    self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
+                self.lmp.command("min_style fire")
 
-            delr_threshold = config.eventsearch.delr_thr
+                artn.reset_input()
+                artn.set("filout", "artn.out." + str(self.engine_id))
+                artn.set("engine_units", "lammps/metal")
+                artn.set("verbose", config.partn.verbosity)
+                artn.set("struc_format_out", "none")
+                artn.set("delr_thr", config.partn.delr_thr)
+                artn.set("lpush_final", True)
+                artn.set("lmove_nextmin", False)
+                artn.set("zseed", config.partn.zseed)
+                artn.set("push_mode", config.partn.push_mode)
+                if config.partn.push_mode == "rad":
+                    artn.set("push_dist_thr", config.partn.push_dist_thr)
+                artn.set("push_step_size", config.partn.push_step_size)
+                artn.set("push_ids", central_lammps_id)
+                artn.set("ninit", config.partn.ninit)
+                artn.set("lanczos_min_size", config.partn.lanczos_min_size)
+                artn.set("lanczos_max_size", config.partn.lanczos_max_size)
+                artn.set("lanczos_disp", config.partn.lanczos_disp)
+                artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
+                artn.set("eigval_thr", config.partn.eigval_thr)
+                artn.set("eigen_step_size", config.partn.eigen_step_size)
+                artn.set("nsmooth", config.partn.nsmooth)
+                artn.set("neigen", config.partn.neigen)
+                artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
+                artn.set("nnewchance", config.partn.nnewchance)
+                if config.partn.nperp is not None:
+                    artn.set("nperp", config.partn.nperp)
+                if config.partn.nperp_limitation is not None:
+                    artn.set(
+                        "nperp_limitation", np.array(config.partn.nperp_limitation)
+                    )
+                else:
+                    artn.set("lnperp_limitation", False)
+                artn.set("forc_thr", config.partn.forc_thr)
+                artn.set("push_over", config.partn.push_over)
 
-            artn = pypARTn.artn(engine="lmp")
+                fixed_rows = (
+                    constraints.crop(atom_map).local_fixed_indices
+                    if config.control.active_volume
+                    else constraints.local_fixed_indices
+                )
+                with self._fixed_velocity_guard(fixed_rows):
+                    self.lmp.command(
+                        f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}"
+                    )
+                self.lmp.command("unfix 10")
+                if config.control.active_volume:
+                    self.lmp.command("unfix f_buffer_post")
+                self._remove_frozen_fix("f_frozen_post", atoms_frozen)
+                self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
+                self._delete_frozen_group(atoms_frozen)
+            finally:
+                # Always give stdout back, even when pARTn or LAMMPS raised.
+                os.dup2(original_stdout_fd, 1)
+                os.close(original_stdout_fd)
+                os.close(devnull)
 
-            self.lmp.command(f"plugin load {artn.lib._name}")
-            atoms_frozen = (
-                False
-                if config.control.active_volume
-                else self._make_frozen_group(config, positions, types, constraints)
-            )
-            self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
-            self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
-            self._apply_frozen_fix("f_frozen_post", atoms_frozen)
-            if config.control.active_volume:
-                # ARTn replaces forces with trial displacements after f_buffer
-                # runs. Keep the buffer fixed through that second force update.
-                self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
-            self.lmp.command("min_style fire")
+            if self._is_rank0:
+                err = artn.get_error()
+                if err[0] == 0:
+                    delr1 = artn.extract("delr_min1")
+                    delr2 = artn.extract("delr_min2")
+                    if delr1 < delr_threshold or delr2 < delr_threshold:
+                        E_sad = artn.extract("etot_sad")
+                        E_min1 = artn.extract("etot_min1")
+                        E_min2 = artn.extract("etot_min2")
+                        dE_forward = E_sad - E_min1
+                        dE_backward = E_sad - E_min2
 
-            artn.reset_input()
-            artn.set("filout", "artn.out." + str(self.engine_id))
-            artn.set("engine_units", "lammps/metal")
-            artn.set("verbose", config.partn.verbosity)
-            artn.set("struc_format_out", "none")
-            artn.set("delr_thr", config.partn.delr_thr)
-            artn.set("lpush_final", True)
-            artn.set("lmove_nextmin", False)
-            artn.set("zseed", config.partn.zseed)
-            artn.set("push_mode", config.partn.push_mode)
-            if config.partn.push_mode == "rad":
-                artn.set("push_dist_thr", config.partn.push_dist_thr)
-            artn.set("push_step_size", config.partn.push_step_size)
-            artn.set("push_ids", central_lammps_id)
-            artn.set("ninit", config.partn.ninit)
-            artn.set("lanczos_min_size", config.partn.lanczos_min_size)
-            artn.set("lanczos_max_size", config.partn.lanczos_max_size)
-            artn.set("lanczos_disp", config.partn.lanczos_disp)
-            artn.set("lanczos_eval_conv_thr", config.partn.lanczos_eval_conv_thr)
-            artn.set("eigval_thr", config.partn.eigval_thr)
-            artn.set("eigen_step_size", config.partn.eigen_step_size)
-            artn.set("nsmooth", config.partn.nsmooth)
-            artn.set("neigen", config.partn.neigen)
-            artn.set("alpha_mix_cr", config.partn.alpha_mix_cr)
-            artn.set("nnewchance", config.partn.nnewchance)
-            if config.partn.nperp is not None:
-                artn.set("nperp", config.partn.nperp)
-            if config.partn.nperp_limitation is not None:
-                artn.set("nperp_limitation", np.array(config.partn.nperp_limitation))
-            else:
-                artn.set("lnperp_limitation", False)
-            artn.set("forc_thr", config.partn.forc_thr)
-            artn.set("push_over", config.partn.push_over)
-
-            fixed_rows = (
-                constraints.crop(atom_map).local_fixed_indices
-                if config.control.active_volume
-                else constraints.local_fixed_indices
-            )
-            with self._fixed_velocity_guard(fixed_rows):
-                self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
-            self.lmp.command("unfix 10")
-            if config.control.active_volume:
-                self.lmp.command("unfix f_buffer_post")
-            self._remove_frozen_fix("f_frozen_post", atoms_frozen)
-            self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
-            self._delete_frozen_group(atoms_frozen)
-        finally:
-            # Always give stdout back, even when pARTn or LAMMPS raised.
-            os.dup2(original_stdout_fd, 1)
-            os.close(original_stdout_fd)
-            os.close(devnull)
-
-        if self._is_rank0:
-            err = artn.get_error()
-            if err[0] == 0:
-                delr1 = artn.extract("delr_min1")
-                delr2 = artn.extract("delr_min2")
-                if delr1 < delr_threshold or delr2 < delr_threshold:
-                    E_sad = artn.extract("etot_sad")
-                    E_min1 = artn.extract("etot_min1")
-                    E_min2 = artn.extract("etot_min2")
-                    dE_forward = E_sad - E_min1
-                    dE_backward = E_sad - E_min2
-
-                    if config.control.active_volume:
-                        min1positions, min2positions, saddlepositions, index_move = (
-                            position_results_AV(config, artn, atom_map, positions)
-                        )
-                    else:
-                        min1positions = self._positions_from_lammps(
-                            artn.extract("tau_min1")
-                        )
-                        min2positions = self._positions_from_lammps(
-                            artn.extract("tau_min2")
-                        )
-                        saddlepositions = self._positions_from_lammps(
-                            artn.extract("tau_sad")
-                        )
-                        dist = (min1positions - saddlepositions) ** 2
-                        dist = dist.sum(axis=-1)
-                        dist = np.sqrt(dist)
-                        dist[dist > config.atomicenvironment.rcut] = 0
-                        index_move = np.argmax(dist)
-
-                    if delr1 < delr2:
-                        return Ok(
-                            EventSearchOutput(
-                                central_atom_index=central_atom_idx,
-                                dE_forward=dE_forward,
-                                dE_backward=dE_backward,
-                                min1_positions=min1positions,
-                                saddle_positions=saddlepositions,
-                                min2_positions=min2positions,
-                                move_atom_index=index_move,
-                                types=types,
+                        if config.control.active_volume:
+                            (
+                                min1positions,
+                                min2positions,
+                                saddlepositions,
+                                index_move,
+                            ) = position_results_AV(config, artn, atom_map, positions)
+                        else:
+                            min1positions = self._positions_from_lammps(
+                                artn.extract("tau_min1")
                             )
-                        )
+                            min2positions = self._positions_from_lammps(
+                                artn.extract("tau_min2")
+                            )
+                            saddlepositions = self._positions_from_lammps(
+                                artn.extract("tau_sad")
+                            )
+                            dist = (min1positions - saddlepositions) ** 2
+                            dist = dist.sum(axis=-1)
+                            dist = np.sqrt(dist)
+                            dist[dist > config.atomicenvironment.rcut] = 0
+                            index_move = np.argmax(dist)
+
+                        if delr1 < delr2:
+                            return Ok(
+                                EventSearchOutput(
+                                    central_atom_index=central_atom_idx,
+                                    dE_forward=dE_forward,
+                                    dE_backward=dE_backward,
+                                    min1_positions=min1positions,
+                                    saddle_positions=saddlepositions,
+                                    min2_positions=min2positions,
+                                    move_atom_index=index_move,
+                                    types=types,
+                                )
+                            )
+                        else:
+                            return Ok(
+                                EventSearchOutput(
+                                    central_atom_index=central_atom_idx,
+                                    dE_forward=dE_backward,
+                                    dE_backward=dE_forward,
+                                    min1_positions=min2positions,
+                                    saddle_positions=saddlepositions,
+                                    min2_positions=min1positions,
+                                    move_atom_index=index_move,
+                                    types=types,
+                                )
+                            )
                     else:
-                        return Ok(
-                            EventSearchOutput(
-                                central_atom_index=central_atom_idx,
-                                dE_forward=dE_backward,
-                                dE_backward=dE_forward,
-                                min1_positions=min2positions,
-                                saddle_positions=saddlepositions,
-                                min2_positions=min1positions,
-                                move_atom_index=index_move,
-                                types=types,
+                        return Err(
+                            ErrorInfo(
+                                type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
+                                message="delr1 and delr2 > at {}".format(
+                                    delr_threshold
+                                ),
+                                variables={"delr1": delr1, "delr2": delr2},
                             )
                         )
                 else:
                     return Err(
                         ErrorInfo(
-                            type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
-                            message="delr1 and delr2 > at {}".format(delr_threshold),
-                            variables={"delr1": delr1, "delr2": delr2},
+                            type=ErrorType.EVENT_NOT_FOUND,
+                            message="No event found",
+                            details=err,
                         )
                     )
-            else:
-                return Err(
-                    ErrorInfo(
-                        type=ErrorType.EVENT_NOT_FOUND,
-                        message="No event found",
-                        details=err,
-                    )
-                )
+        except BaseException as exc:
+            original = exc
+            raise
+        finally:
+            self._destroy_artn(artn, original)
 
     @lammps_error_handler
     def partn_refine(
@@ -1832,159 +1874,169 @@ class LammpsEngine(Engine):
         constraints=None,
         user_constraints=None,
     ) -> Ok | Err | None:
-        if config.control.active_volume:
-            try:
-                E_init, atom_map, central_lammps_id = partn_refine_AV(
-                    self,
-                    config,
-                    central_atom_idx,
-                    positions,
-                    cell,
-                    types,
-                    saddle_idx,
-                    saddle_positions,
-                    constraints=constraints,
-                    user_constraints=user_constraints,
+        artn = None
+        original = None
+        try:
+            if config.control.active_volume:
+                try:
+                    E_init, atom_map, central_lammps_id = partn_refine_AV(
+                        self,
+                        config,
+                        central_atom_idx,
+                        positions,
+                        cell,
+                        types,
+                        saddle_idx,
+                        saddle_positions,
+                        constraints=constraints,
+                        user_constraints=user_constraints,
+                    )
+                except ActiveVolumeSaddleError as exc:
+                    # A saddle atom missing from the crop: report, do not crash the
+                    # worker (the base's `.item()` numpy error).
+                    if self._is_rank0:
+                        return Err(
+                            ErrorInfo(
+                                type=ErrorType.REFINEMENT_INVALID_MINIMA,
+                                message=str(exc),
+                            )
+                        )
+                    return None
+            else:
+                central_lammps_id = [central_atom_idx + 1]
+                E_init = 0
+                atom_map = None
+                if positions is not None:
+                    self.set_positions(positions=positions)
+                    if minimize_outer_atoms:
+                        core = set(() if saddle_idx is None else saddle_idx)
+                        core.update(constraints.local_fixed_indices)
+                        if core:
+                            self.minimize_freeze_core(sorted(core))
+
+            artn = pypARTn.artn(engine="lmp")
+            self.lmp.command(f"plugin load {artn.lib._name}")
+
+            artn.reset_input()
+            artn.set("filout", "artn.out." + str(self.engine_id))
+            artn.set("engine_units", "lammps/metal")
+            artn.set("verbose", config.partn.verbosity)
+            artn.set("struc_format_out", "none")
+            artn.set("delr_thr", config.partn.delr_thr)
+            artn.set("lpush_final", False)
+            artn.set("lmove_nextmin", False)
+            artn.set("zseed", config.partn.zseed)
+            artn.set("push_mode", config.partn.r_push_mode)
+            if config.partn.push_mode == "rad":
+                artn.set("push_dist_thr", config.partn.r_push_dist_thr)
+            artn.set("push_step_size", config.partn.r_push_step_size)
+            artn.set("push_ids", central_lammps_id)
+            artn.set("ninit", config.partn.r_ninit)
+            artn.set("lanczos_min_size", config.partn.r_lanczos_min_size)
+            artn.set("lanczos_max_size", config.partn.r_lanczos_max_size)
+            artn.set("lanczos_disp", config.partn.r_lanczos_disp)
+            artn.set("lanczos_eval_conv_thr", config.partn.r_lanczos_eval_conv_thr)
+            artn.set("eigval_thr", config.partn.r_eigval_thr)
+            artn.set("eigen_step_size", config.partn.r_eigen_step_size)
+            artn.set("nsmooth", config.partn.r_nsmooth)
+            artn.set("neigen", config.partn.r_neigen)
+            artn.set("alpha_mix_cr", config.partn.r_alpha_mix_cr)
+            artn.set("nnewchance", config.partn.r_nnewchance)
+            if config.partn.r_nperp is not None:
+                artn.set("nperp", config.partn.r_nperp)
+            if config.partn.r_nperp_limitation is not None:
+                artn.set("nperp_limitation", np.array(config.partn.r_nperp_limitation))
+            else:
+                artn.set("lnperp_limitation", False)
+            artn.set("forc_thr", config.partn.r_forc_thr)
+
+            max_attempts = config.partn.r_max_attempts
+            attempt = 0
+            atoms_frozen = (
+                False
+                if config.control.active_volume
+                else self._make_frozen_group(config, positions, types, constraints)
+            )
+            self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
+
+            while attempt < max_attempts:
+                exit_flag = False
+                result = None
+                self.lmp.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
+                self._apply_frozen_fix("f_frozen_post", atoms_frozen)
+                if config.control.active_volume:
+                    self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
+                self.lmp.command("min_style fire")
+                fixed_rows = (
+                    constraints.crop(atom_map).local_fixed_indices
+                    if config.control.active_volume
+                    else constraints.local_fixed_indices
                 )
-            except ActiveVolumeSaddleError as exc:
-                # A saddle atom missing from the crop: report, do not crash the
-                # worker (the base's `.item()` numpy error).
+                with self._fixed_velocity_guard(fixed_rows):
+                    self.lmp.command(
+                        f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}"
+                    )
+                self.lmp.command("unfix 10")
+                if config.control.active_volume:
+                    self.lmp.command("unfix f_buffer_post")
+                self._remove_frozen_fix("f_frozen_post", atoms_frozen)
+
                 if self._is_rank0:
+                    err = artn.get_error()
+                    if err[0] == 0:
+                        delr_sad = artn.extract("delr_sad")
+                        if delr_sad < config.partn.r_delr_sad_thr:
+                            E_sad = artn.extract("etot_sad")
+                            E_result = E_sad - E_init
+                            saddlepositions = self._positions_from_lammps(
+                                artn.extract("tau_sad")
+                            )
+                            if config.control.active_volume:
+                                saddlepositions_results = positions.copy()
+                                for i, atom_idx in enumerate(atom_map):
+                                    saddlepositions_results[atom_idx] = saddlepositions[
+                                        i
+                                    ]
+                            else:
+                                saddlepositions_results = saddlepositions
+                            exit_flag = True
+                            result = Ok(
+                                EventRefinementOutput(
+                                    central_atom_index=central_atom_idx,
+                                    saddle_positions=saddlepositions_results,
+                                    E_saddle=E_result,
+                                    refined="T",
+                                )
+                            )
+
+                exit_flag = (
+                    self.comm.bcast(exit_flag, root=0)
+                    if self.comm is not None
+                    else exit_flag
+                )
+                if exit_flag:
+                    self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
+                    self._delete_frozen_group(atoms_frozen)
+                    return result
+
+                attempt += 1
+                artn.set("zseed", config.partn.zseed)
+
+            else:
+                self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
+                self._delete_frozen_group(atoms_frozen)
+                if self._is_rank0:
+                    err = artn.get_error()
                     return Err(
                         ErrorInfo(
-                            type=ErrorType.REFINEMENT_INVALID_MINIMA,
-                            message=str(exc),
+                            type=ErrorType.EVENT_NOT_FOUND,
+                            message="no event found",
+                            details=err,
                         )
                     )
                 return None
-        else:
-            central_lammps_id = [central_atom_idx + 1]
-            E_init = 0
-            atom_map = None
-            if positions is not None:
-                self.set_positions(positions=positions)
-                if minimize_outer_atoms:
-                    core = set(() if saddle_idx is None else saddle_idx)
-                    core.update(constraints.local_fixed_indices)
-                    if core:
-                        self.minimize_freeze_core(sorted(core))
-
-        artn = pypARTn.artn(engine="lmp")
-        self.lmp.command(f"plugin load {artn.lib._name}")
-
-        artn.reset_input()
-        artn.set("filout", "artn.out." + str(self.engine_id))
-        artn.set("engine_units", "lammps/metal")
-        artn.set("verbose", config.partn.verbosity)
-        artn.set("struc_format_out", "none")
-        artn.set("delr_thr", config.partn.delr_thr)
-        artn.set("lpush_final", False)
-        artn.set("lmove_nextmin", False)
-        artn.set("zseed", config.partn.zseed)
-        artn.set("push_mode", config.partn.r_push_mode)
-        if config.partn.push_mode == "rad":
-            artn.set("push_dist_thr", config.partn.r_push_dist_thr)
-        artn.set("push_step_size", config.partn.r_push_step_size)
-        artn.set("push_ids", central_lammps_id)
-        artn.set("ninit", config.partn.r_ninit)
-        artn.set("lanczos_min_size", config.partn.r_lanczos_min_size)
-        artn.set("lanczos_max_size", config.partn.r_lanczos_max_size)
-        artn.set("lanczos_disp", config.partn.r_lanczos_disp)
-        artn.set("lanczos_eval_conv_thr", config.partn.r_lanczos_eval_conv_thr)
-        artn.set("eigval_thr", config.partn.r_eigval_thr)
-        artn.set("eigen_step_size", config.partn.r_eigen_step_size)
-        artn.set("nsmooth", config.partn.r_nsmooth)
-        artn.set("neigen", config.partn.r_neigen)
-        artn.set("alpha_mix_cr", config.partn.r_alpha_mix_cr)
-        artn.set("nnewchance", config.partn.r_nnewchance)
-        if config.partn.r_nperp is not None:
-            artn.set("nperp", config.partn.r_nperp)
-        if config.partn.r_nperp_limitation is not None:
-            artn.set("nperp_limitation", np.array(config.partn.r_nperp_limitation))
-        else:
-            artn.set("lnperp_limitation", False)
-        artn.set("forc_thr", config.partn.r_forc_thr)
-
-        max_attempts = config.partn.r_max_attempts
-        attempt = 0
-        atoms_frozen = (
-            False
-            if config.control.active_volume
-            else self._make_frozen_group(config, positions, types, constraints)
-        )
-        self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
-
-        while attempt < max_attempts:
-            exit_flag = False
-            result = None
-            self.lmp.command("fix 10 all artn dmax {}".format(config.partn.r_dmax))
-            self._apply_frozen_fix("f_frozen_post", atoms_frozen)
-            if config.control.active_volume:
-                self.lmp.command("fix f_buffer_post buffer setforce 0.0 0.0 0.0")
-            self.lmp.command("min_style fire")
-            fixed_rows = (
-                constraints.crop(atom_map).local_fixed_indices
-                if config.control.active_volume
-                else constraints.local_fixed_indices
-            )
-            with self._fixed_velocity_guard(fixed_rows):
-                self.lmp.command(
-                    f"minimize 1e-6 1e-8 10000 {config.partn.r_nevalf_max}"
-                )
-            self.lmp.command("unfix 10")
-            if config.control.active_volume:
-                self.lmp.command("unfix f_buffer_post")
-            self._remove_frozen_fix("f_frozen_post", atoms_frozen)
-
-            if self._is_rank0:
-                err = artn.get_error()
-                if err[0] == 0:
-                    delr_sad = artn.extract("delr_sad")
-                    if delr_sad < config.partn.r_delr_sad_thr:
-                        E_sad = artn.extract("etot_sad")
-                        E_result = E_sad - E_init
-                        saddlepositions = self._positions_from_lammps(
-                            artn.extract("tau_sad")
-                        )
-                        if config.control.active_volume:
-                            saddlepositions_results = positions.copy()
-                            for i, atom_idx in enumerate(atom_map):
-                                saddlepositions_results[atom_idx] = saddlepositions[i]
-                        else:
-                            saddlepositions_results = saddlepositions
-                        exit_flag = True
-                        result = Ok(
-                            EventRefinementOutput(
-                                central_atom_index=central_atom_idx,
-                                saddle_positions=saddlepositions_results,
-                                E_saddle=E_result,
-                                refined="T",
-                            )
-                        )
-
-            exit_flag = (
-                self.comm.bcast(exit_flag, root=0)
-                if self.comm is not None
-                else exit_flag
-            )
-            if exit_flag:
-                self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
-                self._delete_frozen_group(atoms_frozen)
-                return result
-
-            attempt += 1
-            artn.set("zseed", config.partn.zseed)
-
-        else:
-            self._remove_frozen_fix("f_frozen_pre", atoms_frozen)
-            self._delete_frozen_group(atoms_frozen)
-            if self._is_rank0:
-                err = artn.get_error()
-                return Err(
-                    ErrorInfo(
-                        type=ErrorType.EVENT_NOT_FOUND,
-                        message="no event found",
-                        details=err,
-                    )
-                )
-            return None
+        except BaseException as exc:
+            original = exc
+            raise
+        finally:
+            self._destroy_artn(artn, original)
