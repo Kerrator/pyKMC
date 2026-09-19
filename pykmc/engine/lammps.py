@@ -57,7 +57,8 @@ def lammps_error_handler(method):
     ``LAMMPSException`` (``_LAMMPS_EXCEPTIONS`` is non-empty); otherwise the
     wrapped method's exceptions propagate unchanged and the engine stays open.
     A LAMMPS build without exception support calls MPI_Abort instead of
-    raising at all.
+    raising at all. Closing drops the native handle but retains any pending
+    restoration and its full-system descriptor for a later retry.
     """
 
     @functools.wraps(method)
@@ -461,7 +462,10 @@ class LammpsEngine(Engine):
           instance reproduces a fresh engine's energy for the same positions.
           A replay that raises leaves the instance marked cropped with the
           remembered descriptor intact, so a later `ensure_full_system`
-          retries from the same map. When the search/refine itself failed, a
+          retries from the same map, starting a new native instance if the
+          pending handle was closed. Replay verifies the remembered force
+          snapshot and masses before reporting success. When the
+          search/refine itself failed, a
           failure of the restore is reported as a `RuntimeWarning` and the
           *original* exception is the one raised (`system_is_cropped` then
           tells whether the engine is still a crop). The AV helpers clean up
@@ -472,7 +476,9 @@ class LammpsEngine(Engine):
           `self.command` (the AV helpers' path, and the start of a restore)
           marks the instance as replaced; only a completed
           `initialize_potential` clears that marker, and an atom-count
-          mismatch is detected independently.
+          mismatch is detected independently. Pending state survives handle
+          closure; explicitly closing an intact instance remains a no-op for
+          restoration.
         - Scratch work that must not disturb this engine (HTST Hessians)
           belongs in a separate `LammpsEngine(comm=MPI.COMM_SELF)`; nothing
           here caches state across instances.
@@ -552,13 +558,17 @@ class LammpsEngine(Engine):
         ``command`` (the active-volume crop path and the start of an
         ``ensure_full_system`` replay) and comes down only when
         ``initialize_potential`` completes, so an instance whose rebuild
-        stopped short of the potential is still reported as cropped. False
-        before ``initialize_system`` or after ``close``.
+        stopped short of the potential is still reported as cropped. The
+        marker survives native handle closure, allowing a later restore to
+        start a new instance. False before ``initialize_system`` or after
+        explicitly closing an intact instance.
         """
-        if self.lmp is None or self.full_system is None:
+        if self.full_system is None:
             return False
         if self._cleared_since_init:
             return True
+        if self.lmp is None:
+            return False
         return int(self.lmp.get_natoms()) != self.full_system.natoms
 
     def ensure_full_system(self, positions: np.ndarray | None = None) -> bool:
@@ -579,6 +589,13 @@ class LammpsEngine(Engine):
         though the atom count may already match) and ``self.full_system`` is
         the same descriptor as before, so calling this method again retries
         the rebuild from the same species/mass map, cell, pbc and types.
+
+        A pending restore with a closed handle starts a new instance before
+        replay. Start and clear failures obey the same retention rule. The
+        remembered force snapshot and actual replayed species/masses must
+        agree before restoration is complete; changed physics is an explicit
+        failure, never a relabeled successful restore. An explicitly closed
+        intact instance remains a no-op.
 
         Parameters
         ----------
@@ -620,11 +637,21 @@ class LammpsEngine(Engine):
         positions = _require_positions(
             positions, "ensure_full_system", natoms=fs.natoms
         )
-        # The clear goes through `command` so the marker is up for the whole
-        # replay even when only the atom count flagged the crop; a completed
-        # `initialize_potential` is the only thing that takes it down.
-        self.command("clear")
         try:
+            # Latch even an atom-count-only mismatch before any operation can
+            # close the native handle. Pending state outlives that handle.
+            self._cleared_since_init = True
+            if (
+                fs.physics is not None
+                and ForceModel.capture(self.config) != fs.physics.force_model
+            ):
+                raise RuntimeError(
+                    "ensure_full_system: force-model physics changed since initialization"
+                )
+            if self.lmp is None:
+                self.start()
+            else:
+                self.command("clear")
             self.initialize_parameters()
             self.initialize_system(
                 types=fs.types,
@@ -635,6 +662,18 @@ class LammpsEngine(Engine):
                 masses=fs.masses,
             )
             self.initialize_potential()
+            restored = self.full_system
+            if restored.species != fs.species or restored.masses != fs.masses:
+                raise RuntimeError(
+                    "ensure_full_system: restored species/masses differ from the descriptor"
+                )
+            if fs.physics is not None and (
+                restored.physics is None
+                or restored.physics.force_model != fs.physics.force_model
+            ):
+                raise RuntimeError(
+                    "ensure_full_system: restored force-model physics differs from the descriptor"
+                )
         except BaseException:
             # Incomplete rebuild: keep the authoritative descriptor (the replay
             # may have re-recorded it) and the marker so the next call retries.
@@ -655,6 +694,7 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def start(self) -> None:
+        """Create a native handle, retaining any pending restoration state."""
         engine_log = (
             "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
         )
@@ -663,6 +703,7 @@ class LammpsEngine(Engine):
         )
 
     def close(self) -> None:
+        """Drop the handle while retaining the descriptor and pending marker."""
         if self.lmp is not None:
             self.lmp.close()
             self.lmp = None

@@ -19,6 +19,12 @@ integer image translations. Nonperiodic lattice directions retain their
 physical displacement; normalization neither reorders atoms nor modifies the
 input array. The AV refinement helper uses this same engine boundary.
 
+A failed full-system restore retains its original descriptor and pending state
+even if the native error wrapper closes the handle. Retrying starts a fresh
+instance when necessary. Restoration verifies the force snapshot and actual
+replayed species/masses before reporting success; changed physics remains an
+explicit failure. Closing an intact engine intentionally does not restart it.
+
 The force-model snapshot identifies the command definition and coefficient-file
 contents. Moving an identical file does not change its content identity. Editing
 a file at the same path does. The supported fingerprint parsers cover single-file
