@@ -2972,7 +2972,12 @@ class ActiveEventTable:
                 if aligned is None:
                     continue
                 pos_ref, pos_comp = aligned
-                delr = compute_delr(pos_ref, pos_comp, cell)
+                delr = compute_delr(
+                    pos_ref,
+                    pos_comp,
+                    cell,
+                    True if neighbors_list is None else neighbors_list.system.pbc,
+                )
                 if delr < self.config.psr.matching_score_thr:
                     # print('Removing event with delr',delr)
                     duplicates.append(jdx)

@@ -93,7 +93,14 @@ class SiteState:
         )
         if settings != self.source.settings:
             return False
-        if row["nu0_status"] != "ok" and (
+        if (
+            row["nu0_status"] != "ok"
+            or (
+                self.calculation is not None
+                and not self.calculation.estimate.ok
+                and self.calculation.estimate.reason_code.value == "out_of_window"
+            )
+        ) and (
             service.settings.nu0_min_hz != self.source.settings.nu0_min_hz
             or service.settings.nu0_max_hz != self.source.settings.nu0_max_hz
         ):
