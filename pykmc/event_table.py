@@ -2581,9 +2581,10 @@ class ActiveEventTable:
             if (
                 calculation.direction != "forward"
                 or calculation.provenance.source != source
+                or calculation.provenance.method != self.prefactor_service.method
             ):
                 raise RuntimeError(
-                    "site result does not belong to its submitted source"
+                    "site result does not belong to its submitted source and method"
                 )
         center_id = source.constraints.atom_ids[source.center_index]
         self._site_states[int(label)] = SiteState(
