@@ -489,6 +489,7 @@ def test_reference_and_site_callers_transport_the_contract(tmp_path, monkeypatch
         types=("Ni",) * 3,
         cell=20.0 * np.eye(3),
         pbc=(True, False, True),
+        index=np.arange(3),
     )
     neighbors = SimpleNamespace(
         get_neighbors=lambda kind, atom: np.array([0, 1], dtype=int)
