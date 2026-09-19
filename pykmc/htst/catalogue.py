@@ -43,8 +43,8 @@ class PrefactorArchive:
     """Append-only producing facts and superseded/unknown estimate history."""
 
     def __init__(self) -> None:
-        self.descriptors: dict[str, PhysicalDescriptor] = {}
-        self.calculations: dict[str, DirectionalCalculation] = {}
+        self.descriptors: dict[str, PhysicalDescriptor | None] = {}
+        self.calculations: dict[str, DirectionalCalculation | None] = {}
         self.references: dict[int, EstimateReference | None] = {}
         self.history: dict[int, list[dict[str, Any]]] = {}
         self.legacy_metadata: list[dict[str, Any]] = []
@@ -55,10 +55,16 @@ class PrefactorArchive:
         """Associate an actual calculation; never infer one from a service."""
         calculation.validate()
         descriptor = calculation.provenance.produced.descriptor
-        if descriptor is not None:
-            self.descriptors.setdefault(descriptor.descriptor_id, descriptor)
+        if (
+            descriptor is not None
+            and self.descriptors.get(descriptor.descriptor_id) is None
+        ):
+            # A missing registry value is not an immutable producing fact.
+            # Fill it only from this actual calculation, never from a service.
+            self.descriptors[descriptor.descriptor_id] = descriptor
         key = calculation.calculation_id
-        self.calculations.setdefault(key, calculation)
+        if self.calculations.get(key) is None:
+            self.calculations[key] = calculation
         self.references[int(idx_ref)] = EstimateReference(key, row_digest(row))
 
     def retain(self, idx_ref: int, row: Any, reason: str) -> None:
