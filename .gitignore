@@ -43,3 +43,7 @@ pykmc.*
 
 # OS
 .DS_Store
+
+# Run artifacts dropped by LAMMPS / pARTn engines and test lanes
+lammps.log.*
+artn.out.*

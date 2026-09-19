@@ -33,6 +33,11 @@ doc = [
 ]
 
 
+[tool.pytest.ini_options]
+markers = [
+    "mpi: collective test that needs a real MPI launch (mpirun -n N); guarded or skipped under plain pytest",
+]
+
 [tool.ty.environment]
 python-version = "3.10"
 
