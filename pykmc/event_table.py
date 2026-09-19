@@ -1700,6 +1700,20 @@ class ReferenceEventTable:
 
         complete_columns = len(present) == len(REFERENCE_HTST_COLUMNS)
         version = metadata.get("schema_version")
+        if "idx_ref" not in df.columns and version is None:
+            # Pre-schema catalogues used the dataframe index for reverse links.
+            # Promote that logical label without inventing physical provenance.
+            if not df.index.is_unique or any(
+                isinstance(idx, (bool, np.bool_))
+                or not isinstance(idx, (int, np.integer))
+                or idx < 0
+                for idx in df.index
+            ):
+                raise ValueError(
+                    f"reference table {path}: legacy reference labels must be "
+                    "unique nonnegative integers"
+                )
+            df.insert(0, "idx_ref", df.index.to_numpy(copy=True))
         if metadata and complete_columns:
             if version not in (1, TABLE_SCHEMA_VERSION):
                 raise ValueError(
