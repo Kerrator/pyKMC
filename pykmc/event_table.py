@@ -2175,6 +2175,7 @@ class ActiveEventTable:
         self._full_saddle_constraints: dict[int, Any] = {}
         self._site_states: dict[int, Any] = {}
         self._pending_site_rows: set[int] = set()
+        self._constant_crop_ids: dict[int, tuple[int, ...]] = {}
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2271,6 +2272,8 @@ class ActiveEventTable:
         row = self.table.loc[label]
         ids = _indices(system.index)
         stored = row.get("crop_atom_ids")
+        if not self.uses_prefactors:
+            stored = self._constant_crop_ids.get(int(label), stored)
         if stored is None or (isinstance(stored, float) and math.isnan(stored)):
             if not capture or neighbors_list is None:
                 raise ValueError("active event has no stored crop identities")
@@ -2482,6 +2485,12 @@ class ActiveEventTable:
             self._require_htst_columns("add_events")
         first_label = len(self.table)
         self.add(dfactive)
+        if not self.uses_prefactors:
+            for offset, output in enumerate(outputs):
+                if output.crop_atom_ids is not None:
+                    self._constant_crop_ids[first_label + offset] = tuple(
+                        output.crop_atom_ids
+                    )
         if self.uses_prefactors:
             # The full refined saddle travels beside the row (never in it) until
             # request_site_prefactors consumes it.
@@ -2567,7 +2576,7 @@ class ActiveEventTable:
             dfactive["nu0_reason"] = reason
             dfactive["nu0_source"] = source
             dfactive["nu0_site_attempted"] = False
-        if event_refinement_output.crop_atom_ids is not None:
+        if self.uses_prefactors and event_refinement_output.crop_atom_ids is not None:
             dfactive["crop_atom_ids"] = tuple(event_refinement_output.crop_atom_ids)
         return dfactive
 
@@ -2908,6 +2917,11 @@ class ActiveEventTable:
 
     def _remap_stores(self, kept) -> None:
         """Apply the same row-label map to every transient store."""
+        self._constant_crop_ids = {
+            new: self._constant_crop_ids[int(old)]
+            for new, old in enumerate(kept)
+            if int(old) in self._constant_crop_ids
+        }
         self._site_states = {
             new: self._site_states[int(old)]
             for new, old in enumerate(kept)
