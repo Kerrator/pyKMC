@@ -373,6 +373,7 @@ class KMC:
                     self.reference_table,
                     self.visited_environments,
                     self.manager,
+                    global_constraints=self.global_constraints,
                 )
                 self.system.update_positions(
                     result_reconstruction.ok_value().min1_positions
@@ -689,7 +690,13 @@ class KMC:
             The EventSearch class containing results of the event searches.
 
         """
-        event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
+        event_search = EventSearch(
+            self.config,
+            self.system,
+            self.manager,
+            self.loggers,
+            global_constraints=self.global_constraints,
+        )
         event_search.execute(central_atom_research_list)
         return event_search
 
@@ -791,6 +798,7 @@ class KMC:
             self.neighbors_list,
             self.atomic_environment,
             self.manager,
+            global_constraints=self.global_constraints,
         )
         # refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(
@@ -967,6 +975,7 @@ class KMC:
             self.system.pbc,
             central_atom,
             self.system.index,
+            user_constraints=self.global_constraints,
         )
         # Keep the live source untouched even if validation or minimization fails.
         working = np.array(self.system.positions, copy=True)

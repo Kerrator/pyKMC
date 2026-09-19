@@ -9,6 +9,7 @@ from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .manager import Manager
+from .physics import resolve_event_constraints
 import numpy as np
 import pandas as pd
 import concurrent.futures
@@ -42,6 +43,7 @@ class Refinement:
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
         manager: Manager,
+        global_constraints=None,
     ) -> None:
         self.config = config
         self.loggers = loggers
@@ -50,6 +52,7 @@ class Refinement:
         self.atomic_environment = atomic_environment
         self.manager = manager
         self.results = None
+        self.global_constraints = global_constraints
 
     def execute(
         self,
@@ -222,6 +225,16 @@ class Refinement:
                 self.system.positions.copy()
             )  # save to restore system after
 
+            constraints = resolve_event_constraints(
+                self.config,
+                current_positions,
+                self.system.types,
+                self.system.cell,
+                self.system.pbc,
+                at_idx,
+                self.system.index,
+                user_constraints=self.global_constraints,
+            )
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
             ):
@@ -257,9 +270,12 @@ class Refinement:
                 neighbors = self.neighbors_list.get_neighbors("rcut", at_idx).copy()
 
                 ###=> move the system to the saddle point
-                self.system.update_positions(
-                    new_positions=new_positions_saddle, atom_idx=neighbors
-                )
+                working = current_positions.copy()
+                working[neighbors] = new_positions_saddle
+                final = current_positions.copy()
+                final[neighbors] = new_positions_final
+                constraints.validate_positions(working)
+                constraints.validate_positions(final)
                 if (
                     dfevent.at["energy_barrier"] > e_thr
                 ):  # We dont refine, we use generic date
@@ -270,11 +286,12 @@ class Refinement:
                         Ok(
                             EventRefinementOutput(
                                 central_atom_index=at_idx,
-                                saddle_positions=self.system.positions.copy(),
+                                saddle_positions=working.copy(),
                                 E_saddle=dfevent["energy_barrier"]
                                 if self.config.control.active_volume
                                 else total_energy + dfevent["energy_barrier"],
                                 refined="F",
+                                constraints=constraints,
                             )
                         )
                     )
@@ -293,18 +310,21 @@ class Refinement:
                             cell=self.system.cell,
                             types=self.system.types.copy(),
                             saddle_idx=neighbors.copy(),
-                            saddle_positions=self.system.positions.copy()[
-                                neighbors.copy()
-                            ],
+                            saddle_positions=working[neighbors].copy(),
+                            constraints=constraints,
+                            user_constraints=self.global_constraints,
                         )  # send copy not reference !
                     else:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
                             config=self.config,
                             central_atom_idx=at_idx,
-                            positions=self.system.positions.copy(),
+                            positions=working.copy(),
                             types=self.system.types.copy(),
+                            cell=self.system.cell,
                             saddle_idx=neighbors.copy(),
+                            constraints=constraints,
+                            user_constraints=self.global_constraints,
                         )  # send copy not reference !
                 futures.append(f)
 
@@ -321,8 +341,6 @@ class Refinement:
                     "estimate": self._inherited_estimate(dfevent),
                 }
 
-                # => Restore the system to its initial state
-                self.system.update_positions(current_positions)
             return futures
 
     def _inherited_estimate(self, dfevent: pd.Series) -> dict:

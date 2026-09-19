@@ -5,6 +5,7 @@ from .system import System
 from .manager import Manager
 from .log import LogKMC
 from .utils.geometry import translate
+from .physics import resolve_event_constraints
 import numpy as np
 
 
@@ -23,13 +24,19 @@ class EventSearch:
     """
 
     def __init__(
-        self, config, system: System, manager: Manager, loggers: LogKMC
+        self,
+        config,
+        system: System,
+        manager: Manager,
+        loggers: LogKMC,
+        global_constraints=None,
     ) -> None:
         self.config = config
         self.system = system
         self.manager = manager
         self.loggers = loggers
         self.results = None
+        self.global_constraints = global_constraints
 
     def execute(self, central_atom_research_list: list[int]) -> None:
         """Execute an event search for each central atom in the central_atom_research_list list.
@@ -49,31 +56,36 @@ class EventSearch:
                 len(central_atom_research_list)
             ),
         )
-        if self.config.control.active_volume == True:
-            if self.config.activevolume.ract <= self.config.atomicenvironment.rcut:
-                raise ValueError(
-                    "Active Volume radius is smaller than cutoff radius. Please increase ract or decrease rcut"
-                )
-            futures = [
+        if (
+            self.config.control.active_volume
+            and self.config.activevolume.ract <= self.config.atomicenvironment.rcut
+        ):
+            raise ValueError(
+                "Active Volume radius is smaller than cutoff radius. Please increase ract or decrease rcut"
+            )
+        futures = []
+        for atom in central_atom_research_list:
+            constraints = resolve_event_constraints(
+                self.config,
+                self.system.positions,
+                self.system.types,
+                self.system.cell,
+                self.system.pbc,
+                atom,
+                self.system.index,
+                user_constraints=self.global_constraints,
+            )
+            futures.append(
                 self.manager.partn_search(
                     config=self.config,
                     central_atom_idx=atom,
                     positions=self.system.positions.copy(),
                     cell=self.system.cell.copy(),
                     types=self.system.types.copy(),
+                    constraints=constraints,
+                    user_constraints=self.global_constraints,
                 )
-                for atom in central_atom_research_list
-            ]
-        else:
-            futures = [
-                self.manager.partn_search(
-                    config=self.config,
-                    central_atom_idx=atom,
-                    positions=self.system.positions.copy(),
-                    types=self.system.types.copy(),
-                )
-                for atom in central_atom_research_list
-            ]
+            )
         for f in futures:
             self.results.append(f.result())
 
@@ -107,6 +119,14 @@ class EventSearch:
             The dataclass countaining the event search outputs with translated positions.
 
         """
+        if (
+            self.config.rateconstant.style in ("htst", "rpa")
+            and event_search_output.prefactor_geometry is None
+        ):
+            event_search_output.prefactor_geometry = tuple(
+                np.array(getattr(event_search_output, field), copy=True)
+                for field in ("min1_positions", "saddle_positions", "min2_positions")
+            )
         # Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr
         cell = self.system.cell
         ax, ay, az = cell[0][0], cell[1][1], cell[2][2]

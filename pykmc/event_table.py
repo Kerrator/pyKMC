@@ -430,16 +430,22 @@ class ReferenceEventTable:
                     "EventSearchOutput.types is required to build the HTST request "
                     f"of reference event {fwd_id}"
                 )
+            geometry = ev.prefactor_geometry or (
+                ev.min1_positions,
+                ev.saddle_positions,
+                ev.min2_positions,
+            )
             requests.append(
                 self.prefactor_service.build_request(
                     event_key=(fwd_id, bwd_id),
-                    min1_positions=ev.min1_positions,
-                    saddle_positions=ev.saddle_positions,
-                    min2_positions=ev.min2_positions,
+                    min1_positions=geometry[0],
+                    saddle_positions=geometry[1],
+                    min2_positions=geometry[2],
                     types=ev.types,
                     cell=ev.cell,
                     pbc=pbc,
                     center_index=ev.move_atom_index,
+                    constraints=ev.constraints,
                 )
             )
         results = self.prefactor_service.compute(requests)
@@ -1935,6 +1941,7 @@ class ActiveEventTable:
         # Transient full refined saddles of rows awaiting their site request,
         # keyed by the row's current label (see the class notes).
         self._full_saddles: dict[int, np.ndarray] = {}
+        self._full_saddle_constraints: dict[int, Any] = {}
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2008,6 +2015,7 @@ class ActiveEventTable:
         are dropped here.
         """
         self._full_saddles = {}
+        self._full_saddle_constraints = {}
         if self.recycler is None:
             self.table = self.table.iloc[0:0].reset_index(drop=True)
         else:
@@ -2105,6 +2113,9 @@ class ActiveEventTable:
                 if full is not None:
                     self._full_saddles[first_label + offset] = np.asarray(
                         full, dtype=float
+                    )
+                    self._full_saddle_constraints[first_label + offset] = (
+                        output.constraints
                     )
 
     def add(self, dfevents: pd.Series | list[pd.Series]) -> None:
@@ -2345,6 +2356,7 @@ class ActiveEventTable:
                         cell=system.cell,
                         pbc=system.pbc,
                         center_index=atom,
+                        constraints=self._full_saddle_constraints.get(int(idx)),
                     )
                 )
                 keys.append((idx, key))
@@ -2353,6 +2365,7 @@ class ActiveEventTable:
             # Release the full arrays: the requests hold their own copies and
             # a row is attempted at most once.
             self._full_saddles = {}
+            self._full_saddle_constraints = {}
         wall = self.prefactor_service.last_batch_wall_s
         for idx in no_geometry:
             self.table.loc[idx, "nu0_site_attempted"] = True
@@ -2451,6 +2464,12 @@ class ActiveEventTable:
                 for new, old in enumerate(kept)
                 if int(old) in self._full_saddles
             }
+
+        self._full_saddle_constraints = {
+            new: self._full_saddle_constraints[int(old)]
+            for new, old in enumerate(kept)
+            if int(old) in self._full_saddle_constraints
+        }
 
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""

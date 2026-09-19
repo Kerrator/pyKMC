@@ -99,7 +99,12 @@ class Initializer:
         system = self.kmc.system
         # Resolve in the full source ordering before any native mutation.
         self.kmc.global_constraints = ResolvedConstraints.resolve(
-            system.positions, system.types, self.kmc.config.frozen_atoms
+            system.positions,
+            system.types,
+            self.kmc.config.frozen_atoms,
+            system.index,
+            cell=system.cell,
+            pbc=system.pbc,
         )
         self.kmc.manager.broadcast("start")
         self.kmc.manager.broadcast("initialize_parameters")

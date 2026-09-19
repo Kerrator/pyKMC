@@ -37,6 +37,7 @@ import numpy as np
 import ctypes
 from ase.cell import Cell
 from ase.geometry import find_mic
+from ..physics import validate_event_constraints, _indices
 
 
 class ActiveVolumeSaddleError(ValueError):
@@ -301,7 +302,14 @@ def redefine_atoms(engine, positions, type=None) -> None:
 
 
 def partn_search_AV(
-    engine, config, central_atom_idx: int, positions, cell, type
+    engine,
+    config,
+    central_atom_idx: int,
+    positions,
+    cell,
+    type,
+    constraints=None,
+    user_constraints=None,
 ) -> [np.array, int]:
     # Guard the full-system positions before the crop clears anything: a NaN
     # raises here on every rank, with the engine still intact.
@@ -313,6 +321,19 @@ def partn_search_AV(
     masses = getattr(full, "masses", None)
     int_types, map_type = map_types(type, species=species, masses=masses)
     pbc = _engine_pbc(engine)
+    constraints = validate_event_constraints(
+        config,
+        positions,
+        type,
+        cell,
+        pbc,
+        central_atom_idx,
+        constraints,
+        user_constraints=user_constraints,
+    )
+    av_positions, av_idx, _ = define_AV(
+        config, central_atom_idx, positions, cell, pbc=pbc
+    )
     reset(
         engine,
         config,
@@ -321,15 +342,13 @@ def partn_search_AV(
         pbc=pbc,
         preserve_masses=species is not None,
     )
-    av_positions, av_idx, buffer_idx = define_AV(
-        config, central_atom_idx, positions, cell, pbc=pbc
-    )
-
     atom_map = np.array(av_idx, dtype=int)
     av_type = int_types[atom_map]
 
     redefine_atoms(engine, av_positions, av_type)
-    make_AV(engine, av_idx, buffer_idx)
+    # This group owns the whole execution restriction, including user atoms
+    # inside rmov. Native IDs are translated from full-source rows only here.
+    make_AV(engine, av_idx, constraints.local_fixed_indices)
     return atom_map, np.array(np.where(atom_map == central_atom_idx)[0] + 1)
 
 
@@ -342,6 +361,8 @@ def partn_refine_AV(
     type,
     saddle_idx,
     saddle_positions,
+    constraints=None,
+    user_constraints=None,
 ) -> [float, np.array, int]:
     """
     Receive the system with the central atom index, define an active volume around this atom, then update the positions
@@ -358,7 +379,7 @@ def partn_refine_AV(
     legitimate saddle geometry). Non-finite ``saddle_positions`` raise
     ``ValueError`` before any LAMMPS command.
     """
-    saddle_idx = np.asarray(saddle_idx, dtype=int)
+    saddle_idx = np.array(_indices(saddle_idx, upper=len(positions)), dtype=int)
     saddle_positions = _check_positions(
         saddle_positions, "active_volume.partn_refine_AV (saddle_positions)"
     )
@@ -369,8 +390,28 @@ def partn_refine_AV(
             "(one row per saddle_idx entry)"
         )
 
+    constraints = validate_event_constraints(
+        config,
+        positions,
+        type,
+        cell,
+        _engine_pbc(engine),
+        central_atom_idx,
+        constraints,
+        user_constraints=user_constraints,
+    )
+    proposed = np.array(positions, copy=True)
+    proposed[saddle_idx] = saddle_positions
+    constraints.validate_positions(proposed)
     atom_map, central_lammps_id = partn_search_AV(
-        engine, config, central_atom_idx, positions, cell, type
+        engine,
+        config,
+        central_atom_idx,
+        positions,
+        cell,
+        type,
+        constraints=constraints,
+        user_constraints=user_constraints,
     )
     av_positions = positions[atom_map]
 

@@ -28,7 +28,12 @@ from ..activevolume.active_volume import (
     require_orthorhombic_cell,
 )
 from ..atomic_environment import AtomicEnvironment
-from ..physics import EnginePhysics, ForceModel, ResolvedConstraints
+from ..physics import (
+    EnginePhysics,
+    ForceModel,
+    ResolvedConstraints,
+    validate_event_constraints,
+)
 from ..result import (
     ErrorInfo,
     EventSearchOutput,
@@ -1003,8 +1008,17 @@ class LammpsEngine(Engine):
     # Frozen-atom helpers
     # ------------------------------------------------------------------
 
-    def _make_frozen_group(self, config, positions=None, types=None) -> bool:
+    def _make_frozen_group(
+        self, config, positions=None, types=None, constraints=None
+    ) -> bool:
         """Resolve frozen atoms from config and create g_frozen group. Returns True if any atoms are frozen."""
+        if constraints is not None:
+            frozen_indices = constraints.local_fixed_indices
+            if not frozen_indices:
+                return False
+            lammps_ids = " ".join(str(i + 1) for i in frozen_indices)
+            self.lmp.command(f"group g_frozen id {lammps_ids}")
+            return True
         if config.frozen_atoms is None:
             return False
         if positions is None:
@@ -1191,9 +1205,8 @@ class LammpsEngine(Engine):
         ------
         ValueError
             If positions, cell or types are missing (the crop and the restore
-            both need the full system), or if ``config.frozen_atoms`` is set:
-            frozen indices are full-system ids and the crop renumbers atoms, so
-            that combination would freeze the wrong atoms.
+            both need the full system). Resolved execution constraints are
+            validated separately before the crop changes native state.
 
         """
         if positions is None or cell is None or types is None:
@@ -1202,12 +1215,6 @@ class LammpsEngine(Engine):
                 "and types (needed for the crop and to restore the engine)"
             )
         require_orthorhombic_cell(cell, op_name)
-        if getattr(config, "frozen_atoms", None) is not None:
-            raise ValueError(
-                f"{op_name}: frozen_atoms is not supported together with "
-                "active_volume (frozen indices are full-system ids but the "
-                "active-volume crop renumbers atoms)"
-            )
 
     def _restore_after_failure(
         self, positions: np.ndarray, original: BaseException, op_name: str
@@ -1239,7 +1246,14 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def partn_search(
-        self, config, central_atom_idx: int, positions=None, cell=None, types=None
+        self,
+        config,
+        central_atom_idx: int,
+        positions=None,
+        cell=None,
+        types=None,
+        constraints=None,
+        user_constraints=None,
     ):
         """Run a pARTn event search around ``central_atom_idx``.
 
@@ -1248,20 +1262,82 @@ class LammpsEngine(Engine):
         on every exit path (Ok, Err, exception); see the class docstring,
         "State ownership".
         """
-        if not config.control.active_volume:
-            return self._partn_search_impl(
-                config, central_atom_idx, positions, cell, types
+        active = config.control.active_volume
+        if active:
+            self._check_active_volume_inputs(
+                config, positions, cell, types, "partn_search"
             )
-        self._check_active_volume_inputs(config, positions, cell, types, "partn_search")
+        constraints = self._resolve_search_constraints(
+            config,
+            central_atom_idx,
+            positions,
+            cell,
+            types,
+            constraints,
+            user_constraints,
+        )
         try:
             result = self._partn_search_impl(
-                config, central_atom_idx, positions, cell, types
+                config,
+                central_atom_idx,
+                positions,
+                cell,
+                types,
+                constraints,
+                user_constraints,
             )
         except BaseException as exc:
-            self._restore_after_failure(positions, exc, "partn_search")
+            if active:
+                self._restore_after_failure(positions, exc, "partn_search")
             raise
-        self.ensure_full_system(positions)
+        if active:
+            self.ensure_full_system(positions)
+        self._validate_search_result(result, constraints)
         return result
+
+    def _resolve_search_constraints(
+        self, config, center, positions, cell, types, constraints, user_constraints
+    ):
+        full = self.full_system
+        if positions is None:
+            positions = self.get_positions()
+            if self.comm is not None:
+                positions = self.comm.bcast(positions, root=0)
+        if types is None and full is not None:
+            types = full.types
+        if cell is None and full is not None:
+            cell = full.cell
+        pbc = full.pbc if full is not None else (True, True, True)
+        return validate_event_constraints(
+            config,
+            positions,
+            types,
+            cell,
+            pbc,
+            center,
+            constraints,
+            user_constraints=user_constraints,
+        )
+
+    def _validate_search_result(self, result, constraints):
+        # All ranks take the same failure path; output arrays live on rank zero.
+        failure = None
+        if self._is_rank0 and result is not None and result.is_ok():
+            output = result.ok_value()
+            try:
+                for field in ("min1_positions", "saddle_positions", "min2_positions"):
+                    positions = getattr(output, field, None)
+                    if positions is not None:
+                        constraints.validate_positions(positions)
+            except ValueError as exc:
+                failure = str(exc)
+            output.constraints = constraints
+        if self.comm is not None:
+            failure = self.comm.bcast(failure, root=0)
+        if failure is not None:
+            raise ValueError(
+                f"pARTn returned an incompatible constrained event: {failure}"
+            )
 
     def _partn_search_impl(
         self,
@@ -1270,6 +1346,8 @@ class LammpsEngine(Engine):
         positions: np.ndarray | None = None,
         cell: np.ndarray | None = None,
         types: list[str] | np.ndarray | None = None,
+        constraints=None,
+        user_constraints=None,
     ) -> Ok | Err | None:
         original_stdout_fd = os.dup(1)
         devnull = os.open(os.devnull, os.O_WRONLY)
@@ -1278,7 +1356,14 @@ class LammpsEngine(Engine):
             print("Central Atom", central_atom_idx)
             if config.control.active_volume:
                 atom_map, central_lammps_id = partn_search_AV(
-                    self, config, central_atom_idx, positions, cell, types
+                    self,
+                    config,
+                    central_atom_idx,
+                    positions,
+                    cell,
+                    types,
+                    constraints=constraints,
+                    user_constraints=user_constraints,
                 )
             else:
                 atom_map = None
@@ -1291,7 +1376,11 @@ class LammpsEngine(Engine):
             artn = pypARTn.artn(engine="lmp")
 
             self.lmp.command(f"plugin load {artn.lib._name}")
-            atoms_frozen = self._make_frozen_group(config, positions, types)
+            atoms_frozen = (
+                False
+                if config.control.active_volume
+                else self._make_frozen_group(config, positions, types, constraints)
+            )
             self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
             self.lmp.command("fix 10 all artn dmax {}".format(config.partn.dmax))
             self._apply_frozen_fix("f_frozen_post", atoms_frozen)
@@ -1434,6 +1523,8 @@ class LammpsEngine(Engine):
         saddle_idx=None,
         saddle_positions=None,
         minimize_outer_atoms: bool = True,
+        constraints=None,
+        user_constraints=None,
     ):
         """Refine a saddle point with pARTn starting from ``saddle_positions``.
 
@@ -1447,18 +1538,21 @@ class LammpsEngine(Engine):
         base). Non-finite ``saddle_positions`` raise ``ValueError`` on every
         rank before any LAMMPS call.
         """
-        if not config.control.active_volume:
-            return self._partn_refine_impl(
-                config,
-                central_atom_idx,
-                positions,
-                cell,
-                types,
-                saddle_idx,
-                saddle_positions,
-                minimize_outer_atoms,
+        active = config.control.active_volume
+        if active:
+            self._check_active_volume_inputs(
+                config, positions, cell, types, "partn_refine"
             )
-        self._check_active_volume_inputs(config, positions, cell, types, "partn_refine")
+        constraints = self._resolve_search_constraints(
+            config,
+            central_atom_idx,
+            positions,
+            cell,
+            types,
+            constraints,
+            user_constraints,
+        )
+        # The helper validates the proposed overlay before it clears the engine.
         try:
             result = self._partn_refine_impl(
                 config,
@@ -1469,11 +1563,16 @@ class LammpsEngine(Engine):
                 saddle_idx,
                 saddle_positions,
                 minimize_outer_atoms,
+                constraints,
+                user_constraints,
             )
         except BaseException as exc:
-            self._restore_after_failure(positions, exc, "partn_refine")
+            if active:
+                self._restore_after_failure(positions, exc, "partn_refine")
             raise
-        self.ensure_full_system(positions)
+        if active:
+            self.ensure_full_system(positions)
+        self._validate_search_result(result, constraints)
         return result
 
     def _partn_refine_impl(
@@ -1486,6 +1585,8 @@ class LammpsEngine(Engine):
         saddle_idx: np.ndarray | None = None,
         saddle_positions: np.ndarray | None = None,
         minimize_outer_atoms: bool = True,
+        constraints=None,
+        user_constraints=None,
     ) -> Ok | Err | None:
         if config.control.active_volume:
             try:
@@ -1498,6 +1599,8 @@ class LammpsEngine(Engine):
                     types,
                     saddle_idx,
                     saddle_positions,
+                    constraints=constraints,
+                    user_constraints=user_constraints,
                 )
             except ActiveVolumeSaddleError as exc:
                 # A saddle atom missing from the crop: report, do not crash the
@@ -1517,7 +1620,10 @@ class LammpsEngine(Engine):
             if positions is not None:
                 self.set_positions(positions=positions)
                 if minimize_outer_atoms:
-                    self.minimize_freeze_core(saddle_idx)
+                    core = set(() if saddle_idx is None else saddle_idx)
+                    core.update(constraints.local_fixed_indices)
+                    if core:
+                        self.minimize_freeze_core(sorted(core))
 
         artn = pypARTn.artn(engine="lmp")
         self.lmp.command(f"plugin load {artn.lib._name}")
@@ -1557,7 +1663,11 @@ class LammpsEngine(Engine):
 
         max_attempts = config.partn.r_max_attempts
         attempt = 0
-        atoms_frozen = self._make_frozen_group(config, positions, types)
+        atoms_frozen = (
+            False
+            if config.control.active_volume
+            else self._make_frozen_group(config, positions, types, constraints)
+        )
         self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
 
         while attempt < max_attempts:

@@ -596,21 +596,165 @@ class ResolvedConstraints:
 
 
 def resolve_event_constraints(
-    config, positions, types, cell, pbc, center_index, atom_ids=None
+    config,
+    positions,
+    types,
+    cell,
+    pbc,
+    center_index,
+    atom_ids=None,
+    *,
+    user_constraints=None,
 ):
-    """Resolve an event's user-plus-AV restriction from the unmodified source."""
-    ids = tuple(range(len(positions))) if atom_ids is None else tuple(atom_ids)
+    """Resolve the AV shell without reclassifying initialized user constraints.
+
+    Spatial user policies select identities at initialization. An atom entering
+    that region later must not silently become fixed, nor may an existing
+    reference coordinate be replaced by its current position.
+    """
+    ids = _indices(range(len(positions)) if atom_ids is None else atom_ids)
+    center_index = _indices((center_index,), upper=len(positions))[0]
     active = config.control.active_volume
-    return ResolvedConstraints.resolve(
+    region = getattr(config, "frozen_atoms", None)
+    resolved = ResolvedConstraints.resolve(
         positions,
         types,
-        getattr(config, "frozen_atoms", None),
+        region if user_constraints is None else None,
         ids,
         cell=cell,
         pbc=pbc,
         center_id=ids[center_index] if active else None,
         rmov=config.activevolume.rmov if active else None,
     )
+    if user_constraints is None:
+        return resolved
+    user_constraints.validate(len(ids))
+    if set(ids) != set(user_constraints.source_ids):
+        raise ValueError(
+            "event source identities differ from initialized user constraints"
+        )
+    policy = json.dumps(
+        None if region is None else region.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    if user_constraints.user_policy not in (None, policy):
+        raise ValueError("user constraint policy changed since initialization")
+    user = replace(user_constraints, atom_ids=ids)
+    user.validate_positions(positions, cell=cell, pbc=pbc)
+    references = dict(zip(resolved.fixed_ids, resolved.fixed_positions))
+    references.update(zip(user.fixed_ids, user.fixed_positions))
+    fixed_ids = tuple(i for i in user.source_ids if i in references)
+    return replace(
+        resolved,
+        source_ids=user.source_ids,
+        fixed_ids=fixed_ids,
+        fixed_positions=tuple(references[i] for i in fixed_ids),
+        user_policy=user.user_policy,
+    )
+
+
+def validate_event_constraints(
+    config,
+    positions,
+    types,
+    cell,
+    pbc,
+    center_index,
+    constraints=None,
+    *,
+    user_constraints=None,
+):
+    """Validate a full-source execution payload before any native mutation.
+
+    With no payload, the standalone call declares this full input its source.
+    Supplied payloads retain their already-resolved user identities; the AV
+    shell is independently checked against this operation's actual source.
+    """
+    center_index = _indices((center_index,), upper=len(positions))[0]
+    if constraints is None:
+        return resolve_event_constraints(
+            config,
+            positions,
+            types,
+            cell,
+            pbc,
+            center_index,
+            user_constraints=user_constraints,
+        )
+    if not isinstance(constraints, ResolvedConstraints):
+        raise ValueError("constraints must be a resolved source payload")
+    constraints.validate(len(positions))
+    if set(constraints.atom_ids) != set(constraints.source_ids):
+        raise ValueError("event execution requires the full source constraint mapping")
+    constraints.validate_positions(positions, cell=cell, pbc=pbc)
+    region = getattr(config, "frozen_atoms", None)
+    policy = json.dumps(
+        None if region is None else region.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    if constraints.user_policy not in (None, policy):
+        raise ValueError(
+            "event constraint policy differs from the configured user policy"
+        )
+    if user_constraints is None:
+        # A standalone call without initialized authority declares this full
+        # input to be its user source, just as the stateless HTST boundary does.
+        user_constraints = ResolvedConstraints.resolve(
+            positions,
+            types,
+            region,
+            constraints.atom_ids,
+            cell=cell,
+            pbc=pbc,
+        )
+        user_constraints = replace(user_constraints, source_ids=constraints.source_ids)
+    else:
+        user_constraints.validate(len(positions))
+        if user_constraints.user_policy not in (None, policy):
+            raise ValueError("user constraint policy changed since initialization")
+        if set(user_constraints.atom_ids) != set(user_constraints.source_ids):
+            raise ValueError("user authority must retain the full source")
+        replace(user_constraints, atom_ids=constraints.atom_ids).validate_positions(
+            positions,
+            cell=cell,
+            pbc=pbc,
+        )
+    constraints.require_preserves(user_constraints, cell=cell, pbc=pbc)
+    if config.control.active_volume:
+        expected = ResolvedConstraints.resolve(
+            positions,
+            types,
+            atom_ids=constraints.atom_ids,
+            cell=cell,
+            pbc=pbc,
+            center_id=constraints.atom_ids[center_index],
+            rmov=config.activevolume.rmov,
+        )
+        expected = replace(expected, source_ids=constraints.source_ids)
+        if (
+            constraints.center_id != expected.center_id
+            or constraints.rmov != expected.rmov
+        ):
+            raise ValueError(
+                "event constraints differ from the AV source center/radius"
+            )
+        from ase.geometry import find_mic
+
+        if constraints.center_position is None:
+            raise ValueError("event constraints lack the AV source center")
+        _, center_distance = find_mic(
+            np.asarray(constraints.center_position) - expected.center_position,
+            cell,
+            pbc=pbc,
+        )
+        if center_distance > 1e-10:
+            raise ValueError("event constraints differ from the AV source center")
+        constraints.require_preserves(expected, cell=cell, pbc=pbc)
+    return constraints
 
 
 @dataclass(frozen=True)

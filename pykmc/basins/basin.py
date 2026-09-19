@@ -67,8 +67,14 @@ class StateData:
 
 class BasinsGenericEvents:
     def __init__(
-        self, config: Config, reference_table, known_environments, manager
+        self,
+        config: Config,
+        reference_table,
+        known_environments,
+        manager,
+        global_constraints=None,
     ) -> None:
+        self.global_constraints = global_constraints
         self.config = config  # Config object with basins parameters
         self.explorer = None  # object to explore a state in the basin
         self.reference_table = reference_table  # Object with reference generic events
@@ -97,6 +103,17 @@ class BasinsGenericEvents:
         """
         run the basin exploration and select an event from a system, corresponding to the first state in the basin, it is assumed that this state is transient.
         """
+        if self.global_constraints is None:
+            from ..physics import ResolvedConstraints
+
+            self.global_constraints = ResolvedConstraints.resolve(
+                system.positions,
+                system.types,
+                self.config.frozen_atoms,
+                system.index,
+                cell=system.cell,
+                pbc=system.pbc,
+            )
         # initialize the basin
         self._initialize(system)
         # explore the basin
@@ -331,6 +348,7 @@ class BasinsGenericEvents:
             source.pbc,
             central_atom,
             source.index,
+            user_constraints=self.global_constraints,
         )
 
         # We start from the from_state
@@ -574,6 +592,20 @@ class BasinsGenericEvents:
                     "rcut", row["central_atom"]
                 )
 
+                constraints = resolve_event_constraints(
+                    self.config,
+                    tmp_system.positions,
+                    tmp_system.types,
+                    tmp_system.cell,
+                    tmp_system.pbc,
+                    row["central_atom"],
+                    tmp_system.index,
+                    user_constraints=self.global_constraints,
+                )
+                proposed = tmp_system.positions.copy()
+                proposed[neighbors] = saddle_positions
+                constraints.validate_positions(proposed)
+
                 if self.config.control.active_volume == True:
                     # add a job to manager queue
                     future2 = self.manager.partn_refine(
@@ -584,6 +616,8 @@ class BasinsGenericEvents:
                         types=tmp_system.types.copy(),
                         saddle_idx=neighbors.copy(),
                         saddle_positions=saddle_positions.copy(),
+                        constraints=constraints,
+                        user_constraints=self.global_constraints,
                     )
                 # Move system do saddle positions
                 else:
@@ -593,7 +627,11 @@ class BasinsGenericEvents:
                         config=self.config,
                         central_atom_idx=row["central_atom"],
                         positions=tmp_system.positions.copy(),
+                        types=tmp_system.types.copy(),
+                        cell=tmp_system.cell,
                         saddle_idx=neighbors.copy(),
+                        constraints=constraints,
+                        user_constraints=self.global_constraints,
                     )  # send copy not reference !
 
                 # save future in context :

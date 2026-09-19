@@ -10,12 +10,15 @@ Includes:
 - Output data containers (`EventSearchOutput`, `PSROutput`, `KMCLoopInfo`, etc.)
 """
 
-from typing import TypeAlias, TypeVar, Generic, Optional, Dict, Any
+from typing import TypeAlias, TypeVar, Generic, Optional, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import numpy as np
 import yaml
 import pandas as pd
+
+if TYPE_CHECKING:
+    from .physics import ResolvedConstraints
 
 # Construction of the Result Type :
 
@@ -155,6 +158,9 @@ class EventSearchOutput:
     # map: np.ndarray
     cell: Optional[np.ndarray] = None
     types: Optional[list] = None
+    constraints: Optional["ResolvedConstraints"] = None
+    # Native full-source coordinates retained before catalogue centering.
+    prefactor_geometry: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None
 
 
 @dataclass
@@ -208,6 +214,7 @@ class EventRefinementOutput:
     nu0_reason: Optional[str] = None
     nu0_source: Optional[str] = None
     full_saddle_positions: Optional[np.ndarray] = None
+    constraints: Optional["ResolvedConstraints"] = None
 
 
 @dataclass
