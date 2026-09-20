@@ -279,9 +279,24 @@ class LammpsHTSTExtension(EngineExtension):
         request = replace(request, user_constraints=request.resolved_user_constraints())
         if request.descriptor is not None:
             physics = request.descriptor.engine
-            if ForceModel.capture(self.engine.config) != physics.force_model:
+            actual = ForceModel.capture(self.engine.config)
+            if actual != physics.force_model:
                 raise HTSTRequestError(
-                    "request force model differs from scratch inputs"
+                    "request force model differs from scratch inputs: the "
+                    f"request declares pair_style {' '.join(physics.force_model.style)!r} "
+                    f"with pair_coeff {' '.join(physics.force_model.coefficients)!r}, "
+                    f"the engine runs pair_style {' '.join(actual.style)!r} with "
+                    f"pair_coeff {' '.join(actual.coefficients)!r}"
+                    + (
+                        f" (declared model limitation: {physics.force_model.limitation})"
+                        if physics.force_model.limitation
+                        else ""
+                    )
+                    + (
+                        f" (engine model limitation: {actual.limitation})"
+                        if actual.limitation
+                        else ""
+                    )
                 )
             if request.settings.premin and physics.premin_solver != (
                 str(self.engine.config.min_style),

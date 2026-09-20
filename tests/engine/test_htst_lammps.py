@@ -1292,6 +1292,35 @@ class TestLammpsHTSTSerial:
         )
         assert provenance.energies is None
 
+    def test_force_model_mismatch_names_both_models(
+        self,
+        search_engine: LammpsEngine,
+        hop_request: Callable[..., HTSTEventRequest],
+        scratch_log: list[LammpsEngine],
+    ) -> None:
+        """A request declaring another potential is refused before any Hessian,
+        and the refusal names the declared and the engine's force models."""
+        from dataclasses import replace
+
+        from pykmc.physics import EnginePhysics, PhysicalDescriptor
+
+        ext = LammpsHTSTExtension(search_engine)
+        request = hop_request(free_radius=6.0)
+        declared = PhysicalDescriptor.from_config(
+            SimpleNamespace(frozen_atoms=None),
+            EnginePhysics.capture(_LJConfig(), request.species, request.masses),
+            request.settings,
+        )
+        request = replace(request, descriptor=declared)
+        request.validate()
+        with pytest.raises(HTSTRequestError) as captured:
+            ext.compute_event_prefactors(request)
+        message = str(captured.value)
+        assert "force model" in message
+        assert "lj/cut" in message, message  # the request's declared model
+        assert "sw" in message, message  # the engine's actual model
+        assert scratch_log == []
+
 
 @pytest.mark.mpi
 class TestLammpsHTSTEngineMPI:
