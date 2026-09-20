@@ -2345,6 +2345,25 @@ class ActiveEventTable:
                 )
         return indices
 
+    def _warn_crop_identity(self, label, exc: Exception, stage: str) -> None:
+        """Report a row that cannot declare stable crop identities (never raise).
+
+        Such a row is handled as a crop-only fallback (contracts section 7d,
+        F1): it keeps its inherited estimate for the current step and cannot
+        record a dependency context, so the next validation rebuilds it.
+        """
+        row = self.table.loc[label]
+        logger.warning(
+            "[htst] active event (atom %d, reference %d): no stable crop "
+            "identities at %s (%s); keeping the inherited %s estimate as a "
+            "crop-only fallback, no site request possible",
+            int(row["atom_index"]),
+            int(row["num_reference_event"]),
+            stage,
+            exc,
+            row["nu0_source"],
+        )
+
     def site_calculation(self, label):
         """Return the actual row-bound site producer, never a scalar reconstruction."""
         from .htst.site_state import row_signature
@@ -2371,6 +2390,7 @@ class ActiveEventTable:
         """
         if not self.uses_prefactors or self.table.empty:
             return 0
+        from .htst.request import HTSTRequestError
         from .htst.site_state import row_signature, source_index_map
         from dataclasses import replace
 
@@ -2423,6 +2443,17 @@ class ActiveEventTable:
                 self._site_states[int(label)] = replace(
                     state,
                     signature=row_signature(self.table.loc[label], state.center_id),
+                )
+            except HTSTRequestError as exc:
+                # A configuration/authority error of the current service is not
+                # an ordinary dependency change: report which row it hit and why.
+                dropped.append(label)
+                logger.warning(
+                    "[htst] active event (atom %d, reference %d): dropped, the "
+                    "prefactor service cannot describe its source: %s",
+                    int(row["atom_index"]),
+                    int(row["num_reference_event"]),
+                    exc,
                 )
             except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
                 dropped.append(label)
@@ -2783,7 +2814,15 @@ class ActiveEventTable:
             # fallback context, not a claim that its spectrum was calculated here.
             for label, row in self.table.iterrows():
                 if row["refined"] != "T" and label in self._pending_site_rows:
-                    self.crop_indices(label, system, neighbors_list, capture=True)
+                    try:
+                        self.crop_indices(label, system, neighbors_list, capture=True)
+                    except ValueError as exc:
+                        # No stable identities: no dependency context can be
+                        # recorded, so the row keeps its inherited estimate for
+                        # this step only and is rebuilt at the next validation.
+                        self._warn_crop_identity(label, exc, "fallback context")
+                        self._pending_site_rows.discard(int(label))
+                        continue
                     request = self._site_request(label, system, system.positions)
                     self._capture_site_state(label, request)
         eligible = (self.table["refined"] == "T") & ~self.table[
@@ -2806,7 +2845,17 @@ class ActiveEventTable:
         try:
             for idx, row in rows.iterrows():
                 atom = int(row["atom_index"])
-                neighbors = self.crop_indices(idx, system, neighbors_list, capture=True)
+                try:
+                    neighbors = self.crop_indices(
+                        idx, system, neighbors_list, capture=True
+                    )
+                except ValueError as exc:
+                    # Crop-only row without stable identities (contracts 7d,
+                    # F1): the inherited estimate stands, no request is built
+                    # and no dependency context can be recorded.
+                    self._warn_crop_identity(idx, exc, "site request")
+                    no_geometry.append(idx)
+                    continue
                 saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
                 if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
                     raise RuntimeError(
@@ -2846,7 +2895,8 @@ class ActiveEventTable:
         wall = self.prefactor_service.last_batch_wall_s
         for idx in no_geometry:
             self.table.loc[idx, "nu0_site_attempted"] = True
-            self._capture_site_state(idx, submitted[idx])
+            if idx in submitted:
+                self._capture_site_state(idx, submitted[idx])
             summary["attempted"] += 1
             summary["no_geometry"] += 1
             logger.info(
@@ -2980,9 +3030,15 @@ class ActiveEventTable:
         if neighbors_list is not None and self.uses_prefactors:
             for label in list(self._pending_site_rows):
                 if label in self.table.index:
-                    self.crop_indices(
-                        label, neighbors_list.system, neighbors_list, capture=True
-                    )
+                    try:
+                        self.crop_indices(
+                            label, neighbors_list.system, neighbors_list, capture=True
+                        )
+                    except ValueError as exc:
+                        # A row without stable identities cannot be compared by
+                        # identity; it is left to the geometric checks below and
+                        # to the no_geometry fallback, never aborting the step.
+                        self._warn_crop_identity(label, exc, "duplicate removal")
 
         def align(first, second, *, shared=False):
             a, b = self.table.loc[first], self.table.loc[second]
