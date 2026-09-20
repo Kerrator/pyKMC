@@ -2351,20 +2351,36 @@ class ActiveEventTable:
     def _warn_crop_identity(self, label, exc: Exception, stage: str) -> None:
         """Report a row that cannot declare stable crop identities (never raise).
 
-        Such a row is handled as a crop-only fallback (contracts section 7d,
-        F1): it keeps its inherited estimate for the current step and cannot
-        record a dependency context, so the next validation rebuilds it.
+        Such a row is not a crop-only fallback (contracts section 7d, F1
+        covers rows with stable identities and no full saddle): reconstruction
+        resolves the stored identities against the current source, so the row
+        cannot be reconstructed and selecting it would purge its reference.
+        :meth:`request_site_prefactors` drops it before selection
+        (:meth:`_drop_identityless_rows`); its ``(atom, reference)`` pair is
+        re-refined next step.
         """
         row = self.table.loc[label]
         logger.warning(
             "[htst] active event (atom %d, reference %d): no stable crop "
-            "identities at %s (%s); keeping the inherited %s estimate as a "
-            "crop-only fallback, no site request possible",
+            "identities at %s (%s); the row cannot be reconstructed from the "
+            "current source and is dropped before selection, its (atom, "
+            "reference) pair is re-refined next step",
             int(row["atom_index"]),
             int(row["num_reference_event"]),
             stage,
             exc,
-            row["nu0_source"],
+        )
+
+    def _drop_identityless_rows(self, labels: Iterable[Any]) -> None:
+        """Remove the rows reported by :meth:`_warn_crop_identity` this call."""
+        if not labels:
+            return
+        self.remove(list(labels))
+        logger.info(
+            "active table: dropped %d row(s) without stable crop identities "
+            "before selection; their (atom, reference) pairs are re-refined "
+            "next step",
+            len(labels),
         )
 
     def site_calculation(self, label):
@@ -2789,6 +2805,15 @@ class ActiveEventTable:
         fallback's current source is recorded without inventing a calculation.
         Later changes invalidate it under the same dependency guard.
 
+        Rows without stable crop identities (none stored and no full saddle
+        to prove a mapping, or identities that do not resolve in the current
+        source) are not crop-only fallbacks: reconstruction cannot resolve
+        them, so they are dropped before selection with one WARNING per row
+        (``_warn_crop_identity``), counted under no summary key and never
+        kept behind a fallback context. Their ``(atom, reference)`` pair is
+        re-refined next step. The mapping-mismatch ``RuntimeError`` is
+        unchanged.
+
         Returns
         -------
         dict[str, int]
@@ -2814,6 +2839,9 @@ class ActiveEventTable:
 
         self._require_htst_columns("request_site_prefactors")
         self.validate_recycled(system, neighbors_list)
+        # Rows without stable crop identities cannot be reconstructed; they
+        # are removed once, after every label-addressed update of this call.
+        identityless: list[Any] = []
         if self.prefactor_service is not None:
             # Even an unrefined reference approximation needs a full dependency
             # context before it may suppress work in a later step. This is a
@@ -2823,11 +2851,8 @@ class ActiveEventTable:
                     try:
                         self.crop_indices(label, system, neighbors_list, capture=True)
                     except ValueError as exc:
-                        # No stable identities: no dependency context can be
-                        # recorded, so the row keeps its inherited estimate for
-                        # this step only and is rebuilt at the next validation.
                         self._warn_crop_identity(label, exc, "fallback context")
-                        self._pending_site_rows.discard(int(label))
+                        identityless.append(label)
                         continue
                     request = self._site_request(label, system, system.positions)
                     self._capture_site_state(label, request)
@@ -2836,6 +2861,7 @@ class ActiveEventTable:
         ].astype(bool)
         rows = self.table[eligible]
         if rows.empty:
+            self._drop_identityless_rows(identityless)
             return summary
         if self.prefactor_service is None:
             raise RuntimeError(
@@ -2856,11 +2882,11 @@ class ActiveEventTable:
                         idx, system, neighbors_list, capture=True
                     )
                 except ValueError as exc:
-                    # Crop-only row without stable identities (contracts 7d,
-                    # F1): the inherited estimate stands, no request is built
-                    # and no dependency context can be recorded.
+                    # Not a crop-only fallback: without stable identities the
+                    # row cannot be reconstructed, so it leaves the table
+                    # before selection instead of being counted as attempted.
                     self._warn_crop_identity(idx, exc, "site request")
-                    no_geometry.append(idx)
+                    identityless.append(idx)
                     continue
                 saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
                 if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
@@ -2993,6 +3019,7 @@ class ActiveEventTable:
                 PrefactorRejection.NONSTATIONARY_GEOMETRY.value,
                 self.prefactor_service.settings.force_tol,
             )
+        self._drop_identityless_rows(identityless)
         return summary
 
     def prefactor_summary(self) -> dict[str, int]:

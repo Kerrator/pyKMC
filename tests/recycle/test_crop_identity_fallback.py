@@ -1,16 +1,23 @@
 """Bookkeeping failures on the active-table step path degrade, never abort.
 
-A row that cannot declare stable crop identities is a crop-only row without
-a usable dependency context: it keeps its inherited estimate, is counted
-under ``no_geometry`` (contracts section 7d, F1) and is reported at WARNING
-level, instead of raising through ``KMC.run``. A configuration error raised
-by the prefactor service while validating recycled rows is reported with the
-affected row's identity and reason rather than being absorbed silently.
+A row that cannot declare stable crop identities is not a crop-only fallback
+(contracts section 7d, F1 covers rows with stable identities and no full
+saddle): in htst mode reconstruction resolves the stored identities against
+the current source, so such a row cannot be reconstructed and selecting it
+would purge its reference from the catalogue. It is therefore dropped before
+selection at the point where it is reported (WARNING level, naming the row
+and the stage), never counted under ``no_geometry`` and never kept behind a
+message that says otherwise; its ``(atom, reference)`` pair is re-refined
+next step (ACCEPTANCE N06: a dropped row is unavailable before selection). A
+configuration error raised by the prefactor service while validating
+recycled rows is reported with the affected row's identity and reason rather
+than being absorbed silently.
 """
 
 import logging
 
 import numpy as np
+import pytest
 
 from pykmc.event_table import ActiveEventTable
 from pykmc.neighbors_list import NeighborsList
@@ -19,9 +26,11 @@ from pykmc.result import EventRefinementOutput
 from . import test_site_dependencies as deps
 from . import test_site_recycling as h
 
+_NOTHING = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
 
-def identityless_refined_row(cfg, system, svc):
-    """A refined row without crop identities and without a full saddle."""
+
+def identityless_refined_row(cfg, system, svc, *, refined="T"):
+    """A ``refined`` row without crop identities and without a full saddle."""
     table = ActiveEventTable(cfg, prefactor_service=svc)
     saddle = h.full_saddle(system)
     table.add_events(
@@ -32,7 +41,7 @@ def identityless_refined_row(cfg, system, svc):
             min2_positions=np.array([[11.0, 10.0, 10.0]]),
             dE_forward=1.0,
             num_reference_event=47,
-            refined="T",
+            refined=refined,
             nu0_status="pending",
         )
     )
@@ -41,25 +50,87 @@ def identityless_refined_row(cfg, system, svc):
     return table, neighbors
 
 
-def test_identityless_refined_row_is_a_no_geometry_fallback(caplog):
+def _warning_text(caplog) -> str:
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "the identity failure must be visible at WARNING level"
+    return " ".join(r.getMessage() for r in warnings)
+
+
+def _assert_dropped_truthfully(table, system, neighbors, manager, summary, text):
+    # Nothing was attempted for the row and nothing is left to select.
+    assert summary == _NOTHING
+    assert manager.requests == []
+    assert len(table.table) == 0
+    assert table._pending_site_rows == set() and table._site_states == {}
+    assert "atom 0" in text and "reference 47" in text
+    assert "crop" in text
+    # The WARNING states what happened, not the opposite.
+    assert "dropped before selection" in text
+    assert "keeping" not in text
+    # KMC.reconstruction() validates again before _select_event: the drop
+    # already happened where it was reported, nothing vanishes quietly here.
+    assert table.validate_recycled(system, neighbors, allow_pending=False) == 0
+    assert len(table.table) == 0
+
+
+def test_identityless_refined_row_is_dropped_before_selection(caplog):
+    # Adapted from the no_geometry-fallback assertion: an identity-less row is
+    # not a 7d F1 crop-only row, it is unreconstructable (N06).
     cfg, system, manager, svc = h.setup()
     table, neighbors = identityless_refined_row(cfg, system, svc)
-    before = table.table.iloc[0].copy()
+    # Control: the reconstruction path (crop_indices without capture) cannot
+    # resolve this row, so a selected row would fail and purge reference 47.
+    with pytest.raises(ValueError):
+        table.crop_indices(0, system)
     with caplog.at_level(logging.WARNING, logger="log"):
         summary = table.request_site_prefactors(system, neighbors)
+    text = _warning_text(caplog)
+    assert "site request" in text
+    _assert_dropped_truthfully(table, system, neighbors, manager, summary, text)
+
+
+def test_identityless_pending_approximation_is_dropped_before_selection(caplog):
+    """The fallback-context branch (unrefined pending row) drops truthfully too."""
+    cfg, system, manager, svc = h.setup()
+    table, neighbors = identityless_refined_row(cfg, system, svc, refined="F")
+    assert 0 in table._pending_site_rows
+    with caplog.at_level(logging.WARNING, logger="log"):
+        summary = table.request_site_prefactors(system, neighbors)
+    text = _warning_text(caplog)
+    assert "fallback context" in text
+    _assert_dropped_truthfully(table, system, neighbors, manager, summary, text)
+
+
+def test_identityless_drop_keeps_the_other_rows_and_their_context():
+    """Dropping relabels the survivors; their pending/site stores follow them."""
+    cfg, system, manager, svc = h.setup()
+    table, neighbors = identityless_refined_row(cfg, system, svc)
+    # A second, healthy crop-only row (stable identities, no full saddle):
+    # a 7d F1 fallback that keeps its inherited estimate and stays selectable.
+    saddle = h.full_saddle(system)
+    table.add_events(
+        EventRefinementOutput(
+            central_atom_index=0,
+            saddle_positions=saddle[[0]],
+            E_saddle=1.0,
+            min2_positions=np.array([[11.0, 10.0, 10.0]]),
+            dE_forward=0.5,
+            num_reference_event=48,
+            refined="T",
+            nu0_status="pending",
+            crop_atom_ids=(int(system.index[0]),),
+        )
+    )
+    summary = table.request_site_prefactors(system, neighbors)
     assert summary == {"attempted": 1, "ok": 0, "rejected": 0, "no_geometry": 1}
     assert manager.requests == []
     assert len(table.table) == 1
-    row = table.table.iloc[0]
-    assert bool(row.nu0_site_attempted)
-    assert row.nu0_source == before.nu0_source == "k0"
-    assert row.nu0_status == before.nu0_status
-    assert row.k == before.k and row.k_prefactor == before.k_prefactor
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert warnings, "the identity failure must be visible at WARNING level"
-    text = " ".join(r.getMessage() for r in warnings)
-    assert "atom 0" in text and "reference 47" in text
-    assert "crop" in text
+    survivor = table.table.iloc[0]
+    assert int(survivor.num_reference_event) == 48
+    assert bool(survivor.nu0_site_attempted) and survivor.nu0_source == "k0"
+    assert list(table._site_states) == [0], "the survivor's context follows its label"
+    assert table.validate_recycled(system, neighbors, allow_pending=False) == 0
+    assert len(table.table) == 1 and table.table.iloc[0].k == survivor.k
 
 
 def test_identityless_pending_row_does_not_abort_duplicate_removal(caplog):
