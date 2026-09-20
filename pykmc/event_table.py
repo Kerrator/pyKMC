@@ -346,6 +346,7 @@ class ReferenceEventTable:
                 cell=ev.cell,
                 types=ev.types,
                 request=request,
+                pbc=pbc,
             )
             if res.is_ok():
                 admission = res.ok_value()
@@ -1081,6 +1082,7 @@ class ReferenceEventTable:
         types: list[str] = None,
         *,
         request=None,
+        pbc: Any = None,
     ) -> Result[EventAdmission, ErrorInfo]:
         """Apply the energy gates, build the directional series and admit them.
 
@@ -1102,6 +1104,11 @@ class ReferenceEventTable:
             Simulation box cell.
         types : list[str]
             Event's atom types.
+        request : HTSTEventRequest, optional
+            Full physical source of the event (htst/rpa lookups).
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in, handed to
+            :meth:`_build_event_series`.
 
         Returns
         -------
@@ -1175,6 +1182,7 @@ class ReferenceEventTable:
                 dE_backward=dE_backward,
                 cell=cell,
                 types=types,
+                pbc=pbc,
             )
             return self._admit_series(
                 dfevent_forward, dfevent_backward, request=request
@@ -1190,6 +1198,8 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        *,
+        pbc: Any = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -1214,6 +1224,8 @@ class ReferenceEventTable:
             Simulation box cell.
         types : list[str]
             Event's atom types.
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in.
 
         Returns
         -------
@@ -1230,6 +1242,7 @@ class ReferenceEventTable:
             dE_backward=dE_backward,
             cell=cell,
             types=types,
+            pbc=pbc,
         )
         if res.is_ok():
             return Ok(res.ok_value().frame)
@@ -1522,6 +1535,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        pbc: Any = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -1546,6 +1560,14 @@ class ReferenceEventTable:
             always stored in the ``types`` column (both coloring modes, so the schema
             is mode-independent). Colouring is only *applied* to graph
             hashing/symmetry detection when the configured coloring mode is 'full'.
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in. The scratch
+            systems that compute the neighbour lists, graph ids, stored crops
+            and symmetry sets carry these axes, so a catalogued ``event_id``
+            equals the runtime environment id of a boundary-crossing atom.
+            ``None`` keeps the catalogue's historical all-periodic convention
+            (a bare ``System()`` is non-periodic); ``add_events`` always passes
+            the real axes.
 
         Returns
         -------
@@ -1558,9 +1580,10 @@ class ReferenceEventTable:
         full = self.config.atomicenvironment.atom_coloring_mode == "full"
         # Only use element types for graph/symmetry computation in full coloring mode
         graph_types = types if full else None
+        axes = True if pbc is None else pbc
 
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
-        min1system = System()
+        min1system = System(pbc=axes)
         min1system.positions = min1_positions
         min1system.cell = cell
         min1neighbors_list = NeighborsList(
@@ -1569,7 +1592,7 @@ class ReferenceEventTable:
             self.config.atomicenvironment.rcut,
         )
 
-        saddlesystem = System()
+        saddlesystem = System(pbc=axes)
         saddlesystem.positions = saddle_positions
         saddlesystem.cell = cell
         saddleneighbors_list = NeighborsList(
@@ -1578,7 +1601,7 @@ class ReferenceEventTable:
             self.config.atomicenvironment.rcut,
         )
 
-        min2system = System()
+        min2system = System(pbc=axes)
         min2system.positions = min2_positions
         min2system.cell = cell
         min2neighbors_list = NeighborsList(

@@ -5,8 +5,10 @@ import pandas as pd
 import pytest
 
 from pykmc import NeighborsList
+from pykmc.atomic_environment import AtomicEnvironment
 from pykmc.config import RateConstantConfig
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
+from pykmc.result import EventSearchOutput
 
 S0_REFERENCE_COLUMNS = [
     "idx_ref",
@@ -137,6 +139,99 @@ class TestReferenceTableTypes:
                     key,
                     k,
                 )
+
+
+class TestReferenceTablePeriodicity:
+    """The catalogue builds its scratch systems on the real periodic axes.
+
+    Regression for review cluster C2 (R05 ``f7bc418``): an unspecified
+    ``System`` is non-periodic, so a bare scratch system truncated every
+    catalogued environment at the cell faces while the runtime ids stayed
+    periodic. Atom 0 of the 4x4x4 fixture sits at the cell corner, so its
+    rcut shell wraps across all three faces.
+    """
+
+    @staticmethod
+    def _trivial_event(system):
+        pos = np.asarray(system.positions, dtype=float)
+        return EventSearchOutput(
+            central_atom_index=0,
+            min1_positions=pos.copy(),
+            saddle_positions=pos.copy(),
+            min2_positions=pos.copy(),
+            dE_forward=0.5,
+            dE_backward=0.5,
+            move_atom_index=0,
+            cell=np.asarray(system.cell, dtype=float),
+            types=list(system.types),
+        )
+
+    @pytest.mark.parametrize("mode", ["grey", "full"])
+    def test_catalogue_event_id_equals_runtime_environment_id(
+        self, system_binary_fcc, config_system_single_type, mode
+    ):
+        """``add_events`` threads the system axes: catalogue id == runtime id."""
+        config = config_system_single_type
+        config.atomicenvironment.atom_coloring_mode = mode
+        system = system_binary_fcc
+        assert list(system.pbc) == [True, True, True]
+        nl = NeighborsList(
+            system, config.atomicenvironment.rnei, config.atomicenvironment.rcut
+        )
+        runtime = AtomicEnvironment(
+            "graph",
+            nl.neighbors_list["rnei"],
+            nl.neighbors_list["rcut"],
+            types=system.types,
+            coloring_mode=mode,
+        )
+        runtime_id = runtime.atomic_environment_list[0]
+        runtime_shell = list(nl.neighbors_list["rcut"][0])
+        # The corner atom really crosses the boundary: an open shell is smaller.
+        open_system = type(system)(
+            positions=system.positions, cell=system.cell, pbc=[False, False, False]
+        )
+        open_shell = NeighborsList(
+            open_system,
+            config.atomicenvironment.rnei,
+            config.atomicenvironment.rcut,
+        ).neighbors_list["rcut"][0]
+        assert len(open_shell) < len(runtime_shell)
+
+        table = ReferenceEventTable(config)
+        results = table.add_events([self._trivial_event(system)], pbc=system.pbc)
+        assert results[0].is_ok()
+        row = table.table.iloc[0]
+        assert row["event_id"] == runtime_id
+        assert row["id_final"] == runtime_id
+        assert len(row["initial_positions"]) == len(runtime_shell)
+        assert list(row["types"]) == list(np.asarray(system.types)[runtime_shell])
+
+    def test_open_axes_are_honoured(self, system_binary_fcc, config_system_single_type):
+        """Explicit open axes give the open-boundary crop, so ``pbc`` is consumed."""
+        config = config_system_single_type
+        config.atomicenvironment.atom_coloring_mode = "grey"
+        system = system_binary_fcc
+        table = ReferenceEventTable(config)
+        pos = system.positions
+        kwargs = dict(
+            min1_positions=pos,
+            saddle_positions=pos,
+            min2_positions=pos,
+            index_move=0,
+            dE_forward=0.5,
+            dE_backward=0.5,
+            cell=system.cell,
+            types=list(system.types),
+        )
+        periodic, _ = table._build_event_series(pbc=system.pbc, **kwargs)
+        open_, _ = table._build_event_series(pbc=[False, False, False], **kwargs)
+        default, _ = table._build_event_series(**kwargs)
+        assert len(open_["initial_positions"]) < len(periodic["initial_positions"])
+        assert open_["event_id"] != periodic["event_id"]
+        # An unspecified ``pbc`` keeps the catalogue's all-periodic convention.
+        assert default["event_id"] == periodic["event_id"]
+        assert len(default["initial_positions"]) == len(periodic["initial_positions"])
 
 
 class TestGreyDedupSpeciesGating:

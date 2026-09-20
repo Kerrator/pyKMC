@@ -65,7 +65,9 @@ def table_and_worker(monkeypatch, frequencies):
         dE_backward,
         cell,
         types,
+        pbc=None,
     ):
+        assert tuple(pbc) == base.PBC
         forward = np.array_equal(min1_positions, base.I)
         expected = (base.I, base.F) if forward else (base.F, base.I)
         assert np.array_equal(min1_positions, expected[0])

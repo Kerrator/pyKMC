@@ -115,7 +115,9 @@ def test_shared_self_reverse_survivor_needs_direct_spectral_agreement(monkeypatc
         dE_backward,
         cell,
         types,
+        pbc=None,
     ):
+        assert tuple(pbc) == base.PBC
         assert np.array_equal(min1_positions, initial)
         assert np.array_equal(saddle_positions, saddle)
         assert np.array_equal(min2_positions, final)

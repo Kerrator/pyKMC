@@ -178,6 +178,7 @@ def test_actual_periodic_lattice_controls_whole_event_collapse(
         method="periodic-identity-protocol",
     )
     table = ReferenceEventTable(cfg, prefactor_service=service)
+    expected_axes = tuple(bool(p) for p in pbc)
 
     def build_series(
         *,
@@ -189,9 +190,11 @@ def test_actual_periodic_lattice_controls_whole_event_collapse(
         dE_backward,
         cell,
         types,
+        pbc=None,
     ):
         assert index_move == 0 and tuple(types) == TYPES
         assert dE_forward == dE_backward == 0.5
+        assert tuple(bool(p) for p in pbc) == expected_axes
         np.testing.assert_array_equal(cell, np.diag(lengths))
         return (
             row(min1_positions, saddle_positions, min2_positions),

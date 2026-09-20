@@ -196,9 +196,11 @@ def setup_table(style, *, seed_reverse, monkeypatch):
         dE_backward,
         cell,
         types,
+        pbc=None,
     ):
         assert tuple(types) == TYPES and index_move == 0
         assert np.array_equal(cell, CELL)
+        assert tuple(pbc) == PBC  # the admitted axes reach the series builder
         return (
             row(min1_positions, saddle_positions, min2_positions, barrier=dE_forward),
             row(
