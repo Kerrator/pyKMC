@@ -34,10 +34,12 @@ for its classification and recorded backward barrier and rate.
 A self-link is authoritative only for a genuine self-reverse, whose initial
 and final topologies coincide (`event_id == id_final`). The constant-mode
 writer also self-links a forward whose reverse was already catalogued; that
-placeholder is resolved by topology (the catalogued rows whose `event_id` is
-the forward's `id_final`, lowest barrier when several exist), never by
-comparing the forward barrier with itself. A placeholder with no such row
-raises.
+placeholder is resolved by topology among the reciprocal rows only (the
+catalogued rows whose `event_id` is the forward's `id_final` **and** whose
+`id_final` is the forward's `event_id`, lowest barrier when several exist),
+never by comparing the forward barrier with itself and never by following
+another channel that merely leaves the forward's final topology. A
+placeholder with no reciprocal row raises.
 
 These link errors are catalogue-integrity errors, not basin failures: they
 propagate out of the KMC step instead of taking the `Err` fallback described

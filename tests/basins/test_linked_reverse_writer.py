@@ -4,8 +4,11 @@ Both catalogues are built through ``ReferenceEventTable.add_events`` (no
 hand-written ``idx_backward``). In constant mode the writer self-links a
 forward whose reverse is already catalogued (``event_table.add`` with
 ``reverse_idx_ref=None``); that placeholder must resolve to the catalogued
-reverse row, never to the forward itself. In htst mode the reciprocal pair
-carries explicit links. Strict threshold equality stays absorbing.
+reciprocal reverse row (initial topology of the forward's final one AND final
+topology of the forward's initial one), never to the forward itself and never
+to another channel that merely leaves the forward's final topology. In htst
+mode the reciprocal pair carries explicit links. Strict threshold equality
+stays absorbing.
 """
 
 from pathlib import Path
@@ -161,6 +164,87 @@ def test_constant_reciprocal_pair_follows_its_written_link(
     edge = _explorer_edge(table.table, forward, 0.95)
     assert edge.dE_forward == 0.30 and edge.dE_backward == 0.90
     assert bool(edge.transient) is True
+
+
+def _third_channel(table: ReferenceEventTable, system: Any, forward: pd.Series):
+    """Admit ``B -> C`` through the writer: it leaves the placeholder's final
+    topology ``B`` for a third topology ``C`` with a barrier below the
+    reciprocal ``B -> A`` reverse (0.90 eV)."""
+    pos = np.asarray(system.positions, dtype=float)
+    side = np.array([0.0, 1.2, 0.3])
+    b = pos.copy()
+    b[0] += HOP
+    saddle = b.copy()
+    saddle[0] += 0.5 * side
+    c = b.copy()
+    c[0] += side
+    result = table.add_events(
+        [
+            EventSearchOutput(
+                central_atom_index=0,
+                min1_positions=b,
+                saddle_positions=saddle,
+                min2_positions=c,
+                dE_forward=0.20,
+                dE_backward=0.95,
+                move_atom_index=0,
+                cell=np.asarray(system.cell, dtype=float),
+                types=list(system.types),
+            )
+        ],
+        pbc=system.pbc,
+    )
+    assert result[0].is_ok() and len(result[0].ok_value()) == 2
+    third = _row(table, int(result[0].ok_value().iloc[0]["idx_ref"]))
+    assert third["energy_barrier"] == 0.20
+    assert third["event_id"] == forward["id_final"], "B -> C starts from B"
+    assert third["id_final"] not in {forward["event_id"], forward["id_final"]}, (
+        "C is a third topology, so B -> C is not the reverse of A -> B"
+    )
+    return third
+
+
+def test_constant_placeholder_ignores_non_reciprocal_channels_from_its_final_topology(
+    constant_config: Any, system_single_type_fcc: Any
+) -> None:
+    """The lowest barrier leaving ``B`` is not the reverse of ``A -> B``."""
+    table, forward, (_, reciprocal) = constant_placeholder(
+        constant_config, system_single_type_fcc
+    )
+    third = _third_channel(table, system_single_type_fcc, forward)
+    assert third["energy_barrier"] < reciprocal["energy_barrier"]
+    before = table.table.copy(deep=True)
+    _, reverse = resolve_linked_pair(forward, table.table)
+    assert int(reverse["idx_ref"]) == int(reciprocal["idx_ref"])
+    assert reverse["id_final"] == forward["event_id"], "the reverse returns to A"
+    assert reverse["energy_barrier"] == 0.90
+    _assert_detector_contract(table.table, forward)
+    # Forward 0.60 below 0.7, reciprocal reverse 0.90 above it: absorbing;
+    # following B -> C (0.20) would wrongly declare the state transient.
+    assert not DetectorThreshold().detect(forward, table.table, 0.7)
+    edge = _explorer_edge(table.table, forward, 0.7)
+    assert edge.dE_forward == 0.60 and edge.dE_backward == 0.90
+    assert edge.k_backward == reciprocal["k"]
+    assert bool(edge.transient) is False
+    pd.testing.assert_frame_equal(table.table, before)
+
+
+def test_constant_placeholder_with_only_non_reciprocal_channels_is_explicit(
+    constant_config: Any, system_single_type_fcc: Any
+) -> None:
+    """Rows leaving ``B`` elsewhere do not stand in for a missing ``B -> A``."""
+    table, forward, (_, reciprocal) = constant_placeholder(
+        constant_config, system_single_type_fcc
+    )
+    _third_channel(table, system_single_type_fcc, forward)
+    frame = table.table[table.table["idx_ref"] != int(reciprocal["idx_ref"])].copy()
+    assert (frame["event_id"] == forward["id_final"]).sum() == 1, (
+        "B -> C is still catalogued; only the reciprocal B -> A is gone"
+    )
+    with pytest.raises(ValueError) as captured:
+        DetectorThreshold().detect(forward, frame, 0.95)
+    assert str(int(forward["idx_ref"])) in str(captured.value)
+    assert str(forward["id_final"]) in str(captured.value)
 
 
 def test_constant_placeholder_without_any_catalogued_reverse_is_explicit(

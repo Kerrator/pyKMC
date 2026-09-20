@@ -19,9 +19,11 @@ def resolve_linked_pair(
     constant-mode writer also self-links a forward whose reverse was already
     catalogued (``ReferenceEventTable.add`` with ``reverse_idx_ref=None``);
     that placeholder carries no reverse barrier of its own, so the physical
-    reverse is resolved by topology: the catalogued rows whose ``event_id`` is
-    the forward's ``id_final``, the lowest barrier when several exist (the
-    original detector rule). A placeholder with no such row raises.
+    reverse is resolved by topology among the reciprocal rows only: those
+    whose ``event_id`` is the forward's ``id_final`` AND whose ``id_final`` is
+    the forward's ``event_id``, the lowest barrier when several exist. A row
+    that merely leaves the forward's final topology for a third one is another
+    channel, not the reverse. A placeholder with no reciprocal row raises.
     """
     forward_id = selected_event["num_reference_event" if is_refined else "idx_ref"]
     forward_rows = reference_table[reference_table["idx_ref"] == forward_id]
@@ -33,12 +35,15 @@ def resolve_linked_pair(
     forward = forward_rows.iloc[0]
     reverse_id = forward["idx_backward"]
     if reverse_id == forward["idx_ref"] and forward["event_id"] != forward["id_final"]:
-        candidates = reference_table[reference_table["event_id"] == forward["id_final"]]
+        candidates = reference_table[
+            (reference_table["event_id"] == forward["id_final"])
+            & (reference_table["id_final"] == forward["event_id"])
+        ]
         if len(candidates) == 0:
             raise ValueError(
                 f"Basin event {forward_id}: its self-link is a placeholder for an "
-                f"already catalogued reverse, but no row has the reverse "
-                f"topology {forward['id_final']!r}."
+                f"already catalogued reverse, but no row returns from topology "
+                f"{forward['id_final']!r} to {forward['event_id']!r}."
             )
         lowest = candidates["energy_barrier"].astype(float).idxmin()
         return forward, candidates.loc[lowest]
