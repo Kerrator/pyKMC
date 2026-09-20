@@ -3,6 +3,7 @@
 from pykmc.manager import Manager
 from pykmc import Config
 from pykmc.result import Result, Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
+from pykmc.physics import overlay_tolerance
 import numpy as np
 import copy
 from pykmc.utils.geometry import (
@@ -86,13 +87,31 @@ class Reconstruction:
                     raise ValueError(
                         "reconstruction endpoint shape does not match neighbors"
                     )
-            # A claimed stationary event must already obey its fixed references;
-            # projecting an incompatible event would silently change its physics.
-            self.constraints.validate_positions(saddle_positions)
-            for endpoint in (supposed_min1_positions, supposed_min2_positions):
-                full = np.array(saddle_positions, copy=True)
-                full[neighbors] = endpoint
-                self.constraints.validate_positions(full)
+            # A claimed stationary event must already obey its USER-fixed
+            # references at the PSR tolerance; projecting an incompatible event
+            # would silently change its physics, so it is reported as an Err
+            # and the caller purges the reference. The AV shell is a transport
+            # restriction that protect_positions re-clamps below (contracts 7f
+            # policy 5).
+            tolerance = overlay_tolerance(self.config)
+            try:
+                self.constraints.validate_positions(
+                    saddle_positions, tolerance=tolerance, user_only=True
+                )
+                for endpoint in (supposed_min1_positions, supposed_min2_positions):
+                    full = np.array(saddle_positions, copy=True)
+                    full[neighbors] = endpoint
+                    self.constraints.validate_positions(
+                        full, tolerance=tolerance, user_only=True
+                    )
+            except ValueError as exc:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                        message="event changes a user-fixed reference "
+                        "coordinate: {}".format(exc),
+                    )
+                )
 
         # Saddle positions
         tmp_positions = copy.deepcopy(saddle_positions)

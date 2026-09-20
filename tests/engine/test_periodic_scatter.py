@@ -181,29 +181,30 @@ def test_bad_request_rejects_before_native_or_caller_mutation(poison):
 
 
 @pytest.mark.parametrize("kind", ["rotated_mixed", "ortho_nonperiodic"])
-def test_nonperiodic_image_is_preserved_or_rejected_before_mutation(kind):
-    # A nonperiodic lattice translation is NOT a representation equivalence.
-    # Fixed-boundary outside coordinates may be explicitly unsupported. If
-    # scatter accepts them, inspect immediately (without run 0), require that
-    # they were not silently folded, and reset before computing native physics.
-    # This does not claim support for evaluating atoms outside a fixed box.
+def test_nonperiodic_lattice_translation_is_a_physical_displacement(kind):
+    # A nonperiodic lattice translation is NOT a representation equivalence:
+    # the scatter contract folds periodic images only and never a nonperiodic
+    # direction. The displaced coordinate must therefore reach the native
+    # instance as given (inspected without run 0), neither rejected nor
+    # silently folded back onto the initial image; the caller's read-only
+    # array is untouched. This does not claim support for evaluating atoms
+    # outside a fixed box, so the pair is reset before native physics.
     with initialized(kind) as (engine, cell, pbc, initial):
-        before = engine.get_positions().copy()
         descriptor = engine.full_system
         axis = next(i for i, periodic in enumerate(pbc) if not periodic)
         supplied = initial.copy()
         supplied[1] += 2 * cell[axis]
         supplied.setflags(write=False)
         saved = supplied.copy()
-        try:
-            engine.set_positions(supplied)
-        except ValueError:
-            np.testing.assert_array_equal(engine.get_positions(), before)
-        else:
-            np.testing.assert_allclose(
-                engine.get_positions(), supplied, rtol=0, atol=2e-11
-            )
-            engine.set_positions(initial)
+        engine.set_positions(supplied)
+        placed = engine.get_positions()
+        np.testing.assert_allclose(placed, supplied, rtol=0, atol=2e-11)
+        # Discriminating against folding: the nonperiodic shift survives.
+        assert np.linalg.norm(placed[1] - initial[1]) == pytest.approx(
+            2 * np.linalg.norm(cell[axis]), rel=1e-12
+        )
         np.testing.assert_array_equal(supplied, saved)
+        assert not supplied.flags.writeable
+        engine.set_positions(initial)
         assert engine.full_system is descriptor
         assert_physical_pair(engine, initial)

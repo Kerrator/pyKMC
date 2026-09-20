@@ -1009,21 +1009,32 @@ class KMC:
         working = np.array(self.system.positions, copy=True)
         working[neighbors] = saddle_positions
 
-        # try to reconstruct
-        result = Reconstruction(
-            self.config,
-            self.manager,
-            types=self.system.types,
-            constraints=constraints,
-            pbc=self.system.pbc,
-        ).reconstruct(
-            supposed_initial_positions,
-            supposed_final_positions,
-            working,
-            self.system.cell,
-            self.config.psr.matching_score_thr,
-            neighbors,
-        )
+        # try to reconstruct. A constraint or mapping violation is a
+        # recoverable rejection of this catalogue row: it must reach the purge
+        # loop as an Err, never abort the run as a bare ValueError (contracts
+        # 7f policy 5).
+        try:
+            result = Reconstruction(
+                self.config,
+                self.manager,
+                types=self.system.types,
+                constraints=constraints,
+                pbc=self.system.pbc,
+            ).reconstruct(
+                supposed_initial_positions,
+                supposed_final_positions,
+                working,
+                self.system.cell,
+                self.config.psr.matching_score_thr,
+                neighbors,
+            )
+        except ValueError as exc:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                    message=str(exc),
+                )
+            )
         # result with min1, saddle, min2 pos
 
         return result

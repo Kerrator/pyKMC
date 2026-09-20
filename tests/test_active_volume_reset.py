@@ -29,6 +29,7 @@ from ase.cell import Cell
 from ase.data import atomic_masses, atomic_numbers
 
 from pykmc.activevolume import active_volume as av
+from pykmc.config import RegionConfig
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CELL = np.diag([20.0, 20.0, 50.0])
@@ -120,6 +121,7 @@ class _ResetCfg:
 
     lammps: _EamCfg = field(default_factory=_EamCfg)
     activevolume: _AVCfg = field(default_factory=_AVCfg)
+    frozen_atoms: object | None = None
 
 
 def _index_of(commands: list[str], prefix: str) -> int:
@@ -291,14 +293,44 @@ def _outer_shell_atom(
     return edge, (positions[edge] + 0.05 * u)[None, :]
 
 
-def test_partn_refine_av_rejects_fixed_shell_overlay_before_mutation() -> None:
-    """An AV buffer atom retains its source coordinate even inside the crop."""
+def test_partn_refine_av_places_saddle_atom_displaced_past_ract() -> None:
+    """An in-crop shell atom relaxed 0.05 A past ``ract`` is placed, not rejected.
+
+    The active-volume shell (beyond ``rmov``) is a crop/transport restriction
+    held by ``fix setforce``, not a fixed-coordinate contract (contracts 7f
+    policy 5): only membership in the crop is checked, and the saddle
+    position is scattered as given and held by ``f_core``.
+    """
     pytest.importorskip("lammps")
     types, positions, cell = _fcc_ni_cell(0)
     cfg = _ResetCfg(activevolume=_AVCfg(ract=5.6, rmov=3.0))
     edge, saddle = _outer_shell_atom(positions, cell, cfg.activevolume.ract)
-    _, distance = av.find_mic(saddle[0] - positions[0], cell, pbc=True)
-    assert distance > cfg.activevolume.ract
+    _, d = av.find_mic(saddle[0] - positions[0], cell, pbc=True)
+    assert d > cfg.activevolume.ract, "fixture: the saddle must lie past ract"
+    engine = _FakeEngine()
+    _, atom_map, _ = av.partn_refine_AV(
+        engine, cfg, 0, positions.copy(), cell, types, np.array([edge]), saddle
+    )
+    crop_index = int(np.where(atom_map == edge)[0][0])
+    np.testing.assert_allclose(engine.lmp.last_scatter[crop_index], saddle[0])
+    assert f"group core id {crop_index + 1}" in engine.commands
+    assert isinstance(av.ActiveVolumeSaddleError("x"), ValueError)
+
+
+def test_partn_refine_av_rejects_user_frozen_overlay_before_mutation() -> None:
+    """A USER-frozen atom is a coordinate contract: its overlay is refused.
+
+    Negative twin of the shell-placement test above: the same 0.05 A overlay
+    on the same atom is a ``ValueError`` before any LAMMPS command once that
+    atom is declared in ``frozen_atoms`` (contracts 7f policy 5).
+    """
+    pytest.importorskip("lammps")
+    types, positions, cell = _fcc_ni_cell(0)
+    edge, saddle = _outer_shell_atom(positions, cell, 5.6)
+    cfg = _ResetCfg(
+        activevolume=_AVCfg(ract=5.6, rmov=3.0),
+        frozen_atoms=RegionConfig(indices=[edge]),
+    )
     engine = _FakeEngine()
     with pytest.raises(ValueError, match="fixed reference"):
         av.partn_refine_AV(

@@ -24,6 +24,7 @@ import pytest
 pytest.importorskip("lammps")
 
 from pykmc.activevolume import active_volume as av  # noqa: E402
+from pykmc.config import RegionConfig  # noqa: E402
 from pykmc.engine import lammps as lammps_module  # noqa: E402
 from pykmc.engine.lammps import (  # noqa: E402
     FullSystem,
@@ -340,18 +341,40 @@ class TestLammpsSpeciesStateSerial:
         assert not engine.system_is_cropped
         assert engine.get_total_energy(recompute=False) == pytest.approx(e_fresh)
 
-    def test_partn_search_rejects_frozen_atoms_with_active_volume(
-        self, engine: LammpsEngine, ni_orthorhombic: System
+    def test_partn_search_accepts_frozen_atoms_with_active_volume(
+        self,
+        engine: LammpsEngine,
+        ni_orthorhombic: System,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """``frozen_atoms`` + active volume is refused before any state change."""
+        """``frozen_atoms`` + active volume is supported, not refused.
+
+        contracts 7f policy 1 (adapter): the former preflight rejection was
+        an intermediate safety measure. The resolved payload carries the user
+        atom as user-declared together with the AV shell, the crop is built
+        and the engine restores afterwards.
+        """
         system = ni_orthorhombic
         _initialize(engine, system)
-        config = _av_config(engine.config, frozen_atoms=object())
-        with pytest.raises(ValueError, match="frozen_atoms"):
-            engine.partn_search(
-                config, 0, system.positions.copy(), np.array(system.cell), system.types
-            )
+        e_fresh = engine.get_total_energy()
+        cell = np.array(system.cell)
+        _, d = av.find_mic(system.positions - system.positions[0], cell, pbc=True)
+        inner = int(np.argsort(d)[1])  # a movable neighbour, now user-frozen
+        config = _av_config(engine.config, frozen_atoms=RegionConfig(indices=[inner]))
+        payload = engine._resolve_search_constraints(
+            config, 0, system.positions.copy(), cell, system.types, None, None
+        )
+        assert payload.user_fixed_ids == (inner,)
+        assert inner in payload.fixed_ids
+        assert set(payload.fixed_ids) > {inner}, "the AV shell is unioned in"
+        assert payload.center_id == 0 and payload.rmov == config.activevolume.rmov
+        monkeypatch.setattr(lammps_module, "pypARTn", _failing_partn())
+        with pytest.raises(_InjectedFailure):
+            engine.partn_search(config, 0, system.positions.copy(), cell, system.types)
         assert not engine.system_is_cropped
+        assert engine.get_total_energy(positions=system.positions) == pytest.approx(
+            e_fresh, abs=1e-8
+        )
 
     def test_partn_search_requires_full_system_inputs_under_av(
         self, engine: LammpsEngine, ni_orthorhombic: System

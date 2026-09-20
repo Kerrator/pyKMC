@@ -9,7 +9,7 @@ from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .manager import Manager
-from .physics import resolve_event_constraints
+from .physics import overlay_tolerance, resolve_event_constraints
 import numpy as np
 import pandas as pd
 import concurrent.futures
@@ -238,6 +238,7 @@ class Refinement:
                 self.system.index,
                 user_constraints=self.global_constraints,
             )
+            tolerance = overlay_tolerance(self.config)
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False
             ):
@@ -277,8 +278,43 @@ class Refinement:
                 working[neighbors] = new_positions_saddle
                 final = current_positions.copy()
                 final[neighbors] = new_positions_final
-                constraints.validate_positions(working)
-                constraints.validate_positions(final)
+                # Only user-declared fixed atoms are a coordinate contract: a
+                # PSR residual within the matching tolerance is re-clamped, a
+                # larger one is a different event and is reported as an Err
+                # (never a ValueError out of the KMC loop). The AV shell is
+                # placed as given and held by fix setforce (contracts 7f
+                # policy 5).
+                try:
+                    constraints.validate_positions(
+                        working, tolerance=tolerance, user_only=True
+                    )
+                    constraints.validate_positions(
+                        final, tolerance=tolerance, user_only=True
+                    )
+                except ValueError as exc:
+                    self.loggers.warning(
+                        "log",
+                        "\t :=> Reference event {} on atom {} moves a user-fixed "
+                        "atom beyond {} A; refinement skipped ({})".format(
+                            dfevent["idx_ref"], at_idx, tolerance, exc
+                        ),
+                    )
+                    f = concurrent.futures.Future()
+                    f.set_result(
+                        Err(
+                            ErrorInfo(
+                                type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                                message="generic event changes a user-fixed "
+                                "reference coordinate: {}".format(exc),
+                            )
+                        )
+                    )
+                    futures.append(f)
+                    future_context[f] = {"num_reference_event": dfevent["idx_ref"]}
+                    continue
+                working = constraints.protect_positions(working, user_only=True)
+                final = constraints.protect_positions(final, user_only=True)
+                new_positions_final = final[neighbors]
                 if (
                     dfevent.at["energy_barrier"] > e_thr
                 ):  # We dont refine, we use generic date
