@@ -60,6 +60,8 @@ def native_case() -> Any:
         types=types,
         cell=hop["cell"],
         pbc=(True, True, True),
+        # Refinement records stable crop identities from the source index.
+        index=np.arange(len(hop["min1_positions"])),
     )
     engine = LammpsEngine(_SWConfig(), comm=MPI.COMM_SELF)
     engine.start()
@@ -67,12 +69,24 @@ def native_case() -> Any:
         _initialize(engine, types, system.positions, system.cell)
         extension = LammpsHTSTExtension(engine)
         base = Config.from_ini_file(str(_INPUT))
+        # The service must describe the potential the engine actually runs
+        # (SW-Si), not the committed input's EAM-Ni: the extension's
+        # force-model pre-check compares the two before any Hessian.
         config = base.model_copy(
             update={
                 "rateconstant": RateConstantConfig(
                     style="htst", free_radius=6.0, premin=False, k0=1.0
                 ),
                 "control": base.control.model_copy(update={"active_volume": False}),
+                "lammps": base.lammps.model_copy(
+                    update={
+                        "pair_style": engine.config.pair_style,
+                        "pair_coeff": engine.config.pair_coeff,
+                        "min_style": engine.config.min_style,
+                        "minimize": engine.config.minimize,
+                        "frz_min": engine.config.frz_min,
+                    }
+                ),
             }
         )
         manager = FakeManager(extension.compute_event_prefactors)

@@ -2328,6 +2328,9 @@ class ActiveEventTable:
         self._site_states: dict[int, Any] = {}
         self._pending_site_rows: set[int] = set()
         self._constant_crop_ids: dict[int, tuple[int, ...]] = {}
+        # Site rejections of the most recent request_site_prefactors call,
+        # by kernel reason code (for the per-step [htst] summary).
+        self.step_site_rejections: dict[str, int] = {}
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2475,7 +2478,13 @@ class ActiveEventTable:
                 )
             self.table.at[label, "crop_atom_ids"] = stored
         stored = _indices(stored)
-        indices = np.array([ids.index(i) for i in stored], dtype=int)
+        position = {atom_id: k for k, atom_id in enumerate(ids)}
+        try:
+            indices = np.array([position[i] for i in stored], dtype=int)
+        except KeyError as exc:
+            raise ValueError(
+                "stored crop identities are not in the current source"
+            ) from exc
         if int(row.atom_index) not in indices:
             raise ValueError("active event center is outside its stored crop")
         for name in ("saddle_positions", "final_positions"):
@@ -2488,6 +2497,41 @@ class ActiveEventTable:
                     "crop and identities have different sizes"
                 )
         return indices
+
+    def _warn_crop_identity(self, label, exc: Exception, stage: str) -> None:
+        """Report a row that cannot declare stable crop identities (never raise).
+
+        Such a row is not a crop-only fallback (contracts section 7d, F1
+        covers rows with stable identities and no full saddle): reconstruction
+        resolves the stored identities against the current source, so the row
+        cannot be reconstructed and selecting it would purge its reference.
+        :meth:`request_site_prefactors` drops it before selection
+        (:meth:`_drop_identityless_rows`); its ``(atom, reference)`` pair is
+        re-refined next step.
+        """
+        row = self.table.loc[label]
+        logger.warning(
+            "[htst] active event (atom %d, reference %d): no stable crop "
+            "identities at %s (%s); the row cannot be reconstructed from the "
+            "current source and is dropped before selection, its (atom, "
+            "reference) pair is re-refined next step",
+            int(row["atom_index"]),
+            int(row["num_reference_event"]),
+            stage,
+            exc,
+        )
+
+    def _drop_identityless_rows(self, labels: Iterable[Any]) -> None:
+        """Remove the rows reported by :meth:`_warn_crop_identity` this call."""
+        if not labels:
+            return
+        self.remove(list(labels))
+        logger.info(
+            "active table: dropped %d row(s) without stable crop identities "
+            "before selection; their (atom, reference) pairs are re-refined "
+            "next step",
+            len(labels),
+        )
 
     def site_calculation(self, label):
         """Return the actual row-bound site producer, never a scalar reconstruction."""
@@ -2515,9 +2559,12 @@ class ActiveEventTable:
         """
         if not self.uses_prefactors or self.table.empty:
             return 0
-        from .htst.site_state import row_signature
+        from .htst.request import HTSTRequestError
+        from .htst.site_state import row_signature, source_index_map
         from dataclasses import replace
 
+        # One identity -> row map per validation pass, shared by every row.
+        index_map = source_index_map(system)
         dropped = []
         for label, row in self.table.iterrows():
             state = self._site_states.get(int(label))
@@ -2532,12 +2579,12 @@ class ActiveEventTable:
                 dropped.append(label)
                 continue
             try:
-                if not state.matches(row, system, self.prefactor_service):
+                if not state.matches(
+                    row, system, self.prefactor_service, index_map=index_map
+                ):
                     dropped.append(label)
                     continue
-                self.table.at[label, "atom_index"] = list(system.index).index(
-                    state.center_id
-                )
+                self.table.at[label, "atom_index"] = index_map[state.center_id]
                 if neighbors_list is not None:
                     crop = self.crop_indices(label, system)
                     current = neighbors_list.get_neighbors(
@@ -2565,6 +2612,17 @@ class ActiveEventTable:
                 self._site_states[int(label)] = replace(
                     state,
                     signature=row_signature(self.table.loc[label], state.center_id),
+                )
+            except HTSTRequestError as exc:
+                # A configuration/authority error of the current service is not
+                # an ordinary dependency change: report which row it hit and why.
+                dropped.append(label)
+                logger.warning(
+                    "[htst] active event (atom %d, reference %d): dropped, the "
+                    "prefactor service cannot describe its source: %s",
+                    int(row["atom_index"]),
+                    int(row["num_reference_event"]),
+                    exc,
                 )
             except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
                 dropped.append(label)
@@ -2897,6 +2955,15 @@ class ActiveEventTable:
         fallback's current source is recorded without inventing a calculation.
         Later changes invalidate it under the same dependency guard.
 
+        Rows without stable crop identities (none stored and no full saddle
+        to prove a mapping, or identities that do not resolve in the current
+        source) are not crop-only fallbacks: reconstruction cannot resolve
+        them, so they are dropped before selection with one WARNING per row
+        (``_warn_crop_identity``), counted under no summary key and never
+        kept behind a fallback context. Their ``(atom, reference)`` pair is
+        re-refined next step. The mapping-mismatch ``RuntimeError`` is
+        unchanged.
+
         Returns
         -------
         dict[str, int]
@@ -2915,17 +2982,28 @@ class ActiveEventTable:
 
         """
         summary = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        self.step_site_rejections = {}
         if not self.uses_prefactors or len(self.table) == 0:
             return summary
+        from .htst.result import PrefactorRejection
+
         self._require_htst_columns("request_site_prefactors")
         self.validate_recycled(system, neighbors_list)
+        # Rows without stable crop identities cannot be reconstructed; they
+        # are removed once, after every label-addressed update of this call.
+        identityless: list[Any] = []
         if self.prefactor_service is not None:
             # Even an unrefined reference approximation needs a full dependency
             # context before it may suppress work in a later step. This is a
             # fallback context, not a claim that its spectrum was calculated here.
             for label, row in self.table.iterrows():
                 if row["refined"] != "T" and label in self._pending_site_rows:
-                    self.crop_indices(label, system, neighbors_list, capture=True)
+                    try:
+                        self.crop_indices(label, system, neighbors_list, capture=True)
+                    except ValueError as exc:
+                        self._warn_crop_identity(label, exc, "fallback context")
+                        identityless.append(label)
+                        continue
                     request = self._site_request(label, system, system.positions)
                     self._capture_site_state(label, request)
         eligible = (self.table["refined"] == "T") & ~self.table[
@@ -2933,6 +3011,7 @@ class ActiveEventTable:
         ].astype(bool)
         rows = self.table[eligible]
         if rows.empty:
+            self._drop_identityless_rows(identityless)
             return summary
         if self.prefactor_service is None:
             raise RuntimeError(
@@ -2948,7 +3027,17 @@ class ActiveEventTable:
         try:
             for idx, row in rows.iterrows():
                 atom = int(row["atom_index"])
-                neighbors = self.crop_indices(idx, system, neighbors_list, capture=True)
+                try:
+                    neighbors = self.crop_indices(
+                        idx, system, neighbors_list, capture=True
+                    )
+                except ValueError as exc:
+                    # Not a crop-only fallback: without stable identities the
+                    # row cannot be reconstructed, so it leaves the table
+                    # before selection instead of being counted as attempted.
+                    self._warn_crop_identity(idx, exc, "site request")
+                    identityless.append(idx)
+                    continue
                 saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
                 if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
                     raise RuntimeError(
@@ -2988,7 +3077,8 @@ class ActiveEventTable:
         wall = self.prefactor_service.last_batch_wall_s
         for idx in no_geometry:
             self.table.loc[idx, "nu0_site_attempted"] = True
-            self._capture_site_state(idx, submitted[idx])
+            if idx in submitted:
+                self._capture_site_state(idx, submitted[idx])
             summary["attempted"] += 1
             summary["no_geometry"] += 1
             logger.info(
@@ -3034,19 +3124,52 @@ class ActiveEventTable:
                 # A skipped forward direction cannot happen (only the backward
                 # one is skipped); a rejected one keeps the row as it is.
                 summary["rejected"] += 1
-                logger.info(
-                    "[htst] active event (atom %d, reference %d): site prefactor "
-                    "rejected (%s: %s); keeping the %s estimate (n_free %d, "
-                    "batch %.3f s)",
-                    atom,
-                    ref,
-                    estimate.reason_code.value if estimate.reason_code else "skipped",
-                    estimate.reason,
-                    self.table.loc[idx, "nu0_source"],
-                    pre.n_free,
-                    wall,
+                code = estimate.reason_code.value if estimate.reason_code else "skipped"
+                self.step_site_rejections[code] = (
+                    self.step_site_rejections.get(code, 0) + 1
                 )
+                if estimate.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY:
+                    # A stationarity rejection is a silent k0 fallback unless
+                    # it is reported here, with the tolerance that decided it.
+                    logger.warning(
+                        "[htst] active event (atom %d, reference %d): site "
+                        "prefactor rejected (%s: %s; force_tol %s eV/A); keeping "
+                        "the %s estimate (n_free %d, batch %.3f s)",
+                        atom,
+                        ref,
+                        code,
+                        estimate.reason,
+                        self.prefactor_service.settings.force_tol,
+                        self.table.loc[idx, "nu0_source"],
+                        pre.n_free,
+                        wall,
+                    )
+                else:
+                    logger.info(
+                        "[htst] active event (atom %d, reference %d): site "
+                        "prefactor rejected (%s: %s); keeping the %s estimate "
+                        "(n_free %d, batch %.3f s)",
+                        atom,
+                        ref,
+                        code,
+                        estimate.reason,
+                        self.table.loc[idx, "nu0_source"],
+                        pre.n_free,
+                        wall,
+                    )
             self._capture_site_state(idx, submitted[idx], calculation)
+        nonstationary = self.step_site_rejections.get(
+            PrefactorRejection.NONSTATIONARY_GEOMETRY.value, 0
+        )
+        if nonstationary:
+            logger.warning(
+                "[htst] %d site prefactor request(s) rejected as %s this step "
+                "(force_tol %s eV/A): those events use the constant k0 prefactor",
+                nonstationary,
+                PrefactorRejection.NONSTATIONARY_GEOMETRY.value,
+                self.prefactor_service.settings.force_tol,
+            )
+        self._drop_identityless_rows(identityless)
         return summary
 
     def prefactor_summary(self) -> dict[str, int]:
@@ -3122,9 +3245,15 @@ class ActiveEventTable:
         if neighbors_list is not None and self.uses_prefactors:
             for label in list(self._pending_site_rows):
                 if label in self.table.index:
-                    self.crop_indices(
-                        label, neighbors_list.system, neighbors_list, capture=True
-                    )
+                    try:
+                        self.crop_indices(
+                            label, neighbors_list.system, neighbors_list, capture=True
+                        )
+                    except ValueError as exc:
+                        # A row without stable identities cannot be compared by
+                        # identity; it is left to the geometric checks below and
+                        # to the no_geometry fallback, never aborting the step.
+                        self._warn_crop_identity(label, exc, "duplicate removal")
 
         def align(first, second, *, shared=False):
             a, b = self.table.loc[first], self.table.loc[second]

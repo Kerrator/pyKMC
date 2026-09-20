@@ -215,6 +215,10 @@ class PrefactorService:
         if not isinstance(method, str) or not method:
             raise ValueError("prefactor worker method must be a nonempty string")
         self.method = method
+        # An authoritative map (engine map or preflight physics) fixes the
+        # descriptor for the run; without one it is derived per request.
+        self._authoritative = self.species_masses is not None
+        self._derived_descriptors: dict[tuple[str, ...], PhysicalDescriptor] = {}
         self._descriptor = (
             None
             if self.species_masses is None
@@ -231,19 +235,43 @@ class PrefactorService:
         self.step_wall_s = 0.0
 
     def descriptor_for(self, types: Sequence[str]) -> PhysicalDescriptor:
-        """Return the shared physical contract, retaining absent potential slots."""
-        if self._descriptor is None:
-            from pykmc.engine.lammps import species_map
+        """Return the physical contract describing a request's full-system types.
 
-            self.species_masses = species_map(list(types))
-            self._descriptor = PhysicalDescriptor.from_config(
+        With an authoritative engine map (``species_masses`` or the preflight
+        ``engine_physics``) the descriptor is fixed at construction and every
+        request must be describable by it; an unknown symbol is a named error.
+        Without one (the offline/test path) the map is derived from each
+        request's own full-system types through the one species rule
+        (:func:`pykmc.engine.lammps.species_map`), so a request introducing a
+        species absent from earlier requests widens the map instead of being
+        rejected or mis-mapped by whichever batch arrived first; descriptors
+        are cached per species tuple and ``current_descriptor`` follows the
+        last request.
+        """
+        symbols = tuple(str(t) for t in types)
+        if self._authoritative:
+            unknown = sorted(set(symbols) - set(self._descriptor.engine.species))
+            if unknown:
+                raise HTSTRequestError(
+                    f"types {unknown} are not in the engine species map "
+                    f"{list(self._descriptor.engine.species)}; the map is the "
+                    "initialized potential's and is never widened by a request"
+                )
+            return self._descriptor
+        from pykmc.engine.lammps import species_map
+
+        species, masses = species_map(list(symbols))
+        descriptor = self._derived_descriptors.get(species)
+        if descriptor is None:
+            descriptor = PhysicalDescriptor.from_config(
                 self.config,
-                EnginePhysics.capture(self.config.lammps, *self.species_masses),
+                EnginePhysics.capture(self.config.lammps, species, masses),
                 self.settings,
             )
-        if not set(types).issubset(self._descriptor.engine.species):
-            raise HTSTRequestError("types are not in the engine species map")
-        return self._descriptor
+            self._derived_descriptors[species] = descriptor
+        self.species_masses = (species, masses)
+        self._descriptor = descriptor
+        return descriptor
 
     @property
     def current_descriptor(self) -> PhysicalDescriptor | None:
