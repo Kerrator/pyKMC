@@ -71,14 +71,14 @@ def event():
     return first, saddle, second
 
 
-def config(style="global/reconstruction", active=True, radius=1.3):
+def config(style="global/reconstruction", active=True, radius=1.3, thr=1e-7):
     return SimpleNamespace(
         frozen_atoms=RegionConfig(types=["Fe"]),
         control=SimpleNamespace(active_volume=active),
         activevolume=SimpleNamespace(rmov=radius, ract=2.25),
         basin=SimpleNamespace(style=style),
         reconstruction=SimpleNamespace(push_fraction=0.1),
-        psr=SimpleNamespace(matching_score_thr=1e-7),
+        psr=SimpleNamespace(matching_score_thr=thr),
     )
 
 
@@ -271,15 +271,39 @@ class ProtocolSystem:
             self.positions[atom_idx] = new_positions
 
 
+RIGID_PSR = SimpleNamespace(
+    rotation_matrix=np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]),
+    translation_matrix=np.array([1.5, -2.0, 0.7]),
+    permutation_matrix=np.array([2, 0, 4, 1, 3]),
+)
+USER_LOCAL = int(np.flatnonzero(NEIGHBORS == 1)[0])  # source row 1 (Fe) in patch order
+
+
+def reference_frame(patch, psr):
+    """Return the catalogue rows that ``transform_positions(rows, psr)`` maps onto ``patch``.
+
+    ``transform_positions`` computes ``(rows @ R.T + t)[P]``; invert it so a
+    non-identity registration reproduces the source patch exactly.
+    """
+    inverse_perm = np.argsort(psr.permutation_matrix)
+    return (patch[inverse_perm] - psr.translation_matrix) @ psr.rotation_matrix
+
+
 @pytest.mark.parametrize("style", ["global", "global/reconstruction"])
 @pytest.mark.parametrize("bad_fixed_overlay", [False, True])
+@pytest.mark.parametrize("psr_kind", ["identity", "rigid"])
 def test_basin_callers_resolve_before_overlay_and_transport_types_and_both_endpoints(
-    monkeypatch, style, bad_fixed_overlay
+    monkeypatch, style, bad_fixed_overlay, psr_kind
 ):
     first, saddle, second = event()
     if bad_fixed_overlay:
         second[1, 0] += 0.2
-    cfg, expected = config(style), payload()
+    # The rigid case is a rotation + translation + permutation whose mapped
+    # initial leaves a 0.01 A residual on the user-frozen row, inside the 0.1 A
+    # matching tolerance: it must be re-clamped, not rejected (contracts 7f
+    # policy 5). The identity case keeps the exact 1e-7 tolerance.
+    rigid = psr_kind == "rigid"
+    cfg, expected = config(style, thr=0.1 if rigid else 1e-7), payload()
     manager = RecordingManager(
         expected, [second] if style == "global" else [first, second]
     )
@@ -288,21 +312,40 @@ def test_basin_callers_resolve_before_overlay_and_transport_types_and_both_endpo
     state = SimpleNamespace(
         system=source, neighbors_list=neighbors, ensure_full_state=lambda *_: None
     )
-    ref = pd.DataFrame(
-        [
-            dict(
-                idx_ref=31,
-                initial_positions=first[NEIGHBORS],
-                saddle_positions=saddle[NEIGHBORS],
-                final_positions=second[NEIGHBORS],
-            )
-        ]
-    )
-    psr = SimpleNamespace(
-        rotation_matrix=np.eye(3),
-        translation_matrix=np.zeros(3),
-        permutation_matrix=np.arange(5),
-    )
+    if rigid:
+        psr = RIGID_PSR
+        mapped_initial = first[NEIGHBORS].copy()
+        mapped_initial[USER_LOCAL, 0] += 0.01
+        rows = {
+            "initial_positions": reference_frame(mapped_initial, psr),
+            "saddle_positions": reference_frame(saddle[NEIGHBORS], psr),
+            "final_positions": reference_frame(second[NEIGHBORS], psr),
+        }
+        from pykmc.utils import geometry
+
+        np.testing.assert_allclose(
+            geometry.transform_positions(
+                rows["final_positions"],
+                psr.rotation_matrix,
+                psr.translation_matrix,
+                psr.permutation_matrix,
+            ),
+            second[NEIGHBORS],
+            rtol=0,
+            atol=1e-12,
+        )
+    else:
+        psr = SimpleNamespace(
+            rotation_matrix=np.eye(3),
+            translation_matrix=np.zeros(3),
+            permutation_matrix=np.arange(5),
+        )
+        rows = {
+            "initial_positions": first[NEIGHBORS],
+            "saddle_positions": saddle[NEIGHBORS],
+            "final_positions": second[NEIGHBORS],
+        }
+    ref = pd.DataFrame([dict(idx_ref=31, **rows)])
     monkeypatch.setattr(basin_module, "System", ProtocolSystem)
     monkeypatch.setattr(
         basin_module,

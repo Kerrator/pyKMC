@@ -81,6 +81,32 @@ def lammps_error_handler(method):
     return wrapper
 
 
+# ``BaseException.add_note`` exists from Python 3.11. The module-level seam is
+# what ``_attach_note`` consults, so the 3.10 fallback is testable everywhere.
+_ADD_NOTE = getattr(BaseException, "add_note", None)
+
+
+def _attach_note(exc: BaseException, message: str) -> None:
+    """Attach ``message`` to ``exc`` so the record survives on Python 3.10 too.
+
+    On 3.11+ this is ``exc.add_note(message)``. On 3.10 the note is appended to
+    the same ``__notes__`` list attribute, so a secondary restore/cleanup
+    failure is never discarded: callers and logs can read it from the
+    exception even though the interpreter does not print it.
+    """
+    if _ADD_NOTE is not None:
+        _ADD_NOTE(exc, message)
+        return
+    notes = getattr(exc, "__notes__", None)
+    if not isinstance(notes, list):
+        notes = []
+        try:
+            exc.__notes__ = notes
+        except Exception:  # noqa: BLE001 - an exception refusing attributes
+            return
+    notes.append(message)
+
+
 # ----------------------------------------------------------------------
 # Species / type / mass rule (one authoritative implementation)
 # ----------------------------------------------------------------------
@@ -1209,11 +1235,9 @@ class LammpsEngine(Engine):
                     self._raise_operation_failure(
                         cleanup, failures, "velocity unfix cleanup"
                     )
-                add_note = getattr(BaseException, "add_note", None)
-                if add_note is not None:
-                    add_note(
-                        original, f"Fixed-velocity unfix cleanup failed: {failures}"
-                    )
+                _attach_note(
+                    original, f"Fixed-velocity unfix cleanup failed: {failures}"
+                )
 
     # ------------------------------------------------------------------
     # Minimization
@@ -1326,9 +1350,7 @@ class LammpsEngine(Engine):
                 self._cleared_since_init = True
                 if original is None:
                     raise failures[0]
-                add_note = getattr(BaseException, "add_note", None)
-                if add_note is not None:
-                    add_note(original, f"Endpoint cleanup failures: {failures!r}")
+                _attach_note(original, f"Endpoint cleanup failures: {failures!r}")
 
     @lammps_error_handler
     def minimize_freeze_core(self, core_idx) -> None:
@@ -1367,9 +1389,7 @@ class LammpsEngine(Engine):
                 self._raise_operation_failure(
                     failure, failures, "native ARTn destruction"
                 )
-            add_note = getattr(BaseException, "add_note", None)
-            if add_note is not None:
-                add_note(original, f"Native ARTn destruction failed: {failures}")
+            _attach_note(original, f"Native ARTn destruction failed: {failures}")
 
     @contextmanager
     def _partn_resource_scope(self, active):
@@ -1429,9 +1449,7 @@ class LammpsEngine(Engine):
                 self._cleared_since_init = True
                 if original is None:
                     self._raise_operation_failure(cleanup, failures, "resource cleanup")
-                add_note = getattr(BaseException, "add_note", None)
-                if add_note is not None:
-                    add_note(original, f"pARTn resource cleanup failed: {failures}")
+                _attach_note(original, f"pARTn resource cleanup failed: {failures}")
             elif original is not None and not self._cleared_since_init:
                 try:
                     self.set_positions(entry)
@@ -1440,11 +1458,9 @@ class LammpsEngine(Engine):
                 failures = self._operation_failures(cleanup)
                 if any(value is not None for value in failures):
                     self._cleared_since_init = True
-                    add_note = getattr(BaseException, "add_note", None)
-                    if add_note is not None:
-                        add_note(
-                            original, f"pARTn position restoration failed: {failures}"
-                        )
+                    _attach_note(
+                        original, f"pARTn position restoration failed: {failures}"
+                    )
         if original is not None:
             raise original
 
@@ -1497,9 +1513,7 @@ class LammpsEngine(Engine):
                 warnings.warn(message, RuntimeWarning, stacklevel=3)
             except RuntimeWarning:
                 # Python 3.10 has no exception notes; keep its original error too.
-                add_note = getattr(BaseException, "add_note", None)
-                if add_note is not None:
-                    add_note(original, message)
+                _attach_note(original, message)
 
     @lammps_error_handler
     def partn_search(
