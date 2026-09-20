@@ -49,6 +49,10 @@
   <details><summary>Description</summary>
   Number of Sessions
   </details>
+- **`group_size`** : `int`, default = `-1`
+  <details><summary>Description</summary>
+  Number of MPI worker ranks in the group communicator (replaces old global mode). -1 means all worker ranks.
+  </details>
 - **`engine_use_rank_0`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Deprecated : If use mpi rank 0 or not.
@@ -76,6 +80,14 @@
 - **`bias`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Enable event selection bias. Requires a [Bias] section.
+  </details>
+- **`max_physical_time`** : `float`, optional
+  <details><summary>Description</summary>
+  Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).
+  </details>
+- **`seed`** : `int`, optional
+  <details><summary>Description</summary>
+  Reproducibility knob. When set, the Python `random` module and NumPy's global random generator are seeded once at KMC construction, so the choice of the atoms searched per new environment (`central_atoms_research`), the rejection-free (BKL) event and time draws and the basin exit draws repeat between runs; the new-environment list is sorted, so `PYTHONHASHSEED` is not needed. It does not seed the saddle-point search: pARTn's own stream is `[pARTn] zseed`, and the saddle instance a search returns can still differ between runs. Must be between 0 and 2**32 - 1, inclusive. Defaults to None (unseeded).
   </details>
 
 ---
@@ -179,20 +191,68 @@
 
 <details><summary>Section Overview</summary>
   Rate constant computation parameters.
+  
+  The rate of an event is ``k = k_prefactor * exp(-dE / (kb * T))`` with every
+  rate and prefactor in ps^-1. ``style`` selects the prefactor backend in
+  ``pykmc.rate_constant.backends``:
+  
+  - ``constant``: ``k_prefactor = k0`` for every event.
+  - ``htst``: harmonic transition state theory; ``k_prefactor`` is the
+    per-event Vineyard frequency ``nu0`` (computed in Hz by the HTST kernel
+    and converted to ps^-1 once), falling back to ``k0`` when no estimate is
+    available for that event.
+  - ``rpa``: registered alias of ``htst``; bare Vineyard, no recrossing
+    correction is implemented.
+  
+  The HTST-only fields (``free_radius``, ``free_region_center``, ``fd_step``,
+  ``zone_radius``, ``nu0_min_THz``, ``nu0_max_THz``, ``premin``) are validated
+  for every style and ignored by ``constant``.
 </details>
 
-- **`style`** : `Literal['constant']`, mandatory
+- **`style`** : `Literal['constant', 'htst', 'rpa']`, mandatory
   <details><summary>Description</summary>
-  Method used to compute the prefactor of the rate constant. 
+  Method used to compute the prefactor of the rate constant: 'constant' (fixed `k0`), 'htst' (per-event harmonic TST / Vineyard prefactor with `k0` as the fallback) or 'rpa' (alias of 'htst': bare Vineyard, no recrossing correction is implemented).
   </details>
 - **`k0`** : `float`, default = `1.0`
   <details><summary>Description</summary>
-  When `style` is set to **'constant'**, this value is used directly as the pre-exponential factor ($k_0$) 
+  Prefactor in ps^-1 (1.0 = 1 THz). When `style` is **'constant'** it is used directly as the pre-exponential factor ($k_0$); for **'htst'** and **'rpa'** it is the per-event fallback when no Vineyard prefactor is available. For 'htst'/'rpa' a value above 1e4 ps^-1 is rejected because it was almost certainly entered in Hz.
   $$ k = k_{0} \exp\left(-\frac{\Delta E}{k_{b}T}\right) $$
   </details>
-- **`T`** : `float`, default = `300`
+- **`T`** : `float`, default = `300.0`
   <details><summary>Description</summary>
   Temperature (in Kelvin) used for computing rate constants.
+  </details>
+- **`free_radius`** : `float`, default = `6.0`
+  <details><summary>Description</summary>
+  HTST: radius (Angstrom) around the moving atom selecting the free (movable) atoms of the partial Hessian; every other atom is frozen.
+  </details>
+- **`free_region_center`** : `Literal['saddle', 'min1']`, default = `'saddle'`
+  <details><summary>Description</summary>
+  HTST: geometry in which the free (movable) region of the partial Hessians is selected around the moving atom. 'saddle' (default) centres the one common free region on the atom's saddle-point position, which is symmetric between the two minima by construction. 'min1' centres it on the atom's initial position (the original model); on the symmetric SW-Si vacancy hop this gives forward and backward prefactors that differ by 20 percent (23.6 vs 19.6 THz) purely through the frozen-boundary choice, so 'min1' exists only for comparison with older results.
+  </details>
+- **`fd_step`** : `float`, default = `0.01`
+  <details><summary>Description</summary>
+  HTST: central finite-difference displacement (Angstrom) used to build the Hessian.
+  </details>
+- **`force_tol`** : `float`, default = `0.005`
+  <details><summary>Description</summary>
+  HTST: maximum raw force norm (eV/Angstrom) on any atom of the common vibrational set at each stationary geometry, after premin and cropping. Fixed-atom reaction forces are excluded. Larger or nonfinite forces reject the native prefactor calculation.
+  </details>
+- **`zone_radius`** : `float`, optional
+  <details><summary>Description</summary>
+  HTST: optional radius (Angstrom) around the moving atom used to crop the scratch system on which the Hessians are computed. None (default) uses the full system.
+  </details>
+- **`nu0_min_THz`** : `float`, default = `1.0`
+  <details><summary>Description</summary>
+  HTST: lower bound (THz) of the acceptance window for the Vineyard prefactor nu0. The window is applied by the HTST kernel: an estimate below it is rejected and the event falls back to `k0`. Must be < `nu0_max_THz`.
+  </details>
+- **`nu0_max_THz`** : `float`, default = `100.0`
+  <details><summary>Description</summary>
+  HTST: upper bound (THz) of the acceptance window for the Vineyard prefactor nu0. The window is applied by the HTST kernel: an estimate above it is rejected and the event falls back to `k0`. Must be > `nu0_min_THz`.
+  </details>
+- **`premin`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  HTST: relax the surroundings of the event with the event core frozen before computing the Hessians.
   </details>
 
 ---
@@ -222,6 +282,10 @@
 - **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
   <details><summary>Description</summary>
   Lammps minimize command with frozen core
+  </details>
+- **`verbosity`** : `int`, optional
+  <details><summary>Description</summary>
+  LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.
   </details>
 
 ---
@@ -496,7 +560,7 @@
 
 - **`style`** : `Literal['displacement']`, mandatory
   <details><summary>Description</summary>
-  Geometric filter for event recycling. 'displacement' requires the central atom to move less than movement_thr AND remain farther than distance_thr from the executed event. Both distances use the source's actual periodic axes. HTST/RPA rows must additionally pass full-source physical-dependency validation before refinement or selection; passing this geometric filter alone does not preserve a site frequency.
+  Method used to decide which events can be recycled. 'displacement' = central atom moved less than movement_thr AND is farther than distance_thr from the executed event.
   </details>
 - **`movement_thr`** : `float`, default = `0.02`
   <details><summary>Description</summary>

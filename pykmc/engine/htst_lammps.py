@@ -56,6 +56,7 @@ forces are zeroed), so the free set and the event identity are preserved.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import tempfile
@@ -81,6 +82,8 @@ from ..htst.provenance import CalculationProvenance
 from .base import EngineExtension
 from .lammps import LammpsEngine
 from ..physics import EnginePhysics, ForceModel
+
+logger = logging.getLogger("log")
 
 TMPDIR_PREFIX: str = "pykmc_htst_"
 """Prefix of the per-call ``tempfile.mkdtemp`` directory (tests count these)."""
@@ -319,21 +322,32 @@ class LammpsHTSTExtension(EngineExtension):
             else request.constraints.local_fixed_indices
         )
         relaxation_locks = np.union1d(core_global, fixed_global).astype(int)
+        zone: np.ndarray | None = None
+        if settings.zone_radius is not None:
+            zone = select_free_indices(
+                centring, center, settings.zone_radius, cell, request.pbc
+            )
         if free_global.size == 0:
             # The kernel owns the unavailable/skipped result. No scratch engine
             # or matrix is needed when constraints leave no vibrational DOFs.
-            return _kernel_compute_event_prefactors(
+            # The provenance still records the zone these settings select, so
+            # a later context comparison sees the same crop a computed result
+            # would carry.
+            empty = _kernel_compute_event_prefactors(
                 request,
                 lambda positions, indices: np.empty((0, 0)),
                 method="lammps_eskm",
                 free_indices=free_global,
                 compute_backward=compute_backward,
             )
-        zone: np.ndarray | None = None
-        if settings.zone_radius is not None:
-            zone = select_free_indices(
-                centring, center, settings.zone_radius, cell, request.pbc
+            provenance = CalculationProvenance.capture(
+                request,
+                request,
+                method="lammps_eskm",
+                free_indices=free_global,
+                zone_indices=zone,
             )
+            return replace(empty, provenance=provenance)
 
         geometries = [min1, saddle, min2]
         scratch = self._new_scratch()
@@ -461,6 +475,18 @@ class LammpsHTSTExtension(EngineExtension):
                 norms = np.linalg.norm(forces[free_indices], axis=1)
                 largest = float(np.max(norms))
                 if not np.all(np.isfinite(norms)) or largest > settings.force_tol:
+                    # The kernel turns this into the documented k0 fallback;
+                    # make the rejection visible at run time.
+                    logger.warning(
+                        "[htst] event %r: stationarity check rejected the "
+                        "geometry, maximum free-atom force norm %.4e eV/A "
+                        "exceeds force_tol %s eV/A (n_free %d); the constant "
+                        "k0 prefactor will be used for this event",
+                        request.event_key,
+                        largest,
+                        settings.force_tol,
+                        int(len(free_indices)),
+                    )
                     raise PrefactorRejected(
                         PrefactorRejection.NONSTATIONARY_GEOMETRY,
                         f"maximum free-atom force norm {largest!r} eV/Å exceeds "

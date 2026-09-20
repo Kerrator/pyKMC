@@ -2178,6 +2178,9 @@ class ActiveEventTable:
         self._site_states: dict[int, Any] = {}
         self._pending_site_rows: set[int] = set()
         self._constant_crop_ids: dict[int, tuple[int, ...]] = {}
+        # Site rejections of the most recent request_site_prefactors call,
+        # by kernel reason code (for the per-step [htst] summary).
+        self.step_site_rejections: dict[str, int] = {}
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2804,8 +2807,11 @@ class ActiveEventTable:
 
         """
         summary = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        self.step_site_rejections = {}
         if not self.uses_prefactors or len(self.table) == 0:
             return summary
+        from .htst.result import PrefactorRejection
+
         self._require_htst_columns("request_site_prefactors")
         self.validate_recycled(system, neighbors_list)
         if self.prefactor_service is not None:
@@ -2942,19 +2948,51 @@ class ActiveEventTable:
                 # A skipped forward direction cannot happen (only the backward
                 # one is skipped); a rejected one keeps the row as it is.
                 summary["rejected"] += 1
-                logger.info(
-                    "[htst] active event (atom %d, reference %d): site prefactor "
-                    "rejected (%s: %s); keeping the %s estimate (n_free %d, "
-                    "batch %.3f s)",
-                    atom,
-                    ref,
-                    estimate.reason_code.value if estimate.reason_code else "skipped",
-                    estimate.reason,
-                    self.table.loc[idx, "nu0_source"],
-                    pre.n_free,
-                    wall,
+                code = estimate.reason_code.value if estimate.reason_code else "skipped"
+                self.step_site_rejections[code] = (
+                    self.step_site_rejections.get(code, 0) + 1
                 )
+                if estimate.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY:
+                    # A stationarity rejection is a silent k0 fallback unless
+                    # it is reported here, with the tolerance that decided it.
+                    logger.warning(
+                        "[htst] active event (atom %d, reference %d): site "
+                        "prefactor rejected (%s: %s; force_tol %s eV/A); keeping "
+                        "the %s estimate (n_free %d, batch %.3f s)",
+                        atom,
+                        ref,
+                        code,
+                        estimate.reason,
+                        self.prefactor_service.settings.force_tol,
+                        self.table.loc[idx, "nu0_source"],
+                        pre.n_free,
+                        wall,
+                    )
+                else:
+                    logger.info(
+                        "[htst] active event (atom %d, reference %d): site "
+                        "prefactor rejected (%s: %s); keeping the %s estimate "
+                        "(n_free %d, batch %.3f s)",
+                        atom,
+                        ref,
+                        code,
+                        estimate.reason,
+                        self.table.loc[idx, "nu0_source"],
+                        pre.n_free,
+                        wall,
+                    )
             self._capture_site_state(idx, submitted[idx], calculation)
+        nonstationary = self.step_site_rejections.get(
+            PrefactorRejection.NONSTATIONARY_GEOMETRY.value, 0
+        )
+        if nonstationary:
+            logger.warning(
+                "[htst] %d site prefactor request(s) rejected as %s this step "
+                "(force_tol %s eV/A): those events use the constant k0 prefactor",
+                nonstationary,
+                PrefactorRejection.NONSTATIONARY_GEOMETRY.value,
+                self.prefactor_service.settings.force_tol,
+            )
         return summary
 
     def prefactor_summary(self) -> dict[str, int]:

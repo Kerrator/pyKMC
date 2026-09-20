@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import glob
 import inspect
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
@@ -498,6 +499,7 @@ class TestLammpsHTSTSerial:
         hessian_geometries: list[np.ndarray],
         raw_force_evaluations: list[dict[str, Any]],
         scratch_log: list[LammpsEngine],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A site request from the full refined saddle equals the reference; a crop does not.
 
@@ -548,8 +550,22 @@ class TestLammpsHTSTSerial:
         pasted[crop] = saddle[crop]
         pasted_request = site_request(pasted, ("site", "crop"))
         matrices_before = len(hessian_geometries)
-        rejected = ext.compute_event_prefactors(pasted_request, compute_backward=False)
+        with caplog.at_level(logging.WARNING, logger="log"):
+            rejected = ext.compute_event_prefactors(
+                pasted_request, compute_backward=False
+            )
         assert rejected.forward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+        # The rejection is visible at run time: one WARNING per rejected event
+        # naming the event, the offending force norm and the tolerance.
+        stationarity_warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "force_tol" in r.getMessage()
+        ]
+        assert len(stationarity_warnings) == 1, caplog.text
+        assert repr(pasted_request.event_key) in stationarity_warnings[0]
+        assert f"{pasted_request.settings.force_tol}" in stationarity_warnings[0]
+        assert "eV/" in stationarity_warnings[0]
         assert rejected.forward.nu0_hz is None
         assert rejected.backward.skipped
         assert len(hessian_geometries) == matrices_before
@@ -1220,6 +1236,61 @@ class TestLammpsHTSTSerial:
         finally:
             engine.close()
         assert _count_tmpdirs() == 0
+
+    def test_empty_free_set_early_return_records_the_zone_provenance(
+        self,
+        search_engine: LammpsEngine,
+        si_hop: dict[str, Any],
+        scratch_log: list[LammpsEngine],
+    ) -> None:
+        """No vibrational DOF: the kernel's EMPTY_FREE_REGION result carries
+        the same zone provenance as a computed one, without a scratch engine."""
+        from pykmc.physics import ResolvedConstraints
+
+        ext = LammpsHTSTExtension(search_engine)
+        full_system = search_engine.full_system
+        min1 = si_hop["min1_positions"].copy()
+        cell = si_hop["cell"].copy()
+        center = int(si_hop["central_atom_idx"])
+        settings = HTSTSettings(free_radius=6.0, zone_radius=8.0)
+        sphere = select_free_indices(min1, center, 6.0, cell, _ALL_PERIODIC)
+        ids = tuple(range(len(min1)))
+        constraints = ResolvedConstraints(
+            ids,
+            ids,
+            tuple(int(i) for i in sphere),
+            tuple(tuple(float(x) for x in min1[i]) for i in sphere),
+        )
+        # Every free-sphere atom is fixed and nothing moves, so the request is
+        # valid while its common free set is empty.
+        request = HTSTEventRequest(
+            event_key=("ref", "empty-free"),
+            min1_positions=min1.copy(),
+            saddle_positions=min1.copy(),
+            min2_positions=min1.copy(),
+            types=tuple(str(t) for t in si_hop["types"]),
+            species=full_system.species,
+            masses=full_system.masses,
+            cell=cell,
+            pbc=_ALL_PERIODIC,
+            center_index=center,
+            settings=settings,
+            constraints=constraints,
+        )
+        result = ext.compute_event_prefactors(request)
+        assert result.forward.reason_code is PrefactorRejection.EMPTY_FREE_REGION
+        assert result.backward.reason_code is PrefactorRejection.EMPTY_FREE_REGION
+        assert result.n_free == 0 and scratch_log == []
+        provenance = result.provenance
+        assert provenance.method == "lammps_eskm"
+        assert provenance.free_indices == ()
+        zone = select_free_indices(min1, center, 8.0, cell, _ALL_PERIODIC)
+        assert 0 < zone.size < len(min1)
+        assert provenance.zone_indices == tuple(int(i) for i in zone), (
+            "the early return must record the zone the settings select, "
+            "exactly as a computed result does"
+        )
+        assert provenance.energies is None
 
 
 @pytest.mark.mpi
