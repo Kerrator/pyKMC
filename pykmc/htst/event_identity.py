@@ -1,18 +1,20 @@
 """Conservative whole-event identity under one physical rigid map.
 
-IRA proposes a witness; every vertex and the full producing environment must
-then satisfy that *same* witness. Failure to find one is not an inequivalence
-proof. Callers retain both channels whenever these sufficient checks fail.
+IRA proposes a witness on the moving atom's crop (contracts 7f policy 6); the
+proposed rigid map is extended to every atom and every vertex, and the full
+producing environment must then satisfy that *same* witness. Failure to find
+one is not an inequivalence proof. Callers retain both channels whenever these
+sufficient checks fail.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import cKDTree
 
-from .free_region import common_free_indices, select_free_indices
-from .provenance import RequestSnapshot
+from .free_region import select_free_indices
 from ..point_set_registration import simple_ira
-from ..utils.geometry import minimum_image_displacement
+from ..utils.geometry import minimum_image_displacement, periodic_tree_inputs
 
 STRUCTURAL_ATOL = 1e-10
 """Rounding tolerance for orthogonality/lattice relations and fixed references."""
@@ -121,6 +123,94 @@ def _context_preserved(source, target, permutation, rotation, translation):
     return True
 
 
+def _unwrapped(positions, snapshot):
+    """Canonical copy for a proposal: minimum images around the moving atom."""
+    center = positions[snapshot.center_index]
+    return center + minimum_image_displacement(
+        positions - center, snapshot.cell, snapshot.pbc
+    )
+
+
+def _crop(snapshot, positions, radius):
+    """Rows within ``radius`` of the mover (minimum image); every row when None."""
+    if radius is None:
+        return np.arange(len(snapshot.types))
+    return select_free_indices(
+        positions, snapshot.center_index, radius, snapshot.cell, snapshot.pbc
+    )
+
+
+def _proposals(
+    source_vertices,
+    target_vertices,
+    source,
+    target,
+    *,
+    tolerance,
+    kmax_factor,
+    radius,
+):
+    """Yield rigid maps proposed on the movers' crops, extended to every atom.
+
+    Each vertex of the event is tried in turn: IRA sees only the atoms within
+    ``radius`` of each moving atom in that vertex, its rotation and
+    translation are applied to every source atom of the same vertex and each
+    target atom is paired with the nearest mapped source atom (minimum image
+    on periodic axes). A symmetric crop can propose a map that only works for
+    that vertex, so the caller verifies every proposal on the full event and
+    the next vertex is tried when one fails. ``radius`` None proposes once on
+    the whole initial vertex.
+    """
+    vertices = (
+        zip(source_vertices[:1], target_vertices[:1])
+        if radius is None
+        else zip(source_vertices, target_vertices)
+    )
+    for vertex_source, vertex_target in vertices:
+        unwrapped_source = _unwrapped(vertex_source, source)
+        unwrapped_target = _unwrapped(vertex_target, target)
+        crop_source = _crop(source, vertex_source, radius)
+        crop_target = _crop(target, vertex_target, radius)
+        if len(crop_source) != len(crop_target):
+            continue
+        result = simple_ira(
+            len(crop_target),
+            [target.types[i] for i in crop_target],
+            unwrapped_target[crop_target],
+            len(crop_source),
+            [source.types[i] for i in crop_source],
+            unwrapped_source[crop_source],
+            kmax_factor,
+        )
+        if not result.is_ok():
+            continue
+        witness = result.ok_value()
+        rotation = np.asarray(witness.rotation_matrix, dtype=float)
+        translation = np.asarray(witness.translation_matrix, dtype=float)
+        if (
+            rotation.shape != (3, 3)
+            or translation.shape != (3,)
+            or not np.isfinite(rotation).all()
+            or not np.isfinite(translation).all()
+        ):
+            continue
+        if radius is None:
+            yield rotation, translation, np.asarray(witness.permutation_matrix)
+            continue
+        cell = np.asarray(target.cell, dtype=float)
+        mapped, box = periodic_tree_inputs(
+            unwrapped_source @ rotation.T + translation, cell, target.pbc
+        )
+        queries, _ = periodic_tree_inputs(unwrapped_target, cell, target.pbc)
+        distances, permutation = cKDTree(mapped, boxsize=box).query(queries)
+        permutation = np.asarray(permutation, dtype=int)
+        if np.any(distances > tolerance) or len(np.unique(permutation)) != len(
+            permutation
+        ):
+            continue
+        yield rotation, translation, permutation
+
+
 def _common_map(
     sources,
     targets,
@@ -133,6 +223,7 @@ def _common_map(
     *,
     tolerance,
     kmax_factor,
+    crop_radius=None,
 ):
     source, target = sources[0], targets[0]
     count = len(source.types)
@@ -201,33 +292,29 @@ def _common_map(
     if proves(np.eye(3), translation, np.arange(count)):
         return True
 
-    # Canonicalize copies only to propose a map. All checks above use the
-    # actual full coordinates, one translation, and the actual periodic axes.
-    def unwrapped(positions, snapshot):
-        center = positions[snapshot.center_index]
-        return center + minimum_image_displacement(
-            positions - center, snapshot.cell, snapshot.pbc
+    # Canonicalized crops only propose a map. Every check in ``proves`` uses
+    # the actual full coordinates, one translation, and the periodic axes.
+    return any(
+        proves(rotation, translation, permutation)
+        for rotation, translation, permutation in _proposals(
+            _vertices(source, source_direction),
+            _vertices(target, target_direction),
+            source,
+            target,
+            tolerance=tolerance,
+            kmax_factor=kmax_factor,
+            radius=crop_radius,
         )
-
-    result = simple_ira(
-        count,
-        list(target.types),
-        unwrapped(initial_target, target),
-        count,
-        list(source.types),
-        unwrapped(initial_source, source),
-        kmax_factor,
-    )
-    if not result.is_ok():
-        return False
-    witness = result.ok_value()
-    return proves(
-        witness.rotation_matrix, witness.translation_matrix, witness.permutation_matrix
     )
 
 
-def calculations_equivalent(first, second, *, tolerance, kmax_factor):
-    """Compare two actual directional producers with one common full map."""
+def calculations_equivalent(first, second, *, tolerance, kmax_factor, crop_radius=None):
+    """Compare two actual directional producers with one common full map.
+
+    ``crop_radius`` (the catalogue's ``rcut``) bounds the IRA proposal to the
+    moving atom's neighbourhood; the map is verified on the full coordinates
+    either way. ``None`` proposes on the whole system.
+    """
     first.validate()
     second.validate()
     a, b = first.provenance, second.provenance
@@ -244,53 +331,5 @@ def calculations_equivalent(first, second, *, tolerance, kmax_factor):
         b.zone_indices,
         tolerance=tolerance,
         kmax_factor=kmax_factor,
-    )
-
-
-def request_matches_calculation(
-    request, direction, calculation, *, method, tolerance, kmax_factor
-):
-    """Conservative pre-dispatch duplicate proof, without inventing a producer.
-
-    The incoming source must match both the stored source and the actual
-    prepared geometry. Preprocessing differences can therefore cause a safe
-    non-match; post-dispatch comparison uses each actual producing snapshot.
-    """
-    request.validate()
-    calculation.validate()
-    provenance = calculation.provenance
-    if provenance.method != method:
-        return False
-    snapshot = RequestSnapshot.capture(request)
-    free = tuple(int(i) for i in common_free_indices(request))
-    center_positions = (
-        request.saddle_positions
-        if request.settings.free_region_center == "saddle"
-        else request.min1_positions
-    )
-    zone = (
-        tuple(range(len(request.types)))
-        if request.settings.zone_radius is None or method != "lammps_eskm"
-        else tuple(
-            int(i)
-            for i in select_free_indices(
-                center_positions,
-                request.center_index,
-                request.settings.zone_radius,
-                request.cell,
-                request.pbc,
-            )
-        )
-    )
-    return _common_map(
-        (snapshot, snapshot),
-        (provenance.source, provenance.produced),
-        direction,
-        calculation.direction,
-        free,
-        provenance.free_indices,
-        zone,
-        provenance.zone_indices,
-        tolerance=tolerance,
-        kmax_factor=kmax_factor,
+        crop_radius=crop_radius,
     )

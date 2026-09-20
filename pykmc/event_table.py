@@ -334,16 +334,9 @@ class ReferenceEventTable:
         """
         results_is_valid_events = []
         accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
-        # Check if the event is valid based on is_valid_new_event conditions
+        # Admission is geometric (contracts 7f policy 6): the full physical
+        # source is built once per accepted event, in _resolve_prefactors.
         for ev in events:
-            request = None
-            if (
-                self.uses_prefactors
-                and self.prefactor_service is not None
-                and pbc is not None
-                and ev.types is not None
-            ):
-                request = self._event_request(ev, pbc, event_key=())
             res = self._admit(
                 min1_positions=ev.min1_positions,
                 saddle_positions=ev.saddle_positions,
@@ -353,7 +346,6 @@ class ReferenceEventTable:
                 dE_backward=ev.dE_backward,
                 cell=ev.cell,
                 types=ev.types,
-                request=request,
                 pbc=pbc,
             )
             if res.is_ok():
@@ -637,35 +629,6 @@ class ReferenceEventTable:
             else None
         )
 
-    def _matching_whole_event(self, event, request, direction):
-        """Strengthen a topology/barrier candidate to one full physical map."""
-        from .htst.event_identity import request_matches_calculation
-
-        if request is None:
-            return None
-        subset = self.table[
-            (self.table.event_id == event.event_id)
-            & ((self.table.energy_barrier - float(event.energy_barrier)).abs() <= 0.25)
-        ]
-        for idx_ref in subset.idx_ref:
-            row = subset[subset.idx_ref == idx_ref].iloc[0]
-            if (
-                abs(float(row.energy_barrier) - float(event.energy_barrier))
-                > SELF_REVERSE_BARRIER_TOL
-            ):
-                continue
-            calculation = self._eligible_identity_calculation(int(idx_ref))
-            if calculation is not None and request_matches_calculation(
-                request,
-                direction,
-                calculation,
-                method=self.prefactor_service.method,
-                tolerance=self.config.psr.matching_score_thr,
-                kmax_factor=self.config.ira.kmax_factor,
-            ):
-                return int(idx_ref)
-        return None
-
     def _merge_direction(self, discarded, survivor, reason=None):
         """Redirect every alias while keeping both original producing records."""
         mask = self.table.idx_ref == discarded
@@ -710,6 +673,7 @@ class ReferenceEventTable:
                 second,
                 tolerance=self.config.psr.matching_score_thr,
                 kmax_factor=self.config.ira.kmax_factor,
+                crop_radius=self.config.atomicenvironment.rcut,
             )
         ):
             return False
@@ -744,6 +708,7 @@ class ReferenceEventTable:
                     pre.calculation("backward"),
                     tolerance=self.config.psr.matching_score_thr,
                     kmax_factor=self.config.ira.kmax_factor,
+                    crop_radius=self.config.atomicenvironment.rcut,
                 )
             )
         first = self._eligible_identity_calculation(known_forward)
@@ -788,6 +753,7 @@ class ReferenceEventTable:
                     second,
                     tolerance=self.config.psr.matching_score_thr,
                     kmax_factor=self.config.ira.kmax_factor,
+                    crop_radius=self.config.atomicenvironment.rcut,
                 )
             ):
                 return int(known_id)
@@ -1319,7 +1285,8 @@ class ReferenceEventTable:
         admitted and linked to that row, as in constant mode. Whether a
         resolved pair may be collapsed is decided after resolution by the
         whole-event proof (policy 4), never here. ``request`` is accepted for
-        signature compatibility; admission does not read the full source.
+        signature compatibility and ignored: admission never reads the full
+        source, which is built once per accepted event for the worker.
         """
         duplicate = self.find_matching_event(dfevent_forward)
         if duplicate is not None:

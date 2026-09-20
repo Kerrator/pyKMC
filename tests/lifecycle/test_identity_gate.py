@@ -30,7 +30,7 @@ from pykmc.event_table import (
 from pykmc.htst.free_region import common_free_indices
 from pykmc.rate_constant import create_rate_constant, rate_from_prefactor
 from pykmc.rate_constant.prefactors import PrefactorService
-from pykmc.result import EventSearchOutput
+from pykmc.result import ErrorType, EventSearchOutput
 from tests.lifecycle.conftest import (
     FakeManager,
     accepted,
@@ -829,16 +829,24 @@ class TestConstantModeFixedSequence:
     def test_htst_same_sequence_has_the_same_row_layout(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """HTST admits exactly the constant-mode sequence, one row per unproven candidate."""
-        # contracts 7f policy 6: same geometric gate, self-linked fallback rows
+        """HTST admits the constant-mode sequence; unproven candidates are one row.
+
+        Admission is the constant-mode geometric gate (contracts 7f policy 6):
+        the same five events are dispatched. The hop at atom 5 is a lattice
+        translation of the hop at atom 0 that the saddle-crop IRA does not
+        match, so both are admitted; after resolution the whole-event proof
+        maps the new pair onto rows 4/5 with agreeing spectra and merges it
+        (policy 4), so that search is reported as not new.
+        """
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(4.0e12)
         )
         results = table.add_events(
             self._events(system_single_type_fcc), pbc=system_single_type_fcc.pbc
         )
-        assert [r.is_ok() for r in results] == [True, False, True, True, True, True]
-        assert _links(table) == [(0, 0), (2, 2), (4, 5), (5, 4), (6, 7), (7, 6), (8, 8)]
+        assert [r.is_ok() for r in results] == [True, False, True, True, False, True]
+        assert results[4].err_value().type == ErrorType.EVENT_NOT_NEW
+        assert _links(table) == [(0, 0), (2, 2), (4, 5), (5, 4), (8, 8)]
         assert len(fake.prefactor_requests) == 5
         assert [k for k in (r.event_key for r in fake.prefactor_requests)] == [
             (0, 1),
@@ -847,7 +855,7 @@ class TestConstantModeFixedSequence:
             (6, 7),
             (8, 9),
         ]
-        assert list(table.table.energy_barrier) == [0.5, 1.0, 2.0, 1.5, 2.0, 1.5, 0.5]
+        assert list(table.table.energy_barrier) == [0.5, 1.0, 2.0, 1.5, 0.5]
         # Same-topology candidates keep the forward estimate, note the 20 % gap
         # and archive the backward value under the discarded id.
         for idx in (0, 2, 8):
@@ -857,11 +865,14 @@ class TestConstantModeFixedSequence:
                 "self-reverse unproven: backward nu0 = 4.0000e+12 Hz"
             )
             assert archived_frequency(table, idx + 1, 4.0e12)
-        for idx in (4, 6):
-            assert table.table[table.table["idx_ref"] == idx].iloc[0]["nu0"] == 5.0e12
-        for idx in (5, 7):
-            row = table.table[table.table["idx_ref"] == idx].iloc[0]
-            assert row["nu0"] == 4.0e12 and row["nu0_reason"] == ""
+        assert table.table[table.table["idx_ref"] == 4].iloc[0]["nu0"] == 5.0e12
+        backward = table.table[table.table["idx_ref"] == 5].iloc[0]
+        assert backward["nu0"] == 4.0e12 and backward["nu0_reason"] == ""
+        for merged, survivor in ((6, 4), (7, 5)):
+            assert any(
+                entry["reason"] == f"whole-event equivalent to reference {survivor}"
+                for entry in table.prefactor_archive.history[merged]
+            )
         assert table.max_idx_ref() == 10
 
 
