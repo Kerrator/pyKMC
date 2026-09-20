@@ -573,11 +573,10 @@ class ResolvedConstraints:
                 raise ValueError("constraint cell/PBC differs from event context")
         else:
             matrix, axes = self.cell, self.pbc
-        fixed = dict(zip(self.fixed_ids, self.fixed_positions))
-        rows = self.local_user_fixed_indices if user_only else self.local_fixed_indices
-        if not rows:
+        _, rows, references = self._local_rows(user_only)
+        if rows.size == 0:
             return
-        delta = pos[list(rows)] - [fixed[self.atom_ids[i]] for i in rows]
+        delta = pos[rows] - references
         if matrix is not None:
             from ase.geometry import find_mic
 
@@ -596,10 +595,9 @@ class ResolvedConstraints:
         protect the whole transport union.
         """
         pos = self._positions(positions).copy()
-        fixed = dict(zip(self.fixed_ids, self.fixed_positions))
-        rows = self.local_user_fixed_indices if user_only else self.local_fixed_indices
-        for i in rows:
-            pos[i] = fixed[self.atom_ids[i]]
+        _, rows, references = self._local_rows(user_only)
+        if rows.size:
+            pos[rows] = references
         return pos
 
     def user_view(self) -> ResolvedConstraints:
@@ -629,6 +627,48 @@ class ResolvedConstraints:
         # fixed (a hand-narrowed payload) is simply not a constraint.
         return frozenset(self.user_fixed_ids).intersection(self.fixed_ids)
 
+    # -- derived row caches -------------------------------------------------
+    # The instance is frozen, so anything derived from its fields is memoised
+    # once per instance (a crop or replace() is a new instance with its own
+    # cache). Membership is a frozenset and the row scan is a single O(N) pass;
+    # the per-row tuple scan it replaces was O(N x F), quadratic under an
+    # active-volume mask where F ~ N (contracts 7f policy 5).
+
+    def _cache(self) -> dict:
+        cache = self.__dict__.get("_derived")
+        if cache is None:
+            cache = {}
+            object.__setattr__(self, "_derived", cache)
+        return cache
+
+    def __getstate__(self) -> dict:
+        # Derived caches are rebuilt on demand; keep transport payloads lean.
+        return {k: v for k, v in self.__dict__.items() if k != "_derived"}
+
+    def _local_rows(
+        self, user_only: bool
+    ) -> tuple[tuple[int, ...], np.ndarray, np.ndarray]:
+        """Local rows of the (user-)fixed atoms, as a tuple, an index array and
+        their ``(K, 3)`` reference coordinates in that row order."""
+        key = "user" if user_only else "fixed"
+        cache = self._cache()
+        entry = cache.get(key)
+        if entry is None:
+            members = self._user_ids() if user_only else frozenset(self.fixed_ids)
+            local = tuple(
+                i for i, atom_id in enumerate(self.atom_ids) if atom_id in members
+            )
+            references = dict(zip(self.fixed_ids, self.fixed_positions))
+            entry = (
+                local,
+                np.asarray(local, dtype=np.intp),
+                np.array(
+                    [references[self.atom_ids[i]] for i in local], dtype=float
+                ).reshape(-1, 3),
+            )
+            cache[key] = entry
+        return entry
+
     def require_preserves(
         self, required: ResolvedConstraints, *, cell: Any, pbc: Any
     ) -> None:
@@ -652,15 +692,13 @@ class ResolvedConstraints:
 
     @property
     def local_fixed_indices(self) -> tuple[int, ...]:
-        return tuple(
-            i for i, atom_id in enumerate(self.atom_ids) if atom_id in self.fixed_ids
-        )
+        """Local rows of every fixed atom (user and AV shell); O(N), cached."""
+        return self._local_rows(False)[0]
 
     @property
     def local_user_fixed_indices(self) -> tuple[int, ...]:
         """Local rows of the user-declared fixed atoms (the AV shell excluded)."""
-        user = self._user_ids()
-        return tuple(i for i, atom_id in enumerate(self.atom_ids) if atom_id in user)
+        return self._local_rows(True)[0]
 
     @property
     def constraint_id(self) -> str:

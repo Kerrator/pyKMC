@@ -310,7 +310,17 @@ def partn_search_AV(
     type,
     constraints=None,
     user_constraints=None,
+    *,
+    validated: bool = False,
 ) -> [np.array, int]:
+    """Crop the engine to the active volume around ``central_atom_idx``.
+
+    ``validated`` declares that the caller (the engine's public wrapper, or
+    ``partn_refine_AV``) already ran ``validate_event_constraints`` on this
+    same ``constraints`` payload against this source, cell and PBC; the
+    helper then trusts it instead of repeating the O(N) validation. A direct
+    call without a validated payload always validates.
+    """
     # Guard the full-system positions before the crop clears anything: a NaN
     # raises here on every rank, with the engine still intact.
     positions = _check_positions(
@@ -321,17 +331,18 @@ def partn_search_AV(
     masses = getattr(full, "masses", None)
     int_types, map_type = map_types(type, species=species, masses=masses)
     pbc = _engine_pbc(engine)
-    constraints = validate_event_constraints(
-        config,
-        positions,
-        type,
-        cell,
-        pbc,
-        central_atom_idx,
-        constraints,
-        user_constraints=user_constraints,
-        active_volume=True,
-    )
+    if constraints is None or not validated:
+        constraints = validate_event_constraints(
+            config,
+            positions,
+            type,
+            cell,
+            pbc,
+            central_atom_idx,
+            constraints,
+            user_constraints=user_constraints,
+            active_volume=True,
+        )
     av_positions, av_idx, _ = define_AV(
         config, central_atom_idx, positions, cell, pbc=pbc
     )
@@ -364,6 +375,8 @@ def partn_refine_AV(
     saddle_positions,
     constraints=None,
     user_constraints=None,
+    *,
+    validated: bool = False,
 ) -> [float, np.array, int]:
     """
     Receive the system with the central atom index, define an active volume around this atom, then update the positions
@@ -378,7 +391,8 @@ def partn_refine_AV(
     the caller put it, as the base did: there is no distance check against
     ``ract`` (an in-crop shell atom relaxed slightly past ``ract`` is a
     legitimate saddle geometry). Non-finite ``saddle_positions`` raise
-    ``ValueError`` before any LAMMPS command.
+    ``ValueError`` before any LAMMPS command. ``validated`` has the same
+    meaning as in ``partn_search_AV``.
     """
     saddle_idx = np.array(_indices(saddle_idx, upper=len(positions)), dtype=int)
     saddle_positions = _check_positions(
@@ -391,17 +405,18 @@ def partn_refine_AV(
             "(one row per saddle_idx entry)"
         )
 
-    constraints = validate_event_constraints(
-        config,
-        positions,
-        type,
-        cell,
-        _engine_pbc(engine),
-        central_atom_idx,
-        constraints,
-        user_constraints=user_constraints,
-        active_volume=True,
-    )
+    if constraints is None or not validated:
+        constraints = validate_event_constraints(
+            config,
+            positions,
+            type,
+            cell,
+            _engine_pbc(engine),
+            central_atom_idx,
+            constraints,
+            user_constraints=user_constraints,
+            active_volume=True,
+        )
     # Only user-declared fixed atoms are a coordinate contract: validate them at
     # the PSR tolerance and re-clamp their rows. The AV shell is a crop
     # restriction held by ``f_buffer``/``f_core``, so a shell atom is placed
@@ -423,6 +438,7 @@ def partn_refine_AV(
         type,
         constraints=constraints,
         user_constraints=user_constraints,
+        validated=True,
     )
     av_positions = positions[atom_map]
 

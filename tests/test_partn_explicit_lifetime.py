@@ -185,6 +185,7 @@ def setup(monkeypatch, outcome, active_volume=True):
         *,
         constraints=None,
         user_constraints=None,
+        validated=False,
     ):
         assert center == 0
         np.testing.assert_array_equal(positions, POSITIONS)
@@ -207,6 +208,7 @@ def setup(monkeypatch, outcome, active_volume=True):
         *,
         constraints=None,
         user_constraints=None,
+        validated=False,
     ):
         mapping, central = prepare(
             engine,

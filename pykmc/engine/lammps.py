@@ -1634,6 +1634,7 @@ class LammpsEngine(Engine):
                         types,
                         constraints=constraints,
                         user_constraints=user_constraints,
+                        validated=True,
                     )
                 else:
                     atom_map = None
@@ -1897,6 +1898,7 @@ class LammpsEngine(Engine):
                         saddle_positions,
                         constraints=constraints,
                         user_constraints=user_constraints,
+                        validated=True,
                     )
                 except ActiveVolumeSaddleError as exc:
                     # A saddle atom missing from the crop: report, do not crash the
