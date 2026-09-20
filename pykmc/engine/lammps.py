@@ -1580,6 +1580,13 @@ class LammpsEngine(Engine):
         )
 
     def _validate_search_result(self, result, constraints):
+        # Only the user-declared fixed atoms are a coordinate contract for a
+        # returned event; the AV shell is a crop restriction held by setforce
+        # (a refined saddle keeps a placed shell overlay). The output carries
+        # that user set, so an HTST request built from it keeps the
+        # free_radius Vineyard region and excludes user-frozen atoms only
+        # (contracts 7f policy 5). The AV union stays engine-side transport.
+        user = constraints.user_view()
         # All ranks take the same failure path; output arrays live on rank zero.
         failure = None
         if self._is_rank0 and result is not None and result.is_ok():
@@ -1588,10 +1595,10 @@ class LammpsEngine(Engine):
                 for field in ("min1_positions", "saddle_positions", "min2_positions"):
                     positions = getattr(output, field, None)
                     if positions is not None:
-                        constraints.validate_positions(positions)
+                        user.validate_positions(positions)
             except ValueError as exc:
                 failure = str(exc)
-            output.constraints = constraints
+            output.constraints = user
         if self.comm is not None:
             failure = self.comm.bcast(failure, root=0)
         if failure is not None:

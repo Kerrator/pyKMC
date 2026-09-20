@@ -199,7 +199,13 @@ search: overlay validation ignores it, a catalogue saddle coordinate for a shell
 atom is placed as given, and endpoint minimisations re-clamp it to the source
 coordinate before dispatch. `ResolvedConstraints.user_fixed_ids` records the
 user subset; `validate_positions(..., user_only=True, tolerance=...)` and
-`protect_positions(..., user_only=True)` act on that subset only. Returned search vertices retain their
+`protect_positions(..., user_only=True)` act on that subset only, and
+`user_view()` returns the user set without the AV shell or the AV centre
+context. The engine validates a returned search/refinement geometry against
+that user view and attaches it to the output, so the HTST/RPA request built
+from an output carries the user constraints only: the Vineyard free region is
+`free_radius` around the mover minus the user-frozen atoms, never clipped to
+the `rmov` sphere. Returned search vertices retain their
 original full-coordinate frame for prefactor evaluation, even when the event
 catalogue stores a recentered representation. Basin state copies preserve these
 source identities.
