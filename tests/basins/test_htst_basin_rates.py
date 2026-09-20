@@ -22,6 +22,7 @@ from pykmc.event_table import ActiveEventTable, ReferenceEventTable
 from pykmc.rate_constant import compute_rate_Eyring, rate_from_prefactor
 from pykmc.result import EventRefinementOutput
 from tests.lifecycle.conftest import DATA_INPUT, accepted, rejected
+from tests.lifecycle.protocol_producers import protocol_patch
 
 
 def _config(style: str, k0: float = 1.0, T: float = 300.0) -> Config:
@@ -34,8 +35,13 @@ def _config(style: str, k0: float = 1.0, T: float = 300.0) -> Config:
 def _reference(
     config: Config, system: Any, rows: dict[int, Any]
 ) -> ReferenceEventTable:
-    """Build a reference table with one trivial row per id, patched with ``rows[id]``."""
+    """Build a reference table with one trivial row per id, patched with ``rows[id]``.
+
+    Accepted estimates are written with their producing calculation (built
+    from the full fixture system by ``protocol_patch``), as production does.
+    """
     table = ReferenceEventTable(config)
+    table._protocol_source = system
     pos = system.positions
     for idx in rows:
         fwd, _ = table._build_event_series(
@@ -53,7 +59,7 @@ def _reference(
         table.table = pd.concat([table.table, fwd.to_frame().T], ignore_index=True)
     if table.uses_prefactors:
         for idx, estimate in rows.items():
-            table._patch_row(idx, estimate)
+            protocol_patch(table, idx, estimate)
     return table
 
 

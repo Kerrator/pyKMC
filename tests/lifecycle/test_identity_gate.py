@@ -372,6 +372,33 @@ class TestSelfReverseRecording:
         with pytest.raises(ValueError, match="skipped"):
             table._patch_row(0, skipped())
 
+    def test_accepted_estimate_without_producer_is_demoted_with_a_warning(
+        self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
+    ) -> None:
+        """An accepted value written without its calculation is legacy, loudly.
+
+        Production always passes ``calculation=``; a caller that does not
+        must not silently turn an accepted frequency into a k0 row.
+        """
+        table = ReferenceEventTable(htst_config)
+        fwd, _ = _series(table, system_single_type_fcc, 0, 0.5, 0.5)
+        _insert(table, fwd, idx_ref=4, idx_backward=4)
+        table._patch_row(4, accepted(5.0e12))
+        row = table.table.iloc[0]
+        assert row["nu0_status"] == "legacy" and np.isnan(row["nu0"])
+        assert row["k_prefactor"] == htst_config.rateconstant.k0
+        assert "missing producing calculation" in row["nu0_reason"]
+        assert archived_frequency(table, 4, 5.0e12)
+        warnings = [r for r in htst_log_records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "reference event 4" in message
+        assert "5.0000e+12" in message and "producing calculation" in message
+        assert "legacy" in message
+        # A rejected value carries no estimate to lose: no warning.
+        table._patch_row(4, rejected("w"))
+        assert sum(r.levelno == logging.WARNING for r in htst_log_records) == 1
+
     def test_htst_log_lines_carry_n_free_and_batch_time(
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:

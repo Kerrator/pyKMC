@@ -854,6 +854,12 @@ class ReferenceEventTable:
             If no row carries ``idx_ref`` or if the estimate was skipped
             (``status == "skipped"`` is never stored: it is no estimate).
 
+        Notes
+        -----
+        An accepted estimate written without ``calculation`` has no producer
+        and is demoted to ``legacy``/``k0`` with a warning; production callers
+        always pass the producing calculation.
+
         """
         if estimate.skipped:
             raise ValueError(
@@ -885,6 +891,8 @@ class ReferenceEventTable:
         if calculation is None:
             archive.references[int(idx_ref)] = None
             if estimate.ok:
+                # Never a production path (every caller passes calculation=);
+                # a value without its producer is not selectable, and says so.
                 archive.retain(
                     idx_ref,
                     self.table.loc[mask].iloc[0],
@@ -892,6 +900,13 @@ class ReferenceEventTable:
                 )
                 self._set_estimate(
                     idx_ref, NU0_LEGACY, None, "legacy: missing producing calculation"
+                )
+                logger.warning(
+                    "[htst] reference event %d: accepted nu0 = %.4e Hz written "
+                    "without its producing calculation; demoted to 'legacy' with "
+                    "the k0 fallback (the value stays in the archive history)",
+                    idx_ref,
+                    float(estimate.nu0_hz),
                 )
         else:
             archive.record(idx_ref, self.table.loc[mask].iloc[0], calculation)
