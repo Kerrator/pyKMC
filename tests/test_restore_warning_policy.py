@@ -8,7 +8,7 @@ import warnings
 
 import pytest
 
-from tests.engine.test_restore_retry_physics import (
+from tests.test_restore_retry_physics import (
     CELL,
     POSITIONS,
     Harness,

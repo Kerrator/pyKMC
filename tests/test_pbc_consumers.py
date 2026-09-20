@@ -278,6 +278,7 @@ def test_refinement_final_context_preserves_nonperiodic_coordinate(monkeypatch):
     instance.system = obj
     instance.neighbors_list = SimpleNamespace(get_neighbors=lambda *_: np.arange(1))
     instance._carry_prefactors = False
+    instance.global_constraints = None  # constructor attribute the double bypasses
     context = {}
     futures = instance.refine_single(0, ref, 0.0, context, e_thr=0.0)
     assert len(futures) == 1
@@ -325,6 +326,9 @@ def test_reference_recentering_retains_nonperiodic_event_displacement():
 
     search = EventSearch.__new__(EventSearch)
     search.system = system(np.array([[1.0, 1.0, 1.0]]), MIXED)
+    # Constructor attribute the double bypasses; constant style keeps the
+    # catalogue-centred representation this test pins.
+    search.config = SimpleNamespace(rateconstant=SimpleNamespace(style="artn"))
     event = SimpleNamespace(
         move_atom_index=0,
         min1_positions=np.array([[1.0, 1.0, 1.0]]),
