@@ -367,15 +367,23 @@ class ResolvedConstraints:
         rmov: float | None = None,
     ) -> ResolvedConstraints:
         pos = np.asarray(positions, dtype=float)
-        if (
-            pos.ndim != 2
-            or pos.shape[1] != 3
-            or len(pos) == 0
-            or not np.all(np.isfinite(pos))
-            or len(types) != len(pos)
-        ):
+        if pos.ndim != 2 or pos.shape[1] != 3 or len(pos) == 0:
             raise ValueError(
-                "constraint source requires matching finite (N,3) positions and types"
+                "constraint source requires nonempty (N,3) positions, got shape "
+                f"{pos.shape}"
+            )
+        if not np.all(np.isfinite(pos)):
+            # Cause-specific: a NaN/inf coordinate must be named as such before
+            # any native scatter (a per-rank "Non-numeric atom coords" error
+            # would desynchronise a multi-rank engine).
+            n_bad = int(np.count_nonzero(~np.isfinite(pos)))
+            raise ValueError(
+                f"constraint source positions contain {n_bad} non-finite value(s) "
+                "(NaN/inf)"
+            )
+        if len(types) != len(pos):
+            raise ValueError(
+                f"constraint source has {len(types)} types for {len(pos)} positions"
             )
         ids = _indices(range(len(pos)) if atom_ids is None else atom_ids)
         if len(ids) != len(pos):
