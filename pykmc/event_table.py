@@ -299,6 +299,10 @@ class ReferenceEventTable:
         self.prefactor_service = prefactor_service
         self.metadata: dict[str, Any] = {}
         self._fresh_calculations: set[tuple[int, str]] = set()
+        # idx_ref -> cheap validation key (see _ensure_current_estimate); a hit
+        # means the row was validated under this exact service, physics,
+        # producing record, row content and rate policy, so selection skips
+        # the full-source rebuild and hashing. Row writers pop their entry.
         self._resolved_contexts: dict[int, tuple] = {}
         self._recomputed: dict[str, Any] = {}
         self.prefactor_archive = None
@@ -927,8 +931,15 @@ class ReferenceEventTable:
         self.table.loc[mask, "k"] = rate.rate
 
     def _ensure_current_estimate(self, idx_ref: int) -> None:
-        """Validate producing context before reference inheritance or selection."""
-        from .htst.catalogue import row_digest
+        """Validate producing context before reference inheritance or selection.
+
+        The validation is memoised per row on a cheap key (service identity,
+        method, current physical descriptor, producing calculation id, row
+        digest, ``T``, ``k0``); a hit returns before the full source is
+        rebuilt or hashed, so repeated selection of an unchanged row costs one
+        crop digest. Any change of service, physics, producing record, row
+        content or rate policy misses and revalidates.
+        """
         from .htst.provenance import RequestSnapshot
         from .htst.request import HTSTRequestError
         from .physics import _digest
@@ -954,6 +965,22 @@ class ReferenceEventTable:
                 idx_ref, NU0_STALE, None, "stale: missing current physical context"
             )
             return
+        # Cheap memo first: calculation_for already bound the row digest to the
+        # producing record, so the key needs no request rebuild and no
+        # full-geometry hash. Every component is a stored string or scalar.
+        link = archive.references[int(idx_ref)]
+        descriptor = service.current_descriptor
+        signature = (
+            id(service),
+            service.method,
+            None if descriptor is None else descriptor.descriptor_id,
+            link.calculation_id,
+            link.row_digest,
+            float(self.config.rateconstant.T),
+            float(self.config.rateconstant.k0),
+        )
+        if self._resolved_contexts.get(int(idx_ref)) == signature:
+            return
         try:
             request = service.request_from_snapshot(
                 calculation.provenance.source, event_key=("reload", int(idx_ref))
@@ -962,17 +989,6 @@ class ReferenceEventTable:
             reason = f"stale: cannot rebuild complete current source: {exc}"
             archive.retain(idx_ref, row, reason)
             self._set_estimate(idx_ref, NU0_STALE, None, reason)
-            return
-        signature = (
-            id(service),
-            RequestSnapshot.capture(request).snapshot_id,
-            service.method,
-            calculation.calculation_id,
-            row_digest(row),
-            float(self.config.rateconstant.T),
-            float(self.config.rateconstant.k0),
-        )
-        if self._resolved_contexts.get(int(idx_ref)) == signature:
             return
         comparison = self.compare_physics(calculation.provenance.produced.descriptor)
         registered = archive.descriptors.get(calculation.descriptor_id)
