@@ -598,6 +598,41 @@ class TestReverseAlreadyCatalogued:
         )
         return table, fake, fwd, bwd, event, request
 
+    def test_reverse_already_catalogued_with_skipped_backward_claims_no_archive(
+        self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
+    ) -> None:
+        """A skipped backward archives nothing, so the note must not say it did."""
+        table, fake = _table_with_service(htst_config, accepted(5.0e12), skipped())
+        shift = np.array([1.2, 0.3, 0.0])
+        _, bwd = _series(table, system_single_type_fcc, 0, 2.0, 1.5, shift)
+        _insert(table, bwd, idx_ref=7, idx_backward=7)
+        table.add_events(
+            [_hop_event(system_single_type_fcc, 0, 2.0, 1.5, shift)],
+            pbc=system_single_type_fcc.pbc,
+        )
+        assert _links(table) == [(7, 7), (8, 7)]
+        assert [r.event_key for r in fake.prefactor_requests] == [(8, None)]
+        row = table.table[table.table["idx_ref"] == 8].iloc[0]
+        assert row["nu0"] == 5.0e12 and row["nu0_reason"] == ""
+        # Nothing was archived for this search's (skipped) backward direction.
+        assert not any(
+            "reverse already catalogued" in str(entry.get("reason", ""))
+            for entry in table.prefactor_archive.history.get(8, ())
+        )
+        notes = [
+            r.getMessage()
+            for r in htst_log_records
+            if r.getMessage().startswith("[htst] reference event 8")
+        ]
+        linked = [n for n in notes if "reverse already catalogued as event 7" in n]
+        assert len(linked) == 1, notes
+        assert "archived, not selectable" not in linked[0], linked[0]
+        assert "nothing archived" in linked[0], linked[0]
+        assert "not requested" in linked[0], linked[0]
+        match = _BATCH_SUFFIX.search(linked[0])
+        assert match is not None, linked[0]
+        assert not [r for r in htst_log_records if r.levelno >= logging.WARNING]
+
     def test_htst_links_to_the_matched_logical_id(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:

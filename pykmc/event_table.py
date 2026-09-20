@@ -526,22 +526,36 @@ class ReferenceEventTable:
                         self.table["idx_ref"] == fwd_id, "idx_backward"
                     ].iloc[0]
                 )
-                self._archive_discarded_backward(fwd_id, reverse_id, _ev, pre)
-                logger.info(
-                    "[htst] reference event %d: reverse already catalogued as "
-                    "event %d, backward estimate of this search archived, not "
-                    "selectable (n_free %d, batch %.3f s)",
-                    fwd_id,
-                    reverse_id,
-                    pre.n_free,
-                    wall,
-                )
+                if self._archive_discarded_backward(fwd_id, reverse_id, _ev, pre):
+                    logger.info(
+                        "[htst] reference event %d: reverse already catalogued as "
+                        "event %d, backward estimate of this search archived, not "
+                        "selectable (n_free %d, batch %.3f s)",
+                        fwd_id,
+                        reverse_id,
+                        pre.n_free,
+                        wall,
+                    )
+                else:
+                    logger.info(
+                        "[htst] reference event %d: reverse already catalogued as "
+                        "event %d, backward estimate not requested for this "
+                        "search, nothing archived (n_free %d, batch %.3f s)",
+                        fwd_id,
+                        reverse_id,
+                        pre.n_free,
+                        wall,
+                    )
 
-    def _archive_discarded_backward(self, fwd_id, reverse_id, ev, pre) -> None:
-        """Keep a computed backward estimate that no selectable row carries."""
+    def _archive_discarded_backward(self, fwd_id, reverse_id, ev, pre) -> bool:
+        """Keep a computed backward estimate that no selectable row carries.
+
+        Returns ``True`` when an estimate was archived, ``False`` for a skipped
+        backward direction (nothing to keep).
+        """
         backward = pre.backward
         if backward.skipped:
-            return
+            return False
         nu0_hz = float(backward.nu0_hz) if backward.ok else None
         rate = self.rate_constant.compute_rate(float(ev.dE_backward), nu0_hz)
         self.prefactor_archive.retain(
@@ -558,6 +572,7 @@ class ReferenceEventTable:
             f"backward estimate of this search discarded: reverse already "
             f"catalogued as reference {reverse_id}",
         )
+        return True
 
     @staticmethod
     def _log_direction(
