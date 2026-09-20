@@ -30,6 +30,19 @@ forward barrier. Equality with the threshold is outside the basin. Missing or
 ambiguous logical links raise an error naming the affected IDs; self-links and
 directional aliases are supported. Exploration uses the same linked reverse
 for its classification and recorded backward barrier and rate.
+
+A self-link is authoritative only for a genuine self-reverse, whose initial
+and final topologies coincide (`event_id == id_final`). The constant-mode
+writer also self-links a forward whose reverse was already catalogued; that
+placeholder is resolved by topology (the catalogued rows whose `event_id` is
+the forward's `id_final`, lowest barrier when several exist), never by
+comparing the forward barrier with itself. A placeholder with no such row
+raises.
+
+These link errors are catalogue-integrity errors, not basin failures: they
+propagate out of the KMC step instead of taking the `Err` fallback described
+below, because a catalogue that cannot resolve its own reverse links must not
+silently fall back to executing the selected event.
 It explores the basin, computes the exit time, and determines the exit state.
 Once finished, the selected event in the KMC loop is replaced with the basin event.
 

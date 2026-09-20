@@ -13,6 +13,15 @@ def resolve_linked_pair(
     Logical IDs are independent of DataFrame labels and copied row metadata.
     A reverse may be self-linked or shared by aliases; its link need not point
     back to the selected forward.
+
+    A self-link is authoritative only for a genuine self-reverse, whose
+    initial and final topologies coincide (``event_id == id_final``). The
+    constant-mode writer also self-links a forward whose reverse was already
+    catalogued (``ReferenceEventTable.add`` with ``reverse_idx_ref=None``);
+    that placeholder carries no reverse barrier of its own, so the physical
+    reverse is resolved by topology: the catalogued rows whose ``event_id`` is
+    the forward's ``id_final``, the lowest barrier when several exist (the
+    original detector rule). A placeholder with no such row raises.
     """
     forward_id = selected_event["num_reference_event" if is_refined else "idx_ref"]
     forward_rows = reference_table[reference_table["idx_ref"] == forward_id]
@@ -23,6 +32,16 @@ def resolve_linked_pair(
         )
     forward = forward_rows.iloc[0]
     reverse_id = forward["idx_backward"]
+    if reverse_id == forward["idx_ref"] and forward["event_id"] != forward["id_final"]:
+        candidates = reference_table[reference_table["event_id"] == forward["id_final"]]
+        if len(candidates) == 0:
+            raise ValueError(
+                f"Basin event {forward_id}: its self-link is a placeholder for an "
+                f"already catalogued reverse, but no row has the reverse "
+                f"topology {forward['id_final']!r}."
+            )
+        lowest = candidates["energy_barrier"].astype(float).idxmin()
+        return forward, candidates.loc[lowest]
     reverse_rows = reference_table[reference_table["idx_ref"] == reverse_id]
     if len(reverse_rows) != 1:
         raise ValueError(
