@@ -2563,8 +2563,26 @@ class ActiveEventTable:
         from .htst.site_state import row_signature, source_index_map
         from dataclasses import replace
 
-        # One identity -> row map per validation pass, shared by every row.
-        index_map = source_index_map(system)
+        # One identity -> row map per validation pass, shared by every row. A
+        # source without stable identities cannot validate any recycled row:
+        # the documented conservative fallback drops them (re-refined next
+        # step) with one WARNING naming the cause, never an abort of the step.
+        try:
+            index_map = source_index_map(system)
+        except (TypeError, ValueError) as exc:
+            index_map = None
+            bound = [
+                label for label in self.table.index if int(label) in self._site_states
+            ]
+            logger.warning(
+                "[htst] active table: source identities unavailable (%s: %s); "
+                "dropping %d recycled row(s) with a site context instead of "
+                "validating them, their (atom, reference) pairs are re-refined "
+                "next step",
+                type(exc).__name__,
+                exc,
+                len(bound),
+            )
         dropped = []
         for label, row in self.table.iterrows():
             state = self._site_states.get(int(label))
@@ -2576,6 +2594,9 @@ class ActiveEventTable:
                     and row["nu0_source"] != SOURCE_SITE
                 ):
                     continue
+                dropped.append(label)
+                continue
+            if index_map is None:
                 dropped.append(label)
                 continue
             try:

@@ -178,3 +178,29 @@ def test_validate_recycled_generic_invalidation_stays_quiet(caplog):
     with caplog.at_level(logging.INFO, logger="log"):
         assert active.validate_recycled(system, neighbors) == 1
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_validate_recycled_without_source_identities_warns_and_drops(caplog):
+    """A source without stable identities cannot validate recycled rows.
+
+    ``source_index_map`` needs ``system.index``; when it is unavailable the
+    conservative fallback applies (drop the recycled rows, re-refine next
+    step) with one WARNING naming the cause, never a TypeError out of the KMC
+    step.
+    """
+    cfg, system, manager, svc = h.setup()
+    active, neighbors, summary = deps.seed_site(cfg, system, svc)
+    assert summary["ok"] == 1 and len(active.table) == 1
+    before = system.positions.copy()
+    system.index = None
+    with caplog.at_level(logging.WARNING, logger="log"):
+        dropped = active.validate_recycled(system, neighbors, allow_pending=False)
+    assert dropped == 1
+    deps.assert_dropped(active)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, "one WARNING for the whole pass, not one per row"
+    text = warnings[0].getMessage()
+    assert "identities" in text and "dropp" in text
+    assert "NoneType" in text or "index" in text, "the cause must be named"
+    assert len(manager.requests) == 1
+    np.testing.assert_array_equal(system.positions, before)
