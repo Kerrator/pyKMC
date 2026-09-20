@@ -217,3 +217,56 @@ def test_zone_radius_none_or_larger_is_accepted() -> None:
         RateConstantConfig(style="htst", free_radius=6.0, zone_radius=10.0).zone_radius
         == 10.0
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-section: the active volume must cover the local atomic environment
+# ---------------------------------------------------------------------------
+
+
+def _ini_dict(**sections: dict) -> dict:
+    """The INI-derived dict ``Config.from_ini_file`` hands to pydantic, with overrides."""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    parser.read(INPUT_IN)
+    data = {
+        section.lower(): dict(parser.items(section)) for section in parser.sections()
+    }
+    for name, values in sections.items():
+        data.setdefault(name, {}).update(values)
+    return data
+
+
+def test_active_volume_rmov_below_rcut_is_rejected() -> None:
+    """Under active_volume the movable radius must reach the rcut environment.
+
+    contracts 7f policy 5: a catalogue event overlays the whole ``rcut``
+    environment; with ``rmov < rcut`` part of it lies in the frozen AV shell.
+    """
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": "4.0", "ract": "6.0"}
+    )
+    assert float(data["atomicenvironment"]["rcut"]) == 6.5
+    with pytest.raises(ValidationError, match=r"rmov.*4\.0.*rcut.*6\.5"):
+        Config.model_validate(data)
+
+
+@pytest.mark.parametrize("rmov", ["6.5", "9.0"])
+def test_active_volume_rmov_at_least_rcut_is_accepted(rmov: str) -> None:
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": rmov, "ract": "16.0"}
+    )
+    cfg = Config.model_validate(data)
+    assert cfg.control.active_volume is True
+    assert cfg.activevolume.rmov == float(rmov)
+
+
+def test_rmov_below_rcut_is_allowed_when_active_volume_is_off() -> None:
+    data = _ini_dict(
+        control={"active_volume": "False"}, activevolume={"rmov": "4.0", "ract": "6.0"}
+    )
+    cfg = Config.model_validate(data)
+    assert cfg.control.active_volume is False
+    assert cfg.activevolume.rmov == 4.0

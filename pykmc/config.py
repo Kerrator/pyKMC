@@ -1160,6 +1160,31 @@ class Config(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_active_volume_covers_environment(self) -> "Config":
+        """Require ``activevolume.rmov >= atomicenvironment.rcut`` under active volume.
+
+        A catalogue event overlays the whole ``rcut`` environment of its central
+        atom; with ``rmov < rcut`` part of that environment lies in the frozen
+        active-volume shell, so refinements would place atoms that ``fix
+        setforce`` then holds (contracts 7f policy 5). Mirrors the
+        ``zone_radius > free_radius`` check of the rate-constant section.
+        """
+        if not self.control.active_volume or self.activevolume is None:
+            return self
+        rcut = self.atomicenvironment.rcut
+        if rcut is not None and self.activevolume.rmov < rcut:
+            raise ValueError(
+                "activevolume.rmov ({}) must be >= atomicenvironment.rcut ({}) when "
+                "control.active_volume is on: every atom of the rcut environment "
+                "that a catalogue event overlays must be movable inside the active "
+                "volume, otherwise refinements place atoms in the frozen shell. "
+                "Raise rmov (and ract, which must stay >= rmov) or lower rcut.".format(
+                    self.activevolume.rmov, rcut
+                )
+            )
+        return self
+
+    @model_validator(mode="after")
     def set_lammps_verbosity_default(self) -> "Config":
         """Propagate control.verbosity to lammps.verbosity when not explicitly set."""
         if self.lammps is not None and self.lammps.verbosity is None:
