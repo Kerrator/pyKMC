@@ -10,7 +10,6 @@ sufficient checks fail.
 from __future__ import annotations
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from .free_region import select_free_indices
 from ..point_set_registration import simple_ira
@@ -197,6 +196,9 @@ def _proposals(
         if radius is None:
             yield rotation, translation, np.asarray(witness.permutation_matrix)
             continue
+        # Lazy: pykmc.htst imports only numpy and the stdlib at module level.
+        from scipy.spatial import cKDTree
+
         cell = np.asarray(target.cell, dtype=float)
         mapped, box = periodic_tree_inputs(
             unwrapped_source @ rotation.T + translation, cell, target.pbc
