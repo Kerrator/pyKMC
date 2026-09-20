@@ -151,6 +151,25 @@ symmetry-equivalent minima. Unproven events retain reciprocal directional rows.
 SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
 """Coarse barrier window (eV) for a geometric lookup; not an identity proof."""
 
+GEOMETRY_INVALIDATING_REJECTIONS: frozenset[str] = frozenset(
+    {
+        "nonstationary_geometry",
+        "unstable_minimum",
+        "saddle_not_first_order",
+        "mode_count_mismatch",
+        "nonfinite_hessian",
+    }
+)
+"""``PrefactorRejection`` codes that disqualify the recomputed energies.
+
+A recomputation under the current physics that reports one of these has
+found the saved triplet not to be a minimum-saddle-minimum of the current
+potential, so its energy differences are not a barrier: the catalogued
+barrier is kept and the row falls back to ``k0``. The other codes (window,
+empty free region, non-finite prefactor) leave the stationary geometry
+intact and its recomputed barrier is adopted.
+"""
+
 
 @dataclass(frozen=True)
 class EventAdmission:
@@ -1028,7 +1047,33 @@ class ReferenceEventTable:
             self._resolved_contexts[int(idx_ref)] = signature
             return
         minimum = energies[0] if calculation.direction == "forward" else energies[2]
-        self.table.loc[mask, "energy_barrier"] = float(energies[1] - minimum)
+        recomputed_barrier = float(energies[1] - minimum)
+        verdict = current.estimate
+        if verdict.ok or verdict.reason_code.value not in (
+            GEOMETRY_INVALIDATING_REJECTIONS
+        ):
+            self.table.loc[mask, "energy_barrier"] = recomputed_barrier
+        else:
+            # The kernel found the saved triplet non-stationary under the
+            # current physics: its energies are not a barrier. Keep the
+            # catalogued barrier, record the attempt and say so.
+            kept = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+            reason = (
+                f"recomputation rejected ({verdict.reason_code.value}: "
+                f"{verdict.reason}); catalogued barrier {kept:.4f} eV kept, "
+                f"recomputed {recomputed_barrier:.4f} eV not adopted"
+            )
+            archive.retain(idx_ref, row, reason)
+            logger.warning(
+                "[htst] reference event %d: recomputed prefactor rejected (%s: %s) "
+                "under the current physics; keeping the catalogued barrier %.4f eV "
+                "(recomputed %.4f eV not adopted), rate falls back to k0",
+                idx_ref,
+                verdict.reason_code.value,
+                verdict.reason,
+                kept,
+                recomputed_barrier,
+            )
         self._patch_row(idx_ref, current.estimate, calculation=current, fresh=True)
         # Apply the current window and rate policy even to a worker whose
         # numerical acceptance contract was implemented separately.

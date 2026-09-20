@@ -331,3 +331,81 @@ def test_opaque_fresh_result_never_becomes_verified_by_serialization(
             not descriptor.reusable
             for descriptor in stored.attrs["descriptors"].values()
         )
+
+
+def test_rejected_recomputation_keeps_the_saved_barrier(tmp_path, caplog):
+    """A geometry-invalidating recompute never rewrites the catalogued barrier.
+
+    Review R07 major (7c406b2): the energies of a saddle the kernel just
+    declared non-stationary under the current potential are not a barrier.
+    The row falls back to k0 with the rejection recorded; the saved barrier,
+    the attempt and a warning survive.
+    """
+    import logging
+    from concurrent.futures import Future
+    from dataclasses import replace
+
+    from pykmc.htst.result import DirectionalPrefactor, PrefactorRejection
+
+    require_schema2()
+    first, second = tmp_path / "A.json", tmp_path / "B.json"
+    write_potential(first, a=0.0)
+    write_potential(second, scale=2.0)
+    old_service, _ = service(first)
+    old = calculate(old_service, "A")
+    table = table_for(
+        old_service, [(17, old, "forward", 47), (47, old, "backward", 17)]
+    )
+    saved = {idx: float(row_at(table, idx).energy_barrier) for idx in (17, 47)}
+    assert saved == {17: pytest.approx(1.0), 47: pytest.approx(1.0)}
+    path = tmp_path / "saved.pkl"
+    table.save(str(path))
+
+    current, worker = service(second, saved=path)
+    inner = worker.submit
+
+    def nonstationary(
+        operation, *, request, compute_backward=True, compute_energies=False
+    ):
+        result = inner(
+            operation,
+            request=request,
+            compute_backward=compute_backward,
+            compute_energies=compute_energies,
+        ).result()
+        # The worker still reports the current energies of the saved triplet
+        # (barrier 2.0 under potential B) while rejecting the geometry.
+        assert result.provenance.energies[1] - result.provenance.energies[0] == 2.0
+        bad = DirectionalPrefactor.rejected(
+            PrefactorRejection.NONSTATIONARY_GEOMETRY,
+            "maximum free-atom force norm 3.7 eV/A exceeds stationarity tolerance",
+            n_free=result.n_free,
+            n_positive_min=None,
+            n_negative_saddle=None,
+        )
+        future = Future()
+        future.set_result(replace(result, forward=bad, backward=bad))
+        return future
+
+    worker.submit = nonstationary
+    with caplog.at_level(logging.WARNING, logger="log"):
+        loaded = ReferenceEventTable(current.config, prefactor_service=current)
+    assert len(worker.calls) == 1
+    for idx in (17, 47):
+        row = row_at(loaded, idx)
+        assert row.energy_barrier == saved[idx], (
+            "the barrier moved with a rejected geometry"
+        )
+        assert row.nu0_status == "rejected"
+        assert "nonstationary_geometry" in row.nu0_reason
+        assert np.isnan(row.nu0)
+        assert row.k_prefactor == pytest.approx(current.config.rateconstant.k0)
+        assert any(
+            "nonstationary_geometry" in entry["reason"]
+            and entry["energy_barrier"] == saved[idx]
+            for entry in loaded.prefactor_archive.history[idx]
+        ), loaded.prefactor_archive.history[idx]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("nonstationary_geometry" in w and "barrier" in w for w in warnings), (
+        warnings
+    )
