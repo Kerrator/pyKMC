@@ -1161,16 +1161,27 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def validate_active_volume_covers_environment(self) -> "Config":
-        """Require ``activevolume.rmov >= atomicenvironment.rcut`` under active volume.
+        """Require ``ract >= rmov >= atomicenvironment.rcut`` under active volume.
 
         A catalogue event overlays the whole ``rcut`` environment of its central
         atom; with ``rmov < rcut`` part of that environment lies in the frozen
         active-volume shell, so refinements would place atoms that ``fix
-        setforce`` then holds (contracts 7f policy 5). Mirrors the
+        setforce`` then holds (contracts 7f policy 5). The movable sphere must
+        itself lie inside the active volume (``ract >= rmov``), otherwise the
+        shell is empty and the crop smaller than the movable set. Mirrors the
         ``zone_radius > free_radius`` check of the rate-constant section.
         """
         if not self.control.active_volume or self.activevolume is None:
             return self
+        if self.activevolume.ract < self.activevolume.rmov:
+            raise ValueError(
+                "activevolume.ract ({}) must be >= activevolume.rmov ({}) when "
+                "control.active_volume is on: the movable sphere lies inside the "
+                "active volume, its outer shell (rmov < r <= ract) is what fix "
+                "setforce holds. Raise ract or lower rmov.".format(
+                    self.activevolume.ract, self.activevolume.rmov
+                )
+            )
         rcut = self.atomicenvironment.rcut
         if rcut is not None and self.activevolume.rmov < rcut:
             raise ValueError(

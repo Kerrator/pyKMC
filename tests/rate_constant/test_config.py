@@ -270,3 +270,33 @@ def test_rmov_below_rcut_is_allowed_when_active_volume_is_off() -> None:
     cfg = Config.model_validate(data)
     assert cfg.control.active_volume is False
     assert cfg.activevolume.rmov == 4.0
+
+
+def test_active_volume_ract_below_rmov_is_rejected() -> None:
+    """The movable sphere must lie inside the active volume (``ract >= rmov``).
+
+    The rmov/rcut message promises this rule ("ract, which must stay >= rmov");
+    the validator enforces it under active volume.
+    """
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": "9.0", "ract": "8.0"}
+    )
+    with pytest.raises(ValidationError, match=r"ract.*8\.0.*rmov.*9\.0"):
+        Config.model_validate(data)
+
+
+@pytest.mark.parametrize("ract", ["9.0", "16.0"])
+def test_active_volume_ract_at_least_rmov_is_accepted(ract: str) -> None:
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": "9.0", "ract": ract}
+    )
+    cfg = Config.model_validate(data)
+    assert cfg.activevolume.ract == float(ract) and cfg.activevolume.rmov == 9.0
+
+
+def test_ract_below_rmov_is_allowed_when_active_volume_is_off() -> None:
+    data = _ini_dict(
+        control={"active_volume": "False"}, activevolume={"rmov": "9.0", "ract": "8.0"}
+    )
+    cfg = Config.model_validate(data)
+    assert cfg.control.active_volume is False and cfg.activevolume.ract == 8.0
