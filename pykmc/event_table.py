@@ -2325,7 +2325,13 @@ class ActiveEventTable:
                 )
             self.table.at[label, "crop_atom_ids"] = stored
         stored = _indices(stored)
-        indices = np.array([ids.index(i) for i in stored], dtype=int)
+        position = {atom_id: k for k, atom_id in enumerate(ids)}
+        try:
+            indices = np.array([position[i] for i in stored], dtype=int)
+        except KeyError as exc:
+            raise ValueError(
+                "stored crop identities are not in the current source"
+            ) from exc
         if int(row.atom_index) not in indices:
             raise ValueError("active event center is outside its stored crop")
         for name in ("saddle_positions", "final_positions"):
@@ -2365,9 +2371,11 @@ class ActiveEventTable:
         """
         if not self.uses_prefactors or self.table.empty:
             return 0
-        from .htst.site_state import row_signature
+        from .htst.site_state import row_signature, source_index_map
         from dataclasses import replace
 
+        # One identity -> row map per validation pass, shared by every row.
+        index_map = source_index_map(system)
         dropped = []
         for label, row in self.table.iterrows():
             state = self._site_states.get(int(label))
@@ -2382,12 +2390,12 @@ class ActiveEventTable:
                 dropped.append(label)
                 continue
             try:
-                if not state.matches(row, system, self.prefactor_service):
+                if not state.matches(
+                    row, system, self.prefactor_service, index_map=index_map
+                ):
                     dropped.append(label)
                     continue
-                self.table.at[label, "atom_index"] = list(system.index).index(
-                    state.center_id
-                )
+                self.table.at[label, "atom_index"] = index_map[state.center_id]
                 if neighbors_list is not None:
                     crop = self.crop_indices(label, system)
                     current = neighbors_list.get_neighbors(

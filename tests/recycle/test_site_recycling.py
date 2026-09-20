@@ -201,9 +201,13 @@ def assert_no_stale_site(active):
 
 
 def execute_known_current_refinement(
-    active, system, manager, *, omit_full_geometry=False
+    active, system, manager, *, omit_full_geometry=False, expect_rebuild=True
 ):
-    """Run real execute; only the native/registration producer is a declared seam."""
+    """Run real execute; only the native/registration producer is a declared seam.
+
+    With ``expect_rebuild=False`` the retained pair must make the real
+    dispatcher skip the (atom, reference) pair: no producer call, no output.
+    """
     cfg = active.config
     neighbors = NeighborsList(system, 0.4, 0.5)
     assert neighbors.get_neighbors("rcut", 0) == [0]
@@ -269,6 +273,13 @@ def execute_known_current_refinement(
     refinement.execute(
         reference, total_energy=0.0, existing_pairs=active.existing_pairs()
     )
+    if not expect_rebuild:
+        assert calls == [], (
+            "A retained valid pair must be skipped by the real dispatcher"
+        )
+        assert refinement.get_successes_results() == []
+        np.testing.assert_array_equal(system.positions, before)
+        return neighbors, None
     assert calls == [(0, 47)], (
         "Invalidated pair must be rebuilt through real Refinement.execute"
     )
@@ -336,6 +347,14 @@ def assert_current_site(active, system, worker):
 
 
 def recycle_and_fresh(changed_neighbor):
+    """Execute a distant event; optionally also move an interacting neighbour.
+
+    The executed atom (21 A from the candidate centre, outside free_radius
+    6.0 and the stored crop) never enters the candidate's site spectrum, so
+    its motion alone must keep the recycled row and its actual producer
+    (F06 repair invariant: preserve unchanged-local-geometry reuse). A moved
+    neighbour inside free_radius changes the spectrum and must rebuild.
+    """
     cfg, system, manager, svc, active, old_row = initial_active()
     old_record = manager.results[0].calculation("forward")
     before = system.positions.copy()
@@ -344,16 +363,31 @@ def recycle_and_fresh(changed_neighbor):
         system.positions[1, 0] = 12.0
     advanced = system.positions.copy()
     active.prune_for_recycling(executed_idx=1, system=system, positions_pre=before)
-    # Remote-only motion may conservatively trigger the same full rebuild;
-    # equality of its final spectrum is the unchanged-local numerical control.
-    assert_no_stale_site(active)
     svc.reset_step_counters()
-    neighbors, _ = execute_known_current_refinement(active, system, manager)
-    summary = active.request_site_prefactors(system, neighbors)
-    assert summary == {"attempted": 1, "ok": 1, "rejected": 0, "no_geometry": 0}
-    assert svc.step_requests == 1 and len(manager.requests) == 2
-    rebuilt, current_record = assert_current_site(active, system, manager)
-    assert current_record.calculation_id != old_record.calculation_id
+    if changed_neighbor:
+        assert_no_stale_site(active)
+        neighbors, _ = execute_known_current_refinement(active, system, manager)
+        summary = active.request_site_prefactors(system, neighbors)
+        assert summary == {"attempted": 1, "ok": 1, "rejected": 0, "no_geometry": 0}
+        assert svc.step_requests == 1 and len(manager.requests) == 2
+        rebuilt, current_record = assert_current_site(active, system, manager)
+        assert current_record.calculation_id != old_record.calculation_id
+    else:
+        # Distant motion only: the row survives with its actual producer and
+        # the real dispatcher skips the retained pair; no Hessian is requested.
+        assert active.existing_pairs() == {(0, 47)} and len(active.table) == 1
+        assert site_record(active, 0) == old_record
+        neighbors, _ = execute_known_current_refinement(
+            active, system, manager, expect_rebuild=False
+        )
+        summary = active.request_site_prefactors(system, neighbors)
+        assert summary == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        assert svc.step_requests == 0 and len(manager.requests) == 1
+        rebuilt = active.table.iloc[0].copy()
+        current_record = site_record(active, 0)
+        assert current_record == old_record
+        assert rebuilt.nu0_source == "site" and rebuilt.nu0_status == "ok"
+        assert rebuilt.nu0 == old_row.nu0 and rebuilt.k == old_row.k
     np.testing.assert_array_equal(old_record.provenance.source.min1_positions, before)
 
     # A fresh table follows the identical dispatcher and actual current full
@@ -362,7 +396,12 @@ def recycle_and_fresh(changed_neighbor):
     fresh_neighbors, _ = execute_known_current_refinement(fresh, system, manager)
     assert fresh.request_site_prefactors(system, fresh_neighbors)["ok"] == 1
     fresh_row, fresh_record = assert_current_site(fresh, system, manager)
-    assert fresh_record.calculation_id == current_record.calculation_id
+    if changed_neighbor:
+        assert fresh_record.calculation_id == current_record.calculation_id
+    else:
+        # Different full source (the distant atom moved), identical spectrum:
+        # the retained value is the correct current value, not a stale one.
+        assert fresh_record.calculation_id != current_record.calculation_id
     np.testing.assert_array_equal(system.positions, advanced)
     return rebuilt, fresh_row, old_row
 
@@ -379,9 +418,47 @@ def draw_clock(row, monkeypatch):
 
 def test_same_local_geometry_recycles_the_correct_site_value():
     recycled, fresh, old = recycle_and_fresh(False)
-    assert recycled.nu0 == pytest.approx(old.nu0)
+    assert recycled.nu0 == old.nu0
     assert recycled.nu0 == pytest.approx(fresh.nu0, rel=1e-12)
     assert recycled.k == pytest.approx(fresh.k, rel=1e-12, abs=0.0)
+
+
+def test_distant_executed_event_keeps_site_row_without_new_work():
+    """A far executed event must not invalidate a row whose dependency region is unchanged."""
+    cfg, system, manager, svc, active, old = initial_active()
+    original = site_record(active, 0)
+    before = system.positions.copy()
+    # Only the executed atom moves: 21 A from the candidate centre, outside
+    # free_radius (6.0 A) and the stored crop, so no site dependency changed.
+    system.positions[2, 0] += 0.1
+    geometric = active.recycler.select_recyclable(active, 1, system, before)
+    assert list(geometric.num_reference_event.astype(int)) == [47]
+    active.prune_for_recycling(executed_idx=1, system=system, positions_pre=before)
+    assert active.existing_pairs() == {(0, 47)}, (
+        "Distant motion outside the dependency region must keep the recycled row"
+    )
+    row = active.table.iloc[0]
+    assert row.nu0_source == "site" and row.nu0_status == "ok"
+    assert row.nu0 == old.nu0 and row.k == old.k
+    assert site_record(active, 0) == original
+    assert active.validate_recycled(system) == 0
+    assert len(manager.requests) == 1
+
+
+def test_atom_entering_dependency_region_invalidates_site_row():
+    """An atom moving into free_radius changes the spectrum even though the crop is unchanged."""
+    cfg, system, manager, svc, active, old = initial_active()
+    before = system.positions.copy()
+    # Drop the executed row first so only the candidate's dependency is tested.
+    active.prune_for_recycling(executed_idx=1, system=system, positions_pre=before)
+    assert active.existing_pairs() == {(0, 47)}
+    assert site_record(active, 0) is not None
+    # The distant atom (x = 30) enters the free sphere of the centre (x = 9)
+    # without touching the stored crop (the centre alone).
+    system.positions[2, 0] = 13.0
+    assert active.validate_recycled(system) == 1
+    assert_no_stale_site(active)
+    assert len(active.table) == 0
 
 
 def test_changed_noncentral_free_atom_cannot_keep_stale_site_rate(monkeypatch):

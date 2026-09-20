@@ -100,9 +100,11 @@ def test_fresh_allowance_does_not_cross_changed_context(boundary):
         assert other.current_descriptor == service.current_descriptor
         active.prefactor_service = sim.prefactor_service = other
     else:
-        # Even a noninteracting remote-coordinate change breaks a conservative
-        # complete-source binding; same-step freshness cannot waive it.
-        sim.system.positions[2, 0] += 0.1
+        # A changed interacting neighbour (inside free_radius) breaks the
+        # source binding; same-step freshness cannot waive it. Adapted from a
+        # distant-atom move: F06 repair invariant / C1 dependency-region
+        # contract, motion outside the dependency region keeps the row.
+        sim.system.positions[1, 0] = 12.0
     with pytest.raises(
         ValueError, match="No active events with current physical dependencies"
     ):
