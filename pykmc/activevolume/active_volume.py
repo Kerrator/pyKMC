@@ -37,7 +37,7 @@ import numpy as np
 import ctypes
 from ase.cell import Cell
 from ase.geometry import find_mic
-from ..physics import validate_event_constraints, _indices
+from ..physics import overlay_tolerance, validate_event_constraints, _indices
 
 
 class ActiveVolumeSaddleError(ValueError):
@@ -402,9 +402,18 @@ def partn_refine_AV(
         user_constraints=user_constraints,
         active_volume=True,
     )
+    # Only user-declared fixed atoms are a coordinate contract: validate them at
+    # the PSR tolerance and re-clamp their rows. The AV shell is a crop
+    # restriction held by ``f_buffer``/``f_core``, so a shell atom is placed
+    # wherever the caller put it (contracts 7f policy 5).
     proposed = np.array(positions, copy=True)
     proposed[saddle_idx] = saddle_positions
-    constraints.validate_positions(proposed)
+    constraints.validate_positions(
+        proposed, tolerance=overlay_tolerance(config), user_only=True
+    )
+    saddle_positions = constraints.protect_positions(proposed, user_only=True)[
+        saddle_idx
+    ]
     atom_map, central_lammps_id = partn_search_AV(
         engine,
         config,

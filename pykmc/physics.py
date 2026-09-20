@@ -6,7 +6,7 @@ estimate into a current one. Cache consumers must retain the producing descripto
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -326,6 +326,16 @@ class ResolvedConstraints:
     restriction is separate from the Hessian's common free-atom set.
     ``user_policy`` records the original resolver policy before an AV union;
     ``None`` denotes unknown policy for a manually constructed legacy payload.
+
+    ``user_fixed_ids`` names the subset of ``fixed_ids`` the USER declared
+    (``config.frozen_atoms``). The remaining fixed identities are the
+    active-volume shell: a crop/transport restriction held by ``fix setforce``
+    during a search, not a fixed-coordinate contract (contracts 7f policy 5).
+    Overlay validation therefore applies to the user subset only; the AV shell
+    only enters ``protect_positions`` and the native freeze groups. ``None``
+    denotes a legacy payload whose whole fixed set is treated as user-declared.
+    The field is derived bookkeeping: it is excluded from equality and from
+    ``constraint_id``.
     """
 
     source_ids: tuple[int, ...]
@@ -338,6 +348,7 @@ class ResolvedConstraints:
     center_position: tuple[float, float, float] | None = None
     rmov: float | None = None
     user_policy: str | None = None
+    user_fixed_ids: tuple[int, ...] | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         self.validate(len(self.atom_ids))
@@ -399,6 +410,8 @@ class ResolvedConstraints:
                 for i, selected in enumerate(classify_region(region, pos, list(types)))
                 if selected == "in"
             )
+        # The user-declared subset, recorded before any AV shell is unioned in.
+        user_indices = indices
         center_position = None
         if center_id is not None or rmov is not None:
             if (
@@ -440,6 +453,7 @@ class ResolvedConstraints:
                 separators=(",", ":"),
                 allow_nan=False,
             ),
+            tuple(ids[i] for i in user_indices),
         )
 
     def validate(self, n_atoms: int) -> None:
@@ -467,6 +481,10 @@ class ResolvedConstraints:
             or not set(fixed).issubset(source)
         ):
             raise ValueError("invalid source/global-to-crop constraint mapping")
+        if self.user_fixed_ids is not None:
+            if not isinstance(self.user_fixed_ids, tuple):
+                raise ValueError("user-fixed identities must be an immutable tuple")
+            _indices(self.user_fixed_ids)
         if len(self.fixed_positions) != len(fixed) or any(
             not isinstance(p, tuple)
             or len(p) != 3
@@ -520,9 +538,21 @@ class ResolvedConstraints:
         return pos
 
     def validate_positions(
-        self, positions: Any, *, cell: Any = None, pbc: Any = None
+        self,
+        positions: Any,
+        *,
+        cell: Any = None,
+        pbc: Any = None,
+        tolerance: float = 1e-10,
+        user_only: bool = False,
     ) -> None:
-        """Reject an event that changes the source's fixed physical coordinates."""
+        """Reject an event that changes the source's fixed physical coordinates.
+
+        ``tolerance`` is the accepted displacement in Angstrom (exact, 1e-10,
+        for native results; ``overlay_tolerance`` for PSR-mapped overlays).
+        With ``user_only`` only the user-declared fixed atoms are checked: the
+        active-volume shell is not a coordinate contract (contracts 7f policy 5).
+        """
         pos = self._positions(positions)
         if (cell is None) != (pbc is None):
             raise ValueError("constraint validation needs cell and PBC together")
@@ -544,7 +574,7 @@ class ResolvedConstraints:
         else:
             matrix, axes = self.cell, self.pbc
         fixed = dict(zip(self.fixed_ids, self.fixed_positions))
-        rows = self.local_fixed_indices
+        rows = self.local_user_fixed_indices if user_only else self.local_fixed_indices
         if not rows:
             return
         delta = pos[list(rows)] - [fixed[self.atom_ids[i]] for i in rows]
@@ -552,16 +582,52 @@ class ResolvedConstraints:
             from ase.geometry import find_mic
 
             delta, _ = find_mic(delta, matrix, pbc=axes)
-        if np.any(np.linalg.norm(delta, axis=1) > 1e-10):
+        if np.any(np.linalg.norm(delta, axis=1) > tolerance):
             raise ValueError("event changes fixed reference coordinates")
 
-    def protect_positions(self, positions: Any) -> np.ndarray:
-        """Protect a working push/overlay after validating the reference event."""
+    def protect_positions(
+        self, positions: Any, *, user_only: bool = False
+    ) -> np.ndarray:
+        """Re-clamp fixed rows of a working push/overlay to their reference.
+
+        With ``user_only`` only user-declared rows are re-clamped and the
+        active-volume shell keeps the caller's coordinate (a pARTn overlay is
+        placed as given and held by ``fix setforce``); endpoint minimisations
+        protect the whole transport union.
+        """
         pos = self._positions(positions).copy()
         fixed = dict(zip(self.fixed_ids, self.fixed_positions))
-        for i in self.local_fixed_indices:
+        rows = self.local_user_fixed_indices if user_only else self.local_fixed_indices
+        for i in rows:
             pos[i] = fixed[self.atom_ids[i]]
         return pos
+
+    def user_view(self) -> ResolvedConstraints:
+        """Return the user constraint set only: no AV shell, no AV context.
+
+        This is what HTST/RPA requests receive (contracts 7f policy 5): the
+        Vineyard free region excludes user-fixed atoms and never the shell.
+        """
+        user = self._user_ids()
+        fixed_ids = tuple(i for i in self.fixed_ids if i in user)
+        references = dict(zip(self.fixed_ids, self.fixed_positions))
+        return replace(
+            self,
+            fixed_ids=fixed_ids,
+            fixed_positions=tuple(references[i] for i in fixed_ids),
+            center_id=None,
+            center_position=None,
+            rmov=None,
+            user_fixed_ids=fixed_ids,
+        )
+
+    def _user_ids(self) -> frozenset:
+        """User-declared fixed identities; a legacy payload is all user-declared."""
+        if self.user_fixed_ids is None:
+            return frozenset(self.fixed_ids)
+        # Bookkeeping never widens the mask: an identity that is no longer
+        # fixed (a hand-narrowed payload) is simply not a constraint.
+        return frozenset(self.user_fixed_ids).intersection(self.fixed_ids)
 
     def require_preserves(
         self, required: ResolvedConstraints, *, cell: Any, pbc: Any
@@ -589,6 +655,12 @@ class ResolvedConstraints:
         return tuple(
             i for i, atom_id in enumerate(self.atom_ids) if atom_id in self.fixed_ids
         )
+
+    @property
+    def local_user_fixed_indices(self) -> tuple[int, ...]:
+        """Local rows of the user-declared fixed atoms (the AV shell excluded)."""
+        user = self._user_ids()
+        return tuple(i for i, atom_id in enumerate(self.atom_ids) if atom_id in user)
 
     @property
     def constraint_id(self) -> str:
@@ -666,7 +738,26 @@ def resolve_event_constraints(
         fixed_ids=fixed_ids,
         fixed_positions=tuple(references[i] for i in fixed_ids),
         user_policy=user.user_policy,
+        user_fixed_ids=tuple(user.fixed_ids),
     )
+
+
+def overlay_tolerance(config) -> float:
+    """Return the displacement tolerance for PSR-mapped overlays on user-fixed atoms.
+
+    The pipeline accepts a registration whose matching score is at most
+    ``psr.matching_score_thr``; a user-fixed atom displaced by more than that
+    describes a genuinely different event, anything below is a mapping residual
+    that ``protect_positions`` re-clamps (contracts 7f policy 5). A config
+    without a PSR section keeps the exact 1e-10 A check.
+    """
+    thr = getattr(getattr(config, "psr", None), "matching_score_thr", None)
+    if thr is None:
+        return 1e-10
+    thr = float(thr)
+    if not math.isfinite(thr) or thr < 0:
+        raise ValueError("psr.matching_score_thr must be a finite non-negative length")
+    return max(thr, 1e-10)
 
 
 def validate_event_constraints(

@@ -183,7 +183,23 @@ local rows. Active-volume membership uses the source periodic axes.
 Search, refinement and reconstruction resolve that same union from the full
 source before cropping. The initialized user mask is carried separately: moving
 an unfrozen atom across a configured spatial boundary does not silently change
-which source identities were frozen. Returned search vertices retain their
+which source identities were frozen.
+
+The two halves of the union have different authority (contracts 7f policy 5).
+The user-declared atoms (`frozen_atoms`) are a fixed-coordinate contract: a
+PSR-mapped overlay or catalogue endpoint may displace them by at most
+`psr.matching_score_thr` (the same tolerance the registration itself is
+accepted at), the residual is re-clamped to the reference coordinate, and a
+larger displacement describes a different event, which the refinement,
+reconstruction and basin paths report as `Err(RECONSTRUCTION_INVALID_EVENT_DATA)`
+so the reference is purged; it never leaves the KMC loop as a `ValueError`.
+The active-volume shell (atoms farther than `activevolume.rmov` from the event
+centre) is only a crop/transport restriction held by `fix setforce` during the
+search: overlay validation ignores it, a catalogue saddle coordinate for a shell
+atom is placed as given, and endpoint minimisations re-clamp it to the source
+coordinate before dispatch. `ResolvedConstraints.user_fixed_ids` records the
+user subset; `validate_positions(..., user_only=True, tolerance=...)` and
+`protect_positions(..., user_only=True)` act on that subset only. Returned search vertices retain their
 original full-coordinate frame for prefactor evaluation, even when the event
 catalogue stores a recentered representation. Basin state copies preserve these
 source identities.

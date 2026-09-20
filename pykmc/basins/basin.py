@@ -17,12 +17,12 @@ from pykmc import (
 from typing import Optional
 from ..utils import geometry
 from ..rate_constant import create_rate_constant
-from ..physics import resolve_event_constraints
+from ..physics import overlay_tolerance, resolve_event_constraints
 import pandas as pd
 import copy
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok, BasinOutput
+from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput
 
 # TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 # TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
@@ -429,16 +429,32 @@ class BasinsGenericEvents:
         neighbors = self.states[from_state].neighbors_list.get_neighbors(
             "rcut", central_atom
         )
-        # Validate the transformed event against source-fixed references before
-        # either branch overlays or protects a working array.
-        for vertex in (
-            supposed_initial_positions,
-            saddle_positions,
-            supposed_final_positions,
-        ):
-            full = np.array(source.positions, copy=True)
-            full[neighbors] = vertex
-            constraints.validate_positions(full)
+        # Validate the transformed event against the USER-fixed references
+        # before either branch overlays or protects a working array. The AV
+        # shell is a transport restriction re-clamped by protect_positions, not
+        # a coordinate contract; a user atom displaced beyond the PSR tolerance
+        # is a different event and purges the reference through the Result
+        # contract (contracts 7f policy 5).
+        tolerance = overlay_tolerance(self.config)
+        try:
+            for vertex in (
+                supposed_initial_positions,
+                saddle_positions,
+                supposed_final_positions,
+            ):
+                full = np.array(source.positions, copy=True)
+                full[neighbors] = vertex
+                constraints.validate_positions(
+                    full, tolerance=tolerance, user_only=True
+                )
+        except ValueError as exc:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                    message="generic event {} changes a user-fixed reference "
+                    "coordinate: {}".format(event_idx, exc),
+                )
+            )
 
         if self.config.basin.style == "global":
             new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
@@ -602,9 +618,30 @@ class BasinsGenericEvents:
                     tmp_system.index,
                     user_constraints=getattr(self, "global_constraints", None),
                 )
+                # User-fixed atoms only, at the PSR tolerance; the AV shell is
+                # placed as given and held by fix setforce (contracts 7f
+                # policy 5).
                 proposed = tmp_system.positions.copy()
                 proposed[neighbors] = saddle_positions
-                constraints.validate_positions(proposed)
+                try:
+                    constraints.validate_positions(
+                        proposed,
+                        tolerance=overlay_tolerance(self.config),
+                        user_only=True,
+                    )
+                except ValueError as exc:
+                    return Err(
+                        ErrorInfo(
+                            type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                            message="generic event {} changes a user-fixed "
+                            "reference coordinate: {}".format(
+                                row["event_connexion"], exc
+                            ),
+                        )
+                    )
+                saddle_positions = constraints.protect_positions(
+                    proposed, user_only=True
+                )[neighbors]
 
                 if self.config.control.active_volume == True:
                     # add a job to manager queue
