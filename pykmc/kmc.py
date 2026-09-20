@@ -752,12 +752,16 @@ class KMC:
         service = self.prefactor_service
         n_requests = service.step_requests if service is not None else 0
         wall = service.step_wall_s if service is not None else 0.0
+        # Per-step site rejections by reason (reset by request_site_prefactors);
+        # a stationarity rejection is a silent k0 fallback unless counted here.
+        rejections = getattr(self.active_table, "step_site_rejections", {}) or {}
         self.loggers.info(
             "log",
             "\t :=> HTST prefactors: reference ok={} rejected={} legacy={} "
             "pending={} stale={}; active sources reference={} site={} k0={}; site "
-            "attempts this step={} (ok={}, rejected={}, no_geometry={}); hessian "
-            "requests this step={}, prefactor wall={:.3f} s".format(
+            "attempts this step={} (ok={}, rejected={}, no_geometry={}); site "
+            "rejections nonstationary_geometry={}; hessian requests this step={}, "
+            "prefactor wall={:.3f} s".format(
                 ref.get("ok", 0),
                 ref.get("rejected", 0),
                 ref.get("legacy", 0),
@@ -770,6 +774,7 @@ class KMC:
                 site_summary.get("ok", 0),
                 site_summary.get("rejected", 0),
                 site_summary.get("no_geometry", 0),
+                rejections.get("nonstationary_geometry", 0),
                 n_requests,
                 wall,
             ),

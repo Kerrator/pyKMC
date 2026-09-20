@@ -100,3 +100,48 @@ def test_step_site_rejection_counter_resets_each_call():
     assert active.request_site_prefactors(system, neighbors)["attempted"] == 0
     assert active.step_site_rejections == {}
     np.testing.assert_array_equal(system.positions, h.setup()[1].positions)
+
+
+class _Recorder:
+    """Logger double recording the ``log`` messages the step summary writes."""
+
+    def __init__(self):
+        self.messages = []
+
+    def info(self, name, msg, *args, **kwargs):
+        self.messages.append((name, str(msg)))
+
+    def warning(self, name, msg, *args, **kwargs):
+        self.messages.append((name, str(msg)))
+
+
+def test_step_summary_line_carries_the_nonstationary_rejection_count():
+    """The [htst] per-step summary names the stationarity rejections of the step."""
+    from pykmc.event_table import ReferenceEventTable
+    from pykmc.kmc import KMC
+
+    cfg, system, worker, active, neighbors = nonstationary_site()
+    summary = active.request_site_prefactors(system, neighbors)
+    assert summary["rejected"] == 1
+    assert active.step_site_rejections == {"nonstationary_geometry": 1}
+    sim = KMC(cfg, manager=worker)
+    assert sim.uses_event_prefactors
+    sim.active_table = active
+    sim.prefactor_service = active.prefactor_service
+    sim.reference_table = ReferenceEventTable(
+        cfg, prefactor_service=sim.prefactor_service
+    )
+    sim.loggers = _Recorder()
+    sim._log_htst_step_summary(summary)
+    lines = [m for name, m in sim.loggers.messages if "HTST prefactors:" in m]
+    assert len(lines) == 1
+    line = lines[0]
+    assert "site attempts this step=1 (ok=0, rejected=1, no_geometry=0)" in line
+    assert "nonstationary_geometry=1" in line, line
+    # The count describes this step only: a quiet step reports zero.
+    assert active.request_site_prefactors(system, neighbors)["attempted"] == 0
+    sim.loggers = _Recorder()
+    sim._log_htst_step_summary(
+        {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+    )
+    assert "nonstationary_geometry=0" in sim.loggers.messages[0][1]
