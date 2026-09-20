@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from pykmc.result import EventSearchOutput
+from pykmc.result import ErrorType, EventSearchOutput
 
 
 from tests.lifecycle import test_whole_event_batch as batch
@@ -56,8 +56,8 @@ def links_and_values(table):
 
 
 def test_two_direction_matches_must_target_one_existing_pair(monkeypatch):
-    # A and B remain different accepted directional pairs. C's individual
-    # matches would select A.forward and B.backward, never a coherent pair.
+    # contracts 7f policy 6: B and C are geometric duplicates of A and never
+    # reach the worker, so no second or third directional pair can be spliced.
     table, worker = table_and_worker(
         monkeypatch,
         [(5e12, 7e12), (7e12, 5e12), (5e12, 5e12)],
@@ -67,19 +67,14 @@ def test_two_direction_matches_must_target_one_existing_pair(monkeypatch):
     results = table.add_events(events, pbc=base.PBC)
     batch.audit(table, worker, events, before)
     print("cross_pair_rows", links_and_values(table))
-    assert len(worker.requests) == 3
-    assert len(table.table) == 6, (
-        "Independent matches spliced two older directional pairs"
+    assert len(worker.requests) == 1
+    assert len(table.table) == 2, "A duplicate search added a directional pair"
+    assert results[0].is_ok() and len(results[0].ok_value()) == 2
+    assert all(
+        not result.is_ok() and result.err_value().type == ErrorType.EVENT_NOT_NEW
+        for result in results[1:]
     )
-    assert all(result.is_ok() and len(result.ok_value()) == 2 for result in results)
-    assert links_and_values(table) == {
-        0: (1, 5e12),
-        1: (0, 7e12),
-        2: (3, 7e12),
-        3: (2, 5e12),
-        4: (5, 5e12),
-        5: (4, 5e12),
-    }
+    assert links_and_values(table) == {0: (1, 5e12), 1: (0, 7e12)}
     # The nonsymmetric full labeled saddle fixes R=I, so opposite orientation
     # cannot be used to manufacture a third older matching pair.
     assert math.isclose(
@@ -149,12 +144,12 @@ def test_shared_self_reverse_survivor_needs_direct_spectral_agreement(monkeypatc
     results = table.add_events(events, pbc=base.PBC)
     batch.audit(table, worker, events, before)
     print("nontransitive_rows", links_and_values(table))
-    assert len(worker.requests) == 2
-    # The first exact positive must collapse; the disagreeing actual pair
-    # remains reciprocal even though both estimates are close to old 5 THz.
-    assert len(table.table) == 3, (
-        "Two approximate matches bypassed direct directional disagreement"
-    )
-    assert all(result.is_ok() for result in results)
-    assert [len(result.ok_value()) for result in results] == [1, 2]
-    assert links_and_values(table) == {0: (0, 5e12), 2: (3, 4.8e12), 3: (2, 5.2e12)}
+    # contracts 7f policy 6: the first exact positive collapses to one
+    # self-linked row, which then rejects the identical second search at the
+    # geometric gate; its would-be disagreeing spectra are never computed.
+    assert len(worker.requests) == 1
+    assert len(table.table) == 1
+    assert results[0].is_ok() and len(results[0].ok_value()) == 1
+    assert not results[1].is_ok()
+    assert results[1].err_value().type == ErrorType.EVENT_NOT_NEW
+    assert links_and_values(table) == {0: (0, 5e12)}

@@ -211,7 +211,9 @@ def test_common_mapping_and_equal_prefactors_can_collapse():
     assert float(table.table.iloc[0].nu0) == pytest.approx(5e12)
 
 
-def test_rejected_reverse_remains_a_separate_direction():
+def test_rejected_reverse_collapses_to_one_row_and_is_archived():
+    # contracts 7f policy 6: a rejected backward never proves the collapse and
+    # never becomes a second selectable row sharing the event_id.
     table = admitted(
         SYMMETRIC_SADDLE,
         reject_backward=True,
@@ -219,8 +221,14 @@ def test_rejected_reverse_remains_a_separate_direction():
         final=SYMMETRIC_FINAL,
         types=SYMMETRIC_TYPES,
     )
-    assert len(table.table) == 2, (
-        "A rejected estimate cannot establish directional rate equality for collapse"
+    assert len(table.table) == 1
+    row = table.table.iloc[0]
+    assert int(row.idx_backward) == int(row.idx_ref)
+    assert row.nu0_status == "ok" and float(row.k_prefactor) == pytest.approx(5.0)
+    assert "self-reverse unproven: backward prefactor rejected" in row.nu0_reason
+    history = table.prefactor_archive.history[1]
+    assert any(
+        entry["nu0_status"] == "rejected" and entry["k_prefactor"] == 1.0
+        for entry in history
     )
-    assert table.table.nu0_status.tolist() == ["ok", "rejected"]
-    assert table.table.k_prefactor.astype(float).tolist() == pytest.approx([5.0, 1.0])
+    assert table.max_idx_ref() == 2

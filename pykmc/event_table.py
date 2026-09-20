@@ -156,10 +156,13 @@ SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
 class EventAdmission:
     """Provisional rows and candidate links, before actual prefactor resolution.
 
-    HTST/RPA retain two reciprocal rows. ``reverse_idx_ref`` proposes an
-    existing backward row for post-resolution comparison; ``same_topology``
-    and ``self_reverse_candidate`` propose self-reversal only. None of these
-    flags authorizes collapse. Constant mode keeps its original row policy.
+    HTST/RPA admit two reciprocal provisional rows, or one forward row when
+    ``reverse_idx_ref`` names the catalogued row the geometric gate matched
+    for the backward direction (contracts 7f policy 6, as in constant mode).
+    ``same_topology`` and ``self_reverse_candidate`` propose self-reversal
+    only; the whole-event proof after resolution decides the collapse, and an
+    unproven candidate falls back to one self-linked forward row. Constant
+    mode keeps its original row policy.
     """
 
     frame: pd.DataFrame
@@ -254,10 +257,15 @@ class ReferenceEventTable:
     event is kept until its directional logical ids are known; exactly one
     request per accepted event (both directions) is submitted; rows are
     patched by logical id; the batch is resolved before :meth:`add_events`
-    returns, so refinement never reads an unresolved reference ``k``. A
-    self-reverse candidate starts with two rows. Only accepted, agreeing
-    estimates and a common full physical map permit collapse; both original
-    producing records remain in the archive.
+    returns, so refinement never reads an unresolved reference ``k``. The
+    admission duplicate gate is :meth:`find_matching_event` in every style
+    (contracts 7f policy 6), so a catalogued event stays a duplicate whatever
+    its prefactor status. A self-reverse candidate starts with two provisional
+    rows; only accepted, agreeing estimates and a common full physical map
+    permit a proven collapse, and an unproven candidate collapses back to one
+    self-linked forward row with the backward estimate kept in the archive.
+    Two rows sharing one ``event_id`` are never exposed as selectable
+    channels of one site. Both original producing records remain archived.
 
     """
 
@@ -496,20 +504,45 @@ class ReferenceEventTable:
                 elif admission.self_reverse_candidate:
                     self._record_self_reverse(fwd_id, bwd_id, pre, wall)
             else:
-                # The reverse is already catalogued; its own estimate stands.
+                # The reverse is already catalogued (geometric gate); its own
+                # estimate stands and this search's backward is archived only.
+                reverse_id = int(
+                    self.table.loc[
+                        self.table["idx_ref"] == fwd_id, "idx_backward"
+                    ].iloc[0]
+                )
+                self._archive_discarded_backward(fwd_id, reverse_id, _ev, pre)
                 logger.info(
                     "[htst] reference event %d: reverse already catalogued as "
-                    "event %d, backward estimate of this search discarded "
-                    "(n_free %d, batch %.3f s)",
+                    "event %d, backward estimate of this search archived, not "
+                    "selectable (n_free %d, batch %.3f s)",
                     fwd_id,
-                    int(
-                        self.table.loc[
-                            self.table["idx_ref"] == fwd_id, "idx_backward"
-                        ].iloc[0]
-                    ),
+                    reverse_id,
                     pre.n_free,
                     wall,
                 )
+
+    def _archive_discarded_backward(self, fwd_id, reverse_id, ev, pre) -> None:
+        """Keep a computed backward estimate that no selectable row carries."""
+        backward = pre.backward
+        if backward.skipped:
+            return
+        nu0_hz = float(backward.nu0_hz) if backward.ok else None
+        rate = self.rate_constant.compute_rate(float(ev.dE_backward), nu0_hz)
+        self.prefactor_archive.retain(
+            fwd_id,
+            {
+                "nu0": nu0_hz,
+                "nu0_status": NU0_OK if backward.ok else NU0_REJECTED,
+                "nu0_reason": ""
+                if backward.ok
+                else f"{backward.reason_code.value}: {backward.reason}",
+                "energy_barrier": float(ev.dE_backward),
+                "k_prefactor": rate.prefactor,
+            },
+            f"backward estimate of this search discarded: reverse already "
+            f"catalogued as reference {reverse_id}",
+        )
 
     @staticmethod
     def _log_direction(
@@ -633,12 +666,16 @@ class ReferenceEventTable:
                 return int(idx_ref)
         return None
 
-    def _merge_direction(self, discarded, survivor):
+    def _merge_direction(self, discarded, survivor, reason=None):
         """Redirect every alias while keeping both original producing records."""
         mask = self.table.idx_ref == discarded
         row = self.table.loc[mask].iloc[0]
         self.prefactor_archive.retain(
-            discarded, row, f"whole-event equivalent to reference {survivor}"
+            discarded,
+            row,
+            f"whole-event equivalent to reference {survivor}"
+            if reason is None
+            else reason,
         )
         self.table.loc[self.table.idx_backward == discarded, "idx_backward"] = survivor
         self.table = self.table.loc[~mask].copy()
@@ -769,9 +806,18 @@ class ReferenceEventTable:
             )
             return
         fwd, bwd = pre.forward, pre.backward
+        # Policy 6: a rejected or disagreeing backward estimate collapses the
+        # candidate back to one self-linked forward row (the backward value
+        # stays in the archive). Accepted agreeing spectra without one common
+        # whole-event map keep both rows (policy 4 counterexample).
+        collapse = True
         if fwd.ok and bwd.ok:
             differs = 100.0 * abs(fwd.nu0_hz - bwd.nu0_hz) / fwd.nu0_hz
-            note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
+            if self_reverse_prefactors_agree(fwd, bwd):
+                collapse = False
+                note = f"self-reverse unproven: no common whole-event map, backward nu0 = {bwd.nu0_hz:.4e} Hz"
+            else:
+                note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
         elif bwd.ok:
             note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz (forward rejected)"
         elif bwd.skipped:
@@ -781,10 +827,16 @@ class ReferenceEventTable:
         mask = self.table.idx_ref == idx_ref
         current = str(self.table.loc[mask, "nu0_reason"].iloc[0])
         self.table.loc[mask, "nu0_reason"] = f"{current}; {note}" if current else note
+        if collapse:
+            self._merge_direction(bwd_id, idx_ref, reason=note)
+            action = "collapsed to one self-linked row, backward estimate archived"
+        else:
+            action = "retaining both directions"
         logger.warning(
-            "[htst] reference event %d: %s; retaining both directions (n_free %d, batch %.3f s)",
+            "[htst] reference event %d: %s; %s (n_free %d, batch %.3f s)",
             idx_ref,
             note,
+            action,
             pre.n_free,
             wall_s,
         )
@@ -1255,26 +1307,27 @@ class ReferenceEventTable:
         *,
         request=None,
     ) -> Result[EventAdmission, ErrorInfo]:
-        """Retain provisional directions until full physical identity is proven.
+        """Apply the geometric admission gate, then the style's row policy.
 
-        Constant mode retains its original topology/saddle admission policy.
-        HTST/RPA may reject an exact known whole event without recalculation;
-        otherwise both rows carry their own actual result before any merge.
-        Missing full request/provenance is not evidence of equivalence.
+        :meth:`find_matching_event` (topology + 0.25 eV + IRA saddle-crop
+        match) is the duplicate gate in every style (contracts 7f policy 6):
+        a catalogued event is a duplicate whatever its prefactor status, so a
+        k0-fallback row is never re-admitted. Constant mode keeps its original
+        row policy. HTST/RPA admit two provisional reciprocal rows so both
+        directions are actually calculated, except when the backward direction
+        already matches a catalogued row geometrically: then one forward row is
+        admitted and linked to that row, as in constant mode. Whether a
+        resolved pair may be collapsed is decided after resolution by the
+        whole-event proof (policy 4), never here. ``request`` is accepted for
+        signature compatibility; admission does not read the full source.
         """
-        duplicate = (
-            self._matching_whole_event(dfevent_forward, request, "forward")
-            if self.uses_prefactors
-            else self.find_matching_event(dfevent_forward)
-        )
+        duplicate = self.find_matching_event(dfevent_forward)
         if duplicate is not None:
             return Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_NEW,
                     message="Found event already in reference table",
-                    details="Same whole event"
-                    if self.uses_prefactors
-                    else "Same topology",
+                    details="Same topology",
                 )
             )
         same_topology = dfevent_forward["event_id"] == dfevent_forward["id_final"]
@@ -1293,21 +1346,30 @@ class ReferenceEventTable:
                 )
             return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
 
-        reverse_idx_ref = self._matching_whole_event(
-            dfevent_backward, request, "backward"
-        )
         gap = abs(
             float(dfevent_forward.energy_barrier)
             - float(dfevent_backward.energy_barrier)
         )
-        candidate = same_topology and gap <= SELF_REVERSE_BARRIER_TOL
-        return Ok(
-            EventAdmission(
-                frame=self._two_rows(dfevent_forward, dfevent_backward),
-                reverse_idx_ref=reverse_idx_ref,
-                same_topology=candidate,
-                self_reverse_candidate=candidate,
+        if same_topology and gap <= SELF_REVERSE_BARRIER_TOL:
+            # Both directions are calculated; finalize_self_reverse decides
+            # the collapse and _record_self_reverse the one-row fallback.
+            return Ok(
+                EventAdmission(
+                    frame=self._two_rows(dfevent_forward, dfevent_backward),
+                    same_topology=True,
+                    self_reverse_candidate=True,
+                )
             )
+        reverse_idx_ref = self.find_matching_event(dfevent_backward)
+        if reverse_idx_ref is not None:
+            return Ok(
+                EventAdmission(
+                    frame=dfevent_forward.to_frame().T,
+                    reverse_idx_ref=reverse_idx_ref,
+                )
+            )
+        return Ok(
+            EventAdmission(frame=self._two_rows(dfevent_forward, dfevent_backward))
         )
 
     @staticmethod

@@ -20,14 +20,18 @@ from pykmc.event_table import (
 )
 from pykmc.rate_constant import create_rate_constant, rate_from_prefactor
 from pykmc.rate_constant.prefactors import PrefactorService
-from pykmc.result import EventSearchOutput
+from pykmc.result import ErrorType, EventSearchOutput
 from tests.lifecycle.conftest import (
     FakeManager,
     accepted,
     rejected,
 )
 
-from .protocol_producers import protocol_event_prefactors, protocol_patch
+from .protocol_producers import (
+    archived_frequency,
+    protocol_event_prefactors,
+    protocol_patch,
+)
 
 HOP = np.array([1.2, 0.3, 0.0])
 
@@ -221,11 +225,10 @@ class TestOnlyAcceptedEventsCostRequests:
     def test_energy_rejected_and_duplicate_cost_nothing(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """Energy rejection is free; coarse barrier candidates need physical proof."""
-        responses = {
-            (0, 1): (accepted(5.0e12), accepted(3.0e12)),
-            (2, 3): (accepted(5.0e12), accepted(3.0e12)),
-        }
+        """Energy rejection and the geometric duplicate gate cost no request."""
+        # contracts 7f policy 6: same topology within 0.25 eV with a matching
+        # saddle crop is a duplicate whatever its barrier gap or prefactors
+        responses = {(0, 1): (accepted(5.0e12), accepted(3.0e12))}
         table, fake = _table_with_service(htst_config, responses)
         sys_ = system_single_type_fcc
         emax = htst_config.eventsearch.emax_event
@@ -233,33 +236,28 @@ class TestOnlyAcceptedEventsCostRequests:
             [
                 _event(sys_, 0, 2.0, 1.5, HOP),
                 _event(sys_, 0, emax + 1.0, 1.5, HOP),  # energy gate
-                _event(
-                    sys_, 0, 2.05, 1.5, HOP
-                ),  # same coarse topology; 0.05 eV is not numerical equality
+                _event(sys_, 0, 2.05, 1.5, HOP),  # same topology, 0.05 eV: duplicate
             ],
             pbc=sys_.pbc,
         )
-        assert [r.is_ok() for r in results] == [True, False, True]
-        assert len(fake.prefactor_requests) == 2
-        assert len(table.table) == 3
-        assert list(table.table.energy_barrier) == [2.0, 1.5, 2.05]
+        assert [r.is_ok() for r in results] == [True, False, False]
+        assert results[2].err_value().type == ErrorType.EVENT_NOT_NEW
+        assert len(fake.prefactor_requests) == 1
+        assert len(table.table) == 2
+        assert list(table.table.energy_barrier) == [2.0, 1.5]
         assert list(
             zip(table.table.idx_ref, table.table.idx_backward, strict=True)
-        ) == [(0, 1), (1, 0), (2, 1)]
-        # Directional equality permits the shared reverse. The two different
-        # forward barriers/rates remain distinct; this protocol has no actual U.
-        for idx, nu, barrier in ((0, 5.0, 2.0), (1, 3.0, 1.5), (2, 5.0, 2.05)):
+        ) == [(0, 1), (1, 0)]
+        for idx, nu, barrier in ((0, 5.0, 2.0), (1, 3.0, 1.5)):
             row = _row(table, idx)
             assert row.nu0 == nu * 1e12 and row.k_prefactor == nu
             assert row.energy_barrier == barrier
             assert row.k == rate_from_prefactor(nu, barrier, htst_config.rateconstant.T)
-        assert _row(table, 0).k > _row(table, 2).k
-        assert table.prefactor_archive.history[3][-1]["nu0"] == 3.0e12
         # A truly identical, already-resolved whole event still costs no work.
         duplicate = table.add_events([_event(sys_, 0, 2.0, 1.5, HOP)], pbc=sys_.pbc)
         assert not duplicate[0].is_ok()
-        assert len(fake.prefactor_requests) == 2
-        assert len(table.table) == 3
+        assert len(fake.prefactor_requests) == 1
+        assert len(table.table) == 2
 
     def test_no_accepted_event_submits_nothing(
         self, htst_config: Any, system_single_type_fcc: Any
@@ -379,7 +377,8 @@ class TestSelfReverseThroughAddEvents:
     def test_unequal_spectra_keep_one_row_with_the_backward_recorded(
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
-        """Equal topologies with different spectra retain both accepted directions."""
+        """Equal topologies with different spectra keep one row; the backward is archived."""
+        # contracts 7f policy 6: an unproven candidate is one self-linked row
         responses = {(0, 1): (accepted(5.0e12), accepted(3.0e12))}
         table, _ = _table_with_service(htst_config, responses)
         sys_ = system_single_type_fcc
@@ -387,17 +386,15 @@ class TestSelfReverseThroughAddEvents:
         links = list(
             zip(table.table["idx_ref"], table.table["idx_backward"], strict=True)
         )
-        assert [(int(a), int(b)) for a, b in links] == [(0, 1), (1, 0)]
+        assert [(int(a), int(b)) for a, b in links] == [(0, 0)]
         row = _row(table, 0)
         assert row["k_prefactor"] == 5.0 and row["nu0_status"] == "ok"
         assert row["nu0_reason"] == (
             "self-reverse unproven: backward nu0 = 3.0000e+12 Hz, differs by 40.0%"
         )
-        backward = _row(table, 1)
-        assert backward["nu0"] == 3.0e12 and backward["k_prefactor"] == 3.0
-        assert backward["nu0_status"] == "ok" and backward["nu0_reason"] == ""
+        assert archived_frequency(table, 1, 3.0e12)
         assert table.prefactor_summary() == {
-            "ok": 2,
+            "ok": 1,
             "rejected": 0,
             "pending": 0,
             "legacy": 0,

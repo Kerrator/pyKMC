@@ -188,7 +188,7 @@ def test_same_batch_and_sequential_have_one_physical_pair(reverse_second, monkey
     batch, batch_worker = table_and_worker(monkeypatch, [5e12, 5e12])
     batch_events = make_events(reverse_second)
     batch_before = input_copy(batch_events)
-    batch.add_events(batch_events, pbc=base.PBC)
+    batch_results = batch.add_events(batch_events, pbc=base.PBC)
     sequential, sequential_worker = table_and_worker(monkeypatch, [5e12])
     sequential_events = make_events(reverse_second)
     sequential_before = input_copy(sequential_events)
@@ -196,7 +196,10 @@ def test_same_batch_and_sequential_have_one_physical_pair(reverse_second, monkey
         sequential.add_events([ev], pbc=base.PBC)
     audit(batch, batch_worker, batch_events, batch_before)
     audit(sequential, sequential_worker, sequential_events, sequential_before)
-    assert len(batch_worker.requests) == 2  # All actual batch results are observed.
+    # contracts 7f policy 6: the geometric gate rejects the exact repeat (or
+    # its exact reverse) before dispatch, in the same batch as well.
+    assert [r.is_ok() for r in batch_results] == [True, False]
+    assert len(batch_worker.requests) == 1
     assert len(sequential_worker.requests) == 1  # Known exact repeat adds no work.
     assert len(sequential.table) == 2
     assert len(batch.table) == 2, "The same batch retained a second exact physical pair"
@@ -214,11 +217,14 @@ def test_same_batch_disagreeing_actual_spectra_are_not_merged(monkeypatch):
     table, worker = table_and_worker(monkeypatch, [5e12, 7e12])
     events = make_events(False)
     before = input_copy(events)
-    table.add_events(events, pbc=base.PBC)
+    results = table.add_events(events, pbc=base.PBC)
     audit(table, worker, events, before)
-    assert len(worker.requests) == 2
-    assert len(table.table) == 4
-    assert sorted(table.table.nu0.astype(float)) == [5e12, 5e12, 7e12, 7e12]
+    # contracts 7f policy 6: the exact repeat never reaches the worker, so no
+    # second spectrum exists to disagree with; the first pair stands alone.
+    assert [r.is_ok() for r in results] == [True, False]
+    assert len(worker.requests) == 1
+    assert len(table.table) == 2
+    assert sorted(table.table.nu0.astype(float)) == [5e12, 5e12]
     links = {int(r.idx_ref): int(r.idx_backward) for _, r in table.table.iterrows()}
     assert all(
         links.get(back) == forward and forward != back
