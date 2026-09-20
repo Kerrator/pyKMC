@@ -78,6 +78,16 @@ Schema-1 tables and rows without a producing calculation keep their event
 geometry and use an explicit unavailable status with the current `k0` fallback.
 Repeated saving and loading cannot supply their missing provenance.
 
+Loading a schema-1 table (or any HTST pickle without per-calculation
+provenance) is loud: exactly one `WARNING` names the file, the stored and
+current schema versions, the number of rows kept and the number of accepted
+estimates demoted to `legacy`/`k0`, and the recovery path. Reference prefactors
+cannot be rebuilt from the stored local crops, so recovery means running with a
+prefactor service (refined sites then get site estimates, `nu0_source = site`)
+or regenerating the catalogue under the current schema; selection never
+launches a recomputation for such rows. Their original frequencies stay in the
+archive history for inspection.
+
 Loading, reference-estimate retrieval, and the catalogue subset passed to
 refinement validate current physics before inheritance. Verified same-input
 calculations reuse their frequencies. Current inclusive frequency windows are
@@ -96,6 +106,13 @@ Changes to masses or numerical settings still require current calculations.
 Restart recomputation requests all three full-system potential energies after
 preminimization and before cropping. It updates the directional barrier as well
 as the frequency; ordinary prefactor calls incur no extra energy evaluations.
+The recomputed barrier is adopted only when the kernel accepts the geometry, or
+rejects it for a reason that leaves the stationary triplet intact (frequency
+window, empty free region, non-finite prefactor). A rejection that invalidates
+the geometry (`nonstationary_geometry`, `unstable_minimum`,
+`saddle_not_first_order`, `mode_count_mismatch`, `nonfinite_hessian`) keeps the
+catalogued barrier, records the attempt with both values in the archive history
+and logs a warning; the row uses the `k0` fallback on the catalogued barrier.
 The superseded calculation remains in the registry and history. Fresh opaque
 force-model results can be used in their producing context, but serialization
 does not make them reusable: a subsequent load needs a new calculation or an

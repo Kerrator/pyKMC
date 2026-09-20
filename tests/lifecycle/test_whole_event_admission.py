@@ -196,9 +196,11 @@ def setup_table(style, *, seed_reverse, monkeypatch):
         dE_backward,
         cell,
         types,
+        pbc=None,
     ):
         assert tuple(types) == TYPES and index_move == 0
         assert np.array_equal(cell, CELL)
+        assert tuple(pbc) == PBC  # the admitted axes reach the series builder
         return (
             row(min1_positions, saddle_positions, min2_positions, barrier=dE_forward),
             row(
@@ -306,29 +308,26 @@ def test_early_admission_needs_whole_event(
     print("saddle_only_candidate_id", table.find_matching_event(probe))
     results = table.add_events([ev], pbc=PBC)
     assert len(results) == 1
-    if different_endpoint:
-        assert results[0].is_ok(), (
-            "A saddle-only forward match discarded a distinct full endpoint channel"
-        )
-        assert len(table.table) == 3, (
-            "A saddle-only reverse match discarded the new backward channel"
-        )
-        added = table.table[table.table.idx_ref.astype(int) != 7]
-        assert len(added) == 2
-        new_ids = set(added.idx_ref.astype(int))
-        assert set(added.idx_backward.astype(int)) == new_ids
-        assert all(int(r.idx_ref) != int(r.idx_backward) for _, r in added.iterrows())
-        assert len(worker.requests) == 1
-        for _, r in added.iterrows():
-            calc = table.prefactor_archive.calculation_for(int(r.idx_ref), r)
-            assert calc is not None and calc.provenance.source.is_complete
-            assert float(r.nu0) == 5e12 and r.nu0_status == "ok"
-    elif seed_reverse:
+    # contracts 7f policy 6: the geometric gate (topology + barrier + saddle
+    # crop) decides admission exactly as in constant mode, so a different
+    # endpoint behind the same saddle crop is a duplicate of the catalogued
+    # direction; the whole-event proof only decides collapses.
+    if seed_reverse:
         assert results[0].is_ok()
         assert len(table.table) == 2
         added = table.table[table.table.idx_ref.astype(int) != 7]
         assert len(added) == 1 and int(added.iloc[0].idx_backward) == 7
         assert len(worker.requests) == 1
+        new_id = int(added.iloc[0].idx_ref)
+        calc = table.prefactor_archive.calculation_for(new_id, added.iloc[0])
+        assert calc is not None and calc.provenance.source.is_complete
+        assert float(added.iloc[0].nu0) == 5e12
+        # The new backward estimate is archived, never a second selectable row.
+        assert any(
+            "reverse already catalogued as reference 7" in entry["reason"]
+            and entry["nu0"] == 5e12
+            for entry in table.prefactor_archive.history[new_id]
+        )
     else:
         assert not results[0].is_ok()
         assert results[0].err_value().type == ErrorType.EVENT_NOT_NEW

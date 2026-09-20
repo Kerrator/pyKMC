@@ -331,3 +331,151 @@ def test_opaque_fresh_result_never_becomes_verified_by_serialization(
             not descriptor.reusable
             for descriptor in stored.attrs["descriptors"].values()
         )
+
+
+def test_rejected_recomputation_keeps_the_saved_barrier(tmp_path, caplog):
+    """A geometry-invalidating recompute never rewrites the catalogued barrier.
+
+    Review R07 major (7c406b2): the energies of a saddle the kernel just
+    declared non-stationary under the current potential are not a barrier.
+    The row falls back to k0 with the rejection recorded; the saved barrier,
+    the attempt and a warning survive.
+    """
+    import logging
+    from concurrent.futures import Future
+    from dataclasses import replace
+
+    from pykmc.htst.result import DirectionalPrefactor, PrefactorRejection
+
+    require_schema2()
+    first, second = tmp_path / "A.json", tmp_path / "B.json"
+    write_potential(first, a=0.0)
+    write_potential(second, scale=2.0)
+    old_service, _ = service(first)
+    old = calculate(old_service, "A")
+    table = table_for(
+        old_service, [(17, old, "forward", 47), (47, old, "backward", 17)]
+    )
+    saved = {idx: float(row_at(table, idx).energy_barrier) for idx in (17, 47)}
+    assert saved == {17: pytest.approx(1.0), 47: pytest.approx(1.0)}
+    path = tmp_path / "saved.pkl"
+    table.save(str(path))
+
+    current, worker = service(second, saved=path)
+    inner = worker.submit
+
+    def nonstationary(
+        operation, *, request, compute_backward=True, compute_energies=False
+    ):
+        result = inner(
+            operation,
+            request=request,
+            compute_backward=compute_backward,
+            compute_energies=compute_energies,
+        ).result()
+        # The worker still reports the current energies of the saved triplet
+        # (barrier 2.0 under potential B) while rejecting the geometry.
+        assert result.provenance.energies[1] - result.provenance.energies[0] == 2.0
+        bad = DirectionalPrefactor.rejected(
+            PrefactorRejection.NONSTATIONARY_GEOMETRY,
+            "maximum free-atom force norm 3.7 eV/A exceeds stationarity tolerance",
+            n_free=result.n_free,
+            n_positive_min=None,
+            n_negative_saddle=None,
+        )
+        future = Future()
+        future.set_result(replace(result, forward=bad, backward=bad))
+        return future
+
+    worker.submit = nonstationary
+    with caplog.at_level(logging.WARNING, logger="log"):
+        loaded = ReferenceEventTable(current.config, prefactor_service=current)
+    assert len(worker.calls) == 1
+    for idx in (17, 47):
+        row = row_at(loaded, idx)
+        assert row.energy_barrier == saved[idx], (
+            "the barrier moved with a rejected geometry"
+        )
+        assert row.nu0_status == "rejected"
+        assert "nonstationary_geometry" in row.nu0_reason
+        assert np.isnan(row.nu0)
+        assert row.k_prefactor == pytest.approx(current.config.rateconstant.k0)
+        assert any(
+            "nonstationary_geometry" in entry["reason"]
+            and entry["energy_barrier"] == saved[idx]
+            for entry in loaded.prefactor_archive.history[idx]
+        ), loaded.prefactor_archive.history[idx]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("nonstationary_geometry" in w and "barrier" in w for w in warnings), (
+        warnings
+    )
+
+
+def test_validated_rows_are_memoised_before_the_source_is_rebuilt(
+    tmp_path, monkeypatch
+):
+    """A second selection of an unchanged row costs no request rebuild or hash.
+
+    Review R07 major (7c406b2, 8026a63): the memo was consulted only after
+    ``request_from_snapshot`` and a full-geometry ``RequestSnapshot`` capture,
+    so ``has_id_subset_table`` paid O(N_source) per row per KMC step. The
+    cheap key (service, method, physics, producing id, row digest, T, k0) is
+    checked first; a changed service or row still revalidates.
+    """
+    from pykmc.htst import provenance as provenance_module
+    from pykmc.rate_constant.prefactors import PrefactorService
+
+    require_schema2()
+    potential = tmp_path / "p.json"
+    write_potential(potential)
+    svc, worker = service(potential)
+    result = calculate(svc, "A")
+    table = table_for(svc, [(17, result, "forward", 47), (47, result, "backward", 17)])
+    ids = list(table.table.event_id)
+    rebuilt: list[tuple] = []
+    captured: list[int] = []
+    original_rebuild = PrefactorService.request_from_snapshot
+    original_capture = provenance_module.RequestSnapshot.capture.__func__
+
+    def counting_rebuild(self, snapshot, *, event_key):
+        rebuilt.append(event_key)
+        return original_rebuild(self, snapshot, event_key=event_key)
+
+    def counting_capture(cls, request):
+        captured.append(len(request.types))
+        return original_capture(cls, request)
+
+    monkeypatch.setattr(PrefactorService, "request_from_snapshot", counting_rebuild)
+    monkeypatch.setattr(
+        provenance_module.RequestSnapshot, "capture", classmethod(counting_capture)
+    )
+    first = table.has_id_subset_table(ids)
+    assert len(first) == 2 and set(first.nu0_status) == {"ok"}
+    assert rebuilt, "the first selection validates the producing context"
+    rebuilt.clear()
+    captured.clear()
+    for _ in range(3):
+        again = table.has_id_subset_table(ids)
+        assert len(again) == 2 and set(again.nu0_status) == {"ok"}
+        assert table.reference_estimate(17)["nu0_status"] == "ok"
+    assert rebuilt == [], "an unchanged validated row was rebuilt again"
+    assert captured == [], "an unchanged validated row was captured and hashed again"
+    assert not worker.calls[1:], "no recomputation was dispatched"
+    # A different current service (same physics) is a new context: revalidate.
+    other, _ = service(potential)
+    table.prefactor_service = other
+    table.has_id_subset_table(ids)
+    assert rebuilt, "a new service must revalidate the rows"
+    rebuilt.clear()
+    table.has_id_subset_table(ids)
+    assert rebuilt == []
+    # A changed row (barrier edited behind the catalogue's back) no longer
+    # corresponds to its producing record: the memo cannot mask that, the row
+    # is demoted rather than rebuilt, and nothing is dispatched.
+    table.table.loc[table.table.idx_ref == 17, "energy_barrier"] += 0.1
+    edited = table.has_id_subset_table(ids)
+    assert rebuilt == []
+    changed = edited[edited.idx_ref == 17].iloc[0]
+    assert changed.nu0_status == "legacy" and "row correspondence" in changed.nu0_reason
+    assert edited[edited.idx_ref == 47].iloc[0].nu0_status == "ok"
+    assert not worker.calls[1:]

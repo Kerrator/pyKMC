@@ -151,15 +151,37 @@ symmetry-equivalent minima. Unproven events retain reciprocal directional rows.
 SAME_TOPOLOGY_BARRIER_TOL: float = 0.25
 """Coarse barrier window (eV) for a geometric lookup; not an identity proof."""
 
+GEOMETRY_INVALIDATING_REJECTIONS: frozenset[str] = frozenset(
+    {
+        "nonstationary_geometry",
+        "unstable_minimum",
+        "saddle_not_first_order",
+        "mode_count_mismatch",
+        "nonfinite_hessian",
+    }
+)
+"""``PrefactorRejection`` codes that disqualify the recomputed energies.
+
+A recomputation under the current physics that reports one of these has
+found the saved triplet not to be a minimum-saddle-minimum of the current
+potential, so its energy differences are not a barrier: the catalogued
+barrier is kept and the row falls back to ``k0``. The other codes (window,
+empty free region, non-finite prefactor) leave the stationary geometry
+intact and its recomputed barrier is adopted.
+"""
+
 
 @dataclass(frozen=True)
 class EventAdmission:
     """Provisional rows and candidate links, before actual prefactor resolution.
 
-    HTST/RPA retain two reciprocal rows. ``reverse_idx_ref`` proposes an
-    existing backward row for post-resolution comparison; ``same_topology``
-    and ``self_reverse_candidate`` propose self-reversal only. None of these
-    flags authorizes collapse. Constant mode keeps its original row policy.
+    HTST/RPA admit two reciprocal provisional rows, or one forward row when
+    ``reverse_idx_ref`` names the catalogued row the geometric gate matched
+    for the backward direction (contracts 7f policy 6, as in constant mode).
+    ``same_topology`` and ``self_reverse_candidate`` propose self-reversal
+    only; the whole-event proof after resolution decides the collapse, and an
+    unproven candidate falls back to one self-linked forward row. Constant
+    mode keeps its original row policy.
     """
 
     frame: pd.DataFrame
@@ -254,10 +276,15 @@ class ReferenceEventTable:
     event is kept until its directional logical ids are known; exactly one
     request per accepted event (both directions) is submitted; rows are
     patched by logical id; the batch is resolved before :meth:`add_events`
-    returns, so refinement never reads an unresolved reference ``k``. A
-    self-reverse candidate starts with two rows. Only accepted, agreeing
-    estimates and a common full physical map permit collapse; both original
-    producing records remain in the archive.
+    returns, so refinement never reads an unresolved reference ``k``. The
+    admission duplicate gate is :meth:`find_matching_event` in every style
+    (contracts 7f policy 6), so a catalogued event stays a duplicate whatever
+    its prefactor status. A self-reverse candidate starts with two provisional
+    rows; only accepted, agreeing estimates and a common full physical map
+    permit a proven collapse, and an unproven candidate collapses back to one
+    self-linked forward row with the backward estimate kept in the archive.
+    Two rows sharing one ``event_id`` are never exposed as selectable
+    channels of one site. Both original producing records remain archived.
 
     """
 
@@ -272,6 +299,10 @@ class ReferenceEventTable:
         self.prefactor_service = prefactor_service
         self.metadata: dict[str, Any] = {}
         self._fresh_calculations: set[tuple[int, str]] = set()
+        # idx_ref -> cheap validation key (see _ensure_current_estimate); a hit
+        # means the row was validated under this exact service, physics,
+        # producing record, row content and rate policy, so selection skips
+        # the full-source rebuild and hashing. Row writers pop their entry.
         self._resolved_contexts: dict[int, tuple] = {}
         self._recomputed: dict[str, Any] = {}
         self.prefactor_archive = None
@@ -326,16 +357,9 @@ class ReferenceEventTable:
         """
         results_is_valid_events = []
         accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
-        # Check if the event is valid based on is_valid_new_event conditions
+        # Admission is geometric (contracts 7f policy 6): the full physical
+        # source is built once per accepted event, in _resolve_prefactors.
         for ev in events:
-            request = None
-            if (
-                self.uses_prefactors
-                and self.prefactor_service is not None
-                and pbc is not None
-                and ev.types is not None
-            ):
-                request = self._event_request(ev, pbc, event_key=())
             res = self._admit(
                 min1_positions=ev.min1_positions,
                 saddle_positions=ev.saddle_positions,
@@ -345,7 +369,7 @@ class ReferenceEventTable:
                 dE_backward=ev.dE_backward,
                 cell=ev.cell,
                 types=ev.types,
-                request=request,
+                pbc=pbc,
             )
             if res.is_ok():
                 admission = res.ok_value()
@@ -495,20 +519,45 @@ class ReferenceEventTable:
                 elif admission.self_reverse_candidate:
                     self._record_self_reverse(fwd_id, bwd_id, pre, wall)
             else:
-                # The reverse is already catalogued; its own estimate stands.
+                # The reverse is already catalogued (geometric gate); its own
+                # estimate stands and this search's backward is archived only.
+                reverse_id = int(
+                    self.table.loc[
+                        self.table["idx_ref"] == fwd_id, "idx_backward"
+                    ].iloc[0]
+                )
+                self._archive_discarded_backward(fwd_id, reverse_id, _ev, pre)
                 logger.info(
                     "[htst] reference event %d: reverse already catalogued as "
-                    "event %d, backward estimate of this search discarded "
-                    "(n_free %d, batch %.3f s)",
+                    "event %d, backward estimate of this search archived, not "
+                    "selectable (n_free %d, batch %.3f s)",
                     fwd_id,
-                    int(
-                        self.table.loc[
-                            self.table["idx_ref"] == fwd_id, "idx_backward"
-                        ].iloc[0]
-                    ),
+                    reverse_id,
                     pre.n_free,
                     wall,
                 )
+
+    def _archive_discarded_backward(self, fwd_id, reverse_id, ev, pre) -> None:
+        """Keep a computed backward estimate that no selectable row carries."""
+        backward = pre.backward
+        if backward.skipped:
+            return
+        nu0_hz = float(backward.nu0_hz) if backward.ok else None
+        rate = self.rate_constant.compute_rate(float(ev.dE_backward), nu0_hz)
+        self.prefactor_archive.retain(
+            fwd_id,
+            {
+                "nu0": nu0_hz,
+                "nu0_status": NU0_OK if backward.ok else NU0_REJECTED,
+                "nu0_reason": ""
+                if backward.ok
+                else f"{backward.reason_code.value}: {backward.reason}",
+                "energy_barrier": float(ev.dE_backward),
+                "k_prefactor": rate.prefactor,
+            },
+            f"backward estimate of this search discarded: reverse already "
+            f"catalogued as reference {reverse_id}",
+        )
 
     @staticmethod
     def _log_direction(
@@ -603,41 +652,16 @@ class ReferenceEventTable:
             else None
         )
 
-    def _matching_whole_event(self, event, request, direction):
-        """Strengthen a topology/barrier candidate to one full physical map."""
-        from .htst.event_identity import request_matches_calculation
-
-        if request is None:
-            return None
-        subset = self.table[
-            (self.table.event_id == event.event_id)
-            & ((self.table.energy_barrier - float(event.energy_barrier)).abs() <= 0.25)
-        ]
-        for idx_ref in subset.idx_ref:
-            row = subset[subset.idx_ref == idx_ref].iloc[0]
-            if (
-                abs(float(row.energy_barrier) - float(event.energy_barrier))
-                > SELF_REVERSE_BARRIER_TOL
-            ):
-                continue
-            calculation = self._eligible_identity_calculation(int(idx_ref))
-            if calculation is not None and request_matches_calculation(
-                request,
-                direction,
-                calculation,
-                method=self.prefactor_service.method,
-                tolerance=self.config.psr.matching_score_thr,
-                kmax_factor=self.config.ira.kmax_factor,
-            ):
-                return int(idx_ref)
-        return None
-
-    def _merge_direction(self, discarded, survivor):
+    def _merge_direction(self, discarded, survivor, reason=None):
         """Redirect every alias while keeping both original producing records."""
         mask = self.table.idx_ref == discarded
         row = self.table.loc[mask].iloc[0]
         self.prefactor_archive.retain(
-            discarded, row, f"whole-event equivalent to reference {survivor}"
+            discarded,
+            row,
+            f"whole-event equivalent to reference {survivor}"
+            if reason is None
+            else reason,
         )
         self.table.loc[self.table.idx_backward == discarded, "idx_backward"] = survivor
         self.table = self.table.loc[~mask].copy()
@@ -672,6 +696,7 @@ class ReferenceEventTable:
                 second,
                 tolerance=self.config.psr.matching_score_thr,
                 kmax_factor=self.config.ira.kmax_factor,
+                crop_radius=self.config.atomicenvironment.rcut,
             )
         ):
             return False
@@ -706,6 +731,7 @@ class ReferenceEventTable:
                     pre.calculation("backward"),
                     tolerance=self.config.psr.matching_score_thr,
                     kmax_factor=self.config.ira.kmax_factor,
+                    crop_radius=self.config.atomicenvironment.rcut,
                 )
             )
         first = self._eligible_identity_calculation(known_forward)
@@ -750,6 +776,7 @@ class ReferenceEventTable:
                     second,
                     tolerance=self.config.psr.matching_score_thr,
                     kmax_factor=self.config.ira.kmax_factor,
+                    crop_radius=self.config.atomicenvironment.rcut,
                 )
             ):
                 return int(known_id)
@@ -768,9 +795,18 @@ class ReferenceEventTable:
             )
             return
         fwd, bwd = pre.forward, pre.backward
+        # Policy 6: a rejected or disagreeing backward estimate collapses the
+        # candidate back to one self-linked forward row (the backward value
+        # stays in the archive). Accepted agreeing spectra without one common
+        # whole-event map keep both rows (policy 4 counterexample).
+        collapse = True
         if fwd.ok and bwd.ok:
             differs = 100.0 * abs(fwd.nu0_hz - bwd.nu0_hz) / fwd.nu0_hz
-            note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
+            if self_reverse_prefactors_agree(fwd, bwd):
+                collapse = False
+                note = f"self-reverse unproven: no common whole-event map, backward nu0 = {bwd.nu0_hz:.4e} Hz"
+            else:
+                note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz, differs by {differs:.1f}%"
         elif bwd.ok:
             note = f"self-reverse unproven: backward nu0 = {bwd.nu0_hz:.4e} Hz (forward rejected)"
         elif bwd.skipped:
@@ -780,10 +816,16 @@ class ReferenceEventTable:
         mask = self.table.idx_ref == idx_ref
         current = str(self.table.loc[mask, "nu0_reason"].iloc[0])
         self.table.loc[mask, "nu0_reason"] = f"{current}; {note}" if current else note
+        if collapse:
+            self._merge_direction(bwd_id, idx_ref, reason=note)
+            action = "collapsed to one self-linked row, backward estimate archived"
+        else:
+            action = "retaining both directions"
         logger.warning(
-            "[htst] reference event %d: %s; retaining both directions (n_free %d, batch %.3f s)",
+            "[htst] reference event %d: %s; %s (n_free %d, batch %.3f s)",
             idx_ref,
             note,
+            action,
             pre.n_free,
             wall_s,
         )
@@ -816,6 +858,12 @@ class ReferenceEventTable:
             If no row carries ``idx_ref`` or if the estimate was skipped
             (``status == "skipped"`` is never stored: it is no estimate).
 
+        Notes
+        -----
+        An accepted estimate written without ``calculation`` has no producer
+        and is demoted to ``legacy``/``k0`` with a warning; production callers
+        always pass the producing calculation.
+
         """
         if estimate.skipped:
             raise ValueError(
@@ -847,6 +895,8 @@ class ReferenceEventTable:
         if calculation is None:
             archive.references[int(idx_ref)] = None
             if estimate.ok:
+                # Never a production path (every caller passes calculation=);
+                # a value without its producer is not selectable, and says so.
                 archive.retain(
                     idx_ref,
                     self.table.loc[mask].iloc[0],
@@ -854,6 +904,13 @@ class ReferenceEventTable:
                 )
                 self._set_estimate(
                     idx_ref, NU0_LEGACY, None, "legacy: missing producing calculation"
+                )
+                logger.warning(
+                    "[htst] reference event %d: accepted nu0 = %.4e Hz written "
+                    "without its producing calculation; demoted to 'legacy' with "
+                    "the k0 fallback (the value stays in the archive history)",
+                    idx_ref,
+                    float(estimate.nu0_hz),
                 )
         else:
             archive.record(idx_ref, self.table.loc[mask].iloc[0], calculation)
@@ -874,8 +931,15 @@ class ReferenceEventTable:
         self.table.loc[mask, "k"] = rate.rate
 
     def _ensure_current_estimate(self, idx_ref: int) -> None:
-        """Validate producing context before reference inheritance or selection."""
-        from .htst.catalogue import row_digest
+        """Validate producing context before reference inheritance or selection.
+
+        The validation is memoised per row on a cheap key (service identity,
+        method, current physical descriptor, producing calculation id, row
+        digest, ``T``, ``k0``); a hit returns before the full source is
+        rebuilt or hashed, so repeated selection of an unchanged row costs one
+        crop digest. Any change of service, physics, producing record, row
+        content or rate policy misses and revalidates.
+        """
         from .htst.provenance import RequestSnapshot
         from .htst.request import HTSTRequestError
         from .physics import _digest
@@ -901,6 +965,22 @@ class ReferenceEventTable:
                 idx_ref, NU0_STALE, None, "stale: missing current physical context"
             )
             return
+        # Cheap memo first: calculation_for already bound the row digest to the
+        # producing record, so the key needs no request rebuild and no
+        # full-geometry hash. Every component is a stored string or scalar.
+        link = archive.references[int(idx_ref)]
+        descriptor = service.current_descriptor
+        signature = (
+            id(service),
+            service.method,
+            None if descriptor is None else descriptor.descriptor_id,
+            link.calculation_id,
+            link.row_digest,
+            float(self.config.rateconstant.T),
+            float(self.config.rateconstant.k0),
+        )
+        if self._resolved_contexts.get(int(idx_ref)) == signature:
+            return
         try:
             request = service.request_from_snapshot(
                 calculation.provenance.source, event_key=("reload", int(idx_ref))
@@ -909,17 +989,6 @@ class ReferenceEventTable:
             reason = f"stale: cannot rebuild complete current source: {exc}"
             archive.retain(idx_ref, row, reason)
             self._set_estimate(idx_ref, NU0_STALE, None, reason)
-            return
-        signature = (
-            id(service),
-            RequestSnapshot.capture(request).snapshot_id,
-            service.method,
-            calculation.calculation_id,
-            row_digest(row),
-            float(self.config.rateconstant.T),
-            float(self.config.rateconstant.k0),
-        )
-        if self._resolved_contexts.get(int(idx_ref)) == signature:
             return
         comparison = self.compare_physics(calculation.provenance.produced.descriptor)
         registered = archive.descriptors.get(calculation.descriptor_id)
@@ -1009,7 +1078,33 @@ class ReferenceEventTable:
             self._resolved_contexts[int(idx_ref)] = signature
             return
         minimum = energies[0] if calculation.direction == "forward" else energies[2]
-        self.table.loc[mask, "energy_barrier"] = float(energies[1] - minimum)
+        recomputed_barrier = float(energies[1] - minimum)
+        verdict = current.estimate
+        if verdict.ok or verdict.reason_code.value not in (
+            GEOMETRY_INVALIDATING_REJECTIONS
+        ):
+            self.table.loc[mask, "energy_barrier"] = recomputed_barrier
+        else:
+            # The kernel found the saved triplet non-stationary under the
+            # current physics: its energies are not a barrier. Keep the
+            # catalogued barrier, record the attempt and say so.
+            kept = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+            reason = (
+                f"recomputation rejected ({verdict.reason_code.value}: "
+                f"{verdict.reason}); catalogued barrier {kept:.4f} eV kept, "
+                f"recomputed {recomputed_barrier:.4f} eV not adopted"
+            )
+            archive.retain(idx_ref, row, reason)
+            logger.warning(
+                "[htst] reference event %d: recomputed prefactor rejected (%s: %s) "
+                "under the current physics; keeping the catalogued barrier %.4f eV "
+                "(recomputed %.4f eV not adopted), rate falls back to k0",
+                idx_ref,
+                verdict.reason_code.value,
+                verdict.reason,
+                kept,
+                recomputed_barrier,
+            )
         self._patch_row(idx_ref, current.estimate, calculation=current, fresh=True)
         # Apply the current window and rate policy even to a worker whose
         # numerical acceptance contract was implemented separately.
@@ -1081,6 +1176,7 @@ class ReferenceEventTable:
         types: list[str] = None,
         *,
         request=None,
+        pbc: Any = None,
     ) -> Result[EventAdmission, ErrorInfo]:
         """Apply the energy gates, build the directional series and admit them.
 
@@ -1102,6 +1198,11 @@ class ReferenceEventTable:
             Simulation box cell.
         types : list[str]
             Event's atom types.
+        request : HTSTEventRequest, optional
+            Full physical source of the event (htst/rpa lookups).
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in, handed to
+            :meth:`_build_event_series`.
 
         Returns
         -------
@@ -1175,6 +1276,7 @@ class ReferenceEventTable:
                 dE_backward=dE_backward,
                 cell=cell,
                 types=types,
+                pbc=pbc,
             )
             return self._admit_series(
                 dfevent_forward, dfevent_backward, request=request
@@ -1190,6 +1292,8 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        *,
+        pbc: Any = None,
     ) -> Result[pd.DataFrame, ErrorInfo]:
         """Check if the event has the required conditions to be added to the table DataFrame based on the configuration's parameters.
 
@@ -1214,6 +1318,8 @@ class ReferenceEventTable:
             Simulation box cell.
         types : list[str]
             Event's atom types.
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in.
 
         Returns
         -------
@@ -1230,6 +1336,7 @@ class ReferenceEventTable:
             dE_backward=dE_backward,
             cell=cell,
             types=types,
+            pbc=pbc,
         )
         if res.is_ok():
             return Ok(res.ok_value().frame)
@@ -1242,26 +1349,28 @@ class ReferenceEventTable:
         *,
         request=None,
     ) -> Result[EventAdmission, ErrorInfo]:
-        """Retain provisional directions until full physical identity is proven.
+        """Apply the geometric admission gate, then the style's row policy.
 
-        Constant mode retains its original topology/saddle admission policy.
-        HTST/RPA may reject an exact known whole event without recalculation;
-        otherwise both rows carry their own actual result before any merge.
-        Missing full request/provenance is not evidence of equivalence.
+        :meth:`find_matching_event` (topology + 0.25 eV + IRA saddle-crop
+        match) is the duplicate gate in every style (contracts 7f policy 6):
+        a catalogued event is a duplicate whatever its prefactor status, so a
+        k0-fallback row is never re-admitted. Constant mode keeps its original
+        row policy. HTST/RPA admit two provisional reciprocal rows so both
+        directions are actually calculated, except when the backward direction
+        already matches a catalogued row geometrically: then one forward row is
+        admitted and linked to that row, as in constant mode. Whether a
+        resolved pair may be collapsed is decided after resolution by the
+        whole-event proof (policy 4), never here. ``request`` is accepted for
+        signature compatibility and ignored: admission never reads the full
+        source, which is built once per accepted event for the worker.
         """
-        duplicate = (
-            self._matching_whole_event(dfevent_forward, request, "forward")
-            if self.uses_prefactors
-            else self.find_matching_event(dfevent_forward)
-        )
+        duplicate = self.find_matching_event(dfevent_forward)
         if duplicate is not None:
             return Err(
                 ErrorInfo(
                     type=ErrorType.EVENT_NOT_NEW,
                     message="Found event already in reference table",
-                    details="Same whole event"
-                    if self.uses_prefactors
-                    else "Same topology",
+                    details="Same topology",
                 )
             )
         same_topology = dfevent_forward["event_id"] == dfevent_forward["id_final"]
@@ -1280,21 +1389,30 @@ class ReferenceEventTable:
                 )
             return Ok(EventAdmission(frame=dfevent_forward.to_frame().T))
 
-        reverse_idx_ref = self._matching_whole_event(
-            dfevent_backward, request, "backward"
-        )
         gap = abs(
             float(dfevent_forward.energy_barrier)
             - float(dfevent_backward.energy_barrier)
         )
-        candidate = same_topology and gap <= SELF_REVERSE_BARRIER_TOL
-        return Ok(
-            EventAdmission(
-                frame=self._two_rows(dfevent_forward, dfevent_backward),
-                reverse_idx_ref=reverse_idx_ref,
-                same_topology=candidate,
-                self_reverse_candidate=candidate,
+        if same_topology and gap <= SELF_REVERSE_BARRIER_TOL:
+            # Both directions are calculated; finalize_self_reverse decides
+            # the collapse and _record_self_reverse the one-row fallback.
+            return Ok(
+                EventAdmission(
+                    frame=self._two_rows(dfevent_forward, dfevent_backward),
+                    same_topology=True,
+                    self_reverse_candidate=True,
+                )
             )
+        reverse_idx_ref = self.find_matching_event(dfevent_backward)
+        if reverse_idx_ref is not None:
+            return Ok(
+                EventAdmission(
+                    frame=dfevent_forward.to_frame().T,
+                    reverse_idx_ref=reverse_idx_ref,
+                )
+            )
+        return Ok(
+            EventAdmission(frame=self._two_rows(dfevent_forward, dfevent_backward))
         )
 
     @staticmethod
@@ -1522,6 +1640,7 @@ class ReferenceEventTable:
         dE_backward: float,
         cell: np.ndarray,
         types: list[str] = None,
+        pbc: Any = None,
     ) -> tuple[pd.Series, pd.Series]:
         """Build foward and backward events Series.
 
@@ -1546,6 +1665,14 @@ class ReferenceEventTable:
             always stored in the ``types`` column (both coloring modes, so the schema
             is mode-independent). Colouring is only *applied* to graph
             hashing/symmetry detection when the configured coloring mode is 'full'.
+        pbc : array_like of bool, optional
+            Periodic axes of the system the event was found in. The scratch
+            systems that compute the neighbour lists, graph ids, stored crops
+            and symmetry sets carry these axes, so a catalogued ``event_id``
+            equals the runtime environment id of a boundary-crossing atom.
+            ``None`` keeps the catalogue's historical all-periodic convention
+            (a bare ``System()`` is non-periodic); ``add_events`` always passes
+            the real axes.
 
         Returns
         -------
@@ -1558,9 +1685,10 @@ class ReferenceEventTable:
         full = self.config.atomicenvironment.atom_coloring_mode == "full"
         # Only use element types for graph/symmetry computation in full coloring mode
         graph_types = types if full else None
+        axes = True if pbc is None else pbc
 
         # compute neighbors list for initial, saddle and final positions -> to compute graphs
-        min1system = System()
+        min1system = System(pbc=axes)
         min1system.positions = min1_positions
         min1system.cell = cell
         min1neighbors_list = NeighborsList(
@@ -1569,7 +1697,7 @@ class ReferenceEventTable:
             self.config.atomicenvironment.rcut,
         )
 
-        saddlesystem = System()
+        saddlesystem = System(pbc=axes)
         saddlesystem.positions = saddle_positions
         saddlesystem.cell = cell
         saddleneighbors_list = NeighborsList(
@@ -1578,7 +1706,7 @@ class ReferenceEventTable:
             self.config.atomicenvironment.rcut,
         )
 
-        min2system = System()
+        min2system = System(pbc=axes)
         min2system.positions = min2_positions
         min2system.cell = cell
         min2neighbors_list = NeighborsList(
@@ -1873,10 +2001,32 @@ class ReferenceEventTable:
             if metadata:
                 self.prefactor_archive.legacy_metadata.append(metadata)
             reason = "legacy table: missing per-calculation producing provenance"
+            # Policy 2: invalidation is allowed, silence is not. One WARNING
+            # per table says what was lost, why, and how to get it back.
+            accepted_rows = (
+                int((df["nu0_status"] == NU0_OK).sum())
+                if "nu0_status" in df.columns
+                else 0
+            )
             logger.warning(
-                "Reference table %s: %s; retaining geometry with k0 fallback",
+                "Reference table %s: %s (stored %s, current schema %d); %d row(s) "
+                "kept with their event geometry, %d accepted estimate(s) demoted to "
+                "status 'legacy' with the k0 fallback (%g ps^-1) because their "
+                "producing calculations were never persisted (contracts policy 2). "
+                "Recovery: reference prefactors cannot be rebuilt from local crops; "
+                "run with a prefactor service so refined sites get site estimates, "
+                "or regenerate the catalogue under schema %d. Re-saving never "
+                "restores the estimates.",
                 path,
                 reason,
+                "no schema metadata"
+                if version is None
+                else f"schema_version {version}",
+                TABLE_SCHEMA_VERSION,
+                len(df),
+                accepted_rows,
+                float(self.config.rateconstant.k0),
+                TABLE_SCHEMA_VERSION,
             )
             for _, row in df.iterrows():
                 self.prefactor_archive.retain(int(row["idx_ref"]), row, reason)
