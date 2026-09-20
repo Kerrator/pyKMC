@@ -741,3 +741,82 @@ class TestReloadCompatibility:
         assert row["nu0_status"] == "stale" and row["nu0_source"] == "k0"
         assert row["k_prefactor"] == 1.0 and math.isnan(row["nu0"])
         assert "complete source" in row["nu0_reason"]
+
+
+class TestSchemaOneInvalidation:
+    """Policy 2: a schema-1 table is invalidated loudly and recoverably.
+
+    Schema 1 persisted no per-calculation producing provenance, so its accepted
+    estimates cannot be trusted (or rebuilt from the local crops). Reload keeps
+    the geometry, demotes the rows to ``legacy``/``k0`` and says exactly what
+    happened, once, with the file, both schema versions, the counts and the
+    recovery path; selection never launches a recompute for such rows.
+    """
+
+    @staticmethod
+    def _schema_one(config: Config, system: Any, tmp_path: Path) -> Path:
+        """Save accepted rows 12 and 5 plus rejected row 3, then downgrade to schema 1."""
+        table = protocol_table(config)
+        _populate(table, system, [12, 3, 5])
+        protocol_patch(table, 12, accepted(5.0e12))
+        protocol_patch(table, 5, accepted(6.0e12))
+        protocol_patch(table, 3, rejected("unstable"))
+        saved = tmp_path / "schema2.pickle"
+        table.save(str(saved))
+        raw = pd.read_pickle(saved)
+        assert raw.attrs["schema_version"] == TABLE_SCHEMA_VERSION
+        for key in (
+            "descriptors",
+            "calculations",
+            "estimate_references",
+            "estimate_history",
+            "legacy_metadata",
+        ):
+            raw.attrs.pop(key, None)
+        raw.attrs["schema_version"] = 1
+        old = tmp_path / "schema1.pickle"
+        raw.to_pickle(old)
+        return old
+
+    def test_one_warning_names_file_versions_counts_and_recovery(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """Exactly one WARNING per table, and it is actionable."""
+        old = self._schema_one(
+            _config("htst", k0=2.0, T=300.0), system_single_type_fcc, tmp_path
+        )
+        loaded = protocol_table(_config("htst", str(old), k0=2.0, T=300.0))
+        warnings = _warnings(log_records)
+        assert len(warnings) == 1, warnings
+        message = warnings[0]
+        assert str(old) in message
+        assert "schema_version 1" in message
+        assert f"schema {TABLE_SCHEMA_VERSION}" in message
+        assert "2 accepted" in message and "3 row" in message
+        assert "legacy" in message and "k0" in message
+        assert "recover" in message.lower()
+        assert "policy 2" in message
+        assert list(loaded.table["nu0_status"]) == ["legacy"] * 3
+        assert all(math.isnan(v) for v in loaded.table["nu0"])
+        assert set(loaded.table["k_prefactor"]) == {2.0}
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert archived_frequency(loaded, 5, 6.0e12)
+
+    def test_selection_keeps_legacy_rows_and_never_recomputes_a_crop(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """No complete source exists for a schema-1 row, so nothing is dispatched."""
+        old = self._schema_one(
+            _config("htst", k0=1.0, T=300.0), system_single_type_fcc, tmp_path
+        )
+        loaded = protocol_table(_config("htst", str(old), k0=1.0, T=300.0))
+        ids = list(loaded.table["event_id"])
+        subset = loaded.has_id_subset_table(ids)
+        assert len(subset) == 3 and set(subset["nu0_status"]) == {"legacy"}
+        for idx in (12, 3, 5):
+            estimate = loaded.reference_estimate(idx)
+            assert estimate["nu0_status"] == "legacy"
+            assert estimate["nu0_source"] == "k0" and estimate["nu0_hz"] is None
+            assert "producing provenance" in estimate["nu0_reason"]
+        assert loaded.prefactor_service.manager.prefactor_requests == []
+        assert len(_warnings(log_records)) == 1

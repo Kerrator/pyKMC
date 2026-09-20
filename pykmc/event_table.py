@@ -1970,10 +1970,32 @@ class ReferenceEventTable:
             if metadata:
                 self.prefactor_archive.legacy_metadata.append(metadata)
             reason = "legacy table: missing per-calculation producing provenance"
+            # Policy 2: invalidation is allowed, silence is not. One WARNING
+            # per table says what was lost, why, and how to get it back.
+            accepted_rows = (
+                int((df["nu0_status"] == NU0_OK).sum())
+                if "nu0_status" in df.columns
+                else 0
+            )
             logger.warning(
-                "Reference table %s: %s; retaining geometry with k0 fallback",
+                "Reference table %s: %s (stored %s, current schema %d); %d row(s) "
+                "kept with their event geometry, %d accepted estimate(s) demoted to "
+                "status 'legacy' with the k0 fallback (%g ps^-1) because their "
+                "producing calculations were never persisted (contracts policy 2). "
+                "Recovery: reference prefactors cannot be rebuilt from local crops; "
+                "run with a prefactor service so refined sites get site estimates, "
+                "or regenerate the catalogue under schema %d. Re-saving never "
+                "restores the estimates.",
                 path,
                 reason,
+                "no schema metadata"
+                if version is None
+                else f"schema_version {version}",
+                TABLE_SCHEMA_VERSION,
+                len(df),
+                accepted_rows,
+                float(self.config.rateconstant.k0),
+                TABLE_SCHEMA_VERSION,
             )
             for _, row in df.iterrows():
                 self.prefactor_archive.retain(int(row["idx_ref"]), row, reason)
