@@ -160,31 +160,38 @@ def info_refinements(
         "invalid_dE": {"n": 0, "ref_event": []},
         "invalid_minima": {"n": 0, "ref_event": []},
         "event_not_found": {"n": 0, "ref_event": []},
+        # A generic event that displaces a user-fixed atom beyond the overlay
+        # tolerance (Refinement.refine_single, contracts 7f policy 5).
+        "invalid_event_data": {"n": 0, "ref_event": []},
     }
+
+    def count(bucket: str, err: ErrorInfo) -> None:
+        n_fails[bucket]["n"] += 1
+        variables = err.variables if isinstance(err.variables, dict) else {}
+        if "n_ref_event" in variables:
+            n_fails[bucket]["ref_event"].append(variables["n_ref_event"])
+
     for res in results_refinements:
         if res.is_ok():
             n_successes += 1
         else:
-            match res.err_value().type:
+            err = res.err_value()
+            match err.type:
                 case ErrorType.PSR_NO_MATCH_FOUND:
-                    n_fails["no_match_found"]["n"] += 1
-                    n_fails["no_match_found"]["ref_event"].append(
-                        res.err_value().variables["n_ref_event"]
-                    )
+                    count("no_match_found", err)
                 case ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD:
-                    n_fails["matching_score_>_matching_threshold"]["n"] += 1
-                    n_fails["matching_score_>_matching_threshold"]["ref_event"].append(
-                        res.err_value().variables["n_ref_event"]
-                    )
+                    count("matching_score_>_matching_threshold", err)
                     n_fails["matching_score_>_matching_threshold"][
                         "matching_score"
-                    ].append(res.err_value().variables["matching_score"])
+                    ].append(err.variables["matching_score"])
                 case ErrorType.REFINEMENT_INVALID_ENERGY_BARRIER:
-                    n_fails["invalid_dE"]["n"] += 1
+                    count("invalid_dE", err)
                 case ErrorType.REFINEMENT_INVALID_MINIMA:
-                    n_fails["invalid_min"]["n"] += 1
+                    count("invalid_minima", err)
                 case ErrorType.EVENT_NOT_FOUND:
-                    n_fails["event_not_found"]["n"] += 1
+                    count("event_not_found", err)
+                case ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA:
+                    count("invalid_event_data", err)
 
     return RefinementsInfo(n_attempts, n_successes, n_fails)
 
