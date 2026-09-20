@@ -204,3 +204,45 @@ def test_validate_recycled_without_source_identities_warns_and_drops(caplog):
     assert "NoneType" in text or "index" in text, "the cause must be named"
     assert len(manager.requests) == 1
     np.testing.assert_array_equal(system.positions, before)
+
+
+def test_identityless_row_warns_once_per_step_and_the_duplicate_stage_is_truthful(
+    caplog,
+):
+    """One WARNING per row per step; the duplicate-removal note does not drop.
+
+    ``remove_duplicates`` only reports the row (it cannot compare it by
+    identity); the drop happens in ``request_site_prefactors``. The step order
+    is dedup then site requests, so the same row must not be reported twice at
+    WARNING level and the first note must say what that stage does.
+    """
+    cfg, system, manager, svc = h.setup()
+    table, neighbors = identityless_refined_row(cfg, system, svc)
+    with caplog.at_level(logging.INFO, logger="log"):
+        table.remove_duplicates(system.cell, neighbors)
+        assert len(table.table) == 1, "duplicate removal itself never drops the row"
+        summary = table.request_site_prefactors(system, neighbors)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    about_row = [m for m in warnings if "atom 0" in m and "reference 47" in m]
+    assert len(about_row) == 1, about_row
+    note = about_row[0]
+    assert "duplicate removal" in note
+    # True for that stage: not compared by identity here, dropped later.
+    assert "is dropped before selection" not in note
+    assert "not compared by identity" in note
+    assert "request_site_prefactors" in note and "before selection" in note
+    # The drop still happens, at INFO, where it is done.
+    assert summary == _NOTHING and len(table.table) == 0 and manager.requests == []
+    infos = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("dropped" in m and "before selection" in m for m in infos), infos
+    # A later step reports afresh: the once-per-step memory does not persist.
+    table2, neighbors2 = identityless_refined_row(cfg, system, svc)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="log"):
+        table2.request_site_prefactors(system, neighbors2)
+    assert any(
+        "site request" in r.getMessage()
+        and "is dropped before selection" in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+    )

@@ -2346,6 +2346,10 @@ class ActiveEventTable:
         # Site rejections of the most recent request_site_prefactors call,
         # by kernel reason code (for the per-step [htst] summary).
         self.step_site_rejections: dict[str, int] = {}
+        # (atom, reference) pairs already reported without stable crop
+        # identities this step: one WARNING per row per step (see
+        # _warn_crop_identity); forgotten when request_site_prefactors ends.
+        self._identity_warned: set[tuple[int, int]] = set()
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -2520,24 +2524,58 @@ class ActiveEventTable:
         covers rows with stable identities and no full saddle): reconstruction
         resolves the stored identities against the current source, so the row
         cannot be reconstructed and selecting it would purge its reference.
-        :meth:`request_site_prefactors` drops it before selection
-        (:meth:`_drop_identityless_rows`); its ``(atom, reference)`` pair is
-        re-refined next step.
+        :meth:`remove_duplicates` only reports it (the row is not compared by
+        identity there); :meth:`request_site_prefactors` drops it before
+        selection (:meth:`_drop_identityless_rows`) and its ``(atom,
+        reference)`` pair is re-refined next step. The message states what
+        the reporting stage does. A row is reported once per step at WARNING
+        level; a repeat within the step (dedup, then the site request) is an
+        INFO note.
         """
         row = self.table.loc[label]
+        atom, ref = int(row["atom_index"]), int(row["num_reference_event"])
+        if (atom, ref) in self._identity_warned:
+            logger.info(
+                "[htst] active event (atom %d, reference %d): no stable crop "
+                "identities at %s (%s); already reported this step, dropped "
+                "before selection",
+                atom,
+                ref,
+                stage,
+                exc,
+            )
+            return
+        self._identity_warned.add((atom, ref))
+        if stage == "duplicate removal":
+            logger.warning(
+                "[htst] active event (atom %d, reference %d): no stable crop "
+                "identities at %s (%s); the row is not compared by identity "
+                "here and, unless its identities resolve, "
+                "request_site_prefactors drops it before selection and its "
+                "(atom, reference) pair is re-refined next step",
+                atom,
+                ref,
+                stage,
+                exc,
+            )
+            return
         logger.warning(
             "[htst] active event (atom %d, reference %d): no stable crop "
             "identities at %s (%s); the row cannot be reconstructed from the "
             "current source and is dropped before selection, its (atom, "
             "reference) pair is re-refined next step",
-            int(row["atom_index"]),
-            int(row["num_reference_event"]),
+            atom,
+            ref,
             stage,
             exc,
         )
 
     def _drop_identityless_rows(self, labels: Iterable[Any]) -> None:
-        """Remove the rows reported by :meth:`_warn_crop_identity` this call."""
+        """Remove the rows reported by :meth:`_warn_crop_identity` this call.
+
+        Also forgets the step's identity reports: the next step reports afresh.
+        """
+        self._identity_warned.clear()
         if not labels:
             return
         self.remove(list(labels))
@@ -3023,6 +3061,7 @@ class ActiveEventTable:
         summary = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
         self.step_site_rejections = {}
         if not self.uses_prefactors or len(self.table) == 0:
+            self._identity_warned.clear()
             return summary
         from .htst.result import PrefactorRejection
 
