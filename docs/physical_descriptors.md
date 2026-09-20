@@ -129,13 +129,34 @@ barrier, logical reference, status and frequency; replacing a row cannot silentl
 transfer that calculation.
 
 Recycling validates these dependencies before refinement skips and before rate
-selection. Any full-source geometry change conservatively invalidates the row,
-including movement outside its stored crop. Changed masses, force-model
-identity, constraints, numerical settings or crop membership also invalidate it.
-The ordinary dispatcher can then rebuild a current full saddle and request a
-new site calculation. When full geometry is unavailable, an explicit crop-ID
-handoff can retain a labeled reference approximation or `k0` fallback; it cannot
-manufacture a full stationary saddle by overlaying the crop.
+selection. Only the atoms whose positions enter the site spectrum are compared.
+A row's dependency region is its stored crop plus the sphere about the centre
+that bounds the Hessian: `free_radius`, or `zone_radius` when the calculation
+was zone-cropped (the zone is the whole set of atoms the scratch calculation
+ever saw), taken in both the producing minimum and the producing saddle so the
+selection is covered whichever `free_region_center` produced it. A recycled row
+is invalidated when a dependency atom no longer exists, changed type, or sits
+more than 1e-8 Å (minimum image) from its producing position, or when another
+atom entered the sphere about the centre's current position; motion elsewhere in
+the source keeps the row and its actual producer. The tolerance is far below
+any displacement a KMC event, a minimisation step or premin produces and far
+above coordinate round-trip noise, so only representation noise is absorbed.
+Changed masses, force-model identity, user constraints, numerical settings or
+crop membership also invalidate the row; the active-volume shell is not a user
+constraint and never invalidates a row by itself. The ordinary dispatcher can
+then rebuild a current full saddle and request a new site calculation. When
+full geometry is unavailable, an explicit crop-ID handoff can retain a labeled
+reference approximation or `k0` fallback; it cannot manufacture a full
+stationary saddle by overlaying the crop.
+
+One caveat bounds this region. With `zone_radius = None` the scratch Hessian is
+built over the free sphere inside the full source, so the curvature of a free
+atom at the edge of the sphere also depends on fixed atoms within the pair-style
+cutoff beyond `free_radius`. Those atoms are outside the dependency region, and
+their motion is not detected by the dependency comparison. The recycler's
+movement and distance filters remain the outer guard: `DistanceRecycling.distance_thr`
+drops every row whose centre lies within that distance of the executed
+event's central atom, which is where such motion originates.
 
 Pure source or crop reordering preserves stable global IDs and needs no new
 Hessian. Temperature changes update rates using the current rate facade while
