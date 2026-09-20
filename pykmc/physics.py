@@ -317,6 +317,21 @@ class PhysicalDescriptor:
         )
 
 
+class ConstraintViolationError(ValueError):
+    """An event displaces a fixed reference coordinate beyond the tolerance.
+
+    Raised by :meth:`ResolvedConstraints.validate_positions`. It is the only
+    constraint error that names a property of one catalogue row: the
+    reconstruction, basin and refinement paths convert it (and only it) to
+    ``Err(RECONSTRUCTION_INVALID_EVENT_DATA)`` so the reference is purged
+    (contracts 7f policy 5). Every other ``ValueError`` of the constraint
+    machinery (shape, cell/PBC or mapping mismatches) is a programming or
+    data error and propagates: converting it would purge a reference per
+    selection and drain the catalogue. A ``ValueError`` subclass, so callers
+    catching the base class keep working.
+    """
+
+
 @dataclass(frozen=True)
 class ResolvedConstraints:
     """Global source identities, crop correspondence and immutable fixed coordinates.
@@ -590,7 +605,7 @@ class ResolvedConstraints:
 
             delta, _ = find_mic(delta, matrix, pbc=axes)
         if np.any(np.linalg.norm(delta, axis=1) > tolerance):
-            raise ValueError("event changes fixed reference coordinates")
+            raise ConstraintViolationError("event changes fixed reference coordinates")
 
     def protect_positions(
         self, positions: Any, *, user_only: bool = False

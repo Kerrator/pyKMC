@@ -9,7 +9,11 @@ from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .manager import Manager
-from .physics import overlay_tolerance, resolve_event_constraints
+from .physics import (
+    ConstraintViolationError,
+    overlay_tolerance,
+    resolve_event_constraints,
+)
 import numpy as np
 import pandas as pd
 import concurrent.futures
@@ -291,7 +295,7 @@ class Refinement:
                     constraints.validate_positions(
                         final, tolerance=tolerance, user_only=True
                     )
-                except ValueError as exc:
+                except ConstraintViolationError as exc:
                     self.loggers.warning(
                         "log",
                         "\t :=> Reference event {} on atom {} moves a user-fixed "

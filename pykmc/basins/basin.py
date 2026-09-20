@@ -17,7 +17,11 @@ from pykmc import (
 from typing import Optional
 from ..utils import geometry
 from ..rate_constant import create_rate_constant
-from ..physics import overlay_tolerance, resolve_event_constraints
+from ..physics import (
+    ConstraintViolationError,
+    overlay_tolerance,
+    resolve_event_constraints,
+)
 import pandas as pd
 import copy
 import numpy as np
@@ -447,7 +451,7 @@ class BasinsGenericEvents:
                 constraints.validate_positions(
                     full, tolerance=tolerance, user_only=True
                 )
-        except ValueError as exc:
+        except ConstraintViolationError as exc:
             return Err(
                 ErrorInfo(
                     type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
@@ -629,7 +633,7 @@ class BasinsGenericEvents:
                         tolerance=overlay_tolerance(self.config),
                         user_only=True,
                     )
-                except ValueError as exc:
+                except ConstraintViolationError as exc:
                     return Err(
                         ErrorInfo(
                             type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,

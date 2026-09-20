@@ -998,7 +998,7 @@ class KMC:
         )
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
 
-        from .physics import resolve_event_constraints
+        from .physics import ConstraintViolationError, resolve_event_constraints
 
         constraints = resolve_event_constraints(
             self.config,
@@ -1014,10 +1014,12 @@ class KMC:
         working = np.array(self.system.positions, copy=True)
         working[neighbors] = saddle_positions
 
-        # try to reconstruct. A constraint or mapping violation is a
-        # recoverable rejection of this catalogue row: it must reach the purge
-        # loop as an Err, never abort the run as a bare ValueError (contracts
-        # 7f policy 5).
+        # try to reconstruct. A violated user constraint is a recoverable
+        # rejection of this catalogue row: it must reach the purge loop as an
+        # Err, never abort the run as a bare ValueError (contracts 7f policy
+        # 5). Only that violation is converted: any other ValueError (a shape
+        # or mapping mismatch) is a programming error that would otherwise
+        # purge one reference per selection and drain the catalogue.
         try:
             result = Reconstruction(
                 self.config,
@@ -1033,7 +1035,7 @@ class KMC:
                 self.config.psr.matching_score_thr,
                 neighbors,
             )
-        except ValueError as exc:
+        except ConstraintViolationError as exc:
             return Err(
                 ErrorInfo(
                     type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,

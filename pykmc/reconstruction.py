@@ -3,7 +3,7 @@
 from pykmc.manager import Manager
 from pykmc import Config
 from pykmc.result import Result, Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
-from pykmc.physics import overlay_tolerance
+from pykmc.physics import ConstraintViolationError, overlay_tolerance
 import numpy as np
 import copy
 from pykmc.utils.geometry import (
@@ -104,7 +104,7 @@ class Reconstruction:
                     self.constraints.validate_positions(
                         full, tolerance=tolerance, user_only=True
                     )
-            except ValueError as exc:
+            except ConstraintViolationError as exc:
                 return Err(
                     ErrorInfo(
                         type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,

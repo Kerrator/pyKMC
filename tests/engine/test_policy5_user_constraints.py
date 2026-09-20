@@ -23,7 +23,7 @@ from pykmc.config import Config, RateConstantConfig, RegionConfig
 from pykmc.event_table import ActiveEventTable
 from pykmc.kmc import KMC
 from pykmc.neighbors_list import NeighborsList
-from pykmc.physics import ResolvedConstraints
+from pykmc.physics import ConstraintViolationError, ResolvedConstraints
 from pykmc.reconstruction import Reconstruction
 from pykmc.refinement import Refinement
 import pykmc.refinement as refinement_module
@@ -293,7 +293,8 @@ def test_kmc_reconstruction_valueerror_becomes_err_for_the_purge_loop(monkeypatc
             pass
 
         def reconstruct(self, *args, **kwargs):
-            raise ValueError("event changes fixed reference coordinates")
+            # The production violation type (a ValueError subclass).
+            raise ConstraintViolationError("event changes fixed reference coordinates")
 
     sim, table, source = _kmc_case(monkeypatch, RaisingReconstruction)
     result = sim._reconstruction_active_event(0, table)
@@ -301,6 +302,48 @@ def test_kmc_reconstruction_valueerror_becomes_err_for_the_purge_loop(monkeypatc
     assert result.err_value().type is INVALID
     assert "fixed reference" in result.err_value().message
     np.testing.assert_array_equal(sim.system.positions, source)
+
+
+def test_kmc_shape_mismatch_valueerror_still_propagates(monkeypatch):
+    """Only a constraint violation is a recoverable row rejection.
+
+    A programmer-error ValueError (an endpoint whose shape does not match the
+    neighbours) is not a property of one catalogue row; converting it to an
+    Err would purge a reference per selection and drain the catalogue.
+    """
+
+    class MismatchingReconstruction:
+        def __init__(self, config, manager, **kwargs):
+            pass
+
+        def reconstruct(self, *args, **kwargs):
+            raise ValueError("reconstruction endpoint shape does not match neighbors")
+
+    sim, table, source = _kmc_case(monkeypatch, MismatchingReconstruction)
+    with pytest.raises(ValueError, match="shape does not match"):
+        sim._reconstruction_active_event(0, table)
+    assert len(table.table) == 1
+    np.testing.assert_array_equal(sim.system.positions, source)
+
+
+def test_validate_positions_raises_the_dedicated_violation_type():
+    """The violation is a ValueError subclass callers can catch on its own."""
+    assert issubclass(ConstraintViolationError, ValueError)
+    positions = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
+    constraints = ResolvedConstraints.resolve(
+        positions, ["Si"] * 3, RegionConfig(indices=[1]), atom_ids=(3, 5, 7)
+    )
+    moved = positions.copy()
+    moved[1, 0] += 0.5
+    with pytest.raises(ConstraintViolationError, match="fixed reference"):
+        constraints.validate_positions(moved)
+    with pytest.raises(ConstraintViolationError):
+        constraints.validate_positions(moved, tolerance=0.1, user_only=True)
+    # A shape mismatch is a different error and never the violation type.
+    with pytest.raises(ValueError) as excinfo:
+        constraints.validate_positions(moved[:2])
+    assert not isinstance(excinfo.value, ConstraintViolationError)
+    constraints.validate_positions(positions)
 
 
 # ---------------------------------------------------------------------------
