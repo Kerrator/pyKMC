@@ -32,6 +32,10 @@ nav:
       - User Guide: user_guide.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
+  - Physics and features:
+      - Physical descriptors: physical_descriptors.md
+      - Active volumes: active_volumes.md
+      - Basins: basins.md
   - Developer Guide: 
       - Strategy pattern : dev_strategy_pattern.md
       - Engine : dev_engine.md
