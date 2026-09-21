@@ -40,15 +40,41 @@ def _digest(value: Any) -> str:
 
 
 def _indices(values: Any, *, upper: int | None = None) -> tuple[int, ...]:
-    raw = tuple(values)
-    if any(isinstance(i, (bool, np.bool_)) or not isinstance(i, Integral) for i in raw):
+    """Return ``values`` as a tuple of unique, in-range Python ints.
+
+    Vectorised: a ``range`` or an integer array is checked in C, a tuple or
+    list of Python ints is converted once; the per-element ``Integral`` loop
+    of the scalar rule is kept only for its strictness (a ``bool`` is not an
+    identity, nor is a float, ``None`` or a nested sequence).
+    """
+    if isinstance(values, np.ndarray):
+        arr = values
+    elif isinstance(values, range):
+        arr = np.arange(values.start, values.stop, values.step)
+    else:
+        raw = tuple(values)
+        if not raw:
+            return ()
+        kinds = set(map(type, raw))
+        if bool in kinds or np.bool_ in kinds:
+            raise ValueError("atom identities and indices must be integers")
+        try:
+            arr = np.asarray(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("atom identities and indices must be integers") from exc
+    if arr.ndim != 1 or arr.dtype.kind not in "iu":
+        if arr.ndim == 1 and arr.size == 0:
+            return ()
         raise ValueError("atom identities and indices must be integers")
-    result = tuple(int(i) for i in raw)
-    if len(set(result)) != len(result) or any(
-        i < 0 or (upper is not None and i >= upper) for i in result
+    if arr.size == 0:
+        return ()
+    if (
+        int(arr.min()) < 0
+        or (upper is not None and int(arr.max()) >= upper)
+        or np.unique(arr).size != arr.size
     ):
         raise ValueError("atom identities/indices must be unique and in range")
-    return result
+    return tuple(arr.tolist())
 
 
 @dataclass(frozen=True)
@@ -741,6 +767,45 @@ class ResolvedConstraints:
         )
 
 
+_UNCONSTRAINED_CACHE: dict[tuple, tuple[Any, ResolvedConstraints]] = {}
+_UNCONSTRAINED_CACHE_LIMIT = 8
+
+
+def _unconstrained_key(positions, cell, pbc, atom_ids, user_constraints):
+    """Cache key of an empty payload: identities, cell and periodic axes only.
+
+    Returns ``None`` when the inputs cannot be keyed cheaply (a cell without
+    PBC or identities that are not an integer array), so the caller resolves.
+    """
+    if (cell is None) != (pbc is None):
+        return None
+    if atom_ids is None:
+        ids_key = ("range", len(positions))
+    else:
+        ids = np.asarray(atom_ids)
+        if ids.ndim != 1 or ids.dtype.kind not in "iu" or ids.size != len(positions):
+            return None
+        ids_key = ("array", ids.astype(np.int64, copy=False).tobytes())
+    if cell is None:
+        cell_key = None
+    else:
+        matrix = np.asarray(cell, dtype=float)
+        if matrix.shape != (3, 3):
+            return None
+        axes = np.asarray(pbc)
+        if axes.ndim == 0:
+            axes = np.repeat(axes, 3)
+        if axes.shape != (3,) or axes.dtype.kind != "b":
+            return None
+        cell_key = (matrix.tobytes(), tuple(bool(x) for x in axes))
+    return (
+        len(positions),
+        ids_key,
+        cell_key,
+        None if user_constraints is None else id(user_constraints),
+    )
+
+
 def resolve_event_constraints(
     config,
     positions,
@@ -758,11 +823,95 @@ def resolve_event_constraints(
     Spatial user policies select identities at initialization. An atom entering
     that region later must not silently become fixed, nor may an existing
     reference coordinate be replaced by its current position.
+
+    Without user constraints (``config.frozen_atoms`` unset, no user-fixed
+    identity in ``user_constraints``) and with the active volume off, the
+    payload is empty and depends only on the source identities, the cell and
+    the periodic axes: it is resolved once per such source and the same
+    immutable payload is returned while those inputs and the user authority
+    are unchanged. The source itself (finite positions, one type per atom,
+    a center inside it, identities matching the authority) is still checked
+    on every call.
     """
-    ids = _indices(range(len(positions)) if atom_ids is None else atom_ids)
-    center_index = _indices((center_index,), upper=len(positions))[0]
     active = config.control.active_volume if active_volume is None else active_volume
     region = getattr(config, "frozen_atoms", None)
+    unconstrained = (
+        not active
+        and region is None
+        and (
+            user_constraints is None
+            or (
+                not user_constraints.fixed_ids
+                and not user_constraints.user_fixed_ids
+                and user_constraints.user_policy in (None, "null")
+            )
+        )
+    )
+    if unconstrained:
+        key = _unconstrained_key(positions, cell, pbc, atom_ids, user_constraints)
+        if key is not None:
+            _indices((center_index,), upper=len(positions))
+            cached = _UNCONSTRAINED_CACHE.get(key)
+            if cached is not None and cached[0] is user_constraints:
+                pos = np.asarray(positions, dtype=float)
+                if len(types) != len(pos):
+                    raise ValueError(
+                        f"constraint source has {len(types)} types for {len(pos)} "
+                        "positions"
+                    )
+                if not np.all(np.isfinite(pos)):
+                    n_bad = int(np.count_nonzero(~np.isfinite(pos)))
+                    raise ValueError(
+                        f"constraint source positions contain {n_bad} non-finite "
+                        "value(s) (NaN/inf)"
+                    )
+                return cached[1]
+            resolved = _resolve_event_constraints(
+                config,
+                positions,
+                types,
+                cell,
+                pbc,
+                center_index,
+                atom_ids,
+                user_constraints=user_constraints,
+                active=active,
+                region=region,
+            )
+            if len(_UNCONSTRAINED_CACHE) >= _UNCONSTRAINED_CACHE_LIMIT:
+                _UNCONSTRAINED_CACHE.clear()
+            _UNCONSTRAINED_CACHE[key] = (user_constraints, resolved)
+            return resolved
+    return _resolve_event_constraints(
+        config,
+        positions,
+        types,
+        cell,
+        pbc,
+        center_index,
+        atom_ids,
+        user_constraints=user_constraints,
+        active=active,
+        region=region,
+    )
+
+
+def _resolve_event_constraints(
+    config,
+    positions,
+    types,
+    cell,
+    pbc,
+    center_index,
+    atom_ids,
+    *,
+    user_constraints,
+    active,
+    region,
+):
+    """The full resolution behind :func:`resolve_event_constraints`."""
+    ids = _indices(range(len(positions)) if atom_ids is None else atom_ids)
+    center_index = _indices((center_index,), upper=len(positions))[0]
     resolved = ResolvedConstraints.resolve(
         positions,
         types,
