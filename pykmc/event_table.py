@@ -945,6 +945,27 @@ class ReferenceEventTable:
         self.table.loc[mask, "k_prefactor"] = rate.prefactor
         self.table.loc[mask, "k"] = rate.rate
 
+    def _demote_estimate(self, idx_ref, previous, status, reason) -> None:
+        """Set the ``k0`` fallback ``status`` and report the demotion once.
+
+        ``previous`` is the row as it stood when the validation started (before
+        any transient write); a row that already carried ``status`` with the
+        same ``reason`` is not demoted again, so an unchanged legacy or stale
+        row costs no log line per selection.
+        """
+        self._set_estimate(idx_ref, status, None, reason)
+        before = (str(previous["nu0_status"]), str(previous["nu0_reason"]))
+        if before != (status, reason):
+            logger.warning(
+                "[htst] reference event %d: estimate demoted from '%s' to '%s' "
+                "(%s); the rate uses the constant k0 prefactor until a current "
+                "recomputation succeeds",
+                int(idx_ref),
+                before[0],
+                status,
+                reason,
+            )
+
     def _ensure_current_estimate(self, idx_ref: int) -> None:
         """Validate producing context before reference inheritance or selection.
 
@@ -971,13 +992,13 @@ class ReferenceEventTable:
             if status in (NU0_PENDING, NU0_OK):
                 status = NU0_LEGACY
             prior = str(row["nu0_reason"])
-            self._set_estimate(idx_ref, status, None, prior or reason)
+            self._demote_estimate(idx_ref, row, status, prior or reason)
             return
         service = self.prefactor_service
         if service is None:
             archive.retain(idx_ref, row, "missing current prefactor service")
-            self._set_estimate(
-                idx_ref, NU0_STALE, None, "stale: missing current physical context"
+            self._demote_estimate(
+                idx_ref, row, NU0_STALE, "stale: missing current physical context"
             )
             return
         # Cheap memo first: calculation_for already bound the row digest to the
@@ -1003,7 +1024,7 @@ class ReferenceEventTable:
         except HTSTRequestError as exc:
             reason = f"stale: cannot rebuild complete current source: {exc}"
             archive.retain(idx_ref, row, reason)
-            self._set_estimate(idx_ref, NU0_STALE, None, reason)
+            self._demote_estimate(idx_ref, row, NU0_STALE, reason)
             return
         comparison = self.compare_physics(calculation.provenance.produced.descriptor)
         registered = archive.descriptors.get(calculation.descriptor_id)
@@ -1063,10 +1084,10 @@ class ReferenceEventTable:
         result = self._recomputed[request_id]
         current = result.calculation(calculation.direction)
         if current is None:
-            self._set_estimate(
+            self._demote_estimate(
                 idx_ref,
+                row,
                 NU0_STALE,
-                None,
                 "stale: worker returned no producing calculation",
             )
             self._resolved_contexts[int(idx_ref)] = signature
@@ -1084,10 +1105,10 @@ class ReferenceEventTable:
             )
         energies = current.provenance.energies
         if energies is None:
-            self._set_estimate(
+            self._demote_estimate(
                 idx_ref,
+                row,
                 NU0_STALE,
-                None,
                 "stale: recomputation lacks current full-system potential energies",
             )
             self._resolved_contexts[int(idx_ref)] = signature
