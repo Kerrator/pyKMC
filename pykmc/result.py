@@ -119,6 +119,7 @@ class ErrorType(Enum):
     RECONSTRUCTION_INVALID_MIN2 = 42
     RECONSTRUCTION_INVALID_EVENT_DATA = 43
     BASIN_TEXIT_NOT_FOUND = 51
+    BASIN_INVALID_EXIT_FLUX = 52
 
 
 # Dataclass to store operation outputs
@@ -255,10 +256,26 @@ class ReconstructionOutput:
 
 @dataclass
 class BasinSelectorOutput:
-    """ "Store the result of the selector"""
+    """Store the result of the selector.
+
+    Attributes
+    ----------
+    t_exit : float
+        Sampled exit time (ps).
+    exit_state : int
+        Absorbing state reached (numbering of the generator matrix).
+    exit_row : int or None
+        Connectivity-table index label of the selected exit transition (its
+        source state, reference event, central atom, symmetry, refined barrier
+        and rate). ``None`` when the state was selected without a table.
+    from_state : int or None
+        Transient source state of the selected transition.
+    """
 
     t_exit: float
     exit_state: int
+    exit_row: Optional[int] = None
+    from_state: Optional[int] = None
 
 
 @dataclass

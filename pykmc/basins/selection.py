@@ -1,17 +1,123 @@
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
+
 from .exit_time_solver import BisectionSolver
 from .connectivity import StatesConnectivity
 from .utils import solve_master_equation
 from pykmc.result import (
     Result,
     Ok,
+    Err,
     ErrorInfo,
+    ErrorType,
     BasinSelectorOutput,
     BasinExitTimeSolverOutput,
 )
 
 # TODO : Use a Abstract Selector (if implement a new one, eg MRT)
 # TODO : For the moment spectral decomposition=True is hardcoded, and it is assumed that we use BisectionSolver, need to modify if use different (and use builder)
+
+#: Relative roundoff tolerated in an occupation or flux vector. An imaginary or
+#: negative part no larger than this fraction of the vector's largest positive
+#: entry is spectral-solver noise and is discarded; anything larger is rejected.
+FLUX_ROUNDOFF_RTOL = 64.0 * np.finfo(float).eps
+
+
+class BasinExitFluxError(ValueError):
+    """The exit flux at the sampled time is not a valid channel distribution.
+
+    Raised by the direct selector calls (``select_absorbing_state`` and the
+    flux accessors). ``select_from_connectivity`` transports it as
+    ``Err(ErrorType.BASIN_INVALID_EXIT_FLUX)`` so the KMC loop falls back to
+    the originally selected event; no approximate or uniform channel is ever
+    substituted.
+    """
+
+    def __init__(self, message: str, variables: dict | None = None) -> None:
+        super().__init__(message)
+        self.variables = dict(variables or {})
+
+
+def validate_flux(values, what: str, t_exit: float) -> np.ndarray:
+    """Return ``values`` as a finite, real, non-negative vector with a positive total.
+
+    Policy (contracts 7f, R11): a non-finite entry, a materially negative
+    entry, a material imaginary part or the absence of any positive entry is
+    an error, never silently repaired. Only roundoff within
+    ``FLUX_ROUNDOFF_RTOL`` of the largest positive entry is discarded
+    (imaginary parts dropped, negative entries clamped to zero). Tiny positive
+    values are valid: the scale is the vector's own maximum.
+
+    Parameters
+    ----------
+    values : array_like
+        Occupation or flux vector, possibly complex from the spectral solver.
+    what : str
+        Name used in the error message.
+    t_exit : float
+        Sampled exit time (ps), reported in the error.
+
+    Raises
+    ------
+    BasinExitFluxError
+        If the vector is not a valid non-negative distribution up to roundoff.
+    """
+    values = np.asarray(values)
+    if values.size == 0:
+        raise BasinExitFluxError(
+            f"{what} at t_exit={t_exit!r} ps is empty: no exit transition",
+            {"t_exit": t_exit},
+        )
+    if not np.all(np.isfinite(values)):
+        raise BasinExitFluxError(
+            f"{what} at t_exit={t_exit!r} ps is not finite: {values.tolist()}",
+            {"t_exit": t_exit, what: values.tolist()},
+        )
+    real = np.asarray(values.real if np.iscomplexobj(values) else values, dtype=float)
+    scale = float(real.max())
+    if not scale > 0.0:
+        raise BasinExitFluxError(
+            f"{what} at t_exit={t_exit!r} ps has no positive entry: {real.tolist()}",
+            {"t_exit": t_exit, what: real.tolist()},
+        )
+    tolerance = FLUX_ROUNDOFF_RTOL * scale
+    if np.iscomplexobj(values):
+        imaginary = float(np.abs(values.imag).max())
+        if imaginary > tolerance:
+            raise BasinExitFluxError(
+                f"{what} at t_exit={t_exit!r} ps is not real: largest imaginary "
+                f"part {imaginary!r} exceeds {tolerance!r}",
+                {"t_exit": t_exit, what: values.tolist()},
+            )
+    smallest = float(real.min())
+    if smallest < -tolerance:
+        raise BasinExitFluxError(
+            f"{what} at t_exit={t_exit!r} ps is materially negative: {smallest!r} "
+            f"below -{tolerance!r}",
+            {"t_exit": t_exit, what: real.tolist()},
+        )
+    return np.where(real > 0.0, real, 0.0)
+
+
+def normalized_weights(flux: np.ndarray) -> np.ndarray:
+    """Normalise a validated flux vector to unit total, scaled by its maximum first."""
+    scaled = np.asarray(flux, dtype=float) / float(np.max(flux))
+    return scaled / scaled.sum()
+
+
+def draw_channel(weights: np.ndarray) -> int:
+    """Draw one channel index from normalised weights with a single uniform draw.
+
+    The cumulative distribution is renormalised so that its last entry is
+    exactly one, and the draw is placed with ``side="right"`` so a channel of
+    zero weight is never selected (in particular the first one at draw 0).
+    """
+    cumulative = np.cumsum(weights)
+    cumulative = cumulative / cumulative[-1]
+    r2 = np.random.random()
+    return int(np.searchsorted(cumulative, r2, side="right"))
 
 
 class FPTASelector:
@@ -23,7 +129,8 @@ class FPTASelector:
         1. Build the full generator matrix.
         2. Construct a reduced generator matrix where all absorbing states are collapsed into a single effective absorbing state.
         3. Use a numerical solver to compute the exit time from the reduced system.
-        4. Given the exit time, compute the probability distribution over the original absorbing states and select the exit state.
+        4. Given the exit time, select the exit transition from the instantaneous
+           flux at that time (see :meth:`select_exit_transition`).
 
     Attributes
     ----------
@@ -31,6 +138,16 @@ class FPTASelector:
         Full absorbing generator matrix (transient + absorbing states).
     M_abs_reduced : np.ndarray or None
         Reduced matrix where all absorbing states are merged into a single one.
+
+    Notes
+    -----
+    The exit channel is conditioned on the sampled exit time ``T``: with the
+    transient occupation ``q(T) = exp(-M_T T) e_0`` (``M_T`` the transient
+    block of ``M_abs``), the instantaneous flux through a transition
+    ``e = (i -> a)`` of rate ``k_e`` is ``q_i(T) k_e`` and the flux into an
+    absorbing state is ``R q(T)`` with ``R = -M_abs[n:, :n]``. The cumulative
+    absorption up to ``T`` answers a different conditioning question and is
+    not used.
 
     References
     ----------
@@ -43,11 +160,16 @@ class FPTASelector:
         self.M_abs = None  # Absorbing Markov chain generator matrix
         self.M_abs_reduced = None  # Reduced absorbing markoc chain generator matrix
 
+    @property
+    def n_transient(self) -> int:
+        """Number of transient states (the reduced matrix minus its merged absorber)."""
+        return len(self.M_abs_reduced) - 1
+
     def select_from_connectivity(
         self, connectivity_table: StatesConnectivity
     ) -> Result[BasinSelectorOutput, ErrorInfo]:
         """
-        Find both an exit time and an exit absorbing state from a `StatesConnectivity` object.
+        Find both an exit time and an exit transition from a `StatesConnectivity` object.
 
         Parameters
         ----------
@@ -57,8 +179,12 @@ class FPTASelector:
         Returns
         -------
         Result[BasinSelectorOutput, ErrorInfo]
-            - Ok(BasinSelectorOutput(t_exit, exit_state) ) on success.
-            - Err(ErrorInfo) if exit time solver failed.
+            - Ok(BasinSelectorOutput(t_exit, exit_state, exit_row, from_state))
+              on success; ``exit_row`` is the connectivity-table index label of
+              the selected transition.
+            - Err(ErrorInfo) if the exit time solver failed
+              (``BASIN_TEXIT_NOT_FOUND``) or the flux at the sampled time is
+              not a valid channel distribution (``BASIN_INVALID_EXIT_FLUX``).
         """
 
         # Number of transient states
@@ -75,10 +201,30 @@ class FPTASelector:
             return result
         t_exit = result.ok_value().t_exit
 
-        # Find exit state
-        exit_state = self.select_absorbing_state(t_exit=t_exit)
+        # Find exit transition from the instantaneous flux at t_exit
+        try:
+            exit_row, from_state, exit_state = self.select_exit_transition(
+                connectivity_table, t_exit
+            )
+        except (BasinExitFluxError, np.linalg.LinAlgError) as exc:
+            variables = dict(getattr(exc, "variables", None) or {})
+            variables.setdefault("t_exit", t_exit)
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.BASIN_INVALID_EXIT_FLUX,
+                    message="Basin: exit channel selection failed: {}".format(exc),
+                    variables=variables,
+                )
+            )
 
-        return Ok(BasinSelectorOutput(t_exit=t_exit, exit_state=exit_state))
+        return Ok(
+            BasinSelectorOutput(
+                t_exit=t_exit,
+                exit_state=exit_state,
+                exit_row=exit_row,
+                from_state=from_state,
+            )
+        )
 
     def build_absorbing_matrix_from_connectivity(
         self, connectivity_table: StatesConnectivity
@@ -184,9 +330,130 @@ class FPTASelector:
 
         return result
 
+    def transient_occupation(self, t_exit: float) -> np.ndarray:
+        """
+        Probability of occupying each transient state at ``t_exit``, entered in state 0.
+
+        ``q(t) = exp(-M_T t) e_0`` with ``M_T`` the transient block of ``M_abs``;
+        the vector is unnormalised and its total is the survival probability.
+
+        Parameters
+        ----------
+        t_exit : float
+            Exit time (ps).
+
+        Returns
+        -------
+        np.ndarray
+            Length ``n_transient`` vector, validated by :func:`validate_flux`.
+
+        Raises
+        ------
+        BasinExitFluxError
+            If the solver output is not a valid non-negative vector.
+        """
+        n = self.n_transient
+        p0 = np.zeros(n)
+        p0[0] = 1.0  # always at state 0 when entering the basin
+        occupation = solve_master_equation(self.M_abs[:n, :n], t_exit, p0)
+        return validate_flux(occupation, "transient occupation", t_exit)
+
+    def absorbing_flux(self, t_exit: float) -> np.ndarray:
+        """
+        Instantaneous flux into each absorbing state at ``t_exit``.
+
+        ``flux(t) = R q(t)`` with ``R = -M_abs[n:, :n]`` (the transient ->
+        absorbing rates) and ``q`` from :meth:`transient_occupation`. Its
+        total is the exit-time density; divided by the survival probability
+        it is the conditional hazard at ``t_exit``.
+
+        Parameters
+        ----------
+        t_exit : float
+            Exit time (ps).
+
+        Returns
+        -------
+        np.ndarray
+            One entry per absorbing state, in the numbering of ``M_abs``.
+        """
+        n = self.n_transient
+        flux = (-self.M_abs[n:, :n]) @ self.transient_occupation(t_exit)
+        return validate_flux(flux, "absorbing flux", t_exit)
+
+    def exit_transition_flux(
+        self, connectivity_table: StatesConnectivity, t_exit: float
+    ) -> tuple[pd.DataFrame, np.ndarray]:
+        """
+        Instantaneous flux through each transient -> absorbing transition at ``t_exit``.
+
+        A transition ``e = (i -> a)`` of rate ``k_e`` carries ``q_i(t_exit) k_e``.
+        Transitions are listed as :meth:`StatesConnectivity.absorbing_transitions`
+        orders them (by destination, then insertion), so that a single draw over
+        them reaches each absorbing state with exactly the probability
+        :meth:`select_absorbing_state` gives it.
+
+        Parameters
+        ----------
+        connectivity_table : StatesConnectivity
+            Table whose generator was built by
+            :meth:`build_absorbing_matrix_from_connectivity`.
+        t_exit : float
+            Exit time (ps).
+
+        Returns
+        -------
+        tuple[pd.DataFrame, np.ndarray]
+            The ordered exit transitions (original index labels kept) and
+            their validated flux.
+        """
+        exits = connectivity_table.absorbing_transitions()
+        occupation = self.transient_occupation(t_exit)
+        sources = exits["state"].to_numpy(dtype=int)
+        rates = exits["k_forward"].to_numpy(dtype=float)
+        flux = occupation[sources] * rates
+        return exits, validate_flux(flux, "exit transition flux", t_exit)
+
+    def select_exit_transition(
+        self, connectivity_table: StatesConnectivity, t_exit: float
+    ) -> tuple:
+        """
+        Draw the exit transition at ``t_exit`` from the instantaneous transition flux.
+
+        Parameters
+        ----------
+        connectivity_table : StatesConnectivity
+            Table whose generator was built by
+            :meth:`build_absorbing_matrix_from_connectivity`.
+        t_exit : float
+            Exit time (ps).
+
+        Returns
+        -------
+        tuple
+            ``(exit_row, from_state, exit_state)``: the connectivity-table index
+            label of the selected transition, its transient source state and
+            its absorbing destination.
+
+        Raises
+        ------
+        BasinExitFluxError
+            If the flux at ``t_exit`` is not a valid channel distribution.
+        """
+        exits, flux = self.exit_transition_flux(connectivity_table, t_exit)
+        position = draw_channel(normalized_weights(flux))
+        chosen = exits.iloc[position]
+        label = exits.index[position]
+        if isinstance(label, np.integer):
+            label = int(label)
+        return label, int(chosen["state"]), int(chosen["state_connexion"])
+
     def select_absorbing_state(self, t_exit: float) -> int:
         """
         Find which absorbing state is reached at the given exit time.
+
+        The state is drawn from the instantaneous flux :meth:`absorbing_flux`
+        at ``t_exit`` (not from the cumulative absorption up to ``t_exit``).
 
         Parameters
         ----------
@@ -198,24 +465,11 @@ class FPTASelector:
         int
             Index of the absorbing state selected (matching the original
             numbering of the full matrix M_abs).
+
+        Raises
+        ------
+        BasinExitFluxError
+            If the flux at ``t_exit`` is not a valid channel distribution.
         """
-
-        # Compute full probability vector
-        # initial vector
-        p0 = np.zeros(len(self.M_abs))
-        p0[0] = 1  # always at state 0 when entering the basin
-
-        # compute P = ext(-Mt)p0
-        p = solve_master_equation(self.M_abs, t_exit, p0)
-
-        # Select only absorbing state
-        p_absorbing = p[len(self.M_abs_reduced) - 1 :]
-        # asjust so sum gives 1
-        p_absorbing = p_absorbing / np.sum(p_absorbing)
-
-        # choose exit state
-        p_absorbing_cumul = np.cumsum(p_absorbing)
-        r2 = np.random.random()
-        state_exit = np.searchsorted(p_absorbing_cumul, r2)
-
-        return state_exit + len(self.M_abs_reduced) - 1
+        flux = self.absorbing_flux(t_exit)
+        return self.n_transient + draw_channel(normalized_weights(flux))

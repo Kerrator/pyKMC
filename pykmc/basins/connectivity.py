@@ -151,6 +151,26 @@ class StatesConnectivity:
         else:
             return self.to_tuples(sub_df) if as_tuples else sub_df
 
+    def absorbing_transitions(self) -> pd.DataFrame:
+        """Return the transitions into absorbing states, ordered by destination.
+
+        A state is absorbing when it never appears as a source (``state``):
+        that is the definition the generator matrix encodes. The per-row
+        ``transient`` flag is exploration metadata and may disagree for a
+        destination reached by several events, so it is not used here. Rows
+        are ordered by ``state_connexion`` and, within a destination, by their
+        position in the table (stable sort); the original index labels are
+        kept so a selected transition can be looked up by label.
+
+        Returns
+        -------
+        pd.DataFrame
+            Sub-frame of the connectivity table (a copy).
+        """
+        sources = self.df["state"].unique()
+        exits = self.df[~self.df["state_connexion"].isin(sources)]
+        return exits.sort_values("state_connexion", kind="stable")
+
     def get_table(self) -> pd.DataFrame:
         """
         Return the full connectivity table.
