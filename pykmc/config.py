@@ -46,7 +46,8 @@ class ControlConfig(BaseModel):
 
     reference_table: Optional[str] = Field(
         default=None,
-        description="Path to a reference table generated from a previous simulation.",
+        description="Path to a reference table generated from a previous simulation. "
+        + "With the `htst`/`rpa` rate styles a table written before the current schema (or without per-calculation producing provenance) is loaded with its event geometry kept but every accepted prefactor demoted to status `legacy` with the `k0` fallback; one `WARNING` names the file, the schema versions, the counts and the recovery path (run with a prefactor service so refined sites get site estimates, or regenerate the catalogue). Re-saving never restores those estimates. See the *Reference estimate persistence* section of the physical descriptors page.",
     )
 
     visited_environments: Optional[str] = Field(
