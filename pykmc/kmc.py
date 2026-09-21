@@ -434,7 +434,7 @@ class KMC:
                             self.system.types,
                             self.reference_table,
                             basin.connectivity_table,
-                            result_basin.ok_value().exit_state,
+                            result_basin.ok_value().exit_row,
                         )
                         basin_info = basin_info.output_msg()
                         self.loggers.events_basin_info_line("events", idx_exit_event)

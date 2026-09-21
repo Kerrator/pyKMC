@@ -104,10 +104,20 @@ The `Basin` object uses two additional components:
       * build its connectivity table
    7. Merge with the global connectivity table
 3. **Refine** all transient → absorbing transitions (update dE and k)
-4. **Selector step**:
+4. **Selector step** (first-passage-time analysis):
 
-   * build matrix ( M ), solve ( P = e^{-Mt} P_0 )
-   * use bisection to find ( t_{\text{exit}} ) and the exit state
+   * build the absorbing generator matrix ( M ) and its reduced form (all absorbing states merged)
+   * draw the exit time by bisection on the reduced system: ( p_{\text{abs}}(t_{\text{exit}}) = r_1 )
+   * draw the exit **transition** from the *instantaneous* flux at ( t_{\text{exit}} ): with the
+     transient occupation ( q(t) = e^{-M_T t} e_0 ), a transient → absorbing transition
+     ( e = (i \to a) ) of rate ( k_e ) has weight ( q_i(t_{\text{exit}}) \, k_e ). Cumulative
+     absorption up to ( t_{\text{exit}} ) is a different conditioning and is not used. The selected
+     transition keeps its own source state, reference event, symmetry, refined barrier and saddle,
+     also when several transitions share a destination or connect the same pair of states.
+   * a flux vector that is not finite, real and non-negative with a positive total is an `Err`
+     (`BASIN_INVALID_EXIT_FLUX`): no approximate or uniform channel is substituted. `k_tot` in the
+     step log is the unweighted sum of the exit rates (diagnostic); the clock advances by
+     ( t_{\text{exit}} ).
 5. Build the result and return it to the KMC loop
 6. Replace the initially chosen KMC event with the basin event
 

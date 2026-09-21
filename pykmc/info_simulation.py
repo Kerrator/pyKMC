@@ -239,15 +239,26 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
 
 
 def info_basin_events(
-    system_types, reference_table, connectivity_table, exit_state
+    system_types, reference_table, connectivity_table, exit_row
 ) -> EventsInfo:
-    """Construct dataclass with exit basin events"""
+    """Construct dataclass with exit basin events.
 
-    # Only exit state
-    data = connectivity_table.df[
-        connectivity_table.df["transient"] == False
-    ].reset_index(drop=True)
-    idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
+    ``exit_row`` is the connectivity-table index label of the selected exit
+    transition (``BasinOutput.exit_row``); the returned position marks that
+    row in the listed exit transitions, not the first row sharing its
+    destination.
+    """
+
+    # Only exit transitions (transient -> absorbing rows)
+    exits = connectivity_table.df[connectivity_table.df["transient"] == False]
+    if exit_row not in exits.index:
+        raise KeyError(
+            "basin exit row {!r} is not among the exit transitions {}".format(
+                exit_row, list(exits.index)
+            )
+        )
+    idx_selected_event = int(exits.index.get_loc(exit_row))
+    data = exits.reset_index(drop=True)
 
     # Connectivity table data
     central_atom = data["central_atom"].to_numpy(dtype=int, copy=True)

@@ -91,7 +91,9 @@ class BasinsGenericEvents:
         self.explored_states = None  # List of state that we already explored
         self.states: dict[int, StateData] = {}  # Dictionnary of StateDate
         self.known_environments = known_environments
-        self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
+        # Refined saddle of each exit transition, keyed by its connectivity-table
+        # index label (parallel transitions keep their own saddle).
+        self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
         # Rate facade of the run: absorbing transitions are re-rated through it
         # with the reference row's resolved prefactor (htst/rpa) or k0.
         self.rate_constant = create_rate_constant(config.rateconstant)
@@ -131,17 +133,63 @@ class BasinsGenericEvents:
         result = self.refine_absorbing(system)
         if not result.is_ok():
             return result
-        # apply selector algorithm to find t_exit and exit_state
+        # apply selector algorithm to find t_exit and the exit transition
         result = self.selector.select_from_connectivity(self.connectivity_table)
         if not result.is_ok():
             return result
         # Construct output KMC needs
-        t_exit = result.ok_value().t_exit
-        exit_state = result.ok_value().exit_state
+        return self._exit_output(result.ok_value())
 
-        from_state, event_idx, central_atom, sym_idx, is_transient = (
-            self.connectivity_table.get_transition_to_state(target_state=exit_state)
-        )
+    def _exit_output(self, selection):
+        """Build the KMC hand-off for the selected exit transition.
+
+        The transition is the connectivity-table row the selector drew
+        (``selection.exit_row``): its source state, logical reference, central
+        atom, symmetry, refined barrier and refined saddle are the ones that
+        carried the sampled flux. A destination shared by several transitions,
+        or parallel transitions between the same pair of states, keep their own
+        identity. A selected row without a refined saddle (a row flagged
+        transient whose destination was never explored) is an explicit
+        ``Err(BASIN_EXIT_NOT_REFINED)``, never a substitute transition.
+        """
+        exit_row = selection.exit_row
+        table = self.connectivity_table.df
+        if exit_row is None or exit_row not in table.index:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.BASIN_EXIT_NOT_REFINED,
+                    message="Basin: the selector returned no exit transition "
+                    "row ({!r})".format(exit_row),
+                    variables={"exit_row": exit_row},
+                )
+            )
+        row = table.loc[exit_row]
+        from_state = int(row["state"])
+        exit_state = int(row["state_connexion"])
+        central_atom = int(row["central_atom"])
+        event_idx = int(row["event_connexion"])
+        if exit_row not in self.absorbing_saddle_positions:
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.BASIN_EXIT_NOT_REFINED,
+                    message="Basin: exit transition row {!r} ({} -> {}, event {}, "
+                    "atom {}) was selected but never refined (its row is "
+                    "flagged transient although state {} was not explored)".format(
+                        exit_row,
+                        from_state,
+                        exit_state,
+                        event_idx,
+                        central_atom,
+                        exit_state,
+                    ),
+                    variables={
+                        "exit_row": exit_row,
+                        "from_state": from_state,
+                        "exit_state": exit_state,
+                        "idx_ref": event_idx,
+                    },
+                )
+            )
         # Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
 
@@ -152,22 +200,17 @@ class BasinsGenericEvents:
             BasinOutput(
                 initial_system_positions=self.states[from_state].system.positions,
                 central_atom=central_atom,
-                saddle_positions=self.absorbing_saddle_positions[
-                    (from_state, exit_state)
-                ],
+                saddle_positions=self.absorbing_saddle_positions[exit_row],
                 final_positions=self.states[exit_state].system.positions[neighbors],
                 neighbors=neighbors,
-                energy_barrier=self.connectivity_table.df[
-                    (self.connectivity_table.df["state"] == from_state)
-                    & (self.connectivity_table.df["state_connexion"] == exit_state)
-                ].iloc[0]["dE_forward"],
-                k_tot=self.connectivity_table.df.loc[
-                    self.connectivity_table.df["transient"] == False, "k_forward"
-                ].sum(),
-                t_exit=t_exit,
+                energy_barrier=float(row["dE_forward"]),
+                # Diagnostic: unweighted sum of the exit rates (see BasinOutput)
+                k_tot=float(table.loc[table["transient"] == False, "k_forward"].sum()),
+                t_exit=selection.t_exit,
                 exit_state=exit_state,
                 from_state=from_state,
                 num_reference_event=event_idx,
+                exit_row=exit_row,
             )
         )
 
@@ -704,10 +747,9 @@ class BasinsGenericEvents:
                 dE, self.connectivity_table.df.loc[idx].at["event_connexion"]
             )
 
-            # also save saddle positions refined
-            idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
-            from_state_for_saddle = self.connectivity_table.df.loc[idx].at["state"]
-            self.absorbing_saddle_positions[(from_state_for_saddle, idx_state)] = (
+            # also save the refined saddle, per transition row: parallel
+            # transitions between the same pair of states keep their own
+            self.absorbing_saddle_positions[idx] = (
                 result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             )
             # update connectivity table row

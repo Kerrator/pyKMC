@@ -206,7 +206,9 @@ def test_absorbing_refinement_receives_symmetric_displacement_about_original_ini
     basin._absorbing_rate = lambda *_: 0.25
     assert basin.refine_absorbing(source).is_ok()
     assert len(energy_calls) == len(refine_calls) == 1
+    # the refined saddle is stored per transition row (label 0), not per
+    # (source, destination) pair, so parallel transitions keep their own
     np.testing.assert_allclose(
-        basin.absorbing_saddle_positions[(0, 5)], expected_saddle, atol=ATOL, rtol=0
+        basin.absorbing_saddle_positions[0], expected_saddle, atol=ATOL, rtol=0
     )
     unchanged(source, reference, saved)

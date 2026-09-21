@@ -120,6 +120,7 @@ class ErrorType(Enum):
     RECONSTRUCTION_INVALID_EVENT_DATA = 43
     BASIN_TEXIT_NOT_FOUND = 51
     BASIN_INVALID_EXIT_FLUX = 52
+    BASIN_EXIT_NOT_REFINED = 53
 
 
 # Dataclass to store operation outputs
@@ -287,7 +288,26 @@ class BasinExitTimeSolverOutput:
 
 @dataclass
 class BasinOutput:
-    """Store the results of the basin."""
+    """Store the results of the basin.
+
+    Every geometric and energetic field describes the one exit transition the
+    selector drew (``exit_row``): its source state, reference event, central
+    atom, refined saddle and refined barrier. A destination shared by several
+    transitions, or parallel transitions between the same pair of states, keep
+    their own identity through this object.
+
+    Attributes
+    ----------
+    k_tot : float
+        Unweighted sum of the exit-transition rates (ps^-1). Diagnostic only:
+        it is written to the step log, but the clock advances by ``t_exit``.
+        The conditional hazard at the exit time is the instantaneous total
+        flux divided by the survival probability, which is not this sum.
+    t_exit : float
+        Sampled exit time (ps); converted to seconds once, in the KMC loop.
+    exit_row : int or None
+        Connectivity-table index label of the selected exit transition.
+    """
 
     initial_system_positions: np.ndarray
     central_atom: int
@@ -300,6 +320,7 @@ class BasinOutput:
     exit_state: int
     from_state: int
     num_reference_event: int
+    exit_row: Optional[int] = None
 
 
 @dataclass
