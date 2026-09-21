@@ -14,6 +14,8 @@ The doubles here stand in for the frozen cross-slice contracts:
 
 from __future__ import annotations
 
+import logging
+
 import copy
 import threading
 from concurrent.futures import Future
@@ -224,3 +226,24 @@ def htst_config() -> Config:
 def rpa_config() -> Config:
     """Return the committed test input switched to rpa with ``k0 = 1.0``."""
     return _with_rate_style(Config.from_ini_file(DATA_INPUT), "rpa", k0=1.0)
+
+
+@pytest.fixture
+def htst_log_records() -> list[logging.LogRecord]:
+    """Capture the records of the ``log`` logger the catalogue writes to."""
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Collect(level=logging.DEBUG)
+    logger = logging.getLogger("log")
+    previous = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)

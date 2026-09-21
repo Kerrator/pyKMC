@@ -22,12 +22,11 @@ from pykmc.result import ErrorType
 from tests.lifecycle.conftest import accepted, rejected
 
 from .protocol_producers import archived_frequency
-from .test_identity_gate import (  # noqa: F401 - fixture re-export
+from .test_identity_gate import (
     _hop_event,
     _links,
     _table_with_service,
     _trivial_event,
-    htst_log_records,
 )
 
 HOP = np.array([0.6, 0.0, 0.0])

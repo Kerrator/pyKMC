@@ -143,27 +143,6 @@ def _table_with_service(
     return ReferenceEventTable(config, prefactor_service=service), fake
 
 
-@pytest.fixture
-def htst_log_records() -> list[logging.LogRecord]:
-    """Capture the records of the ``log`` logger the catalogue writes to."""
-    records: list[logging.LogRecord] = []
-
-    class _Collect(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    handler = _Collect(level=logging.DEBUG)
-    logger = logging.getLogger("log")
-    previous = logger.level
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    try:
-        yield records
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(previous)
-
-
 class TestPrefactorAgreement:
     """``self_reverse_prefactors_agree`` is the numerical half of the comparison."""
 
