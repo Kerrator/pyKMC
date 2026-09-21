@@ -447,6 +447,14 @@ class KMC:
                                 result_basin_reconstruction.err_value()
                             ),
                         )
+                        exit_err = result_basin_reconstruction.err_value()
+                        if exit_err.type is ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA:
+                            idx_selected_event = self._purge_basin_reference(
+                                int(exit_ref),
+                                active_table,
+                                idx_selected_event,
+                                exit_err.message,
+                            )
                         self.system.update_positions(basin.states[0].system.positions)
                         self.system.update_positions(
                             result_reconstruction.ok_value().min2_positions
@@ -459,6 +467,28 @@ class KMC:
                             result_basin.err_value()
                         ),
                     )
+                    basin_err = result_basin.err_value()
+                    if basin_err.type is ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA:
+                        # A catalogue row rejected on the basin path is purged
+                        # like a failed reconstruction (contracts 7f policy 5);
+                        # the Err names it in variables["idx_ref"].
+                        offender = (basin_err.variables or {}).get("idx_ref")
+                        if offender is None:
+                            self.loggers.warning(
+                                "log",
+                                "\t :=> Basin rejected a catalogue row ({}) but "
+                                "the error names no reference; nothing is "
+                                "purged, the row stays selectable.".format(
+                                    basin_err.message
+                                ),
+                            )
+                        else:
+                            idx_selected_event = self._purge_basin_reference(
+                                int(offender),
+                                active_table,
+                                idx_selected_event,
+                                basin_err.message,
+                            )
                     self.system.update_positions(
                         result_reconstruction.ok_value().min2_positions
                     )
@@ -970,6 +1000,77 @@ class KMC:
             err_reference,
             err_ae,
         )
+
+    def _purge_basin_reference(
+        self,
+        idx_ref: int,
+        active_table: ActiveEventTable,
+        idx_selected_event: int,
+        reason: str,
+    ) -> int:
+        """Purge a catalogue row rejected on the basin path.
+
+        The same purge :meth:`reconstruction` performs after a failed
+        reconstruction (contracts 7f policy 5): the reference leaves the
+        catalogue with its reverse-link closure, every active row referencing
+        a removed id is dropped and the removed topologies are forgotten so
+        they are searched again. The one difference is the executed row: it
+        was reconstructed successfully on the current state and is applied by
+        this step, and the step log and the end-of-step prune read it by
+        label, so it is kept (even when its own reference is the offender)
+        and its label after the relabelling is returned.
+
+        Parameters
+        ----------
+        idx_ref : int
+            Logical id of the offending catalogue row.
+        active_table : ActiveEventTable
+            The step's active table; mutated in place.
+        idx_selected_event : int
+            Label of the executed row before the purge.
+        reason : str
+            The basin error message, logged with the purge.
+
+        Returns
+        -------
+        int
+            Label of the executed row after the purge.
+
+        """
+        removed = self.reference_table.remove([int(idx_ref)])
+        if len(removed) == 0:
+            self.loggers.warning(
+                "log",
+                "\t :=> Basin rejected reference event {} ({}) but it is not in "
+                "the catalogue; nothing to purge.".format(idx_ref, reason),
+            )
+            return idx_selected_event
+        removed_ids = set(removed.idx_refs)
+        table = active_table.table
+        executed_ref = int(table.loc[idx_selected_event].at["num_reference_event"])
+        mask = table["num_reference_event"].astype(int).isin(removed_ids)
+        labels = [
+            int(label)
+            for label in table.index[mask]
+            if int(label) != int(idx_selected_event)
+        ]
+        kept = [int(label) for label in table.index if int(label) not in set(labels)]
+        if labels:
+            # ActiveEventTable.remove relabels the survivors 0..n-1 in order.
+            active_table.remove(labels)
+        self.visited_environments = self.visited_environments.difference(
+            set(removed.event_ids)
+        )
+        self.loggers.info(
+            "log",
+            "\t :=> Basin rejected reference event {} ({}); purging reference "
+            "events {} (reverse-link closure), {} active row(s) and their "
+            "topologies from the known environments; the executed event "
+            "(reference {}) is applied as selected.".format(
+                idx_ref, reason, list(removed.idx_refs), len(labels), executed_ref
+            ),
+        )
+        return kept.index(int(idx_selected_event))
 
     def _reconstruction_active_event(
         self, idx_selected_event: int, active_table: AtomicEnvironment

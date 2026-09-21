@@ -452,11 +452,14 @@ class BasinsGenericEvents:
                     full, tolerance=tolerance, user_only=True
                 )
         except ConstraintViolationError as exc:
+            # ``variables["idx_ref"]`` names the offending catalogue row so
+            # KMC.run can purge it (contracts 7f policy 5).
             return Err(
                 ErrorInfo(
                     type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
                     message="generic event {} changes a user-fixed reference "
                     "coordinate: {}".format(event_idx, exc),
+                    variables={"idx_ref": int(event_idx)},
                 )
             )
 
@@ -641,6 +644,7 @@ class BasinsGenericEvents:
                             "reference coordinate: {}".format(
                                 row["event_connexion"], exc
                             ),
+                            variables={"idx_ref": int(row["event_connexion"])},
                         )
                     )
                 saddle_positions = constraints.protect_positions(
