@@ -83,6 +83,22 @@ class Refinement:
         # htst/rpa reference tables carry the resolved prefactor columns; the
         # inherited estimate travels with each refinement through its context.
         self._carry_prefactors = "nu0_status" in df_reference_events.columns
+        # Refined rows record the source identities of their crop
+        # (``crop_atom_ids``) so recycling and reconstruction can re-address
+        # them after atoms move. ``System.index`` is optional: a constant-mode
+        # reconstruction falls back to the rcut neighbours and skips the
+        # record, while htst/rpa cannot recycle or reconstruct without stable
+        # identities and must say so before any refinement is dispatched.
+        self._record_crop_ids = getattr(self.system, "index", None) is not None
+        if self._carry_prefactors and not self._record_crop_ids:
+            raise RuntimeError(
+                "Refinement in the {} rate style requires stable atom identities "
+                "(System.index is None): site prefactors, recycling and "
+                "reconstruction address refined rows by their crop identities. "
+                "Build the System from a file or give it an index.".format(
+                    self.config.rateconstant.style
+                )
+            )
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(
             df_reference_events
@@ -129,9 +145,10 @@ class Refinement:
             if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
-                res.ok_value().crop_atom_ids = tuple(
-                    int(self.system.index[i]) for i in ctx["neighbors"]
-                )
+                if self._record_crop_ids:
+                    res.ok_value().crop_atom_ids = tuple(
+                        int(self.system.index[i]) for i in ctx["neighbors"]
+                    )
                 estimate = ctx["estimate"]
                 res.ok_value().nu0_hz = estimate["nu0_hz"]
                 res.ok_value().nu0_status = estimate["nu0_status"]
