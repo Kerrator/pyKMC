@@ -145,3 +145,40 @@ def test_admission_builds_no_request_before_dispatch(
     duplicate = table.add_events([hop], pbc=system.pbc)
     assert not duplicate[0].is_ok()
     assert calls == [], "a geometric duplicate never builds a full request"
+
+
+def test_vertex_count_mismatch_is_an_error_not_silence():
+    """``_proposals`` pairs vertices strictly: unequal counts raise."""
+    from types import SimpleNamespace
+
+    from pykmc.htst.event_identity import _proposals
+
+    cell = np.eye(3) * 20.0
+    source = SimpleNamespace(
+        types=("Ni", "Ni"), center_index=0, cell=cell, pbc=(True,) * 3
+    )
+    target = SimpleNamespace(
+        types=("Ni", "Ni", "Ni"), center_index=0, cell=cell, pbc=(True,) * 3
+    )
+    two = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0]])
+    three = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0], [3.0, 1.0, 1.0]])
+    # Crops of different sizes are skipped, so nothing is proposed; the
+    # unequal vertex counts must still surface instead of ending the scan.
+    with pytest.raises(ValueError):
+        list(
+            _proposals(
+                (two, two, two),
+                (three, three),
+                source,
+                target,
+                tolerance=0.1,
+                kmax_factor=1.8,
+                radius=5.0,
+            )
+        )
+    with pytest.raises(ValueError):
+        list(
+            _proposals(
+                (two,), (), source, target, tolerance=0.1, kmax_factor=1.8, radius=None
+            )
+        )

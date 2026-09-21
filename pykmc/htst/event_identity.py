@@ -161,9 +161,9 @@ def _proposals(
     the whole initial vertex.
     """
     vertices = (
-        zip(source_vertices[:1], target_vertices[:1])
+        zip(source_vertices[:1], target_vertices[:1], strict=True)
         if radius is None
-        else zip(source_vertices, target_vertices)
+        else zip(source_vertices, target_vertices, strict=True)
     )
     for vertex_source, vertex_target in vertices:
         unwrapped_source = _unwrapped(vertex_source, source)
