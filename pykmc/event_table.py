@@ -2789,6 +2789,82 @@ class ActiveEventTable:
             )
         )
 
+    def retained_channels(self) -> pd.DataFrame:
+        """Return the retained rows as refinement-ledger channels.
+
+        One row per active event with ``atom_index`` and
+        ``num_reference_event`` as ``int``, its current ``k`` (ps^-1: the
+        site rate when one was accepted, else the inherited reference or
+        ``k0`` rate) and its ``refined`` flag. ``Refinement.execute`` counts
+        each once in the htst/rpa candidate ledger (contracts 7f policy 3);
+        a ``refined == "F"`` pair is a candidate for re-dispatch.
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns ``atom_index``, ``num_reference_event``, ``k``,
+            ``refined``; empty (typed) when the table is empty.
+
+        """
+        if len(self.table) == 0:
+            return pd.DataFrame(
+                {
+                    "atom_index": pd.Series(dtype=int),
+                    "num_reference_event": pd.Series(dtype=int),
+                    "k": pd.Series(dtype=float),
+                    "refined": pd.Series(dtype=str),
+                }
+            )
+        return pd.DataFrame(
+            {
+                "atom_index": self.table["atom_index"].astype(int).to_numpy(),
+                "num_reference_event": self.table["num_reference_event"]
+                .astype(int)
+                .to_numpy(),
+                "k": self.table["k"].astype(float).to_numpy(),
+                "refined": self.table["refined"].astype(str).to_numpy(),
+            }
+        )
+
+    def drop_unrefined_pairs(self, pairs: Iterable[tuple[int, int]]) -> int:
+        """Drop the ``refined == "F"`` rows of the given ``(atom, reference)`` pairs.
+
+        Called with ``Refinement.superseded_pairs`` before the step's refined
+        outputs are added: a retained generic row whose pair was refined this
+        step would otherwise count twice. Refined rows of the same pairs are
+        kept; a pair whose refinement failed is not listed and keeps its
+        generic row as the documented fallback. The surviving rows are
+        relabelled ``0..n-1`` through :meth:`remove`.
+
+        Parameters
+        ----------
+        pairs : Iterable[tuple[int, int]]
+            ``(atom_index, num_reference_event)`` pairs.
+
+        Returns
+        -------
+        int
+            Number of rows dropped (logged when non-zero).
+
+        """
+        wanted = {(int(atom), int(ref)) for atom, ref in pairs}
+        if not wanted or len(self.table) == 0:
+            return 0
+        labels = [
+            int(label)
+            for label, row in self.table.iterrows()
+            if str(row["refined"]) == "F"
+            and (int(row["atom_index"]), int(row["num_reference_event"])) in wanted
+        ]
+        if labels:
+            self.remove(labels)
+            logger.info(
+                "active table: dropped %d retained unrefined row(s) superseded "
+                "by a refinement of the same (atom, reference) pair this step",
+                len(labels),
+            )
+        return len(labels)
+
     def add_events(
         self, events: EventRefinementOutput | list[EventRefinementOutput]
     ) -> None:

@@ -130,6 +130,10 @@ class KMC:
         self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
         self.bias: Bias | None = None
+        # htst/rpa refinement-ledger report of the current step
+        # (``Refinement.coverage``), set by execute_refinements; None before
+        # the first refinement and in the constant style.
+        self.refinement_coverage: dict | None = None
         # The recycler decides what to carry over between KMC steps at
         # end-of-step; with no recycler the active table is cleared each
         # step (same observable behavior as prior releases).
@@ -791,7 +795,7 @@ class KMC:
             "pending={} stale={}; active sources reference={} site={} k0={}; site "
             "attempts this step={} (ok={}, rejected={}, no_geometry={}); "
             "identity-less rows dropped before selection={}; site rejections "
-            "nonstationary_geometry={}; hessian requests this step={}, "
+            "nonstationary_geometry={}; {}; hessian requests this step={}, "
             "prefactor wall={:.3f} s".format(
                 ref.get("ok", 0),
                 ref.get("rejected", 0),
@@ -807,9 +811,46 @@ class KMC:
                 site_summary.get("no_geometry", 0),
                 site_summary.get("identityless", 0),
                 rejections.get("nonstationary_geometry", 0),
+                self._refinement_coverage_clause(),
                 n_requests,
                 wall,
             ),
+        )
+
+    def _refinement_coverage_clause(self) -> str:
+        """Describe the step's refinement-ledger coverage for the summary line.
+
+        Returns
+        -------
+        str
+            ``refinement coverage: not available`` before any refinement,
+            ``... not applicable (...)`` for a zero snapshot total, otherwise
+            the selected, refined and shortfall fractions with the dispatch
+            counts (``Refinement.coverage``).
+
+        """
+        coverage = getattr(self, "refinement_coverage", None)
+        if coverage is None:
+            return "refinement coverage: not available"
+        if not coverage.get("applicable"):
+            return (
+                "refinement coverage: not applicable (snapshot total {:.4e} "
+                "ps^-1, nothing dispatched)".format(coverage.get("snapshot_total", 0.0))
+            )
+        return (
+            "refinement coverage: selected={:.4f} refined={:.4f} shortfall={:.4f} "
+            "(dispatched={}, failed={}; snapshot {:.4e} ps^-1, {} groups, {} "
+            "channels, target {:.4f})".format(
+                coverage["selected_fraction"],
+                coverage["refined_fraction"],
+                coverage["shortfall_fraction"],
+                coverage["n_dispatched"],
+                coverage["n_dispatch_failed"],
+                coverage["snapshot_total"],
+                coverage["n_groups"],
+                coverage["n_channels"],
+                coverage["target"],
+            )
         )
 
     def execute_refinements(
@@ -826,12 +867,15 @@ class KMC:
         existing_pairs : set[tuple[int, int]] | None, optional
             `(atom_index, num_reference_event)` pairs already present in the
             persistent active table (carried over from the previous step).
-            These are skipped during refinement.
+            The constant style skips them all; the htst/rpa styles skip the
+            refined ones and keep a retained ``refined == "F"`` pair as a
+            candidate of the cumulative ledger (contracts 7f policy 3).
 
         Returns
         -------
         Refinement
-            The refinement class with results.
+            The refinement class with results; its ``coverage`` report is
+            kept in ``self.refinement_coverage`` for the step summary.
 
         """
         refinement = Refinement(
@@ -843,10 +887,22 @@ class KMC:
             self.manager,
             global_constraints=self.global_constraints,
         )
+        # Fixtures may drive this method on a bare namespace without a table.
+        table = getattr(self, "active_table", None)
+        retained = table.retained_channels() if table is not None else None
         # refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(
-            df_reference_events, self.total_energy, existing_pairs=existing_pairs
+            df_reference_events,
+            self.total_energy,
+            existing_pairs=existing_pairs,
+            retained_channels=retained,
         )
+        # A retained generic row whose pair was refined this step is
+        # superseded by the refined output and leaves before the outputs are
+        # added; a failed refinement keeps it as the documented fallback.
+        if table is not None:
+            table.drop_unrefined_pairs(refinement.superseded_pairs)
+        self.refinement_coverage = refinement.coverage
         return refinement
 
     def add_active_events(

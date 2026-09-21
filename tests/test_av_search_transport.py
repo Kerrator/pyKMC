@@ -50,7 +50,7 @@ def config():
         frozen_atoms=RegionConfig(
             region_type="plane", normal="y", side="above", threshold=3.3
         ),
-        control=SimpleNamespace(active_volume=True),
+        control=SimpleNamespace(refine_thr=0.9999, active_volume=True),
         activevolume=SimpleNamespace(rmov=1.6, ract=5.0, AV_debug=False),
         atomicenvironment=SimpleNamespace(rcut=2.0),
         eventsearch=SimpleNamespace(refined_energy_thr=1e-7),
@@ -245,6 +245,10 @@ def reference_row(triplet):
             "types": np.array(TYPES)[rows],
             "sym_matrix": [np.eye(3)],
             "sym_perm": [np.arange(len(rows))],
+            # The resolved k0 rate every reference row carries; the htst/rpa
+            # refinement ledger ranks applications by it (contracts 7f
+            # policy 3) and rejects a row without one.
+            "k": 1.0,
             "nu0_status": "rejected",
             "nu0_reason": "protocol has no frequency",
             "nu0": np.nan,
