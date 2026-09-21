@@ -12,6 +12,7 @@ import logging
 from concurrent.futures import Future
 
 import numpy as np
+import pytest
 
 from pykmc.event_table import ActiveEventTable
 from pykmc.htst import compute_event_prefactors
@@ -145,3 +146,55 @@ def test_step_summary_line_carries_the_nonstationary_rejection_count():
         {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
     )
     assert "nonstationary_geometry=0" in sim.loggers.messages[0][1]
+
+
+def test_nonstationary_warnings_do_not_misstate_the_resulting_rate(caplog):
+    """One site rejection: every line agrees with what the row actually keeps.
+
+    The row keeps its inherited estimate (k0 only when the reference has
+    none); no line may claim that the constant k0 prefactor is used.
+    """
+    cfg, system, worker, active, neighbors = nonstationary_site()
+    with caplog.at_level(logging.INFO, logger="log"):
+        active.request_site_prefactors(system, neighbors)
+    messages = [r.getMessage() for r in caplog.records]
+    assert not [m for m in messages if "k0 prefactor will be used" in m], messages
+    assert not [m for m in messages if "use the constant k0 prefactor" in m], messages
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    summary = [m for m in warnings if "1 site" in m and "nonstationary_geometry" in m]
+    assert len(summary) == 1, warnings
+    assert "keep their inherited estimate" in summary[0]
+    assert "k0 only when the reference has none" in summary[0]
+
+
+def _kernel_rejection(event_key, caplog):
+    """Drive the native kernel's stationarity check through the fake scratch."""
+    from dataclasses import replace
+
+    from tests.htst.test_stationarity_protocol import execute, setup_case
+
+    case = setup_case(forces={"saddle": (0.004, 0.004, 0.0)})
+    case.request = replace(case.request, event_key=event_key)
+    with caplog.at_level(logging.INFO, logger="log"):
+        result = execute(case)
+    assert result.forward.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY
+    lines = [
+        r for r in caplog.records if "stationarity check rejected" in r.getMessage()
+    ]
+    assert len(lines) == 1, [r.getMessage() for r in caplog.records]
+    text = lines[0].getMessage()
+    assert "k0 prefactor will be used" not in text
+    assert "the caller decides the fallback" in text
+    assert repr(event_key) in text and "0.005" in text
+    return lines[0]
+
+
+@pytest.mark.parametrize(
+    "event_key", [("site", 3, 0, 47), (12, 13)], ids=["site", "reference"]
+)
+def test_kernel_rejection_line_is_a_rate_neutral_warning(event_key, caplog):
+    """The kernel line stays a WARNING for every request and names no rate:
+    a site request keeps its inherited estimate, a reference request falls
+    back to k0, and only the caller knows which."""
+    record = _kernel_rejection(event_key, caplog)
+    assert record.levelno == logging.WARNING

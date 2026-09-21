@@ -490,13 +490,15 @@ class LammpsHTSTExtension(EngineExtension):
                 norms = np.linalg.norm(forces[free_indices], axis=1)
                 largest = float(np.max(norms))
                 if not np.all(np.isfinite(norms)) or largest > settings.force_tol:
-                    # The kernel turns this into the documented k0 fallback;
-                    # make the rejection visible at run time.
+                    # The kernel only rejects; the caller decides the rate
+                    # fallback (a site request keeps its inherited estimate
+                    # and reports the rejection per row, a reference request
+                    # falls back to k0), so this line names neither.
                     logger.warning(
                         "[htst] event %r: stationarity check rejected the "
                         "geometry, maximum free-atom force norm %.4e eV/A "
-                        "exceeds force_tol %s eV/A (n_free %d); the constant "
-                        "k0 prefactor will be used for this event",
+                        "exceeds force_tol %s eV/A (n_free %d); the request is "
+                        "rejected and the caller decides the fallback",
                         request.event_key,
                         largest,
                         settings.force_tol,

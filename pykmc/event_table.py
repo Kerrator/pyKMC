@@ -3239,8 +3239,9 @@ class ActiveEventTable:
                     self.step_site_rejections.get(code, 0) + 1
                 )
                 if estimate.reason_code is PrefactorRejection.NONSTATIONARY_GEOMETRY:
-                    # A stationarity rejection is a silent k0 fallback unless
-                    # it is reported here, with the tolerance that decided it.
+                    # A stationarity rejection silently keeps the inherited
+                    # estimate (k0 when the reference has none) unless it is
+                    # reported here, with the tolerance that decided it.
                     logger.warning(
                         "[htst] active event (atom %d, reference %d): site "
                         "prefactor rejected (%s: %s; force_tol %s eV/A); keeping "
@@ -3274,7 +3275,8 @@ class ActiveEventTable:
         if nonstationary:
             logger.warning(
                 "[htst] %d site prefactor request(s) rejected as %s this step "
-                "(force_tol %s eV/A): those events use the constant k0 prefactor",
+                "(force_tol %s eV/A): those rows keep their inherited estimate "
+                "(k0 only when the reference has none)",
                 nonstationary,
                 PrefactorRejection.NONSTATIONARY_GEOMETRY.value,
                 self.prefactor_service.settings.force_tol,
