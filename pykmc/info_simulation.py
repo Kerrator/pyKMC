@@ -240,7 +240,7 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
 
 def info_basin_events(
     system_types, reference_table, connectivity_table, exit_row
-) -> EventsInfo:
+) -> tuple[int, EventsInfo]:
     """Construct dataclass with exit basin events.
 
     ``exit_row`` is the connectivity-table index label of the selected exit
