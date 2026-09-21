@@ -23,7 +23,7 @@ import pytest
 
 import pykmc
 import pykmc.refinement as refinement_module
-from pykmc.config import Config, RateConstantConfig
+from pykmc.config import Config, EventRecyclingConfig, RateConstantConfig
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
 from pykmc.physics import ConstraintViolationError
 from pykmc.kmc import KMC
@@ -255,11 +255,19 @@ def exclude_identity_overlay(monkeypatch):
     monkeypatch.setattr(refinement_module, "resolve_event_constraints", resolve)
 
 
-def retained_output(atom, ref, barrier, refined, n_atoms, *, nu0=1e12, rotated=False):
-    """A producer output as the previous step left it (crop = the atom itself)."""
+def retained_output(
+    atom, ref, barrier, refined, n_atoms, *, nu0=1e12, rotated=False, drift=0.0
+):
+    """A producer output as the previous step left it (crop = the atom itself).
+
+    ``drift`` displaces the stored saddle crop along the application's own
+    direction, as recycled atoms that moved since the row was built would.
+    """
     ok = nu0 is not None
     full = np.zeros((n_atoms, 3))
-    full[atom] = [0.0, float(ref), 0.0] if rotated else [float(ref), 0.0, 0.0]
+    full[atom] = (
+        [0.0, float(ref) + drift, 0.0] if rotated else [float(ref) + drift, 0.0, 0.0]
+    )
     return EventRefinementOutput(
         central_atom_index=atom,
         saddle_positions=full[[atom]].copy(),
@@ -296,6 +304,7 @@ def build_retained(active, site, system, neighbors, barriers, rows):
             spec[2],
             len(system.positions),
             rotated=len(spec) > 3 and spec[3] == "rotated",
+            drift=spec[3] if len(spec) > 3 and not isinstance(spec[3], str) else 0.0,
         )
         for spec in rows
     ]
@@ -323,15 +332,24 @@ def run(
     alias_ids=False,
     fail_rotated=False,
     exclude_identity=False,
+    recycling=None,
 ):
     """One refinement round: execute -> supersede -> add -> dedup -> site path.
 
-    ``retained_rows`` are ``(atom, ref, refined[, "rotated"])`` tuples carried
-    over in the active table before the round, as recycling leaves them
-    (attempted in the step that built them; a refined row carries its site
-    rate; ``"rotated"`` is the ROT90 symmetric application's generic saddle).
+    ``retained_rows`` are ``(atom, ref, refined[, "rotated" | drift])`` tuples
+    carried over in the active table before the round, as recycling leaves
+    them (attempted in the step that built them; a refined row carries its
+    site rate; ``"rotated"`` is the ROT90 symmetric application's generic
+    saddle, a float drifts the stored crop along the application).
+    ``recycling`` attaches an ``[EventRecycling]`` section with the given
+    ``movement_thr`` (retained rows exist only with recycling on).
     """
     cfg = config(style, temperature, threshold)
+    if recycling is not None:
+        cfg.control.recycle = True
+        cfg.eventrecycling = EventRecyclingConfig(
+            style="displacement", movement_thr=recycling, distance_thr=10.0
+        )
     df = frame(specs, style, temperature)
     if alias_ids:
         df["idx_ref"] = df["idx_ref"].astype(np.int64)
@@ -800,6 +818,46 @@ def test_excluded_application_keeps_its_generic_row_when_a_sibling_refines(
         "the identity application keeps its own generic row"
     )
     assert any("left unrefined" in msg for _, msg in result.log.lines)
+
+
+@pytest.mark.parametrize(
+    "recycling, drift, matched",
+    [
+        (None, 0.0005, True),  # tolerance = psr.matching_score_thr = 0.001
+        (None, 0.002, False),
+        (0.05, 0.05, True),  # tolerance = 0.001 + 2 x movement_thr = 0.101
+        (0.05, 0.2, False),
+    ],
+)
+def test_matching_tolerance_follows_the_psr_and_recycler_thresholds(
+    monkeypatch, recycling, drift, matched
+):
+    # A retained generic row whose stored crop drifted from this step's
+    # overlay by less than the tolerance is the same application and is
+    # superseded by its refinement; beyond it the row is not claimed: it
+    # stays (warned) beside the refinement rather than being handed to it.
+    result = run(
+        monkeypatch,
+        [row(17, 0.4, [0])],
+        retained_rows=[(0, 17, "F", drift)],
+        recycling=recycling,
+    )
+    cov = result.coverage
+    assert result.manager.submitted == [(0, 17)]
+    if matched:
+        assert result.refinement.superseded_rows == {0}
+        assert cov["n_duplicates_removed"] == 1 and cov["n_retained"] == 0
+        assert result.active.refined.tolist() == ["T"]
+    else:
+        assert result.refinement.superseded_rows == set()
+        assert cov["n_duplicates_removed"] == 0 and cov["n_retained"] == 1
+        assert cov["n_selected_unrefined"] == 1
+        assert sorted(result.active.refined.tolist()) == ["F", "T"]
+        assert any(
+            "matches none" in msg
+            for level, msg in result.log.lines
+            if level == "warning"
+        )
 
 
 def test_failed_refinement_is_a_shortfall_not_a_new_denominator(monkeypatch):
