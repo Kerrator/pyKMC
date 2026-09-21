@@ -232,16 +232,39 @@ class Refinement:
                 self.system.positions.copy()
             )  # save to restore system after
 
-            constraints = resolve_event_constraints(
-                self.config,
-                current_positions,
-                self.system.types,
-                self.system.cell,
-                self.system.pbc,
-                at_idx,
-                self.system.index,
-                user_constraints=self.global_constraints,
-            )
+            try:
+                constraints = resolve_event_constraints(
+                    self.config,
+                    current_positions,
+                    self.system.types,
+                    self.system.cell,
+                    self.system.pbc,
+                    at_idx,
+                    self.system.index,
+                    user_constraints=self.global_constraints,
+                )
+            except ConstraintViolationError as exc:
+                # A user-frozen atom drifted from its initialisation reference:
+                # the same recoverable Err as an overlay that moves one, never
+                # a bare ValueError out of the KMC loop (contracts 7f policy 5).
+                self.loggers.warning(
+                    "log",
+                    "\t :=> Reference event {} on atom {}: a user-fixed atom has "
+                    "drifted from its initialisation reference; refinement "
+                    "skipped ({})".format(dfevent["idx_ref"], at_idx, exc),
+                )
+                f = concurrent.futures.Future()
+                f.set_result(
+                    Err(
+                        ErrorInfo(
+                            type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
+                            message="user-fixed reference coordinate drifted "
+                            "since initialisation: {}".format(exc),
+                        )
+                    )
+                )
+                future_context[f] = {"num_reference_event": dfevent["idx_ref"]}
+                return [f]
             tolerance = overlay_tolerance(self.config)
             for sym_matrix, perm_matrix in zip(
                 dfevent.at["sym_matrix"], dfevent.at["sym_perm"], strict=False

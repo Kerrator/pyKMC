@@ -1103,27 +1103,30 @@ class KMC:
 
         from .physics import ConstraintViolationError, resolve_event_constraints
 
-        constraints = resolve_event_constraints(
-            self.config,
-            self.system.positions,
-            self.system.types,
-            self.system.cell,
-            self.system.pbc,
-            central_atom,
-            self.system.index,
-            user_constraints=self.global_constraints,
-        )
         # Keep the live source untouched even if validation or minimization fails.
         working = np.array(self.system.positions, copy=True)
         working[neighbors] = saddle_positions
 
-        # try to reconstruct. A violated user constraint is a recoverable
-        # rejection of this catalogue row: it must reach the purge loop as an
-        # Err, never abort the run as a bare ValueError (contracts 7f policy
-        # 5). Only that violation is converted: any other ValueError (a shape
-        # or mapping mismatch) is a programming error that would otherwise
-        # purge one reference per selection and drain the catalogue.
+        # Resolve the constraints and try to reconstruct. A violated user
+        # constraint, whether a user-frozen atom drifted from its
+        # initialisation reference (raised by the resolution) or the event
+        # moves one (raised by the reconstruction), is a recoverable rejection
+        # of this catalogue row: it must reach the purge loop as an Err, never
+        # abort the run as a bare ValueError (contracts 7f policy 5). Only that
+        # violation is converted: any other ValueError (a shape or mapping
+        # mismatch) is a programming error that would otherwise purge one
+        # reference per selection and drain the catalogue.
         try:
+            constraints = resolve_event_constraints(
+                self.config,
+                self.system.positions,
+                self.system.types,
+                self.system.cell,
+                self.system.pbc,
+                central_atom,
+                self.system.index,
+                user_constraints=self.global_constraints,
+            )
             result = Reconstruction(
                 self.config,
                 self.manager,

@@ -5,7 +5,7 @@ from .system import System
 from .manager import Manager
 from .log import LogKMC
 from .utils.geometry import translate
-from .physics import resolve_event_constraints
+from .physics import ConstraintViolationError, resolve_event_constraints
 import numpy as np
 
 
@@ -65,16 +65,32 @@ class EventSearch:
             )
         futures = []
         for atom in central_atom_research_list:
-            constraints = resolve_event_constraints(
-                self.config,
-                self.system.positions,
-                self.system.types,
-                self.system.cell,
-                self.system.pbc,
-                atom,
-                self.system.index,
-                user_constraints=self.global_constraints,
-            )
+            try:
+                constraints = resolve_event_constraints(
+                    self.config,
+                    self.system.positions,
+                    self.system.types,
+                    self.system.cell,
+                    self.system.pbc,
+                    atom,
+                    self.system.index,
+                    user_constraints=self.global_constraints,
+                )
+            except ConstraintViolationError as exc:
+                # A user-frozen atom has drifted from its initialisation
+                # reference. Unlike an overlay that moves one (a property of a
+                # catalogue row, rejected as an Err), this breaks the invariant
+                # of the whole constrained run before any search is dispatched:
+                # abort with a named error that says so, not a bare ValueError
+                # from inside the constraint resolution.
+                message = (
+                    "event search on atom {}: a user-frozen atom has drifted from "
+                    "its initialisation reference (frozen_atoms must hold every "
+                    "constrained minimisation); the constrained run is no longer "
+                    "consistent, aborting the step: {}".format(atom, exc)
+                )
+                self.loggers.error("log", "\t :=> " + message)
+                raise RuntimeError(message) from exc
             futures.append(
                 self.manager.partn_search(
                     config=self.config,
