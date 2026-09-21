@@ -246,3 +246,39 @@ def test_identityless_row_warns_once_per_step_and_the_duplicate_stage_is_truthfu
         for r in caplog.records
         if r.levelno == logging.WARNING
     )
+
+
+def test_validate_recycled_reports_per_row_validation_errors(caplog, monkeypatch):
+    """A row dropped by an exception inside its validation is reported.
+
+    ``SiteState.matches``, ``crop_indices`` and the neighbour lookup may raise
+    ValueError/TypeError/KeyError/IndexError/RuntimeError; the blanket handler
+    keeps the step alive by dropping the row, but a systematic cause (a bug, a
+    shape or type drift in the source) would otherwise nullify recycling every
+    step with only an aggregate INFO count. Each such drop names the row, the
+    exception type and its message at WARNING, like the service-error branch.
+    """
+    cfg, system, _, svc = h.setup()
+    active, neighbors, summary = deps.seed_site(cfg, system, svc)
+    assert summary["ok"] == 1 and len(active.table) == 1
+
+    def broken(label, system, neighbors_list=None, *, capture=False):
+        raise RuntimeError("synthetic identity drift")
+
+    monkeypatch.setattr(active, "crop_indices", broken)
+    with caplog.at_level(logging.INFO, logger="log"):
+        dropped = active.validate_recycled(system, neighbors)
+    assert dropped == 1
+    deps.assert_dropped(active)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+    text = warnings[0].getMessage()
+    assert "atom 0" in text and "reference 47" in text
+    assert "RuntimeError" in text and "synthetic identity drift" in text
+    assert "dropped" in text
+    # The aggregate count still follows.
+    assert any(
+        "invalidated 1 rows" in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.INFO
+    )

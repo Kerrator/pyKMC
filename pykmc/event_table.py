@@ -2719,8 +2719,19 @@ class ActiveEventTable:
                     int(row["num_reference_event"]),
                     exc,
                 )
-            except (ValueError, TypeError, KeyError, IndexError, RuntimeError):
+            except (ValueError, TypeError, KeyError, IndexError, RuntimeError) as exc:
+                # The step goes on without the row, but a systematic cause (a
+                # bug, a shape or type drift in the source) must not hide in
+                # the aggregate count: name the row, the type and the message.
                 dropped.append(label)
+                logger.warning(
+                    "[htst] active event (atom %d, reference %d): dropped, its "
+                    "recycled-row validation raised %s: %s",
+                    int(row["atom_index"]),
+                    int(row["num_reference_event"]),
+                    type(exc).__name__,
+                    exc,
+                )
         if dropped:
             self.remove(dropped)
             logger.info(
