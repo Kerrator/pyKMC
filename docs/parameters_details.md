@@ -63,7 +63,7 @@
   </details>
 - **`refine_thr`** : `float`, default = `0.9999`
   <details><summary>Description</summary>
-  Event constributing to this percent of ktot are refined.
+  Refinement coverage target, as a fraction of the total rate. constant style: reference events whose barrier lies within 0.1 eV of the fastest event below this fraction of the estimated total rate are refined. htst/rpa styles: cumulative pre-dispatch rate coverage over the candidate ledger of retained active channels and PSR-valid reference applications, grouped by reference event and ranked by rate (groups tied at the cut are included); 1 refines every group with a positive rate, a zero total refines nothing.
   </details>
 - **`basin`** : `bool`, default = `False`
   <details><summary>Description</summary>

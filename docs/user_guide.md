@@ -176,6 +176,27 @@ Once a reference event is reused, it is refined to adapt to the current atomic c
 - The difference in energy barriers between the generic and refined events is less than `refined_energy_thr`.
 These thresholds ensure that the refined event remains consistent with the original.
 
+Not every applicable reference event is sent to the refinement engine; the others enter the
+active table with their generic saddle (`refined = F`). Which ones are refined is governed by
+`refine_thr` in `[Control]` and depends on the rate-constant style:
+
+- `style = constant`: the fastest reference event whose rate lies below `refine_thr` times
+  the estimated total rate fixes a barrier threshold (its barrier + 0.1 eV); events above it are
+  not refined. Event/atom pairs still present in the active table are skipped.
+- `style = htst` or `rpa`: `refine_thr` is a cumulative pre-dispatch rate coverage. Before
+  anything is dispatched, pyKMC builds a candidate ledger of the retained active events (their
+  current rate, once each) and of every reference event that matches a current site (its
+  resolved reference or `k0` rate, one entry per symmetric application), sums the
+  contributions per reference event, ranks the groups by decreasing rate and selects them until
+  the running sum reaches `refine_thr` times the ledger total (groups tied at the cut are
+  included; `refine_thr = 1` selects every group with a positive rate). Only the selected groups
+  are refined, including retained unrefined pairs; already refined retained events are never
+  refined again. The log reports the ledger (`refinement ledger:`), the selected fraction, the
+  fraction actually refined and the shortfall left by failed refinements
+  (`refinement coverage:`), also on the per-step `HTST prefactors:` summary line. The fractions
+  describe the pre-dispatch ledger; refined and site-specific rates that arrive later change
+  the next step's ledger, never the reported one.
+
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 
 ### pARTn : 
