@@ -299,10 +299,11 @@ class BasinOutput:
     Attributes
     ----------
     k_tot : float
-        Unweighted sum of the exit-transition rates (ps^-1). Diagnostic only:
-        it is written to the step log, but the clock advances by ``t_exit``.
-        The conditional hazard at the exit time is the instantaneous total
-        flux divided by the survival probability, which is not this sum.
+        Unweighted sum of the rates of the connectivity rows flagged
+        absorbing (``transient == False``), in ps^-1. Diagnostic only: it is
+        written to the step log, but the clock advances by ``t_exit``. The
+        conditional hazard at the exit time is the instantaneous total flux
+        divided by the survival probability, which is not this sum.
     t_exit : float
         Sampled exit time (ps); converted to seconds once, in the KMC loop.
     exit_row : int or None
