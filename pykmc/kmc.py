@@ -826,7 +826,8 @@ class KMC:
             ``refinement coverage: not available`` before any refinement,
             ``... not applicable (...)`` for a zero snapshot total, otherwise
             the selected, refined and shortfall fractions with the dispatch
-            counts (``Refinement.coverage``).
+            counts, including the selected retained rows left unrefined
+            (``Refinement.coverage``).
 
         """
         coverage = getattr(self, "refinement_coverage", None)
@@ -839,13 +840,14 @@ class KMC:
             )
         return (
             "refinement coverage: selected={:.4f} refined={:.4f} shortfall={:.4f} "
-            "(dispatched={}, failed={}; snapshot {:.4e} ps^-1, {} groups, {} "
-            "channels, target {:.4f})".format(
+            "(dispatched={}, failed={}, left_unrefined={}; snapshot {:.4e} ps^-1, "
+            "{} groups, {} channels, target {:.4f})".format(
                 coverage["selected_fraction"],
                 coverage["refined_fraction"],
                 coverage["shortfall_fraction"],
                 coverage["n_dispatched"],
                 coverage["n_dispatch_failed"],
+                coverage.get("n_selected_unrefined", 0),
                 coverage["snapshot_total"],
                 coverage["n_groups"],
                 coverage["n_channels"],
@@ -897,11 +899,11 @@ class KMC:
             existing_pairs=existing_pairs,
             retained_channels=retained,
         )
-        # A retained generic row whose pair was refined this step is
-        # superseded by the refined output and leaves before the outputs are
-        # added; a failed refinement keeps it as the documented fallback.
+        # A retained generic row whose own application was refined this step
+        # is superseded by the refined output and leaves before the outputs
+        # are added; a failed refinement keeps it as the documented fallback.
         if table is not None:
-            table.drop_unrefined_pairs(refinement.superseded_pairs)
+            table.drop_unrefined_rows(refinement.superseded_rows)
         self.refinement_coverage = refinement.coverage
         return refinement
 

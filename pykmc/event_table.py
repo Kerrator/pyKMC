@@ -2792,54 +2792,77 @@ class ActiveEventTable:
     def retained_channels(self) -> pd.DataFrame:
         """Return the retained rows as refinement-ledger channels.
 
-        One row per active event with ``atom_index`` and
-        ``num_reference_event`` as ``int``, its current ``k`` (ps^-1: the
+        One row per active event: its ``label`` in this table, ``atom_index``
+        and ``num_reference_event`` as ``int``, its current ``k`` (ps^-1: the
         site rate when one was accepted, else the inherited reference or
-        ``k0`` rate) and its ``refined`` flag. ``Refinement.execute`` counts
-        each once in the htst/rpa candidate ledger (contracts 7f policy 3);
-        a ``refined == "F"`` pair is a candidate for re-dispatch.
+        ``k0`` rate), its ``refined`` flag, and the stored crop identities and
+        saddle crop (``crop_atom_ids``, ``saddle_positions``) by which
+        ``Refinement.execute`` recognises the symmetric application a
+        ``refined == "F"`` row stands for (contracts 7f policy 3). The labels
+        stay valid until the next :meth:`remove`.
 
         Returns
         -------
         pd.DataFrame
-            Columns ``atom_index``, ``num_reference_event``, ``k``,
-            ``refined``; empty (typed) when the table is empty.
+            Columns ``label``, ``atom_index``, ``num_reference_event``, ``k``,
+            ``refined``, ``crop_atom_ids``, ``saddle_positions``; empty
+            (typed) when the table is empty.
 
         """
+        columns = [
+            "label",
+            "atom_index",
+            "num_reference_event",
+            "k",
+            "refined",
+            "crop_atom_ids",
+            "saddle_positions",
+        ]
         if len(self.table) == 0:
             return pd.DataFrame(
                 {
+                    "label": pd.Series(dtype=int),
                     "atom_index": pd.Series(dtype=int),
                     "num_reference_event": pd.Series(dtype=int),
                     "k": pd.Series(dtype=float),
                     "refined": pd.Series(dtype=str),
+                    "crop_atom_ids": pd.Series(dtype=object),
+                    "saddle_positions": pd.Series(dtype=object),
                 }
             )
-        return pd.DataFrame(
-            {
-                "atom_index": self.table["atom_index"].astype(int).to_numpy(),
-                "num_reference_event": self.table["num_reference_event"]
-                .astype(int)
-                .to_numpy(),
-                "k": self.table["k"].astype(float).to_numpy(),
-                "refined": self.table["refined"].astype(str).to_numpy(),
-            }
-        )
+        has_ids = "crop_atom_ids" in self.table.columns
+        records = []
+        for label, row in self.table.iterrows():
+            ids = row["crop_atom_ids"] if has_ids else None
+            if ids is None and int(label) in self._constant_crop_ids:
+                ids = self._constant_crop_ids[int(label)]
+            records.append(
+                {
+                    "label": int(label),
+                    "atom_index": int(row["atom_index"]),
+                    "num_reference_event": int(row["num_reference_event"]),
+                    "k": float(row["k"]),
+                    "refined": str(row["refined"]),
+                    "crop_atom_ids": None if ids is None else tuple(ids),
+                    "saddle_positions": row["saddle_positions"],
+                }
+            )
+        return pd.DataFrame(records, columns=columns)
 
-    def drop_unrefined_pairs(self, pairs: Iterable[tuple[int, int]]) -> int:
-        """Drop the ``refined == "F"`` rows of the given ``(atom, reference)`` pairs.
+    def drop_unrefined_rows(self, labels: Iterable[int]) -> int:
+        """Drop the ``refined == "F"`` rows with the given labels.
 
-        Called with ``Refinement.superseded_pairs`` before the step's refined
-        outputs are added: a retained generic row whose pair was refined this
-        step would otherwise count twice. Refined rows of the same pairs are
-        kept; a pair whose refinement failed is not listed and keeps its
-        generic row as the documented fallback. The surviving rows are
-        relabelled ``0..n-1`` through :meth:`remove`.
+        Called with ``Refinement.superseded_rows`` before the step's refined
+        outputs are added: a retained generic row whose own application was
+        refined this step would otherwise count twice. Refined rows are never
+        dropped, whatever the label; a generic row whose application failed
+        is not listed and stays as the documented fallback. The surviving
+        rows are relabelled ``0..n-1`` through :meth:`remove`.
 
         Parameters
         ----------
-        pairs : Iterable[tuple[int, int]]
-            ``(atom_index, num_reference_event)`` pairs.
+        labels : Iterable[int]
+            Row labels as :meth:`retained_channels` reported them.
 
         Returns
         -------
@@ -2847,23 +2870,22 @@ class ActiveEventTable:
             Number of rows dropped (logged when non-zero).
 
         """
-        wanted = {(int(atom), int(ref)) for atom, ref in pairs}
+        wanted = {int(label) for label in labels}
         if not wanted or len(self.table) == 0:
             return 0
-        labels = [
+        dropped = [
             int(label)
-            for label, row in self.table.iterrows()
-            if str(row["refined"]) == "F"
-            and (int(row["atom_index"]), int(row["num_reference_event"])) in wanted
+            for label in self.table.index
+            if int(label) in wanted and str(self.table.at[label, "refined"]) == "F"
         ]
-        if labels:
-            self.remove(labels)
+        if dropped:
+            self.remove(dropped)
             logger.info(
                 "active table: dropped %d retained unrefined row(s) superseded "
-                "by a refinement of the same (atom, reference) pair this step",
-                len(labels),
+                "by the refinement of their own application this step",
+                len(dropped),
             )
-        return len(labels)
+        return len(dropped)
 
     def add_events(
         self, events: EventRefinementOutput | list[EventRefinementOutput]

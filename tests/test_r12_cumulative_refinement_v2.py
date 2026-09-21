@@ -128,18 +128,22 @@ class SystemBoundary:
 class NativeBoundary:
     """pARTn double: the reference id is encoded in the saddle displacement."""
 
-    def __init__(self, barriers, failing=()):
+    def __init__(self, barriers, failing=(), *, fail_rotated=False):
         self.barriers = barriers
         self.failing = set(failing)
+        self.fail_rotated = fail_rotated
         self.submitted = []
+        self.geometries = []
 
     def partn_refine(self, **kwargs):
         positions = np.array(kwargs["positions"], copy=True)
         atom = int(kwargs["central_atom_idx"])
         ref = int(round(float(np.abs(positions[atom]).max())))
         self.submitted.append((atom, ref))
+        rotated = abs(positions[atom, 1]) > abs(positions[atom, 0])
+        self.geometries.append("rotated" if rotated else "identity")
         future = Future()
-        if (atom, ref) in self.failing:
+        if (atom, ref) in self.failing or (self.fail_rotated and rotated):
             future.set_result(
                 Err(
                     ErrorInfo(
@@ -221,11 +225,11 @@ def psr_double(monkeypatch, failing_pairs):
     monkeypatch.setattr(refinement_module, "PointSetRegistration", factory)
 
 
-def retained_output(atom, ref, barrier, refined, n_atoms, *, nu0=1e12):
+def retained_output(atom, ref, barrier, refined, n_atoms, *, nu0=1e12, rotated=False):
     """A producer output as the previous step left it (crop = the atom itself)."""
     ok = nu0 is not None
     full = np.zeros((n_atoms, 3))
-    full[atom] = [float(ref), 0.0, 0.0]
+    full[atom] = [0.0, float(ref), 0.0] if rotated else [float(ref), 0.0, 0.0]
     return EventRefinementOutput(
         central_atom_index=atom,
         saddle_positions=full[[atom]].copy(),
@@ -252,11 +256,18 @@ def build_retained(active, site, system, neighbors, barriers, rows):
 
     A refined row obtains its site rate through the service (frequency
     ``RETAINED_SITE_HZ``); an unrefined row obtains its fallback context. Both
-    then pass ``validate_recycled`` at the next step. Returns ``{(atom, ref): k}``.
+    then pass ``validate_recycled`` at the next step. Returns ``{label: k}``.
     """
     outputs = [
-        retained_output(atom, ref, barriers[ref], refined, len(system.positions))
-        for atom, ref, refined in rows
+        retained_output(
+            spec[0],
+            spec[1],
+            barriers[spec[1]],
+            spec[2],
+            len(system.positions),
+            rotated=len(spec) > 3 and spec[3] == "rotated",
+        )
+        for spec in rows
     ]
     active.add_events(outputs)
     if site is not None:
@@ -265,10 +276,7 @@ def build_retained(active, site, system, neighbors, barriers, rows):
         active.request_site_prefactors(system, neighbors)
         site.frequencies = run_map
         site.submitted.clear()
-    return {
-        (int(r.atom_index), int(r.num_reference_event)): float(r.k)
-        for _, r in active.table.iterrows()
-    }
+    return {int(label): float(r.k) for label, r in active.table.iterrows()}
 
 
 def run(
@@ -283,12 +291,14 @@ def run(
     partn_fail=(),
     n_atoms=None,
     alias_ids=False,
+    fail_rotated=False,
 ):
     """One refinement round: execute -> supersede -> add -> dedup -> site path.
 
-    ``retained_rows`` are ``(atom, ref, refined)`` tuples carried over in the
-    active table before the round, as recycling leaves them (attempted in
-    the step that built them; a refined row carries its site rate).
+    ``retained_rows`` are ``(atom, ref, refined[, "rotated"])`` tuples carried
+    over in the active table before the round, as recycling leaves them
+    (attempted in the step that built them; a refined row carries its site
+    rate; ``"rotated"`` is the ROT90 symmetric application's generic saddle).
     """
     cfg = config(style, temperature, threshold)
     df = frame(specs, style, temperature)
@@ -300,14 +310,14 @@ def run(
             if atom not in sites.setdefault(spec["event"], []):
                 sites[spec["event"]].append(atom)
     atoms = [a for spec in specs for a in spec["sites"]] + [r[0] for r in retained_rows]
-    retained_rates: dict[tuple[int, int], float] = {}
+    retained_rates: dict[int, float] = {}
     system = SystemBoundary(n_atoms or (1 + max(atoms)))
     neighbors = SimpleNamespace(
         get_neighbors=lambda kind, atom: np.array([atom]), system=system
     )
     psr_double(monkeypatch, set(psr_fail))
     barriers = {spec["ref"]: spec["barrier"] for spec in specs}
-    manager = NativeBoundary(barriers, partn_fail)
+    manager = NativeBoundary(barriers, partn_fail, fail_rotated=fail_rotated)
     log = Log()
     refinement = Refinement(
         cfg,
@@ -339,7 +349,7 @@ def run(
             "retained_channels": active.retained_channels(),
         }
     refinement.execute(df, total_energy=0.0, **kwargs)
-    dropped = active.drop_unrefined_pairs(refinement.superseded_pairs)
+    dropped = active.drop_unrefined_rows(refinement.superseded_rows)
     active.add_events(refinement.get_successes_results())
     active.remove_duplicates(system.cell, neighbors)
     summary = (
@@ -587,7 +597,7 @@ def test_psr_failures_are_excluded_before_the_denominator_is_fixed(monkeypatch):
 def test_retained_refined_rows_count_once_with_their_site_rate(monkeypatch):
     result = run(monkeypatch, [row(17, 0.4, [0, 1])], retained_rows=[(0, 17, "T")])
     k_ref = float(result.frame.k.iloc[0])
-    k_site = result.retained_rates[(0, 17)]
+    k_site = result.retained_rates[0]
     assert k_site == pytest.approx(5.0 * k_ref), (
         "the retained row carries its site rate"
     )
@@ -598,7 +608,7 @@ def test_retained_refined_rows_count_once_with_their_site_rate(monkeypatch):
     assert cov["snapshot_total"] == pytest.approx(k_site + k_ref)
     assert result.manager.submitted == [(1, 17)]
     assert cov["refined_fraction"] == pytest.approx(1.0)
-    assert result.refinement.superseded_pairs == set()
+    assert result.refinement.superseded_rows == set()
     table = result.active
     assert table.query("atom_index == 0").k.tolist() == [k_site]
     assert table.refined.tolist() == ["T", "T"]
@@ -609,7 +619,7 @@ def test_retained_unrefined_row_dispatches_when_selected_and_is_superseded(monke
     cov = result.coverage
     assert cov["n_duplicates_removed"] == 1 and cov["n_channels"] == 1
     assert result.manager.submitted == [(0, 17)]
-    assert result.refinement.superseded_pairs == {(0, 17)}
+    assert result.refinement.superseded_rows == {0}
     assert result.dropped == 1
     assert result.active.refined.tolist() == ["T"]
     assert result.active.atom_index.tolist() == [0]
@@ -620,7 +630,7 @@ def test_retained_unrefined_row_outside_the_cut_stays_as_fallback(monkeypatch):
     result = run(monkeypatch, specs, retained_rows=[(0, 17, "F")], threshold=0.5)
     assert result.coverage["selected_ids"] == (24,)
     assert result.manager.submitted == [(1, 24)]
-    assert result.refinement.superseded_pairs == set() and result.dropped == 0
+    assert result.refinement.superseded_rows == set() and result.dropped == 0
     rows = result.active.query("num_reference_event == 17")
     assert rows.refined.tolist() == ["F"], "no duplicate F output for a retained pair"
 
@@ -637,6 +647,91 @@ def test_retained_unrefined_row_whose_psr_fails_now_counts_as_retained(monkeypat
     assert cov["n_excluded"] == 1 and cov["n_prospective"] == 0
     assert result.manager.submitted == []
     assert result.active.refined.tolist() == ["F"]
+    # Selected but not refinable this step: an explicit shortfall, never a
+    # silent "refined 0 %, shortfall 0 %" (review R12, minor).
+    assert cov["selected_ids"] == (17,) and cov["n_selected_unrefined"] == 1
+    assert cov["refined_fraction"] == pytest.approx(0.0)
+    assert cov["shortfall_fraction"] == pytest.approx(1.0)
+
+
+def test_partial_failure_of_a_multisymmetry_retained_pair_keeps_the_failed_fallback(
+    monkeypatch,
+):
+    # Reference 17 has two symmetric applications on atom 0, both retained as
+    # generic rows; the rotated one fails on re-dispatch. Only the fallback
+    # row of the successful application may leave (review R12, blocker).
+    result = run(
+        monkeypatch,
+        [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],
+        retained_rows=[(0, 17, "F"), (0, 17, "F", "rotated")],
+        fail_rotated=True,
+    )
+    k_ref = float(result.frame.k.iloc[0])
+    cov = result.coverage
+    assert result.manager.submitted == [(0, 17), (0, 17)]
+    assert sorted(result.manager.geometries) == ["identity", "rotated"]
+    assert cov["n_duplicates_removed"] == 2 and cov["n_channels"] == 2
+    assert cov["snapshot_total"] == pytest.approx(2.0 * k_ref)
+    assert cov["n_dispatch_ok"] == 1 and cov["n_dispatch_failed"] == 1
+    assert cov["refined_fraction"] == pytest.approx(0.5)
+    assert cov["shortfall_fraction"] == pytest.approx(0.5)
+    assert len(result.refinement.superseded_rows) == 1
+    table = result.active
+    assert sorted(table.refined.tolist()) == ["F", "T"], table
+    assert float(table.k.sum()) == pytest.approx(2.0 * k_ref), (
+        "the failed application keeps its generic row in the BKL sum"
+    )
+    kept = table[table.refined == "F"].iloc[0]
+    assert np.asarray(kept.saddle_positions)[0, 1] == pytest.approx(17.0), (
+        "the surviving generic row is the rotated (failed) application"
+    )
+
+
+def test_retained_unrefined_pair_with_a_rejected_prospective_rate_still_counts(
+    monkeypatch,
+):
+    # The reference row lost its rate this step (NaN): its prospective channel
+    # is rejected, the retained generic row is still a valid channel with its
+    # own rate and the ledger says so (review R12, minor).
+    result = run(
+        monkeypatch,
+        [row(17, 0.4, [0], k=float("nan"))],
+        retained_rows=[(0, 17, "F")],
+    )
+    cov = result.coverage
+    k_row = result.retained_rates[0]
+    assert cov["n_rejected"] == 1 and cov["n_duplicates_removed"] == 0
+    assert cov["n_retained"] == 1 and cov["n_prospective"] == 0
+    assert cov["applicable"] and cov["snapshot_total"] == pytest.approx(k_row)
+    assert cov["selected_ids"] == (17,)
+    assert cov["n_selected_unrefined"] == 1
+    assert cov["shortfall_fraction"] == pytest.approx(1.0)
+    assert result.manager.submitted == []
+    assert result.active.refined.tolist() == ["F"]
+
+
+def test_mixed_flag_retained_pair_redispatches_only_the_unrefined_application(
+    monkeypatch,
+):
+    # One application of the pair is already refined (T), the other retained
+    # generic (F): only the generic one is re-dispatched and the refined one
+    # counts once with its site rate (review R12, latent minor).
+    result = run(
+        monkeypatch,
+        [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],
+        retained_rows=[(0, 17, "T"), (0, 17, "F", "rotated")],
+    )
+    k_ref = float(result.frame.k.iloc[0])
+    k_site = result.retained_rates[0]
+    cov = result.coverage
+    assert result.manager.submitted == [(0, 17)]
+    assert result.manager.geometries == ["rotated"]
+    assert cov["n_retained"] == 1 and cov["n_prospective"] == 1
+    assert cov["n_duplicates_removed"] == 2
+    assert cov["snapshot_total"] == pytest.approx(k_site + k_ref)
+    table = result.active
+    assert table.refined.tolist() == ["T", "T"]
+    assert float(table.k.sum()) == pytest.approx(k_site + k_ref)
 
 
 def test_failed_refinement_is_a_shortfall_not_a_new_denominator(monkeypatch):
@@ -693,7 +788,7 @@ def test_constant_mode_keeps_the_barrier_rule_and_no_ledger(monkeypatch):
     assert result.active.refined.tolist() == ["T", "F"]
     assert result.manager.submitted == [(0, 17)]
     assert result.coverage is None
-    assert result.refinement.superseded_pairs == set()
+    assert result.refinement.superseded_rows == set()
     assert not any("refinement ledger" in m for _, m in result.log.lines)
 
 
@@ -713,7 +808,7 @@ def test_constant_mode_still_skips_every_existing_pair(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_retained_channels_and_drop_unrefined_pairs(monkeypatch):
+def test_retained_channels_and_drop_unrefined_rows(monkeypatch):
     cfg = config("htst", 300.0, 0.9999)
     site = SiteBoundary(cfg, {17: 1e12, 24: 1e12})
     active = ActiveEventTable(cfg, prefactor_service=site)
@@ -727,19 +822,25 @@ def test_retained_channels_and_drop_unrefined_pairs(monkeypatch):
     )
     channels = active.retained_channels()
     assert list(channels.columns) == [
+        "label",
         "atom_index",
         "num_reference_event",
         "k",
         "refined",
+        "crop_atom_ids",
+        "saddle_positions",
     ]
+    assert channels.label.tolist() == [0, 1, 2]
     assert channels.atom_index.tolist() == [0, 1, 2]
     assert channels.num_reference_event.tolist() == [17, 17, 24]
     assert channels.refined.tolist() == ["T", "F", "F"]
     assert channels.k.tolist() == active.table.k.tolist()
-    # Only unrefined rows of the named pairs leave; the refined (0, 17) stays.
-    assert active.drop_unrefined_pairs({(0, 17), (1, 17), (5, 5)}) == 1
+    assert channels.crop_atom_ids.tolist() == [(0,), (1,), (2,)]
+    assert np.asarray(channels.saddle_positions[2]).tolist() == [[24.0, 0.0, 0.0]]
+    # Only unrefined rows leave, by label; the refined row 0 stays even if named.
+    assert active.drop_unrefined_rows({0, 1, 5}) == 1
     assert active.table.atom_index.tolist() == [0, 2]
-    assert active.drop_unrefined_pairs(set()) == 0
+    assert active.drop_unrefined_rows(set()) == 0
 
 
 def test_execute_refinements_passes_retained_rows_and_drops_superseded(monkeypatch):
@@ -775,7 +876,7 @@ def test_execute_refinements_passes_retained_rows_and_drops_superseded(monkeypat
         sim, df, existing_pairs=active.existing_pairs()
     )
     assert manager.submitted == [(0, 17)], "retained F pair re-dispatched, T pair kept"
-    assert refinement.superseded_pairs == {(0, 17)}
+    assert refinement.superseded_rows == {0}
     assert active.table.atom_index.tolist() == [1], "superseded F row left before add"
     assert sim.refinement_coverage is refinement.coverage
     assert sim.refinement_coverage["n_retained"] == 1
@@ -814,11 +915,13 @@ def test_step_summary_line_reports_refinement_coverage():
         "n_excluded": 0,
         "n_rejected": 0,
         "n_duplicates_removed": 0,
+        "n_predispatched": 0,
         "selected_ids": (17, 24),
         "selected_fraction": 1.0,
         "n_dispatched": 2,
         "n_dispatch_ok": 1,
         "n_dispatch_failed": 1,
+        "n_selected_unrefined": 0,
         "refined_fraction": 0.6,
         "shortfall_fraction": 0.4,
     }
@@ -827,6 +930,7 @@ def test_step_summary_line_reports_refinement_coverage():
     assert "refinement coverage: selected=1.0000" in line
     assert "refined=0.6000" in line and "shortfall=0.4000" in line
     assert "failed=1" in line and "dispatched=2" in line
+    assert "left_unrefined=0" in line
     sim.loggers = Log()
     sim.refinement_coverage = {
         "style": "htst",

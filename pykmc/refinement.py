@@ -25,13 +25,16 @@ enters the active table with the generic (reference) saddle as a
     sum reaches ``refine_thr * snapshot_total``; every group tied with the one
     at the cut is included, a zero total selects nothing and ``refine_thr >= 1``
     selects every positive group. The prospective channels of the selected
-    groups are dispatched, including a retained ``refined="F"`` pair (its
-    generic row is superseded by a successful refinement, see
-    :attr:`Refinement.superseded_pairs`); retained refined channels are never
+    groups are dispatched, including a retained ``refined="F"`` pair: each of
+    its generic rows is matched to its own symmetric application by saddle
+    geometry and superseded only by the successful refinement of that
+    application (:attr:`Refinement.superseded_rows`), a failed one keeps its
+    generic row as the fallback; retained refined channels are never
     re-dispatched. The selected snapshot fraction, the fraction actually
-    refined and the shortfall left by failed refinements are reported
-    separately in :attr:`Refinement.coverage`; the denominator is never
-    recomputed from rates that arrive later.
+    refined and the shortfall (failed refinements and selected retained rows
+    that could not be re-dispatched) are reported separately in
+    :attr:`Refinement.coverage`; the denominator is never recomputed from
+    rates that arrive later.
 """
 
 from .result import Result, EventRefinementOutput, ErrorInfo, ErrorType, Err, Ok
@@ -45,9 +48,11 @@ from .atomic_environment import AtomicEnvironment
 from .manager import Manager
 from .physics import (
     ConstraintViolationError,
+    _indices,
     overlay_tolerance,
     resolve_event_constraints,
 )
+from .utils.geometry import compute_delr
 import math
 import numpy as np
 import pandas as pd
@@ -100,8 +105,9 @@ class _Channel:
     rate : float
         Pre-dispatch contribution (ps^-1): the reference row's resolved rate.
     retained_unrefined : bool
-        The ``(at_idx, ref)`` pair is a retained ``refined="F"`` row of the
-        active table, re-dispatched because its group was selected.
+        This application is represented by a retained ``refined="F"`` row of
+        the active table (label ``superseded_label``), matched by saddle
+        geometry; the row is superseded when this channel refines.
 
     """
 
@@ -127,9 +133,11 @@ class _Channel:
         self.current_positions = current_positions
         self.rate = dfevent["k"] if "k" in dfevent.index else float("nan")
         self.retained_unrefined = False
+        self.superseded_label: int | None = None
         self.duplicate = False
         self.rejected = False
         self.dispatched = False
+        self.ok = False
         self.future = None
 
     def result(self):
@@ -182,13 +190,14 @@ class Refinement:
         # htst/rpa ledger report of the last execute (module docstring); None
         # in the constant style. Keys: style, applicable, target,
         # snapshot_total, n_channels, n_retained, n_prospective, n_groups,
-        # n_excluded, n_rejected, n_duplicates_removed, selected_ids,
-        # selected_fraction, n_dispatched, n_dispatch_ok, n_dispatch_failed,
-        # refined_fraction, shortfall_fraction.
+        # n_excluded, n_rejected, n_duplicates_removed, n_predispatched,
+        # selected_ids, selected_fraction, n_dispatched, n_dispatch_ok,
+        # n_dispatch_failed, n_selected_unrefined, refined_fraction,
+        # shortfall_fraction.
         self.coverage: dict | None = None
-        # Retained ``refined="F"`` pairs whose refinement succeeded this
-        # execute: their generic rows are superseded by the refined outputs.
-        self.superseded_pairs: set[tuple[int, int]] = set()
+        # Labels of retained ``refined="F"`` rows whose own application was
+        # refined successfully this execute: superseded by the refined output.
+        self.superseded_rows: set[int] = set()
         self._carry_prefactors = False
         self._record_crop_ids = False
         self._ledger: dict | None = None
@@ -221,17 +230,19 @@ class Refinement:
             pairs that ``retained_channels`` does not mark ``refined == "F"``.
         retained_channels : pd.DataFrame | None, optional
             The retained active rows as ledger channels
-            (``ActiveEventTable.retained_channels``: ``atom_index``,
-            ``num_reference_event``, ``k``, ``refined``). htst/rpa only: each
-            contributes its current rate once; a ``refined == "F"`` pair is
-            re-dispatched when its group is selected. Without it the ledger
-            holds the prospective channels only.
+            (``ActiveEventTable.retained_channels``: ``label``, ``atom_index``,
+            ``num_reference_event``, ``k``, ``refined``, ``crop_atom_ids``,
+            ``saddle_positions``). htst/rpa only: each contributes its current
+            rate once; a ``refined == "F"`` pair is re-dispatched when its
+            group is selected and each generic row is superseded by the
+            refinement of its own application (:attr:`superseded_rows`).
+            Without it the ledger holds the prospective channels only.
 
         """
         existing_pairs = set(existing_pairs or ())
         self.results = []
         self.coverage = None
-        self.superseded_pairs = set()
+        self.superseded_rows = set()
         self._ledger = None
         # htst/rpa reference tables carry the resolved prefactor columns; the
         # inherited estimate travels with each refinement through its context.
@@ -298,8 +309,6 @@ class Refinement:
             )
 
         # Get results and update values :
-        ok_rate = failed_rate = 0.0
-        n_ok = n_failed = 0
         for f in all_futures:
             # get results
             res = f.result()
@@ -357,17 +366,13 @@ class Refinement:
             self.results.append(res)
             if isinstance(f, _Channel) and f.dispatched:
                 # Ledger bookkeeping: a dispatched channel either refined its
-                # pre-dispatch contribution or left it as a shortfall.
-                if res.is_ok():
-                    n_ok += 1
-                    ok_rate += f.rate
-                    if f.retained_unrefined:
-                        self.superseded_pairs.add((f.at_idx, f.ref))
-                else:
-                    n_failed += 1
-                    failed_rate += f.rate
+                # pre-dispatch contribution or left it as a shortfall; only a
+                # refined application supersedes its own generic row.
+                f.ok = res.is_ok()
+                if f.ok and f.superseded_label is not None:
+                    self.superseded_rows.add(f.superseded_label)
         if self._carry_prefactors:
-            self._finish_coverage(n_ok, ok_rate, n_failed, failed_rate)
+            self._finish_coverage()
 
     def refine_single(
         self,
@@ -683,6 +688,70 @@ class Refinement:
             ),
         )
 
+    def _match_retained_rows(
+        self, rows: list[dict], channels: list[_Channel]
+    ) -> list[tuple[dict, _Channel]]:
+        """Pair retained rows of one ``(atom, reference)`` with their applications.
+
+        Each retained row stores the generic (or refined) saddle crop of one
+        symmetric application; the prospective channel of the same
+        application is the one whose generic overlay is nearest to it
+        (``compute_delr`` over the crop aligned by stable atom identities).
+        Greedy one-to-one assignment by increasing distance; a row whose crop
+        cannot be aligned (no identities, different membership) is matched
+        only when the pair has exactly one row and one channel.
+
+        Returns
+        -------
+        list[tuple[dict, _Channel]]
+            The assigned ``(row, channel)`` pairs.
+
+        """
+        if len(rows) == 1 and len(channels) == 1:
+            return [(rows[0], channels[0])]
+        distances: list[tuple[float, int, int]] = []
+        for i, row in enumerate(rows):
+            saddle = row["saddle_positions"]
+            ids = row["crop_atom_ids"]
+            if saddle is None or ids is None:
+                continue
+            try:
+                ids_row = _indices(ids)
+                row_crop = np.asarray(saddle, dtype=float)
+            except (TypeError, ValueError):
+                continue
+            for j, channel in enumerate(channels):
+                ids_channel = tuple(
+                    int(self.system.index[k]) for k in channel.neighbors
+                )
+                if set(ids_row) != set(ids_channel) or len(ids_row) != len(ids_channel):
+                    continue
+                order = [ids_channel.index(k) for k in ids_row]
+                crop = channel.working[channel.neighbors][order]
+                if crop.shape != row_crop.shape:
+                    continue
+                distances.append(
+                    (
+                        float(
+                            compute_delr(
+                                row_crop, crop, self.system.cell, self.system.pbc
+                            )
+                        ),
+                        i,
+                        j,
+                    )
+                )
+        assigned: list[tuple[dict, _Channel]] = []
+        used_rows: set[int] = set()
+        used_channels: set[int] = set()
+        for _delr, i, j in sorted(distances):
+            if i in used_rows or j in used_channels:
+                continue
+            used_rows.add(i)
+            used_channels.add(j)
+            assigned.append((rows[i], channels[j]))
+        return assigned
+
     def _select_and_dispatch(
         self,
         all_futures: list,
@@ -711,38 +780,9 @@ class Refinement:
                 continue
             seen.add(channel.key)
             kept.append(channel)
-        represented = {(channel.at_idx, channel.ref) for channel in kept}
-        # Retained channels: their current rate, once each. A retained
-        # unrefined pair that is matched again is represented by its
-        # prospective channels (current reference rate) and re-dispatched
-        # when selected.
-        retained: list[tuple[int, float, bool]] = []
+        # Their rates, before any retained row is matched to them: a row
+        # whose application lost its rate this step stays a retained channel.
         rejected = 0
-        if retained_channels is not None and len(retained_channels) > 0:
-            for atom, ref, rate, refined in zip(
-                retained_channels["atom_index"],
-                retained_channels["num_reference_event"],
-                retained_channels["k"],
-                retained_channels["refined"],
-                strict=True,
-            ):
-                atom_id, ref_id = _logical_id(atom), _logical_id(ref)
-                unrefined = str(refined) == "F"
-                if atom_id is None or ref_id is None:
-                    rejected += 1
-                    self._reject_rate("retained", atom, ref, rate)
-                    continue
-                if unrefined and (atom_id, ref_id) in represented:
-                    duplicates += 1
-                    for channel in kept:
-                        if (channel.at_idx, channel.ref) == (atom_id, ref_id):
-                            channel.retained_unrefined = True
-                    continue
-                if not _finite_rate(rate):
-                    rejected += 1
-                    self._reject_rate("retained", atom_id, ref_id, rate)
-                    continue
-                retained.append((ref_id, float(rate), not unrefined))
         counted: list[_Channel] = []
         for channel in kept:
             if not _finite_rate(channel.rate):
@@ -754,10 +794,86 @@ class Refinement:
                 continue
             channel.rate = float(channel.rate)
             counted.append(channel)
+        by_pair: dict[tuple[int, int], list[_Channel]] = {}
+        for channel in counted:
+            by_pair.setdefault((channel.at_idx, channel.ref), []).append(channel)
+        # Retained channels: their current rate, once each. A retained row of
+        # a pair that is matched again is represented by the channel of its
+        # own application: a generic row is re-dispatched with it (and
+        # superseded only by its success), a refined row keeps the channel
+        # from being dispatched at all.
+        retained: list[tuple[int, float, bool]] = []
+        candidates: dict[tuple[int, int], list[dict]] = {}
+        if retained_channels is not None and len(retained_channels) > 0:
+            has_geometry = "crop_atom_ids" in retained_channels.columns
+            for _, entry in retained_channels.iterrows():
+                atom_id = _logical_id(entry["atom_index"])
+                ref_id = _logical_id(entry["num_reference_event"])
+                rate = entry["k"]
+                if atom_id is None or ref_id is None:
+                    rejected += 1
+                    self._reject_rate(
+                        "retained",
+                        entry["atom_index"],
+                        entry["num_reference_event"],
+                        rate,
+                    )
+                    continue
+                row = {
+                    "label": entry["label"] if "label" in entry.index else None,
+                    "ref": ref_id,
+                    "rate": rate,
+                    "unrefined": str(entry["refined"]) == "F",
+                    "crop_atom_ids": entry["crop_atom_ids"] if has_geometry else None,
+                    "saddle_positions": entry["saddle_positions"]
+                    if has_geometry
+                    else None,
+                }
+                if (atom_id, ref_id) in by_pair:
+                    candidates.setdefault((atom_id, ref_id), []).append(row)
+                    continue
+                if not _finite_rate(rate):
+                    rejected += 1
+                    self._reject_rate("retained", atom_id, ref_id, rate)
+                    continue
+                retained.append((ref_id, float(rate), not row["unrefined"]))
+        for pair, rows in candidates.items():
+            assigned = self._match_retained_rows(rows, by_pair[pair])
+            matched_rows = set()
+            for row, channel in assigned:
+                matched_rows.add(id(row))
+                duplicates += 1
+                if row["unrefined"]:
+                    channel.retained_unrefined = True
+                    label = _logical_id(row["label"])
+                    channel.superseded_label = label
+                    continue
+                # Already refined: the retained row is the channel.
+                channel.duplicate = True
+                if not _finite_rate(row["rate"]):
+                    rejected += 1
+                    self._reject_rate("retained", pair[0], pair[1], row["rate"])
+                    continue
+                retained.append((pair[1], float(row["rate"]), True))
+            for row in rows:
+                if id(row) in matched_rows:
+                    continue
+                if not _finite_rate(row["rate"]):
+                    rejected += 1
+                    self._reject_rate("retained", pair[0], pair[1], row["rate"])
+                    continue
+                retained.append((pair[1], float(row["rate"]), not row["unrefined"]))
+        counted = [channel for channel in counted if not channel.duplicate]
         # Group by logical reference id; rank by decreasing total, ascending id.
         groups: dict[int, float] = {}
-        for ref_id, rate, _refined in retained:
+        retained_refined: dict[int, float] = {}
+        retained_unrefined: dict[int, list[float]] = {}
+        for ref_id, rate, refined in retained:
             groups[ref_id] = groups.get(ref_id, 0.0) + rate
+            if refined:
+                retained_refined[ref_id] = retained_refined.get(ref_id, 0.0) + rate
+            else:
+                retained_unrefined.setdefault(ref_id, []).append(rate)
         for channel in counted:
             groups[channel.ref] = groups.get(channel.ref, 0.0) + channel.rate
         ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
@@ -791,15 +907,15 @@ class Refinement:
                 selected_rate += total
         # Resolve every channel in dispatch order.
         resolved: list = []
-        dispatched = 0
+        dispatched: list[_Channel] = []
         excluded = 0
         predispatched = 0
         for f in all_futures:
             if not isinstance(f, _Channel):
                 # A resolved Err (PSR or constraint failure) is excluded from
-                # the snapshot; a resolved Ok comes from a substituted
-                # dispatcher and is collected outside the ledger.
-                if f.done() and f.result().is_ok():
+                # the snapshot; a pending or Ok future comes from a
+                # substituted dispatcher and is collected outside the ledger.
+                if not f.done() or f.result().is_ok():
                     predispatched += 1
                 else:
                     excluded += 1
@@ -825,17 +941,21 @@ class Refinement:
                 continue
             if f.ref in selected_set:
                 self._dispatch_channel(f)
-                dispatched += 1
+                dispatched.append(f)
             else:
                 self._decline_channel(f)
             resolved.append(f)
         applicable = snapshot_total > 0.0
+        selected_unrefined = [
+            rate for ref_id in selected for rate in retained_unrefined.get(ref_id, ())
+        ]
         self._ledger = {
             "snapshot_total": snapshot_total,
-            "retained_refined_rate": sum(
-                rate for _ref_id, rate, refined in retained if refined
-            ),
+            "groups": groups,
+            "selected": selected,
             "selected_rate": selected_rate,
+            "retained_refined": retained_refined,
+            "dispatched": dispatched,
         }
         self.coverage = {
             "style": style,
@@ -849,11 +969,13 @@ class Refinement:
             "n_excluded": excluded,
             "n_rejected": rejected,
             "n_duplicates_removed": duplicates,
+            "n_predispatched": predispatched,
             "selected_ids": tuple(selected),
             "selected_fraction": selected_rate / snapshot_total if applicable else None,
-            "n_dispatched": dispatched,
+            "n_dispatched": len(dispatched),
             "n_dispatch_ok": 0,
             "n_dispatch_failed": 0,
+            "n_selected_unrefined": len(selected_unrefined),
             "refined_fraction": None,
             "shortfall_fraction": None,
         }
@@ -863,8 +985,8 @@ class Refinement:
             "prospective), {} reference groups, snapshot total {:.4e} ps^-1; "
             "excluded {} (PSR/constraints), rejected {} (invalid rates), "
             "duplicates removed {}, collected outside the ledger {}; selected "
-            "{} groups covering {} (target {:.4f}); dispatching {} "
-            "channels".format(
+            "{} groups covering {} (target {:.4f}); dispatching {} channels, "
+            "{} selected retained rows cannot be re-dispatched".format(
                 style,
                 self.coverage["n_channels"],
                 len(retained),
@@ -880,7 +1002,8 @@ class Refinement:
                 if applicable
                 else "not applicable",
                 threshold,
-                dispatched,
+                len(dispatched),
+                len(selected_unrefined),
             ),
         )
         return resolved
@@ -912,13 +1035,29 @@ class Refinement:
         )
         channel.future = f
 
-    def _finish_coverage(
-        self, n_ok: int, ok_rate: float, n_failed: int, failed_rate: float
-    ) -> None:
-        """Complete :attr:`coverage` with the dispatch outcome and log it."""
+    def _finish_coverage(self) -> None:
+        """Complete :attr:`coverage` with the dispatch outcome and log it.
+
+        ``refined_fraction`` is the share of the snapshot that ends the step
+        validly refined (retained refined rows of every group plus the
+        successful refinements); ``shortfall_fraction`` is the share of the
+        selected groups that does not: failed refinements and selected
+        retained generic rows that could not be re-dispatched.
+        """
         if self.coverage is None or self._ledger is None:
             return
-        total = self._ledger["snapshot_total"]
+        ledger = self._ledger
+        total = ledger["snapshot_total"]
+        ok_by_group: dict[int, float] = {}
+        n_ok = n_failed = 0
+        for channel in ledger["dispatched"]:
+            if channel.ok:
+                n_ok += 1
+                ok_by_group[channel.ref] = (
+                    ok_by_group.get(channel.ref, 0.0) + channel.rate
+                )
+            else:
+                n_failed += 1
         self.coverage["n_dispatch_ok"] = n_ok
         self.coverage["n_dispatch_failed"] = n_failed
         style = self.coverage["style"]
@@ -929,21 +1068,31 @@ class Refinement:
                 "0, nothing dispatched)".format(style),
             )
             return
-        refined = (self._ledger["retained_refined_rate"] + ok_rate) / total
-        shortfall = failed_rate / total
+        refined_rate = sum(ledger["retained_refined"].values()) + sum(
+            ok_by_group.values()
+        )
+        refined_selected = 0.0
+        for ref_id in ledger["selected"]:
+            refined_selected += ledger["retained_refined"].get(ref_id, 0.0)
+            refined_selected += ok_by_group.get(ref_id, 0.0)
+        shortfall_rate = max(ledger["selected_rate"] - refined_selected, 0.0)
+        refined = refined_rate / total
+        shortfall = shortfall_rate / total
         self.coverage["refined_fraction"] = refined
         self.coverage["shortfall_fraction"] = shortfall
         self.loggers.info(
             "log",
             "\t :=> [{}] refinement coverage: selected {:.2f} % of the "
-            "pre-dispatch snapshot, refined {:.2f} %, shortfall {:.2f} % "
-            "({} failed of {} dispatched)".format(
+            "pre-dispatch snapshot, refined {:.2f} % (retained refined rows and "
+            "successful refinements), shortfall {:.2f} % ({} failed of {} "
+            "dispatched, {} selected retained rows left unrefined)".format(
                 style,
                 100.0 * self.coverage["selected_fraction"],
                 100.0 * refined,
                 100.0 * shortfall,
                 n_failed,
                 self.coverage["n_dispatched"],
+                self.coverage["n_selected_unrefined"],
             ),
         )
 
