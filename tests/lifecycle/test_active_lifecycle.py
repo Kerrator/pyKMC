@@ -284,7 +284,13 @@ class TestSiteRequests:
             )
         )
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 1, "ok": 1, "rejected": 0, "no_geometry": 0}
+        assert summary == {
+            "attempted": 1,
+            "ok": 1,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         row = table.table.iloc[0]
         T = htst_config.rateconstant.T
         assert row["nu0"] == 5.0e12
@@ -385,7 +391,13 @@ class TestSiteRequests:
         finally:
             logger.removeHandler(handler)
             logger.setLevel(previous)
-        assert summary == {"attempted": 2, "ok": 0, "rejected": 0, "no_geometry": 2}
+        assert summary == {
+            "attempted": 2,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 2,
+            "identityless": 0,
+        }
         assert fake.prefactor_requests == []
         assert fake.submitted == []
         for column in (
@@ -424,7 +436,13 @@ class TestSiteRequests:
         )
         # never re-attempted, still no request
         again = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert again == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        assert again == {
+            "attempted": 0,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         assert fake.submitted == []
 
     def test_crop_inconsistent_with_the_full_saddle_is_an_error(
@@ -600,7 +618,13 @@ class TestSiteRequests:
         )
         k_before = table.table.iloc[0]["k"]
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 1, "ok": 0, "rejected": 1, "no_geometry": 0}
+        assert summary == {
+            "attempted": 1,
+            "ok": 0,
+            "rejected": 1,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         row = table.table.iloc[0]
         assert row["nu0"] == 7.0e11 and row["k_prefactor"] == 0.7
         assert row["k"] == k_before
@@ -665,7 +689,13 @@ class TestSiteRequests:
         assert 7e11 < service.settings.nu0_min_hz
         current["responder"] = next(outcomes)
         summary = table.request_site_prefactors(system_single_type_fcc, neighbors_list)
-        assert summary == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        assert summary == {
+            "attempted": 0,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         assert len(fake.prefactor_requests) == 2
         # R09 rechecks current admissibility before reuse. The disallowed
         # inherited row is unavailable; the unchanged rejected row is not retried.
@@ -799,6 +829,7 @@ class TestSiteRequests:
             "ok": 0,
             "rejected": 0,
             "no_geometry": 0,
+            "identityless": 0,
         }
         assert table.prefactor_summary() == {}
 

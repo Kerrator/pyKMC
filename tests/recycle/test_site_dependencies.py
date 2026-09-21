@@ -327,7 +327,13 @@ def test_widened_window_retries_rejected_site_inherited_reference_fallback():
     active, neighbors, summary = seed_site(
         narrow, system, current, reference=actual_reference
     )
-    assert summary == {"attempted": 1, "ok": 0, "rejected": 1, "no_geometry": 0}
+    assert summary == {
+        "attempted": 1,
+        "ok": 0,
+        "rejected": 1,
+        "no_geometry": 0,
+        "identityless": 0,
+    }
     fallback = active.table.iloc[0]
     assert fallback.nu0_status == "ok" and fallback.nu0_source == "reference"
     assert fallback.nu0 == actual_reference.estimate.nu0_hz

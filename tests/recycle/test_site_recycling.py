@@ -182,6 +182,7 @@ def initial_active():
         "ok": 1,
         "rejected": 0,
         "no_geometry": 0,
+        "identityless": 0,
     }
     np.testing.assert_array_equal(system.positions, source)
     assert manager.results[0].forward.ok
@@ -368,7 +369,13 @@ def recycle_and_fresh(changed_neighbor):
         assert_no_stale_site(active)
         neighbors, _ = execute_known_current_refinement(active, system, manager)
         summary = active.request_site_prefactors(system, neighbors)
-        assert summary == {"attempted": 1, "ok": 1, "rejected": 0, "no_geometry": 0}
+        assert summary == {
+            "attempted": 1,
+            "ok": 1,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         assert svc.step_requests == 1 and len(manager.requests) == 2
         rebuilt, current_record = assert_current_site(active, system, manager)
         assert current_record.calculation_id != old_record.calculation_id
@@ -381,7 +388,13 @@ def recycle_and_fresh(changed_neighbor):
             active, system, manager, expect_rebuild=False
         )
         summary = active.request_site_prefactors(system, neighbors)
-        assert summary == {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        assert summary == {
+            "attempted": 0,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         assert svc.step_requests == 0 and len(manager.requests) == 1
         rebuilt = active.table.iloc[0].copy()
         current_record = site_record(active, 0)
@@ -530,6 +543,7 @@ def test_invalidated_site_without_full_geometry_is_explicit_k0_at_selection(
         "ok": 0,
         "rejected": 0,
         "no_geometry": 1,
+        "identityless": 0,
     }
     assert svc.step_requests == 0 and len(manager.requests) == 1
     assert len(active.table) == 1
@@ -586,6 +600,7 @@ def test_unchanged_complete_source_reuses_actual_producer_without_new_work(monke
         "ok": 0,
         "rejected": 0,
         "no_geometry": 0,
+        "identityless": 0,
     }
     assert svc.step_requests == 0 and len(manager.requests) == 1
     assert site_record(active, 0) == original_record

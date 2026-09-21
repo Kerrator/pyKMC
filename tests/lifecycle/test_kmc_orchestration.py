@@ -1288,7 +1288,13 @@ class TestReconstructionPurgeLabels:
             ]
         )
         summary = table.request_site_prefactors(kmc.system, kmc.neighbors_list)
-        assert summary == {"attempted": 3, "ok": 0, "rejected": 0, "no_geometry": 3}
+        assert summary == {
+            "attempted": 3,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 3,
+            "identityless": 0,
+        }
         assert not service.manager.prefactor_requests
         assert list(table.table["k_prefactor"]) == [1.0, 1.0, 1.0]
         assert list(table.table["nu0_status"]) == ["legacy", "legacy", "legacy"]

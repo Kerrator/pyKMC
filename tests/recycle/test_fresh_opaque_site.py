@@ -59,6 +59,7 @@ def fresh_site():
         "ok": 1,
         "rejected": 0,
         "no_geometry": 0,
+        "identityless": 0,
     }
     row, calculation = h.assert_current_site(active, system, worker)
     assert not calculation.reusable

@@ -68,7 +68,13 @@ def test_nonstationary_site_rejection_is_reported_and_counted(caplog):
     before = active.table.iloc[0].copy()
     with caplog.at_level(logging.INFO, logger="log"):
         summary = active.request_site_prefactors(system, neighbors)
-    assert summary == {"attempted": 1, "ok": 0, "rejected": 1, "no_geometry": 0}
+    assert summary == {
+        "attempted": 1,
+        "ok": 0,
+        "rejected": 1,
+        "no_geometry": 0,
+        "identityless": 0,
+    }
     assert len(worker.requests) == 1
     assert (
         worker.results[0].forward.reason_code
@@ -138,14 +144,16 @@ def test_step_summary_line_carries_the_nonstationary_rejection_count():
     assert len(lines) == 1
     line = lines[0]
     assert "site attempts this step=1 (ok=0, rejected=1, no_geometry=0)" in line
+    assert "identity-less rows dropped before selection=0" in line, line
     assert "nonstationary_geometry=1" in line, line
     # The count describes this step only: a quiet step reports zero.
     assert active.request_site_prefactors(system, neighbors)["attempted"] == 0
     sim.loggers = _Recorder()
     sim._log_htst_step_summary(
-        {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0, "identityless": 0}
     )
     assert "nonstationary_geometry=0" in sim.loggers.messages[0][1]
+    assert "identity-less rows dropped before selection=0" in sim.loggers.messages[0][1]
 
 
 def test_nonstationary_warnings_do_not_misstate_the_resulting_rate(caplog):

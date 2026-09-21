@@ -160,6 +160,7 @@ def test_av_shell_motion_keeps_the_recycled_site_row_and_user_change_ends_it():
         "ok": 1,
         "rejected": 0,
         "no_geometry": 0,
+        "identityless": 0,
     }
     assert len(manager.requests) == 1
     assert manager.requests[0].constraints.fixed_ids == (SOURCE_IDS[USER_FIXED],)

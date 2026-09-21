@@ -789,8 +789,9 @@ class KMC:
             "log",
             "\t :=> HTST prefactors: reference ok={} rejected={} legacy={} "
             "pending={} stale={}; active sources reference={} site={} k0={}; site "
-            "attempts this step={} (ok={}, rejected={}, no_geometry={}); site "
-            "rejections nonstationary_geometry={}; hessian requests this step={}, "
+            "attempts this step={} (ok={}, rejected={}, no_geometry={}); "
+            "identity-less rows dropped before selection={}; site rejections "
+            "nonstationary_geometry={}; hessian requests this step={}, "
             "prefactor wall={:.3f} s".format(
                 ref.get("ok", 0),
                 ref.get("rejected", 0),
@@ -804,6 +805,7 @@ class KMC:
                 site_summary.get("ok", 0),
                 site_summary.get("rejected", 0),
                 site_summary.get("no_geometry", 0),
+                site_summary.get("identityless", 0),
                 rejections.get("nonstationary_geometry", 0),
                 n_requests,
                 wall,

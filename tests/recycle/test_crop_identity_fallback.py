@@ -26,7 +26,13 @@ from pykmc.result import EventRefinementOutput
 from . import test_site_dependencies as deps
 from . import test_site_recycling as h
 
-_NOTHING = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+_NOTHING = {
+    "attempted": 0,
+    "ok": 0,
+    "rejected": 0,
+    "no_geometry": 0,
+    "identityless": 1,
+}
 
 
 def identityless_refined_row(cfg, system, svc, *, refined="T"):
@@ -122,7 +128,13 @@ def test_identityless_drop_keeps_the_other_rows_and_their_context():
         )
     )
     summary = table.request_site_prefactors(system, neighbors)
-    assert summary == {"attempted": 1, "ok": 0, "rejected": 0, "no_geometry": 1}
+    assert summary == {
+        "attempted": 1,
+        "ok": 0,
+        "rejected": 0,
+        "no_geometry": 1,
+        "identityless": 1,
+    }
     assert manager.requests == []
     assert len(table.table) == 1
     survivor = table.table.iloc[0]
@@ -282,3 +294,20 @@ def test_validate_recycled_reports_per_row_validation_errors(caplog, monkeypatch
         for r in caplog.records
         if r.levelno == logging.INFO
     )
+
+
+def test_identityless_drops_are_counted_in_the_step_summary(caplog):
+    """Both identity-less branches count what left the table before selection."""
+    cfg, system, manager, svc = h.setup()
+    table, neighbors = identityless_refined_row(cfg, system, svc)
+    with caplog.at_level(logging.WARNING, logger="log"):
+        summary = table.request_site_prefactors(system, neighbors)
+    assert summary["identityless"] == 1 and summary["attempted"] == 0
+    assert len(table.table) == 0
+    # The unrefined pending approximation (fallback-context branch) counts too.
+    table, neighbors = identityless_refined_row(cfg, system, svc, refined="F")
+    summary = table.request_site_prefactors(system, neighbors)
+    assert summary["identityless"] == 1 and summary["attempted"] == 0
+    # A healthy table reports zero.
+    healthy, neighbors, summary = deps.seed_site(cfg, system, svc)
+    assert summary["identityless"] == 0 and summary["ok"] == 1

@@ -3068,7 +3068,7 @@ class ActiveEventTable:
         to prove a mapping, or identities that do not resolve in the current
         source) are not crop-only fallbacks: reconstruction cannot resolve
         them, so they are dropped before selection with one WARNING per row
-        (``_warn_crop_identity``), counted under no summary key and never
+        (``_warn_crop_identity``), counted under ``identityless`` and never
         kept behind a fallback context. Their ``(atom, reference)`` pair is
         re-refined next step. The mapping-mismatch ``RuntimeError`` is
         unchanged.
@@ -3090,7 +3090,13 @@ class ActiveEventTable:
             If the table (a caller-supplied frame) lacks the HTST columns.
 
         """
-        summary = {"attempted": 0, "ok": 0, "rejected": 0, "no_geometry": 0}
+        summary = {
+            "attempted": 0,
+            "ok": 0,
+            "rejected": 0,
+            "no_geometry": 0,
+            "identityless": 0,
+        }
         self.step_site_rejections = {}
         if not self.uses_prefactors or len(self.table) == 0:
             self._identity_warned.clear()
@@ -3113,6 +3119,7 @@ class ActiveEventTable:
                     except ValueError as exc:
                         self._warn_crop_identity(label, exc, "fallback context")
                         identityless.append(label)
+                        summary["identityless"] += 1
                         continue
                     request = self._site_request(label, system, system.positions)
                     self._capture_site_state(label, request)
@@ -3147,6 +3154,7 @@ class ActiveEventTable:
                     # before selection instead of being counted as attempted.
                     self._warn_crop_identity(idx, exc, "site request")
                     identityless.append(idx)
+                    summary["identityless"] += 1
                     continue
                 saddle_crop = np.asarray(row["saddle_positions"], dtype=float)
                 if saddle_crop.shape != (len(neighbors), 3) or atom not in neighbors:
