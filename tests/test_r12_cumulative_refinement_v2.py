@@ -25,6 +25,7 @@ import pykmc
 import pykmc.refinement as refinement_module
 from pykmc.config import Config, RateConstantConfig
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
+from pykmc.physics import ConstraintViolationError
 from pykmc.kmc import KMC
 from pykmc.rate_constant import create_rate_constant
 from pykmc.rate_constant.prefactors import PrefactorService
@@ -225,6 +226,35 @@ def psr_double(monkeypatch, failing_pairs):
     monkeypatch.setattr(refinement_module, "PointSetRegistration", factory)
 
 
+def exclude_identity_overlay(monkeypatch):
+    """Make the constraint check reject the identity application's overlay.
+
+    The resolved constraints are the real ones; only ``validate_positions``
+    raises for the overlay whose saddle displacement lies along +x (the
+    identity symmetry), as a user-fixed atom drifting between steps would.
+    """
+    real_resolve = refinement_module.resolve_event_constraints
+
+    def resolve(*args, **kwargs):
+        real = real_resolve(*args, **kwargs)
+
+        class Excluding:
+            def validate_positions(self, positions, tolerance=None, user_only=False):
+                moved = np.flatnonzero(np.abs(positions).sum(axis=1) > 0.0)
+                if len(moved) and abs(positions[moved[0], 1]) < 1e-9:
+                    raise ConstraintViolationError("identity overlay excluded")
+                return real.validate_positions(
+                    positions, tolerance=tolerance, user_only=user_only
+                )
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+        return Excluding()
+
+    monkeypatch.setattr(refinement_module, "resolve_event_constraints", resolve)
+
+
 def retained_output(atom, ref, barrier, refined, n_atoms, *, nu0=1e12, rotated=False):
     """A producer output as the previous step left it (crop = the atom itself)."""
     ok = nu0 is not None
@@ -292,6 +322,7 @@ def run(
     n_atoms=None,
     alias_ids=False,
     fail_rotated=False,
+    exclude_identity=False,
 ):
     """One refinement round: execute -> supersede -> add -> dedup -> site path.
 
@@ -316,6 +347,8 @@ def run(
         get_neighbors=lambda kind, atom: np.array([atom]), system=system
     )
     psr_double(monkeypatch, set(psr_fail))
+    if exclude_identity:
+        exclude_identity_overlay(monkeypatch)
     barriers = {spec["ref"]: spec["barrier"] for spec in specs}
     manager = NativeBoundary(barriers, partn_fail, fail_rotated=fail_rotated)
     log = Log()
@@ -732,6 +765,41 @@ def test_mixed_flag_retained_pair_redispatches_only_the_unrefined_application(
     table = result.active
     assert table.refined.tolist() == ["T", "T"]
     assert float(table.k.sum()) == pytest.approx(k_site + k_ref)
+
+
+def test_excluded_application_keeps_its_generic_row_when_a_sibling_refines(
+    monkeypatch,
+):
+    # Only the identity application's generic row was retained; this step
+    # that application is excluded by the constraint check while the rotated
+    # sibling is dispatched and refines. The lone row must not be handed to
+    # the sibling (review R12 re-review, minor): it stays as the fallback and
+    # is reported as a selected retained row left unrefined.
+    result = run(
+        monkeypatch,
+        [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],
+        retained_rows=[(0, 17, "F")],
+        exclude_identity=True,
+    )
+    k_ref = float(result.frame.k.iloc[0])
+    errors = [r.err_value().type for r in result.results if not r.is_ok()]
+    assert errors == [ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA]
+    assert result.manager.geometries == ["rotated"]
+    cov = result.coverage
+    assert cov["n_excluded"] == 1 and cov["n_duplicates_removed"] == 0
+    assert cov["n_retained"] == 1 and cov["n_prospective"] == 1
+    assert cov["snapshot_total"] == pytest.approx(2.0 * k_ref)
+    assert cov["n_selected_unrefined"] == 1
+    assert cov["shortfall_fraction"] == pytest.approx(0.5)
+    assert result.refinement.superseded_rows == set()
+    table = result.active
+    assert sorted(table.refined.tolist()) == ["F", "T"], table
+    assert float(table.k.sum()) == pytest.approx(2.0 * k_ref)
+    generic = table[table.refined == "F"].iloc[0]
+    assert np.asarray(generic.saddle_positions)[0, 0] == pytest.approx(17.0), (
+        "the identity application keeps its own generic row"
+    )
+    assert any("left unrefined" in msg for _, msg in result.log.lines)
 
 
 def test_failed_refinement_is_a_shortfall_not_a_new_denominator(monkeypatch):

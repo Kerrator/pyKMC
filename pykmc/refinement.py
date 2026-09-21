@@ -27,9 +27,11 @@ enters the active table with the generic (reference) saddle as a
     selects every positive group. The prospective channels of the selected
     groups are dispatched, including a retained ``refined="F"`` pair: each of
     its generic rows is matched to its own symmetric application by saddle
-    geometry and superseded only by the successful refinement of that
-    application (:attr:`Refinement.superseded_rows`), a failed one keeps its
-    generic row as the fallback; retained refined channels are never
+    geometry (within the overlay tolerance plus the recycler's drift, never
+    to a sibling application) and superseded only by the successful
+    refinement of that application (:attr:`Refinement.superseded_rows`); a
+    failed or unmatched one keeps its generic row as the fallback and is
+    reported as left unrefined; retained refined channels are never
     re-dispatched. The selected snapshot fraction, the fraction actually
     refined and the shortfall (failed refinements and selected retained rows
     that could not be re-dispatched) are reported separately in
@@ -696,10 +698,14 @@ class Refinement:
         Each retained row stores the generic (or refined) saddle crop of one
         symmetric application; the prospective channel of the same
         application is the one whose generic overlay is nearest to it
-        (``compute_delr`` over the crop aligned by stable atom identities).
+        (``compute_delr`` over the crop aligned by stable atom identities)
+        and within :meth:`_matching_tolerance`: the overlay of the same
+        application differs from the stored crop by the recycled atoms'
+        drift only, a sibling application by the saddle displacement itself.
         Greedy one-to-one assignment by increasing distance; a row whose crop
-        cannot be aligned (no identities, different membership) is matched
-        only when the pair has exactly one row and one channel.
+        cannot be aligned (no identities or saddle stored) is matched only
+        when the pair has exactly one row and one channel, and a row without
+        a channel within tolerance stays a retained channel.
 
         Returns
         -------
@@ -707,14 +713,19 @@ class Refinement:
             The assigned ``(row, channel)`` pairs.
 
         """
-        if len(rows) == 1 and len(channels) == 1:
+        alignable = [
+            row["saddle_positions"] is not None and row["crop_atom_ids"] is not None
+            for row in rows
+        ]
+        if len(rows) == 1 and len(channels) == 1 and not alignable[0]:
             return [(rows[0], channels[0])]
+        tolerance = self._matching_tolerance()
         distances: list[tuple[float, int, int]] = []
         for i, row in enumerate(rows):
+            if not alignable[i]:
+                continue
             saddle = row["saddle_positions"]
             ids = row["crop_atom_ids"]
-            if saddle is None or ids is None:
-                continue
             try:
                 ids_row = _indices(ids)
                 row_crop = np.asarray(saddle, dtype=float)
@@ -730,17 +741,11 @@ class Refinement:
                 crop = channel.working[channel.neighbors][order]
                 if crop.shape != row_crop.shape:
                     continue
-                distances.append(
-                    (
-                        float(
-                            compute_delr(
-                                row_crop, crop, self.system.cell, self.system.pbc
-                            )
-                        ),
-                        i,
-                        j,
-                    )
+                delr = float(
+                    compute_delr(row_crop, crop, self.system.cell, self.system.pbc)
                 )
+                if delr <= tolerance:
+                    distances.append((delr, i, j))
         assigned: list[tuple[dict, _Channel]] = []
         used_rows: set[int] = set()
         used_channels: set[int] = set()
@@ -751,6 +756,21 @@ class Refinement:
             used_channels.add(j)
             assigned.append((rows[i], channels[j]))
         return assigned
+
+    def _matching_tolerance(self) -> float:
+        """Return the largest overlay distance that names the same application.
+
+        The PSR overlay tolerance (``psr.matching_score_thr``, the residual a
+        registration may leave) plus twice the recycler's ``movement_thr``
+        (each recycled atom may have drifted that much since the row was
+        built); zero drift allowance without recycling, where no row is
+        retained.
+        """
+        tolerance = overlay_tolerance(self.config)
+        recycling = getattr(self.config, "eventrecycling", None)
+        if getattr(self.config.control, "recycle", False) and recycling is not None:
+            tolerance += 2.0 * float(recycling.movement_thr)
+        return tolerance
 
     def _select_and_dispatch(
         self,
@@ -863,6 +883,21 @@ class Refinement:
                     self._reject_rate("retained", pair[0], pair[1], row["rate"])
                     continue
                 retained.append((pair[1], float(row["rate"]), not row["unrefined"]))
+                if row["unrefined"]:
+                    self.loggers.warning(
+                        "log",
+                        "\t :=> [{}] refinement ledger: retained generic row {} "
+                        "(atom {}, reference {}) matches none of the {} "
+                        "application(s) dispatched for its pair within {:.3g} A; "
+                        "it stays as the fallback and is left unrefined".format(
+                            style,
+                            row["label"],
+                            pair[0],
+                            pair[1],
+                            len(by_pair[pair]),
+                            self._matching_tolerance(),
+                        ),
+                    )
         counted = [channel for channel in counted if not channel.duplicate]
         # Group by logical reference id; rank by decreasing total, ascending id.
         groups: dict[int, float] = {}

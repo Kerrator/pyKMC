@@ -191,8 +191,10 @@ active table with their generic saddle (`refined = F`). Which ones are refined i
   the running sum reaches `refine_thr` times the ledger total (groups tied at the cut are
   included; `refine_thr = 1` selects every group with a positive rate). Only the selected groups
   are refined, including retained unrefined pairs; already refined retained events are never
-  refined again. The log reports the ledger (`refinement ledger:`), the selected fraction, the
-  fraction actually refined and the shortfall left by failed refinements
+  refined again; a retained unrefined row is superseded only by the refinement of its own
+  application (matched by saddle geometry), never by a sibling's. The log reports the ledger
+  (`refinement ledger:`), the selected fraction, the fraction actually refined and the shortfall
+  (failed refinements and selected retained rows that could not be re-refined this step)
   (`refinement coverage:`), also on the per-step `HTST prefactors:` summary line. The fractions
   describe the pre-dispatch ledger; refined and site-specific rates that arrive later change
   the next step's ledger, never the reported one.
