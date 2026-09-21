@@ -103,9 +103,15 @@ class BasinGenericEventExplorer(Explorer):
             )
             # All atoms on which we can apply the event :
             l_atoms = state.environment.get_atoms_with_id(df_event["event_id"])
-            # Find backward info
-            dE_backward = reverse["energy_barrier"]
-            k_backward = reverse["k"]
+            # Find backward info. A placeholder whose reciprocal was purged
+            # has no reverse row: the transition is absorbing (decided above)
+            # and its backward barrier and rate are unknown, not the forward's.
+            if reverse is None:
+                dE_backward = float("nan")
+                k_backward = float("nan")
+            else:
+                dE_backward = reverse["energy_barrier"]
+                k_backward = reverse["k"]
             ref_event = df_event["idx_ref"]
 
             # Loop over all atoms on which we can apply the event :

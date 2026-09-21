@@ -9,8 +9,16 @@ topology of the forward's initial one), never to the forward itself and never
 to another channel that merely leaves the forward's final topology. In htst
 mode the reciprocal pair carries explicit links. Strict threshold equality
 stays absorbing.
+
+A placeholder whose reciprocal is gone (purged by ``ReferenceEventTable.remove``
+in constant mode, which keeps the base layout and does not follow the
+placeholder) is not a malformed catalogue: the transition is absorbing (an
+unknown reverse cannot be shown fast) and one WARNING names the row, the
+missing reciprocal and the reason. Duplicate identities still raise.
 """
 
+import logging
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -229,8 +237,58 @@ def test_constant_placeholder_ignores_non_reciprocal_channels_from_its_final_top
     pd.testing.assert_frame_equal(table.table, before)
 
 
-def test_constant_placeholder_with_only_non_reciprocal_channels_is_explicit(
-    constant_config: Any, system_single_type_fcc: Any
+def _assert_orphan_placeholder_is_absorbing(
+    frame: pd.DataFrame, forward: pd.Series, caplog: Any
+) -> None:
+    """No reciprocal row: absorbing at every threshold, one WARNING, no raise."""
+    detector = DetectorThreshold()
+    # Forward 0.60 is below 0.95: the forward alone would be transient, the
+    # missing reverse alone makes the transition absorbing.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert detector.detect(forward, frame, 0.95) is False
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+    message = warnings[0].getMessage()
+    assert str(int(forward["idx_ref"])) in message
+    assert repr(forward["id_final"]) in message and repr(forward["event_id"]) in message
+    assert "placeholder" in message and "absorbing" in message
+    assert "purged" in message
+    # The resolved pair carries no reverse row; the forward is unchanged.
+    resolved_forward, reverse = resolve_linked_pair(forward, frame)
+    assert int(resolved_forward["idx_ref"]) == int(forward["idx_ref"])
+    assert reverse is None
+    # The refined path takes the same decision.
+    active = pd.Series(
+        {"num_reference_event": int(forward["idx_ref"]), "energy_barrier": 0.55}
+    )
+    assert detector.detect(active, frame, 0.95, is_refined=True) is False
+
+
+def _assert_orphan_placeholder_edge(frame: pd.DataFrame, forward: pd.Series) -> None:
+    """The explorer records the edge as absorbing with an unknown reverse."""
+    subset = frame[frame["idx_ref"] == int(forward["idx_ref"])]
+    reference = SimpleNamespace(table=frame, has_id_subset_table=lambda ids: subset)
+    environment = SimpleNamespace(
+        atomic_environment_list=[forward["event_id"]],
+        get_atoms_with_id=lambda topology: [0],
+    )
+    explorer = BasinGenericEventExplorer(
+        SimpleNamespace(basin=SimpleNamespace(energy_thr=0.95)), reference
+    )
+    explorer.explore(
+        SimpleNamespace(environment=environment), state_index=2, start_index=11
+    )
+    edges = explorer.get_connectivity_table()
+    assert len(edges) == len(forward["sym_matrix"]) >= 1
+    assert (edges["dE_forward"] == 0.60).all()
+    assert not edges["transient"].astype(bool).any()
+    assert edges["dE_backward"].map(lambda v: math.isnan(float(v))).all()
+    assert edges["k_backward"].map(lambda v: math.isnan(float(v))).all()
+
+
+def test_constant_placeholder_with_only_non_reciprocal_channels_is_absorbing(
+    constant_config: Any, system_single_type_fcc: Any, caplog: Any
 ) -> None:
     """Rows leaving ``B`` elsewhere do not stand in for a missing ``B -> A``."""
     table, forward, (_, reciprocal) = constant_placeholder(
@@ -241,21 +299,73 @@ def test_constant_placeholder_with_only_non_reciprocal_channels_is_explicit(
     assert (frame["event_id"] == forward["id_final"]).sum() == 1, (
         "B -> C is still catalogued; only the reciprocal B -> A is gone"
     )
-    with pytest.raises(ValueError) as captured:
-        DetectorThreshold().detect(forward, frame, 0.95)
-    assert str(int(forward["idx_ref"])) in str(captured.value)
-    assert str(forward["id_final"]) in str(captured.value)
+    # Following B -> C (0.20) would wrongly declare the state transient.
+    _assert_orphan_placeholder_is_absorbing(frame, forward, caplog)
+    _assert_orphan_placeholder_edge(frame, forward)
 
 
-def test_constant_placeholder_without_any_catalogued_reverse_is_explicit(
-    constant_config: Any, system_single_type_fcc: Any
+def test_constant_placeholder_without_any_catalogued_reverse_is_absorbing(
+    constant_config: Any, system_single_type_fcc: Any, caplog: Any
 ) -> None:
     table, forward, _ = constant_placeholder(constant_config, system_single_type_fcc)
     frame = table.table[table.table["idx_ref"] == int(forward["idx_ref"])].copy()
-    with pytest.raises(ValueError) as captured:
-        DetectorThreshold().detect(forward, frame, 0.95)
+    _assert_orphan_placeholder_is_absorbing(frame, forward, caplog)
+    _assert_orphan_placeholder_edge(frame, forward)
+
+
+def test_purging_the_reciprocal_of_a_constant_placeholder_leaves_it_absorbing(
+    constant_config: Any, system_single_type_fcc: Any, caplog: Any
+) -> None:
+    """The production purge after a failed reconstruction of the reciprocal.
+
+    Constant-mode ``remove`` keeps the base rule (the row and its
+    ``idx_backward``, no closure), so the placeholder outlives its reciprocal
+    with an unchanged layout; the detector must then neither raise out of the
+    KMC step nor call the transition fast.
+    """
+    table, forward, (first, reciprocal) = constant_placeholder(
+        constant_config, system_single_type_fcc
+    )
+    removed = table.remove([int(reciprocal["idx_ref"])])
+    assert removed.idx_refs == (int(first["idx_ref"]), int(reciprocal["idx_ref"]))
+    assert list(table.table["idx_ref"].astype(int)) == [int(forward["idx_ref"])], (
+        "constant-mode layout: the placeholder survives its reciprocal's purge"
+    )
+    survivor = _row(table, int(forward["idx_ref"]))
+    assert int(survivor["idx_backward"]) == int(survivor["idx_ref"])
+    assert survivor["event_id"] != survivor["id_final"]
+    _assert_orphan_placeholder_is_absorbing(table.table, survivor, caplog)
+    _assert_orphan_placeholder_edge(table.table, survivor)
+
+
+def test_duplicate_logical_identity_still_raises(
+    constant_config: Any, system_single_type_fcc: Any, caplog: Any
+) -> None:
+    """A malformed catalogue (two rows with one ``idx_ref``) is an error."""
+    table, forward, (first, reciprocal) = constant_placeholder(
+        constant_config, system_single_type_fcc
+    )
+    twice = pd.concat(
+        [table.table, table.table[table.table["idx_ref"] == int(forward["idx_ref"])]],
+        ignore_index=True,
+    )
+    with caplog.at_level(logging.WARNING, logger="log"):
+        with pytest.raises(ValueError) as captured:
+            DetectorThreshold().detect(forward, twice, 0.95)
     assert str(int(forward["idx_ref"])) in str(captured.value)
-    assert str(forward["id_final"]) in str(captured.value)
+    assert "found 2" in str(captured.value)
+    # A reciprocal pair whose explicit reverse is duplicated raises too.
+    twice = pd.concat(
+        [
+            table.table,
+            table.table[table.table["idx_ref"] == int(reciprocal["idx_ref"])],
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError) as captured:
+        DetectorThreshold().detect(first, twice, 0.95)
+    assert str(int(reciprocal["idx_ref"])) in str(captured.value)
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
 
 
 def test_htst_reciprocal_pair_follows_its_written_link(

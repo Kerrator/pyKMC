@@ -38,13 +38,25 @@ placeholder is resolved by topology among the reciprocal rows only (the
 catalogued rows whose `event_id` is the forward's `id_final` **and** whose
 `id_final` is the forward's `event_id`, lowest barrier when several exist),
 never by comparing the forward barrier with itself and never by following
-another channel that merely leaves the forward's final topology. A
-placeholder with no reciprocal row raises.
+another channel that merely leaves the forward's final topology.
 
-These link errors are catalogue-integrity errors, not basin failures: they
-propagate out of the KMC step instead of taking the `Err` fallback described
-below, because a catalogue that cannot resolve its own reverse links must not
-silently fall back to executing the selected event.
+A placeholder whose reciprocal row is gone is not a malformed catalogue: in
+constant mode `ReferenceEventTable.remove` keeps the base rule (the failed
+row and the row its `idx_backward` names, no closure), so purging the
+reciprocal after a failed reconstruction leaves the placeholder behind with
+the catalogue layout unchanged. Its reverse barrier is then unknown, and an
+unknown reverse cannot be shown fast, so the transition is **absorbing**
+(the detector answers "not in a basin", the explorer records the edge as
+absorbing with `NaN` backward barrier and rate) and one `WARNING` names the
+row, the missing reciprocal (`id_final -> event_id`) and the reason. The
+KMC step continues with the selected event; nothing propagates.
+
+Missing or duplicated logical identities (two rows with one `idx_ref`, an
+explicit `idx_backward` naming no row or several) are catalogue-integrity
+errors, not basin failures: they raise a `ValueError` naming the affected
+IDs and propagate out of the KMC step instead of taking the `Err` fallback
+described below, because a catalogue that cannot resolve its own reverse
+links must not silently fall back to executing the selected event.
 It explores the basin, computes the exit time, and determines the exit state.
 Once finished, the selected event in the KMC loop is replaced with the basin event.
 
