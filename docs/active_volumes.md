@@ -57,8 +57,10 @@ event overlays the whole `rcut` environment of its central atom, and with `rmov 
 frozen buffer. When `active_volume = True`, the configuration is rejected at load time with a message naming both
 values (raise `rmov`, keeping `ract >= rmov`, or lower `rcut`). The buffer atoms themselves are only a crop
 restriction held by `fix setforce` during searches and refinements, not a fixed-coordinate contract like
-`frozen_atoms`: a refined saddle may place a buffer atom slightly displaced and it is held there. Similarly, if the
-active volume radius `ract` is less than `rcut`, the Event Searches will fail.
+`frozen_atoms`: a refined saddle may place a buffer atom slightly displaced and it is held there. The active
+volume radius `ract` must in addition exceed `rcut` strictly (`ract > rcut`): the event search needs active atoms
+beyond the `rcut` environment and refuses `ract <= rcut`, so the loader rejects that case too instead of letting
+the first search fail. Together: `ract >= rmov >= rcut` and `ract > rcut`.
 
 A debug mode to check if the AV is large enough can be toggled in `[ActiveVolume]` by setting `AV_debug = True`. This
 will minimize the AV during refinement before the event is applied, and compare the energy before and after. The system 

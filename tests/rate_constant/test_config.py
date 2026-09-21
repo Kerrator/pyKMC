@@ -300,3 +300,26 @@ def test_ract_below_rmov_is_allowed_when_active_volume_is_off() -> None:
     )
     cfg = Config.model_validate(data)
     assert cfg.control.active_volume is False and cfg.activevolume.ract == 8.0
+
+
+def test_active_volume_ract_equal_to_rcut_is_rejected() -> None:
+    """``ract`` must exceed ``rcut`` strictly, as ``EventSearch.execute`` requires.
+
+    ``ract >= rmov >= rcut`` admits ``ract == rmov == rcut``, which the
+    runtime check in ``EventSearch.execute`` (``ract <= rcut`` raises) then
+    aborts on the first search; the loader rejects it with both values.
+    """
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": "6.5", "ract": "6.5"}
+    )
+    assert float(data["atomicenvironment"]["rcut"]) == 6.5
+    with pytest.raises(ValidationError, match=r"ract.*6\.5.*rcut.*6\.5"):
+        Config.model_validate(data)
+
+
+def test_active_volume_ract_just_above_rcut_is_accepted() -> None:
+    data = _ini_dict(
+        control={"active_volume": "True"}, activevolume={"rmov": "6.5", "ract": "6.6"}
+    )
+    cfg = Config.model_validate(data)
+    assert cfg.activevolume.ract == 6.6 and cfg.activevolume.rmov == 6.5

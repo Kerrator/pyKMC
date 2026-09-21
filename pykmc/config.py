@@ -1161,7 +1161,7 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def validate_active_volume_covers_environment(self) -> "Config":
-        """Require ``ract >= rmov >= atomicenvironment.rcut`` under active volume.
+        """Require ``ract >= rmov >= rcut`` and ``ract > rcut`` under active volume.
 
         A catalogue event overlays the whole ``rcut`` environment of its central
         atom; with ``rmov < rcut`` part of that environment lies in the frozen
@@ -1169,7 +1169,11 @@ class Config(BaseModel):
         setforce`` then holds (contracts 7f policy 5). The movable sphere must
         itself lie inside the active volume (``ract >= rmov``), otherwise the
         shell is empty and the crop smaller than the movable set. Mirrors the
-        ``zone_radius > free_radius`` check of the rate-constant section.
+        ``zone_radius > free_radius`` check of the rate-constant section. The
+        active volume must also exceed ``rcut`` strictly: ``EventSearch.execute``
+        refuses ``ract <= rcut`` at the first search, so the loader refuses the
+        one configuration the two inclusive rules admit (``ract == rmov ==
+        rcut``) instead of letting it abort at run time.
         """
         if not self.control.active_volume or self.activevolume is None:
             return self
@@ -1191,6 +1195,15 @@ class Config(BaseModel):
                 "volume, otherwise refinements place atoms in the frozen shell. "
                 "Raise rmov (and ract, which must stay >= rmov) or lower rcut.".format(
                     self.activevolume.rmov, rcut
+                )
+            )
+        if rcut is not None and self.activevolume.ract <= rcut:
+            raise ValueError(
+                "activevolume.ract ({}) must be > atomicenvironment.rcut ({}) when "
+                "control.active_volume is on: the event search needs a buffer of "
+                "active atoms beyond the rcut environment (EventSearch refuses "
+                "ract <= rcut). Raise ract or lower rcut.".format(
+                    self.activevolume.ract, rcut
                 )
             )
         return self
