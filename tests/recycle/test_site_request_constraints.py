@@ -1,13 +1,14 @@
-"""Site requests carry the user constraints only, never the active-volume shell.
+"""Site requests carry the user+AV union; the recycled-row binding stays user-only.
 
-Contracts 7f policy 5: the AV outer shell (atoms beyond ``activevolume.rmov``)
-is a crop/transport restriction held by ``fix setforce`` during a search, not
-a fixed-coordinate contract. An HTST/RPA request built for an active row must
-therefore receive the USER constraint set (``config.frozen_atoms``) so the
-Vineyard free region stays ``free_radius`` about the mover minus user-fixed
-atoms; the shell never shrinks it. This holds on both request paths of
+Contracts 7f policy 5 as amended by R14/N09: the AV outer shell (atoms beyond
+``activevolume.rmov``) is a crop/transport restriction held by ``fix setforce``
+during a search, not a fixed-coordinate contract, but it was never relaxed, so
+an HTST/RPA request built for an active row receives the user+AV union as its
+free-set constraint: the Vineyard free set is ``free_radius`` about the mover
+minus user-fixed atoms minus shell atoms. This holds on both request paths of
 ``ActiveEventTable``: the constraints attached by the producer and the
-fallback resolution when the output carries none.
+fallback resolution when the output carries none; the initialized user
+snapshot travels separately as ``user_constraints``.
 
 The recycled-row binding (``SiteState``) compares the user authority only: a
 moved shell atom outside the dependency region keeps the row, a changed user
@@ -31,33 +32,38 @@ from pykmc.system import System
 from . import test_site_dependencies as deps
 from . import test_site_recycling as h
 
-SOURCE_IDS = (17, 23, 91, 5)
-CENTER, FREE_NEIGHBOUR, SHELL, USER_FIXED = 0, 1, 2, 3
+SOURCE_IDS = (17, 23, 91, 5, 66)
+CENTER, FREE_NEIGHBOUR, SHELL, USER_FIXED, SHELL_IN_SPHERE = 0, 1, 2, 3, 4
+RMOV = 3.0
 
 
 def av_setup():
-    """AV+htst config with one user-frozen atom and one shell-only atom.
+    """AV+htst config with one user-frozen atom and two shell atoms.
 
-    Rows: the centre (x = 9), its free neighbour (x = 11, inside ``free_radius``
-    6.0 but beyond ``rmov`` 1.0), a shell-only atom (x = 30) and a user-frozen
-    atom (x = 50). The coupled analytic oracle asserts the free set ``[0, 1]``.
+    Rows: the centre (x = 9), its free neighbour (x = 11, inside ``rmov`` 3.0
+    and ``free_radius`` 6.0), a shell-only atom (x = 30, outside both), a
+    user-frozen atom (x = 50) and a shell atom inside the free sphere (x = 14:
+    4 Å from the saddle, 5 Å from the AV centre, beyond ``rmov``). The coupled
+    analytic oracle asserts the free set ``[0, 1]``: the shell atom in the
+    sphere must be excluded from it.
     """
     cfg, _, manager, _ = h.setup()
     cfg = cfg.model_copy(
         update={
             "control": cfg.control.model_copy(update={"active_volume": True}),
-            "activevolume": ActiveVolume(rmov=1.0, ract=3.0),
+            "activevolume": ActiveVolume(rmov=RMOV, ract=6.0),
             "frozen_atoms": RegionConfig(indices=[USER_FIXED]),
         }
     )
     system = System(
-        types=["Si"] * 4,
+        types=["Si"] * 5,
         positions=np.array(
             [
                 [9.0, 10.0, 10.0],
                 [11.0, 10.0, 10.0],
                 [30.0, 10.0, 10.0],
                 [50.0, 10.0, 10.0],
+                [14.0, 10.0, 10.0],
             ]
         ),
         cell=100 * np.eye(3),
@@ -107,7 +113,7 @@ def fallback_candidate(table, system):
     return saddle
 
 
-def test_fallback_site_request_carries_the_user_view_only():
+def test_fallback_site_request_carries_the_union_and_excludes_the_shell():
     cfg, system, manager, svc, user = av_setup()
     table = ActiveEventTable(cfg, prefactor_service=svc)
     saddle = fallback_candidate(table, system)
@@ -121,16 +127,16 @@ def test_fallback_site_request_carries_the_user_view_only():
         system.index,
         user_constraints=user,
     )
-    # Control: the AV union really does hold the shell (rows 1, 2) and the
-    # user atom (row 3); without policy 5 the request would carry it.
-    assert union.fixed_ids == tuple(SOURCE_IDS[i] for i in (1, 2, 3))
-    assert union.rmov == 1.0 and union.center_id == SOURCE_IDS[CENTER]
+    # The AV union holds the two shell atoms (rows 2, 4) and the user atom
+    # (row 3); the free neighbour (row 1) is inside rmov.
+    assert union.fixed_ids == tuple(SOURCE_IDS[i] for i in (2, 3, 4))
+    assert union.rmov == RMOV and union.center_id == SOURCE_IDS[CENTER]
+    assert union.user_fixed_ids == (SOURCE_IDS[USER_FIXED],)
 
     request = table._site_request(0, system, saddle)
 
-    assert request.constraints == union.user_view()
-    assert request.constraints.fixed_ids == (SOURCE_IDS[USER_FIXED],)
-    assert request.constraints.center_id is None and request.constraints.rmov is None
+    assert request.constraints == union
+    assert request.constraints.user_view().fixed_ids == (SOURCE_IDS[USER_FIXED],)
     assert request.user_constraints == user
     sphere = select_free_indices(
         request.saddle_positions
@@ -141,10 +147,10 @@ def test_fallback_site_request_carries_the_user_view_only():
         request.cell,
         request.pbc,
     )
-    expected = [i for i in sphere.tolist() if i != USER_FIXED]
-    assert expected == [CENTER, FREE_NEIGHBOUR]
-    assert common_free_indices(request).tolist() == expected, (
-        "the rmov shell must not shrink the Vineyard free region"
+    assert sphere.tolist() == [CENTER, FREE_NEIGHBOUR, SHELL_IN_SPHERE]
+    assert common_free_indices(request).tolist() == [CENTER, FREE_NEIGHBOUR], (
+        "the shell atom inside free_radius was held during the search and is "
+        "fixed for the Hessian"
     )
     assert manager.requests == []
 
@@ -163,18 +169,22 @@ def test_av_shell_motion_keeps_the_recycled_site_row_and_user_change_ends_it():
         "identityless": 0,
     }
     assert len(manager.requests) == 1
-    assert manager.requests[0].constraints.fixed_ids == (SOURCE_IDS[USER_FIXED],)
+    assert set(manager.requests[0].constraints.fixed_ids) == {
+        SOURCE_IDS[i] for i in (SHELL, USER_FIXED, SHELL_IN_SPHERE)
+    }
     record = h.site_record(table, 0)
     assert record is not None and record.estimate.ok
     assert record.provenance.free_indices == (CENTER, FREE_NEIGHBOUR)
-    assert record.provenance.source.constraints.fixed_ids == (SOURCE_IDS[USER_FIXED],)
+    assert set(record.provenance.source.constraints.fixed_ids) == {
+        SOURCE_IDS[i] for i in (SHELL, USER_FIXED, SHELL_IN_SPHERE)
+    }
     assert record.provenance.source.user_constraints == user
     row = table.table.iloc[0].copy()
     assert row.nu0_source == "site" and row.nu0_status == "ok"
 
-    # The shell-only atom moves: outside the stored crop and the free sphere,
-    # so no site dependency changed. Its AV reference coordinate did, which
-    # must not count (the shell is not a user constraint).
+    # The far shell-only atom moves: outside the stored crop and the dependency
+    # region, so no site dependency changed. Its AV reference coordinate did,
+    # which must not count (the shell is not a user constraint).
     system.positions[SHELL, 0] += 0.1
     assert table.validate_recycled(system, neighbors) == 0
     assert len(table.table) == 1 and table.existing_pairs() == {(CENTER, 47)}

@@ -1,11 +1,13 @@
-"""Search/refine outputs carry the USER constraints only, never the AV mask.
+"""Search/refine outputs carry the user+AV union; validation checks user rows only.
 
-The engine attaches the resolved user constraint set to every successful
-``EventSearchOutput`` / ``EventRefinementOutput``; the active-volume shell
-(atoms beyond ``rmov``) is a crop restriction that must not shrink the Vineyard
-free region of the HTST request built from that output (contracts 7f policy 5).
-Result validation likewise checks user rows only: a refined saddle that keeps a
-placed shell overlay is a valid constrained event.
+The engine validates the returned geometry against the user view of the
+resolved constraints and attaches the union it transported to every successful
+``EventSearchOutput`` / ``EventRefinementOutput`` (contracts 7f policy 5 as
+amended by R14/N09). The HTST request built from that output therefore excludes
+both the user-frozen atoms and the active-volume shell (atoms beyond ``rmov``,
+held by ``fix setforce`` during the search, hence not relaxed) from the Vineyard
+free set, while the shell stays outside the coordinate contract: a refined
+saddle that keeps a placed shell overlay is a valid constrained event.
 
 Real public wrappers, payload resolution and result validation run; the pARTn
 implementation and the full-system restore are recording seams.
@@ -117,7 +119,7 @@ def search_output(triplet):
     )
 
 
-def test_search_output_constraints_are_user_only_and_keep_the_free_radius(
+def test_search_output_constraints_are_the_union_and_exclude_the_shell(
     monkeypatch,
 ):
     cfg = config()
@@ -145,8 +147,11 @@ def test_search_output_constraints_are_user_only_and_keep_the_free_radius(
     assert result.is_ok() and len(seen) == 1
     attached = result.ok_value().constraints
     assert isinstance(attached, ResolvedConstraints)
-    assert attached.fixed_ids == (IDS[USER_ROW],)
-    assert attached.center_id is None and attached.rmov is None
+    assert attached == seen[0], "the transported union is attached unchanged"
+    assert set(attached.fixed_ids) == {8, 91, 63}
+    assert attached.center_id == IDS[CENTER] and attached.rmov == 1.6
+    assert attached.user_fixed_ids == (IDS[USER_ROW],)
+    assert attached.user_view().fixed_ids == (IDS[USER_ROW],)
     assert attached.source_ids == IDS and attached.atom_ids == IDS
     attached.require_preserves(user, cell=CELL, pbc=PBC)
 
@@ -171,8 +176,12 @@ def test_search_output_constraints_are_user_only_and_keep_the_free_radius(
     sphere = select_free_indices(triplet[1], MOVER, FREE_RADIUS, CELL, PBC)
     assert SHELL_ROW in sphere and USER_ROW in sphere
     free = common_free_indices(request)
-    # The Vineyard free region is free_radius minus the user-frozen atoms only.
-    np.testing.assert_array_equal(free, [i for i in sphere if i != USER_ROW])
+    # The Vineyard free set is free_radius minus the user-frozen atoms and
+    # minus the AV shell: the shell row was held during the search.
+    np.testing.assert_array_equal(
+        free, [i for i in sphere if i not in (USER_ROW, SHELL_ROW)]
+    )
+    assert request.user_constraints == user
 
 
 @pytest.mark.parametrize("moved", ["shell", "user"])
@@ -215,5 +224,6 @@ def test_refine_result_validation_checks_user_rows_only(monkeypatch, moved):
     assert result.is_ok()
     output = result.ok_value()
     np.testing.assert_array_equal(output.saddle_positions, refined)
-    assert output.constraints.fixed_ids == (IDS[USER_ROW],)
-    assert output.constraints.center_id is None
+    assert set(output.constraints.fixed_ids) == {8, 91, 63}
+    assert output.constraints.center_id == IDS[CENTER]
+    assert output.constraints.user_view().fixed_ids == (IDS[USER_ROW],)

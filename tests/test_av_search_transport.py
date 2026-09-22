@@ -134,26 +134,15 @@ def capturing_service(cfg, user):
     return service
 
 
-def assert_user_only(payload, source, user):
-    # contracts 7f policy 5: outputs and HTST requests carry the USER
-    # constraints only; the AV outer ID and the AV centre context never enter
-    # the request (the Vineyard free region stays free_radius). Formerly
-    # asserted the user+AV union (assert_union).
-    assert isinstance(payload, ResolvedConstraints)
-    assert payload.source_ids == IDS and payload.atom_ids == IDS
-    assert payload.fixed_ids == (8,), "known user ID only, no source AV outer ID"
-    assert payload.fixed_positions == (tuple(source[2]),)
-    assert payload.user_policy == user.user_policy
-    assert payload.center_id is None and payload.rmov is None
-    assert tuple(payload.pbc) == PBC
-    np.testing.assert_array_equal(payload.cell, CELL)
-    payload.require_preserves(user, cell=CELL, pbc=PBC)
-
-
 def assert_request(request, triplet, user):
+    # contracts 7f policy 5 as amended by R14/N09: outputs and HTST requests
+    # carry the user+AV union as their free-set constraint (the AV shell is
+    # fixed for the Hessian, the user view stays the coordinate contract);
+    # the initialized user snapshot travels separately.
     for name, expected in zip(FIELDS, triplet, strict=True):
         np.testing.assert_array_equal(getattr(request, name), expected)
-    assert_user_only(request.constraints, triplet[0], user)
+    assert_union(request.constraints, triplet[0], user)
+    assert request.constraints.user_view().fixed_ids == (8,)
     assert request.user_constraints == user
     assert request.constraints.atom_ids == IDS
 
@@ -179,8 +168,9 @@ class SearchManager:
             },
             cell=CELL.copy(),
             types=np.array(TYPES),
-            # The engine attaches the user view of the union it transported.
-            constraints=kwargs["constraints"].user_view(),
+            # The engine attaches the union it transported (validated on its
+            # user view).
+            constraints=kwargs["constraints"],
         )
         self.outputs.append(output)
         result = Future()
@@ -221,7 +211,7 @@ def test_search_result_to_reference_request_keeps_original_frame_and_known_union
     )  # vibrational center may differ from source AV center
     np.testing.assert_array_equal(source.positions, triplet[0])
     assert user == before
-    assert_user_only(outputs[0].constraints, triplet[0], user)
+    assert_union(outputs[0].constraints, triplet[0], user)
 
 
 class Neighbors:
@@ -294,8 +284,9 @@ class RefineManager:
             saddle_positions=self.triplet[1].copy(),
             E_saddle=0.2,
             refined="T",
-            # The engine attaches the user view of the union it transported.
-            constraints=kwargs["constraints"].user_view(),
+            # The engine attaches the union it transported (validated on its
+            # user view).
+            constraints=kwargs["constraints"],
         )
         result = Future()
         result.set_result(Ok(output))
@@ -324,12 +315,12 @@ def refinery(monkeypatch, *, fail=False):
     return cfg, triplet, user, source, manager, caller
 
 
-def test_refinement_result_to_site_request_keeps_user_constraints(monkeypatch):
+def test_refinement_result_to_site_request_keeps_the_union(monkeypatch):
     cfg, triplet, user, source, manager, caller = refinery(monkeypatch)
     caller.execute(pd.DataFrame([reference_row(triplet)]), total_energy=0.0)
     assert len(manager.calls) == 1 and caller.results[0].is_ok()
     output = caller.results[0].ok_value()
-    assert_user_only(output.constraints, triplet[0], user)
+    assert_union(output.constraints, triplet[0], user)
     np.testing.assert_array_equal(output.full_saddle_positions, triplet[1])
     service = capturing_service(cfg, user)
     table = ActiveEventTable(cfg, prefactor_service=service)

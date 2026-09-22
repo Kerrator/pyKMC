@@ -601,7 +601,11 @@ class RateConstantConfig(BaseModel):
         gt=0.0,
         allow_inf_nan=False,
         description="HTST: radius (Angstrom) around the moving atom selecting the free "
-        "(movable) atoms of the partial Hessian; every other atom is frozen.",
+        "(movable) atoms of the partial Hessian; every other atom is frozen. "
+        "User-frozen atoms and, under active volume, the shell atoms beyond "
+        "`rmov` that fall inside this radius are excluded from the free set as "
+        "well (the search held them, so they carry residual forces); the log "
+        "reports the free-set size and the excluded shell count per request.",
     )
     free_region_center: Literal["saddle", "min1"] = Field(
         default="saddle",

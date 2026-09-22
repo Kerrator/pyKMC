@@ -3044,9 +3044,10 @@ class ActiveEventTable:
         atom = int(self.table.at[label, "atom_index"])
         constraints = self._full_saddle_constraints.get(int(label))
         if constraints is None:
-            # Under active volume the resolver returns the user+AV union; a
-            # request receives the USER constraints only, so the rmov shell
-            # never enters free_region selection (contracts 7f policy 5).
+            # Under active volume the resolver returns the user+AV union, the
+            # request's free-set constraint: the rmov shell was held during
+            # the search and is fixed for the Hessian (contracts 7f policy 5
+            # as amended by R14/N09). The user snapshot travels separately.
             constraints = resolve_event_constraints(
                 self.prefactor_service.config,
                 system.positions,
@@ -3056,7 +3057,7 @@ class ActiveEventTable:
                 atom,
                 system.index,
                 user_constraints=self.prefactor_service.global_constraints,
-            ).user_view()
+            )
         return self.prefactor_service.build_request(
             event_key=(
                 "site",

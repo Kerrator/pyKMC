@@ -255,13 +255,21 @@ user subset; `validate_positions(..., user_only=True, tolerance=...)` and
 `protect_positions(..., user_only=True)` act on that subset only, and
 `user_view()` returns the user set without the AV shell or the AV centre
 context. The engine validates a returned search/refinement geometry against
-that user view and attaches it to the output, so the HTST/RPA request built
-from an output carries the user constraints only: the Vineyard free region is
-`free_radius` around the mover minus the user-frozen atoms, never clipped to
-the `rmov` sphere. Returned search vertices retain their
-original full-coordinate frame for prefactor evaluation, even when the event
-catalogue stores a recentered representation. Basin state copies preserve these
-source identities.
+that user view and attaches the union it transported to the output, so the
+HTST/RPA request built from an output carries the union as its free-set
+constraint and the initialized user snapshot separately: the Vineyard free set
+is `free_radius` around the mover minus the user-frozen atoms and minus the
+shell atoms, which `fix setforce` held while the core relaxed and which
+therefore carry residual forces (0.13 to 0.54 eV/Å on the SW-Si active-volume
+fixture, far above `force_tol`; a free set containing them is rejected as
+non-stationary and the row falls back to `k0`). The adapter logs the free-set
+size and the number of shell atoms it excluded for every request (`free set N
+of M atoms within free_radius`), so the shrink is never silent. Recycled-row
+validity and the recompute path keep the user authority as the only coordinate
+contract; the union also carries the search centre the active-volume recompute
+needs. Returned search vertices retain their original full-coordinate frame for
+prefactor evaluation, even when the event catalogue stores a recentered
+representation. Basin state copies preserve these source identities.
 
 During constrained pARTn searches and refinements, force masking is followed by
 a temporary LAMMPS `fix external` callback that also zeros fixed-atom velocities.

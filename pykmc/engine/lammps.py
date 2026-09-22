@@ -1596,10 +1596,13 @@ class LammpsEngine(Engine):
     def _validate_search_result(self, result, constraints):
         # Only the user-declared fixed atoms are a coordinate contract for a
         # returned event; the AV shell is a crop restriction held by setforce
-        # (a refined saddle keeps a placed shell overlay). The output carries
-        # that user set, so an HTST request built from it keeps the
-        # free_radius Vineyard region and excludes user-frozen atoms only
-        # (contracts 7f policy 5). The AV union stays engine-side transport.
+        # (a refined saddle keeps a placed shell overlay), so the geometry is
+        # validated on the user view. The output carries the transported
+        # user+AV union: the shell was held while the core relaxed, so an
+        # HTST request built from the output fixes it for the Hessian and
+        # excludes it from the Vineyard free set like a user-frozen atom
+        # (contracts 7f policy 5 as amended by R14/N09); the union also keeps
+        # the search centre the active-volume recompute path needs.
         user = constraints.user_view()
         # All ranks take the same failure path; output arrays live on rank zero.
         failure = None
@@ -1612,7 +1615,7 @@ class LammpsEngine(Engine):
                         user.validate_positions(positions)
             except ValueError as exc:
                 failure = str(exc)
-            output.constraints = user
+            output.constraints = constraints
         if self.comm is not None:
             failure = self.comm.bcast(failure, root=0)
         if failure is not None:
