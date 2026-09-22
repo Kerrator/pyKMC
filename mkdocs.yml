@@ -36,6 +36,7 @@ nav:
       - Physical descriptors: physical_descriptors.md
       - Active volumes: active_volumes.md
       - Basins: basins.md
+      - Symmetries: symmetries.md
   - Developer Guide: 
       - Strategy pattern : dev_strategy_pattern.md
       - Engine : dev_engine.md
@@ -58,9 +59,9 @@ nav:
       - PointSetRegistration : api/point_set_registration.md
       - Symmetries : api/symmetries.md
       - RateConstante : api/rate_constant.md
-      - Initialize : api/initializer.md
+      - Initialize : api/initialized.md
       - Result : api/result.md
-      - Info: api/info_simulations.md
+      - Info: api/info_simulation.md
       - Utils: api/utils.md
       - run : api/run.md
 
