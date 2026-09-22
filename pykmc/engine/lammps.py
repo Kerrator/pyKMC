@@ -1712,6 +1712,7 @@ class LammpsEngine(Engine):
                 else:
                     artn.set("lnperp_limitation", False)
                 artn.set("forc_thr", config.partn.forc_thr)
+                artn.set("converge_property", config.partn.convergence_property)
                 artn.set("push_over", config.partn.push_over)
 
                 fixed_rows = (
@@ -1975,6 +1976,7 @@ class LammpsEngine(Engine):
             else:
                 artn.set("lnperp_limitation", False)
             artn.set("forc_thr", config.partn.r_forc_thr)
+            artn.set("converge_property", config.partn.convergence_property)
 
             max_attempts = config.partn.r_max_attempts
             attempt = 0
