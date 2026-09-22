@@ -653,8 +653,11 @@ class ResolvedConstraints:
     def user_view(self) -> ResolvedConstraints:
         """Return the user constraint set only: no AV shell, no AV context.
 
-        This is what HTST/RPA requests receive (contracts 7f policy 5): the
-        Vineyard free region excludes user-fixed atoms and never the shell.
+        The coordinate contract of a returned geometry and of a recycled row
+        (contracts 7f policy 5 as amended by R14/N09). HTST/RPA requests carry
+        the user+AV union as their free-set constraint, so the Vineyard free
+        set excludes the shell as well as the user-fixed atoms; this view is
+        used for validation and for reporting which excluded rows are user's.
         """
         user = self._user_ids()
         fixed_ids = tuple(i for i in self.fixed_ids if i in user)

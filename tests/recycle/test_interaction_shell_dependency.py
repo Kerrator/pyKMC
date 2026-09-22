@@ -19,10 +19,12 @@ import math
 import numpy as np
 import pytest
 
+from pykmc.config import RateConstantConfig
 from pykmc.htst import HTSTSettings
 from pykmc.htst.provenance import RequestSnapshot
 from pykmc.htst.request import HTSTEventRequest
 from pykmc.htst.site_state import (
+    DEFAULT_INTERACTION_RANGE,
     DEPENDENCY_POSITION_TOL,
     SiteState,
     dependency_radius,
@@ -119,6 +121,15 @@ def unchanged(state: SiteState, positions: np.ndarray) -> bool:
     return state.dependency_unchanged(system, source_index_map(system))
 
 
+def test_default_interaction_range_is_the_config_default() -> None:
+    """The site-state default and the rate-constant key default are one value."""
+    field = RateConstantConfig.model_fields["interaction_range"]
+    assert field.default == DEFAULT_INTERACTION_RANGE == 13.0
+    assert (
+        RateConstantConfig(style="htst").interaction_range == DEFAULT_INTERACTION_RANGE
+    )
+
+
 def test_frozen_changed_case_anchor_geometry() -> None:
     """The anchors are outside the free sphere and the crop, inside the LJ range."""
     source, moved = geometry(1.0), geometry(0.95, remote_shift=0.1)
@@ -133,7 +144,7 @@ def test_frozen_changed_case_anchor_geometry() -> None:
 
 
 def test_moved_anchor_inside_the_interaction_range_invalidates_the_site_row() -> None:
-    """R09 ``changed``: anchors move 0.05 Å, the centre stays, the executed centre is 20 Å away."""
+    """R09 ``changed``: anchors move about 0.10 Å, the centre stays, the remote atom is 20 Å away."""
     state = site_state()
     assert unchanged(state, geometry(1.0))
     assert not unchanged(state, geometry(0.95, remote_shift=0.1)), (
