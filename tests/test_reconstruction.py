@@ -349,3 +349,31 @@ def test_degenerate_empty_event_rejected_gracefully() -> None:
     assert not result.is_ok()
     assert result.err_value().type == ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA
     manager.group_minimize_with_results.assert_not_called()
+
+
+def test_containment_guard_disabled_without_rcut() -> None:
+    """With no rcut configured the guard has no limit to test and lets the event through.
+
+    The config validator skips the margin check in that case too, so the
+    reconstruction proceeds to the minimize instead of failing on ``None``.
+    """
+    config = _config()
+    config.atomicenvironment.rcut = None
+    manager = Mock()
+    manager.group_minimize_with_results.side_effect = [
+        (_MIN1.copy(), 0.0),
+        (_MIN2.copy(), -5.0),
+    ]
+    recon = Reconstruction(config, manager, types=["Ni", "Ni"])
+
+    result = recon.reconstruct(
+        _MIN1.copy(),
+        _MIN2.copy(),
+        _SADDLE.copy(),
+        _CELL,
+        _MATCHING_THR,
+        neighbors=np.array([0, 1]),
+        central_atom=0,
+    )
+
+    assert result.is_ok()

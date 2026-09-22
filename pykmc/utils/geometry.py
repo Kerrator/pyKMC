@@ -328,7 +328,7 @@ def event_contained(
     saddle_positions: np.ndarray,
     min2_positions: np.ndarray,
     cell: np.ndarray,
-    rcut: float,
+    rcut: float | None,
     containment_margin: float,
     pbc: bool | np.ndarray = True,
 ) -> "tuple[bool, float, float]":
@@ -370,8 +370,9 @@ def event_contained(
         Shape (N, 3) supposed min2 positions over the shell.
     cell : np.ndarray
         3x3 simulation cell.
-    rcut : float
-        Neighbourhood cutoff radius (``atomicenvironment.rcut``).
+    rcut : float or None
+        Neighbourhood cutoff radius (``atomicenvironment.rcut``). ``None`` (no
+        cutoff configured) disables the guard.
     containment_margin : float
         Margin (Angstrom) subtracted from ``rcut`` to form the limit.
     pbc : bool or np.ndarray, optional
@@ -382,13 +383,12 @@ def event_contained(
     tuple of (bool, float, float)
         ``(contained, max_mover_r, rcut_limit)``. ``contained`` is ``True`` when
         every mover stays within ``rcut - containment_margin`` of the central
-        atom over the whole path. When ``central_atom`` is ``None`` the guard is
-        disabled and returns ``(True, 0.0, 0.0)`` without touching ``rcut``
-        (which may be ``None`` for the disabled guard). An absent central row or
-        empty ``movers`` returns ``(False, inf, rcut_limit)``.
+        atom over the whole path. When ``central_atom`` or ``rcut`` is ``None``
+        the guard is disabled and returns ``(True, 0.0, 0.0)``. An absent
+        central row or empty ``movers`` returns ``(False, inf, rcut_limit)``.
 
     """
-    if central_atom is None:  # no centre to measure from: guard disabled
+    if central_atom is None or rcut is None:  # nothing to measure: guard disabled
         return True, 0.0, 0.0
     rcut_limit = float(rcut) - float(containment_margin)
     mv = np.asarray(movers, dtype=int)
