@@ -154,4 +154,36 @@ def common_free_indices(
     return free
 
 
-__all__ = ["common_free_indices", "select_free_indices"]
+def free_set_report(request: HTSTEventRequest) -> tuple[int, int, int, int]:
+    """Count the free set of a validated request and what its constraints excluded.
+
+    Returns ``(n_free, n_sphere, user_excluded, shell_excluded)``: the size of
+    the common free set, the number of atoms within ``free_radius`` of the
+    centre in the centring geometry, and how many of those the request's
+    constraints excluded because they are user-fixed or because they belong to
+    the active-volume shell (fixed rows that are not user-declared). The
+    service logs these per request so a shrunken free set is never silent
+    (contracts 7f policy 5 as amended by R14/N09).
+    """
+    positions = (
+        request.saddle_positions
+        if request.settings.free_region_center == "saddle"
+        else request.min1_positions
+    )
+    sphere = select_free_indices(
+        positions,
+        request.center_index,
+        request.settings.free_radius,
+        request.cell,
+        request.pbc,
+    )
+    free = common_free_indices(request, sphere)
+    excluded = np.setdiff1d(sphere, free)
+    if request.constraints is None or excluded.size == 0:
+        return int(free.size), int(sphere.size), 0, 0
+    user_rows = frozenset(request.constraints.user_view().local_fixed_indices)
+    shell = int(sum(1 for i in excluded if int(i) not in user_rows))
+    return int(free.size), int(sphere.size), int(excluded.size) - shell, shell
+
+
+__all__ = ["common_free_indices", "free_set_report", "select_free_indices"]

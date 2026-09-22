@@ -262,9 +262,10 @@ is `free_radius` around the mover minus the user-frozen atoms and minus the
 shell atoms, which `fix setforce` held while the core relaxed and which
 therefore carry residual forces (0.13 to 0.54 eV/Å on the SW-Si active-volume
 fixture, far above `force_tol`; a free set containing them is rejected as
-non-stationary and the row falls back to `k0`). The adapter logs the free-set
-size and the number of shell atoms it excluded for every request (`free set N
-of M atoms within free_radius`), so the shrink is never silent. Recycled-row
+non-stationary and the row falls back to `k0`). The prefactor service logs
+the free-set size and the number of shell atoms excluded for every request it
+submits (`free set N of M atoms within free_radius`, INFO when the shell shrank
+the set), so the shrink is never silent. Recycled-row
 validity and the recompute path keep the user authority as the only coordinate
 contract; the union also carries the search centre the active-volume recompute
 needs. Returned search vertices retain their original full-coordinate frame for

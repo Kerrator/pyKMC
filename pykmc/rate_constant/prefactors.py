@@ -34,6 +34,7 @@ Nothing in the constant path imports this module.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections.abc import Sequence
@@ -57,6 +58,8 @@ from .units import thz_to_hz
 
 if TYPE_CHECKING:
     from pykmc.config import Config, RateConstantConfig
+
+logger = logging.getLogger("log")
 
 PREFACTOR_OPERATION: str = "compute_event_prefactors"
 """Worker operation exposed by ``LammpsHTSTExtension`` (contracts section 6)."""
@@ -438,6 +441,25 @@ class PrefactorService:
                     )
                 except ValueError as exc:
                     raise HTSTRequestError(str(exc)) from exc
+        # Report every request's free set here, on the submitting rank (worker
+        # ranks have no INFO handler): a free set shrunk by user-fixed atoms or
+        # by the active-volume shell is never silent (contracts 7f policy 5 as
+        # amended by R14/N09). INFO when the shell shrank it, DEBUG otherwise.
+        from pykmc.htst.free_region import free_set_report
+
+        for req in requests:
+            n_free, n_sphere, user_excluded, shell_excluded = free_set_report(req)
+            logger.log(
+                logging.INFO if shell_excluded else logging.DEBUG,
+                "[htst] event %r: free set %d of %d atoms within free_radius %s A "
+                "(user-fixed excluded %d, active-volume shell excluded %d)",
+                req.event_key,
+                n_free,
+                n_sphere,
+                req.settings.free_radius,
+                user_excluded,
+                shell_excluded,
+            )
         start = time.perf_counter()
         pending: list[tuple[tuple, Any]] = []
         try:

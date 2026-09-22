@@ -338,27 +338,9 @@ class LammpsHTSTExtension(EngineExtension):
         )
         # The free set is the sphere minus the request's fixed rows: the
         # user-frozen atoms and, under active volume, the shell held during
-        # the search (contracts 7f policy 5 as amended by R14/N09). Report the
-        # exclusion per request so a shrunken set is never silent: INFO when
-        # the shell shrank it, DEBUG otherwise.
-        excluded = np.setdiff1d(core_global, free_global)
-        user_rows = (
-            frozenset()
-            if request.constraints is None
-            else frozenset(request.constraints.user_view().local_fixed_indices)
-        )
-        shell_excluded = int(sum(1 for i in excluded if int(i) not in user_rows))
-        logger.log(
-            logging.INFO if shell_excluded else logging.DEBUG,
-            "[htst] event %r: free set %d of %d atoms within free_radius %s A "
-            "(user-fixed excluded %d, active-volume shell excluded %d)",
-            request.event_key,
-            int(free_global.size),
-            int(core_global.size),
-            settings.free_radius,
-            int(excluded.size) - shell_excluded,
-            shell_excluded,
-        )
+        # the search (contracts 7f policy 5 as amended by R14/N09). The
+        # service reports the exclusion per request on rank 0
+        # (``free_set_report``); worker ranks have no INFO handler.
         relaxation_locks = np.union1d(core_global, fixed_global).astype(int)
         zone: np.ndarray | None = None
         if settings.zone_radius is not None:

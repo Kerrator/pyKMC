@@ -13,12 +13,14 @@ Unit-level copy of the R04 LJ6 callers' site channel: the buffer atom inside
 ``free_radius`` carries 0.009 eV/Å (> ``force_tol`` 0.005). With the union the
 free set is the mover alone (n_free 1) and the estimate is accepted; with the
 user projection (the pre-R14 request) the buffer atom is free, n_free 2, and
-the stationarity guard rejects every geometry.
+the stationarity guard rejects every geometry. The free-set line is logged by
+the service on the submitting rank (worker ranks have no INFO handler).
 """
 
 from __future__ import annotations
 
 import logging
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 import numpy as np
@@ -26,7 +28,11 @@ import pytest
 
 from pykmc.config import RateConstantConfig
 from pykmc.engine.htst_lammps import LammpsHTSTExtension
-from pykmc.htst.free_region import common_free_indices, select_free_indices
+from pykmc.htst.free_region import (
+    common_free_indices,
+    free_set_report,
+    select_free_indices,
+)
 from pykmc.physics import EnginePhysics, resolve_event_constraints
 from pykmc.rate_constant import create_rate_constant
 from pykmc.rate_constant.prefactors import PrefactorService
@@ -142,10 +148,28 @@ def union_for(config, source):
     return union
 
 
+class Manager:
+    """Synchronous Future transport straight into the extension under test."""
+
+    def __init__(self):
+        self.extension = None
+
+    def submit(self, operation, *, request, compute_backward=True):
+        assert operation == "compute_event_prefactors"
+        future = Future()
+        future.set_result(
+            self.extension.compute_event_prefactors(
+                request, compute_backward=compute_backward
+            )
+        )
+        return future
+
+
 def build(config, constraints, calls):
+    manager = Manager()
     service = PrefactorService(
         config,
-        object(),
+        manager,
         create_rate_constant(config.rateconstant),
         engine_physics=EnginePhysics.capture(config.lammps, SPECIES, MASSES),
         global_constraints=None,
@@ -179,7 +203,8 @@ def build(config, constraints, calls):
 
     extension._new_scratch = lambda: scratch
     extension._eskm_hessian = matrix
-    return request, extension, scratch
+    manager.extension = extension
+    return request, service, scratch
 
 
 def test_union_request_excludes_the_shell_from_the_free_set_and_is_accepted(
@@ -188,11 +213,12 @@ def test_union_request_excludes_the_shell_from_the_free_set_and_is_accepted(
     config = av_config()
     source = geometries()[0]
     calls: list = []
-    request, extension, scratch = build(config, union_for(config, source), calls)
+    request, service, scratch = build(config, union_for(config, source), calls)
     assert request.constraints.local_fixed_indices == (BUFFER, FAR)
     assert common_free_indices(request).tolist() == [MOVER]
+    assert free_set_report(request) == (1, 2, 0, 1)
     with caplog.at_level(logging.DEBUG, logger="log"):
-        result = extension.compute_event_prefactors(request, compute_backward=True)
+        result = service.compute([request], compute_backward=True)[("site", 1)]
     assert scratch.closed
     assert result.n_free == 1
     assert result.forward.ok and result.backward.ok
@@ -204,11 +230,14 @@ def test_union_request_excludes_the_shell_from_the_free_set_and_is_accepted(
         for _, forces in scratch.observed
     )
     assert len(scratch.observed) == 3
-    lines = [r.getMessage() for r in caplog.records if "[htst]" in r.getMessage()]
-    assert any(
-        "free set 1 of 2" in line and "active-volume shell excluded 1" in line
-        for line in lines
-    ), lines
+    lines = [r.getMessage() for r in caplog.records if "free set" in r.getMessage()]
+    assert lines == [
+        "[htst] event ('site', 1): free set 1 of 2 atoms within free_radius 1.1 A "
+        "(user-fixed excluded 0, active-volume shell excluded 1)"
+    ]
+    assert [r.levelno for r in caplog.records if "free set" in r.getMessage()] == [
+        logging.INFO
+    ]
 
 
 def test_user_projection_request_puts_the_buffer_in_the_free_set_and_is_rejected(
@@ -220,18 +249,18 @@ def test_user_projection_request_puts_the_buffer_in_the_free_set_and_is_rejected
     calls: list = []
     user_view = union_for(config, source).user_view()
     assert user_view.fixed_ids == () and user_view.rmov is None
-    request, extension, _ = build(config, user_view, calls)
+    request, service, _ = build(config, user_view, calls)
     assert common_free_indices(request).tolist() == [MOVER, BUFFER]
+    assert free_set_report(request) == (2, 2, 0, 0)
     with caplog.at_level(logging.DEBUG, logger="log"):
-        result = extension.compute_event_prefactors(request, compute_backward=True)
+        result = service.compute([request], compute_backward=True)[("site", 1)]
     assert result.n_free == 2
     for direction in (result.forward, result.backward):
         assert direction.status == "rejected"
         assert direction.reason_code.value == "nonstationary_geometry"
         assert "0.00908" in direction.reason
     assert [c for c in calls if c[0] == "hessian"] == []
-    lines = [r.getMessage() for r in caplog.records if "[htst]" in r.getMessage()]
-    assert any(
-        "free set 2 of 2" in line and "active-volume shell excluded 0" in line
-        for line in lines
-    ), lines
+    records = [r for r in caplog.records if "free set" in r.getMessage()]
+    assert [r.levelno for r in records] == [logging.DEBUG]
+    assert "free set 2 of 2" in records[0].getMessage()
+    assert "active-volume shell excluded 0" in records[0].getMessage()
