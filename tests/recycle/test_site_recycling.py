@@ -350,8 +350,9 @@ def assert_current_site(active, system, worker):
 def recycle_and_fresh(changed_neighbor):
     """Execute a distant event; optionally also move an interacting neighbour.
 
-    The executed atom (21 A from the candidate centre, outside free_radius
-    6.0 and the stored crop) never enters the candidate's site spectrum, so
+    The executed atom (21 A from the candidate centre, outside the stored crop
+    and the dependency region, free_radius 6.0 + the default interaction_range
+    13.0) never enters the candidate's site spectrum, so
     its motion alone must keep the recycled row and its actual producer
     (F06 repair invariant: preserve unchanged-local-geometry reuse). A moved
     neighbour inside free_radius changes the spectrum and must rebuild.
@@ -441,8 +442,9 @@ def test_distant_executed_event_keeps_site_row_without_new_work():
     cfg, system, manager, svc, active, old = initial_active()
     original = site_record(active, 0)
     before = system.positions.copy()
-    # Only the executed atom moves: 21 A from the candidate centre, outside
-    # free_radius (6.0 A) and the stored crop, so no site dependency changed.
+    # Only the executed atom moves: 21 A from the candidate centre, outside the
+    # stored crop and the dependency region (free_radius 6.0 A + the default
+    # interaction_range 13.0 A), so no site dependency changed.
     system.positions[2, 0] += 0.1
     geometric = active.recycler.select_recyclable(active, 1, system, before)
     assert list(geometric.num_reference_event.astype(int)) == [47]

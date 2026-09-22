@@ -131,10 +131,14 @@ transfer that calculation.
 Recycling validates these dependencies before refinement skips and before rate
 selection. Only the atoms whose positions enter the site spectrum are compared.
 A row's dependency region is its stored crop plus the sphere about the centre
-that bounds the Hessian: `free_radius`, or `zone_radius` when the calculation
-was zone-cropped (the zone is the whole set of atoms the scratch calculation
-ever saw), taken in both the producing minimum and the producing saddle so the
-selection is covered whichever `free_region_center` produced it. A recycled row
+that bounds the Hessian: the free sphere grown by the force model's interaction
+range (`free_radius + interaction_range`), because a free atom's rows of the
+partial Hessian hold the second derivatives of its energy with every fixed
+neighbour inside that range; or `zone_radius` when the calculation was
+zone-cropped (the zone is the whole set of atoms the scratch calculation ever
+saw, so it bounds the dependency whatever the range). The sphere is taken in
+both the producing minimum and the producing saddle so the selection is covered
+whichever `free_region_center` produced it. A recycled row
 is invalidated when a dependency atom no longer exists, changed type, or sits
 more than 1e-8 Å (minimum image) from its producing position, or when another
 atom entered the sphere about the centre's current position; motion elsewhere in
@@ -149,14 +153,25 @@ full geometry is unavailable, an explicit crop-ID handoff can retain a labeled
 reference approximation or `k0` fallback; it cannot manufacture a full
 stationary saddle by overlaying the crop.
 
-One caveat bounds this region. With `zone_radius = None` the scratch Hessian is
-built over the free sphere inside the full source, so the curvature of a free
-atom at the edge of the sphere also depends on fixed atoms within the pair-style
-cutoff beyond `free_radius`. Those atoms are outside the dependency region, and
-their motion is not detected by the dependency comparison. The recycler's
-movement and distance filters remain the outer guard: `DistanceRecycling.distance_thr`
-drops every row whose centre lies within that distance of the executed
-event's central atom, which is where such motion originates.
+`interaction_range` is the user's declaration for the potential, since LAMMPS
+exposes no cutoff to the caller: the pair-style cutoff for a pair potential, up
+to twice the cutoff for an embedded-atom, moment-tensor or three-body
+potential, whose energy terms couple a free atom to its second neighbours. The
+default (13 Å) is twice the 6.5 Å cutoff of the Ni EAM potential shipped with
+the tests, the largest of the shipped potentials (Cu EAM 5.5 Å, SW-Si 3.77 Å,
+LJ 2.5 σ); a value matched to the
+potential keeps more recycled rows valid, a too-small one lets a moved
+interacting atom keep a stale spectrum (the R09 `changed` control of the
+review record: `free_radius` 0.25 Å, anchors at 1.12 Å inside a 2.5 Å cutoff,
+executed centre 20 Å away). The neighbour-list `rcut` is the catalogue crop
+radius, not an interaction range. The range never enters a computed prefactor
+and is not part of the persisted table settings, so changing it does not
+demote catalogued estimates. With `premin` the relaxation of the surroundings
+can reach beyond this region; that elastic coupling is not tracked. The
+recycler's movement and distance filters remain the outer guard for the
+executed event's own surroundings: `DistanceRecycling.distance_thr` drops
+every row whose centre lies within that distance of the executed event's
+central atom.
 
 Pure source or crop reordering preserves stable global IDs and needs no new
 Hessian. Temperature changes update rates using the current rate facade while

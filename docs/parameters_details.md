@@ -205,8 +205,8 @@
     correction is implemented.
   
   The HTST-only fields (``free_radius``, ``free_region_center``, ``fd_step``,
-  ``zone_radius``, ``nu0_min_THz``, ``nu0_max_THz``, ``premin``) are validated
-  for every style and ignored by ``constant``.
+  ``zone_radius``, ``interaction_range``, ``nu0_min_THz``, ``nu0_max_THz``,
+  ``premin``) are validated for every style and ignored by ``constant``.
 </details>
 
 - **`style`** : `Literal['constant', 'htst', 'rpa']`, mandatory
@@ -241,6 +241,10 @@
 - **`zone_radius`** : `float`, optional
   <details><summary>Description</summary>
   HTST: optional radius (Angstrom) around the moving atom used to crop the scratch system on which the Hessians are computed. None (default) uses the full system.
+  </details>
+- **`interaction_range`** : `float`, default = `13.0`
+  <details><summary>Description</summary>
+  HTST: interaction range (Angstrom) of the force model, the largest distance over which a fixed atom's position enters the partial Hessian of a free atom: the pair-style cutoff for a pair potential, up to twice the cutoff for an embedded-atom, moment-tensor or three-body potential. Used only when recycling active events between steps: a stored site prefactor depends on every atom within `free_radius + interaction_range` of the moving atom (within `zone_radius` when the calculation was zone-cropped) and any motion of one of them invalidates the recycled row. It never enters a computed prefactor. The default is twice the 6.5 Angstrom cutoff of the Ni EAM potential shipped with the tests, the largest of the shipped potentials; a value matched to the potential keeps more recycled rows valid.
   </details>
 - **`nu0_min_THz`** : `float`, default = `1.0`
   <details><summary>Description</summary>

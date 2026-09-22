@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -22,22 +23,61 @@ precision coordinate round trip, so only representation noise is absorbed;
 a physical move of a dependency atom always invalidates.
 """
 
+DEFAULT_INTERACTION_RANGE: float = 13.0
+"""Interaction range (Å) of a site state built without one.
 
-def dependency_radius(settings: Any) -> float:
+The same value as the ``interaction_range`` default of ``RateConstantConfig``
+(twice the 6.5 Å cutoff of the Ni EAM potential shipped with the tests, the
+largest of the shipped potentials). The active table passes the configured
+value; the default only serves direct constructions.
+"""
+
+
+def dependency_radius(
+    settings: Any, interaction_range: float = DEFAULT_INTERACTION_RANGE
+) -> float:
     """Return the radius (Å) of a site spectrum's geometric dependency.
 
     The Hessian is built over the free sphere (``free_radius`` about the
-    centre). When the calculation was zone-cropped (``zone_radius``), the zone
-    is the whole set of atoms the scratch calculation ever saw, so it bounds
-    the dependency instead. Atoms beyond this radius (and outside the stored
-    crop) cannot change the spectrum through the free-region Hessian; the
-    recycler's movement/distance filters remain the guard for the executed
-    event's own surroundings.
+    centre), but a free atom's rows hold the second derivatives of its energy
+    with every fixed neighbour inside the force model's interaction range, so
+    the spectrum depends on the free sphere grown by that range
+    (``free_radius + interaction_range``). When the calculation was
+    zone-cropped (``zone_radius``), the zone is the whole set of atoms the
+    scratch calculation ever saw and bounds the dependency instead, whatever
+    the range: an atom beyond the zone never entered the spectrum. Atoms
+    beyond this radius (and outside the stored crop) cannot change the
+    spectrum through the free-region Hessian; the recycler's movement and
+    distance filters remain the guard for the executed event's own
+    surroundings.
+
+    The settings carry no cutoff and LAMMPS exposes none to the caller, so
+    the range is the user's declaration for the potential
+    (``RateConstantConfig.interaction_range``): the pair cutoff for a pair
+    potential, up to twice the cutoff for an embedded-atom, moment-tensor or
+    three-body potential, whose energy terms couple a free atom to its second
+    neighbours. The neighbour-list ``rcut`` is the catalogue crop radius, not
+    an interaction range, and is not used here.
+
+    Raises
+    ------
+    ValueError
+        If ``interaction_range`` is not a finite real number >= 0.
+
     """
-    radius = float(settings.free_radius)
+    if (
+        isinstance(interaction_range, bool)
+        or not isinstance(interaction_range, (int, float, np.integer, np.floating))
+        or not math.isfinite(interaction_range)
+        or interaction_range < 0.0
+    ):
+        raise ValueError(
+            f"interaction_range must be a finite number >= 0, got {interaction_range!r}"
+        )
+    free = float(settings.free_radius)
     if settings.zone_radius is not None:
-        radius = max(radius, float(settings.zone_radius))
-    return radius
+        return max(free, float(settings.zone_radius))
+    return free + float(interaction_range)
 
 
 def source_index_map(system: Any) -> dict[int, int]:
@@ -84,6 +124,7 @@ class SiteState:
     signature: tuple
     calculation: DirectionalCalculation | None = None
     fresh_service: Any = field(default=None, compare=False, repr=False)
+    interaction_range: float = DEFAULT_INTERACTION_RANGE
     dependency_rows: tuple[int, ...] | None = field(
         default=None, compare=False, repr=False
     )
@@ -107,13 +148,15 @@ class SiteState:
         return tuple(self.atom_ids[k] for k in self.dependency_rows)
 
     def _resolve_dependency(self) -> tuple[int, ...]:
-        """Snapshot rows of the stored crop and the free/zone sphere.
+        """Snapshot rows of the stored crop and the dependency sphere.
 
-        The sphere is taken in both producing geometries so the selection is
-        covered whichever ``free_region_center`` produced it.
+        The sphere (:func:`dependency_radius`: the free sphere grown by
+        ``interaction_range``, or the zone) is taken in both producing
+        geometries so the selection is covered whichever
+        ``free_region_center`` produced it.
         """
         source = self.source
-        radius = dependency_radius(source.settings)
+        radius = dependency_radius(source.settings, self.interaction_range)
         cell = np.asarray(source.cell, dtype=float)
         rows: set[int] = set()
         for geometry in (source.min1_positions, source.saddle_positions):
@@ -140,8 +183,8 @@ class SiteState:
 
         Every dependency atom must still exist with the same type and sit
         within :data:`DEPENDENCY_POSITION_TOL` (minimum image) of its producing
-        position, and no other atom may have entered the free/zone sphere
-        about the centre's current position.
+        position, and no other atom may have entered the dependency sphere
+        (:func:`dependency_radius`) about the centre's current position.
         """
         rows = list(self.dependency_rows)
         current_rows = []
@@ -155,7 +198,7 @@ class SiteState:
         entered = select_free_indices(
             positions,
             center_row,
-            dependency_radius(self.source.settings),
+            dependency_radius(self.source.settings, self.interaction_range),
             system.cell,
             system.pbc,
         )

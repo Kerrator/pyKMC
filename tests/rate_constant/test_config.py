@@ -50,6 +50,7 @@ def test_k0_max_is_a_class_var_not_a_field() -> None:
         "fd_step",
         "force_tol",
         "zone_radius",
+        "interaction_range",
         "nu0_min_THz",
         "nu0_max_THz",
         "premin",

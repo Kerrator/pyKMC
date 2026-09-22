@@ -3034,6 +3034,7 @@ class ActiveEventTable:
             row_signature(self.table.loc[label], center_id),
             calculation,
             fresh_service=self.prefactor_service,
+            interaction_range=float(self.config.rateconstant.interaction_range),
         )
         self._pending_site_rows.discard(int(label))
 
