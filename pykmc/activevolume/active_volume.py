@@ -209,6 +209,7 @@ def map_types(
     if species is None:
         species, masses = species_map(types)
     else:
+        assert masses is not None  # paired with species by the check above
         species, masses = _validate_species_override(species, masses)
     map_type: dict[str, TypeEntry] = {
         symbol: {"ref": i + 1, "mass": mass}

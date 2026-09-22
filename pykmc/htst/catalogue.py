@@ -142,8 +142,8 @@ class PrefactorArchive:
             calculation.validate()
             if key != calculation.calculation_id:
                 raise ValueError("producing calculation registry ID mismatch")
-        for key, link in archive.references.items():
-            if type(key) is not int or key < 0:
+        for ref_key, link in archive.references.items():
+            if type(ref_key) is not int or ref_key < 0:
                 raise ValueError("producing references require nonnegative logical IDs")
             if link is not None and (
                 not isinstance(link, EstimateReference)

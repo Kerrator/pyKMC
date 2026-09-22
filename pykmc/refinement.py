@@ -119,7 +119,7 @@ class _Channel:
         dfevent: pd.Series,
         total_energy,
         working: np.ndarray,
-        neighbors: np.ndarray,
+        neighbors: "np.ndarray | list[int]",
         constraints,
         current_positions: np.ndarray,
         signature: tuple,
@@ -140,7 +140,7 @@ class _Channel:
         self.rejected = False
         self.dispatched = False
         self.ok = False
-        self.future = None
+        self.future: concurrent.futures.Future | None = None
 
     def result(self):
         """Return the refinement result once the ledger has resolved the channel."""
@@ -383,7 +383,7 @@ class Refinement:
         total_energy: float,
         future_context: dict,
         e_thr: float | None,
-    ) -> list:
+    ) -> "concurrent.futures.Future | _Channel":
         """Perform a single reference event refinement.
 
         If a reference event has symmetries, it also refine those symmetric events.
@@ -424,7 +424,7 @@ class Refinement:
         ##=>Check results if match or match < matching_score
         result_psr = check_match(result_psr, self.config.psr.matching_score_thr)
         if not result_psr.is_ok():
-            f = concurrent.futures.Future()
+            f: concurrent.futures.Future | _Channel = concurrent.futures.Future()
             f.set_result(result_psr)
             future_context[f] = {"num_reference_event": dfevent["idx_ref"]}
             return f
@@ -960,7 +960,7 @@ class Refinement:
                 future_context.pop(f, None)
                 continue
             if f.rejected:
-                err = concurrent.futures.Future()
+                err: concurrent.futures.Future = concurrent.futures.Future()
                 err.set_result(
                     Err(
                         ErrorInfo(

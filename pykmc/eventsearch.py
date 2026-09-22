@@ -139,9 +139,10 @@ class EventSearch:
             self.config.rateconstant.style in ("htst", "rpa")
             and event_search_output.prefactor_geometry is None
         ):
-            event_search_output.prefactor_geometry = tuple(
-                np.array(getattr(event_search_output, field), copy=True)
-                for field in ("min1_positions", "saddle_positions", "min2_positions")
+            event_search_output.prefactor_geometry = (
+                np.array(event_search_output.min1_positions, copy=True),
+                np.array(event_search_output.saddle_positions, copy=True),
+                np.array(event_search_output.min2_positions, copy=True),
             )
         # Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr
         cell = self.system.cell

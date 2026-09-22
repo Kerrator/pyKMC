@@ -355,7 +355,7 @@ class ReferenceEventTable:
             One result per event: surviving resolved rows or the rejection.
 
         """
-        results_is_valid_events = []
+        results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]] = []
         accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
         # Admission is geometric (contracts 7f policy 6): the full physical
         # source is built once per accepted event, in _resolve_prefactors.
@@ -387,13 +387,13 @@ class ReferenceEventTable:
             self._resolve_prefactors(accepted, pbc)
             # Resolution can merge a proven reverse. Return only surviving,
             # resolved rows and their current links, not provisional frames.
-            resolved_results = []
-            for res in results_is_valid_events:
-                if not res.is_ok():
-                    resolved_results.append(res)
+            resolved_results: list[Result[pd.DataFrame, ErrorInfo]] = []
+            for admitted in results_is_valid_events:
+                if not admitted.is_ok():
+                    resolved_results.append(admitted)
                     continue
                 surviving = self.table[
-                    self.table.idx_ref.isin(res.ok_value().idx_ref)
+                    self.table.idx_ref.isin(admitted.ok_value().idx_ref)
                 ].copy()
                 resolved_results.append(
                     Ok(surviving)
@@ -3473,7 +3473,9 @@ class ActiveEventTable:
                         # to the no_geometry fallback, never aborting the step.
                         self._warn_crop_identity(label, exc, "duplicate removal")
 
-        def align(first, second, *, shared=False):
+        def align(
+            first, second, *, shared=False
+        ) -> tuple[np.ndarray, np.ndarray] | None:
             a, b = self.table.loc[first], self.table.loc[second]
             left, right = np.asarray(a.saddle_positions), np.asarray(b.saddle_positions)
             try:

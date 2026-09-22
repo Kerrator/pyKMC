@@ -11,6 +11,7 @@ from pykmc import (
     Reconstruction,
 )
 import random
+from typing import TYPE_CHECKING
 from .result import (
     EventSearchOutput,
     KMCLoopInfo,
@@ -53,6 +54,9 @@ from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
 from .rate_constant import create_rate_constant
+
+if TYPE_CHECKING:
+    from .physics import ResolvedConstraints
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -106,7 +110,7 @@ class KMC:
         self.loggers = None
         self.system = None
         self.manager = manager
-        self.global_constraints = None
+        self.global_constraints: "ResolvedConstraints | None" = None
         # control.seed: one seeding of the Python and NumPy global generators
         # (central_atoms_research, the BKL draws, the basin exit draws); the
         # saddle search has its own stream (partn.zseed).
@@ -347,12 +351,12 @@ class KMC:
                 self.visited_environments = self.visited_environments.difference(
                     set(err_ae)
                 )
-            events_info = events_info.output_msg()
+            events_msg = events_info.output_msg()
 
             # INFO :
             self.loggers.events_file_step_first_line("events", step)
             self.loggers.events_applicable_info_line("events", idx_selected_event)
-            self.loggers.info("events", events_info)
+            self.loggers.info("events", events_msg)
 
             # TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
@@ -1133,7 +1137,7 @@ class KMC:
         return kept.index(int(idx_selected_event))
 
     def _reconstruction_active_event(
-        self, idx_selected_event: int, active_table: AtomicEnvironment
+        self, idx_selected_event: int, active_table: ActiveEventTable
     ):
         central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
         try:

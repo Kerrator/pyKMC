@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import Literal, cast
 
 from .settings import HTSTSettings
 from .provenance import CalculationProvenance
@@ -362,7 +362,9 @@ class EventPrefactors:
         estimate = getattr(self, direction)
         if self.provenance is None or estimate.skipped:
             return None
-        return DirectionalCalculation(direction, self.provenance, estimate)
+        return DirectionalCalculation(
+            cast(Literal["forward", "backward"], direction), self.provenance, estimate
+        )
 
 
 __all__ = [

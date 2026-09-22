@@ -448,6 +448,7 @@ class ResolvedConstraints:
                 )
             cell = tuple(tuple(float(x) for x in row) for row in matrix)
             pbc = tuple(bool(x) for x in axes)
+        indices: tuple[int, ...]
         if region is None:
             indices = ()
         else:
