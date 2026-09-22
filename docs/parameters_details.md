@@ -30,7 +30,7 @@
   </details>
 - **`restart_file`** : `str`, optional
   <details><summary>Description</summary>
-  File with restart informations.
+  Restart file `restart_<step>.npz` written at the end of a previous run. It holds only the last step number and the simulated time in seconds (`last_step`, `last_time`); the atomic configuration is taken from `initial_config` (the last saved snapshot) and the catalogue from `reference_table` and `visited_environments`. The step counter continues from `last_step + 1` and the saved time is carried over once; the saved configuration is not re-minimized, its energy is evaluated as saved. The random-number streams are not saved: with `seed` set the generators are re-seeded from that value, so a restarted run is reproducible on its own but does not continue the interrupted run's sequence of draws.
   </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
@@ -87,7 +87,7 @@
   </details>
 - **`seed`** : `int`, optional
   <details><summary>Description</summary>
-  Reproducibility knob. When set, the Python `random` module and NumPy's global random generator are seeded once at KMC construction, so the choice of the atoms searched per new environment (`central_atoms_research`), the rejection-free (BKL) event and time draws and the basin exit draws repeat between runs; the new-environment list is sorted, so `PYTHONHASHSEED` is not needed. It does not seed the saddle-point search: pARTn's own stream is `[pARTn] zseed`, and the saddle instance a search returns can still differ between runs. Must be between 0 and 2**32 - 1, inclusive. Defaults to None (unseeded).
+  Reproducibility knob. When set, the Python `random` module and NumPy's global random generator are seeded once at KMC construction, so the choice of the atoms searched per new environment (`central_atoms_research`), the rejection-free (BKL) event and time draws and the basin exit draws repeat between runs; the new-environment list is sorted, so `PYTHONHASHSEED` is not needed. It does not seed the saddle-point search: pARTn's own stream is `[pARTn] zseed`, and the saddle instance a search returns can still differ between runs. On a restart the generators are seeded afresh from the same value; the streams of the interrupted run are not restored. Must be between 0 and 2**32 - 1, inclusive. Defaults to None (unseeded).
   </details>
 
 ---
@@ -149,11 +149,11 @@
   </details>
 - **`backward_emin_event`** : `float`, default = `0.0`
   <details><summary>Description</summary>
-  To be used with `energy_assymetry`.
+  Lower bound (in eV) of the backward barrier used together with `energy_asymmetry`.
   </details>
 - **`energy_asymmetry`** : `int`, default = `5`
   <details><summary>Description</summary>
-  Prevent highly asymmetric event to be added to the reference table.The con
+  Prevent highly asymmetric events from being added to the reference table: an event whose forward barrier exceeds `energy_asymmetry` x `backward_emin_event` is rejected unless its backward barrier is also above `backward_emin_event`.
   </details>
 - **`refined_minimum_delr_thr`** : `float`, default = `0.1`
   <details><summary>Description</summary>

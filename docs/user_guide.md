@@ -169,7 +169,7 @@ The event is added to the reference table only if it satisfies all the following
 - $dE_{foward}$ < `emax_event` 
 - $dE_{foward}$ > `emin_event` 
 - $dE_{backward}$ > `emin_event` 
-- $dE_{backward}$ < `energy_asymmetry`x`backward_min` and $dE_{backward}$ > `backward_min` 
+- the event is not highly asymmetric: it is rejected when $dE_{forward}$ > `energy_asymmetry` x `backward_emin_event` while $dE_{backward}$ < `backward_emin_event`
 
 Once a reference event is reused, it is refined to adapt to the current atomic configuration. The refinement is considered successful if:
 - The central atom moves less than `refined_minimum_delr_thr` between the current position and the refined minimum.
@@ -217,22 +217,19 @@ For a detailed explanation of the pARTn algorithm and its parameters, please ref
 
 ## Rate Constant 
 
-Each time an event is added to either the reference or the active event table, a rate constant is computed. The method used to compute this rate is defined in the [RateConstant] section of the INI configuration file.
-
-Currently, the only implemented style is : `style = constant`. This method computes the rate constant using the following equation. 
+Each time an event is added to either the reference or the active event table, a rate constant is computed from the Arrhenius law
 
 $$
-k = k_{0} e^{-\frac{dE_{forward}}{{k_{b}T}}}
+k = \nu_{0} \, e^{-\frac{dE_{forward}}{{k_{b}T}}}
 $$
-Where:
-- $k$ is the rate constant,
-- $k_{0}$ is a user-defined pre-exponential factor (typically $10^{13}s^{-1}=10ps^{-1}$),
-- $T$ is the system temperature, defined by the user.
-- $dE_{forward}$ is the forward energy barrier,
-- $k_{b}$​ is the Boltzmann constant,
-- $h$ is Planck’s constant.
 
-All parameters must be provided in LAMMPS metal units.
+where $dE_{forward}$ is the forward energy barrier, $T$ the temperature defined by the user and $k_{b}$ the Boltzmann constant. The `[RateConstant]` section selects how the prefactor $\nu_{0}$ is obtained (`style`); all parameters are in LAMMPS metal units.
+
+- `style = constant`: $\nu_{0} = k_{0}$, a user-defined pre-exponential factor in ps$^{-1}$ (typically $10^{13}\,s^{-1} = 10\,ps^{-1}$).
+- `style = htst`: every accepted reference event gets the harmonic-transition-state-theory (Vineyard) prefactor computed from the partial Hessians of its two minima and its saddle over the free region (`free_radius` around the moving atom, centred on the saddle by default, see `free_region_center`), optionally on a cropped scratch system (`zone_radius`) and after a preminimisation (`premin`). Refined active events get their own site prefactor from the refined saddle. This style needs a LAMMPS build with the `PHONON` package (the `dynamical_matrix` command): its absence is a preflight error when the simulation starts, there is no finite-difference fallback in production.
+- `style = rpa`: an alias of `htst` (bare Vineyard prefactor; no recrossing correction is implemented).
+
+With `htst`/`rpa`, `k0` is the per-event **fallback** prefactor. It is used whenever no accepted Vineyard value is available for a row: an estimate outside the acceptance window `[nu0_min_THz, nu0_max_THz]`, a geometry rejected by the kernel (not stationary within `force_tol`, unstable minimum, saddle with more than one negative mode, empty free region), or a reference table written before the current schema, which is loaded with a `WARNING` and its estimates demoted to `legacy`. The per-step `HTST prefactors:` line of the log and the `nu0`, `nu0_status` (`ok`, `rejected`, `legacy`, `pending`, `stale`) and `nu0_source` (`reference`, `site`) columns of the event tables say which value each row used. Inside basins the exit rates use the reference prefactors; no site prefactor is computed there. A `k0` above $10^{4}$ ps$^{-1}$ is rejected for `htst`/`rpa` because it was almost certainly entered in Hz. Persistence, invalidation and recycling of the computed prefactors are described in [Physical descriptors](physical_descriptors.md).
 
 Typically, it will gives : 
 
@@ -241,6 +238,16 @@ Typically, it will gives :
 style = constant 
 k0 = 10
 T = 300 
+``` 
+
+or, for harmonic prefactors,
+
+```INI 
+[RateConstant]
+style = htst 
+k0 = 10
+T = 300 
+free_radius = 6.0
 ``` 
 
 ## PSR 
@@ -313,6 +320,10 @@ Once both the input file and the initial configuration file are ready, launch th
 ```bash 
 python -m pykmc -in <your_input_file_name> 
 ``` 
+
+### Restarting a simulation
+
+At the end of a run pyKMC writes `restart_<last step>.npz`, which holds only the last step number and the simulated time in seconds (`last_step`, `last_time`). To continue, point `restart_file` (in `[Control]`) at it and supply the state it does not contain: `initial_config` must be the last saved snapshot of the trajectory, and `reference_table` and `visited_environments` the catalogue files written by the previous run. The step counter continues from `last_step + 1` and the saved time is carried over once (the `T(s)` column keeps accumulating from it); the saved configuration is not re-minimised, its energy is evaluated as saved. The random-number streams are not part of the restart file: with `seed` set, the Python and NumPy generators are seeded afresh from that value, so a restarted run is reproducible on its own but does not continue the interrupted run's sequence of draws (pARTn's `zseed` stream is not continued either). With `htst`/`rpa`, accepted reference prefactors are reused only when their producing physics (species, masses, potential, numerical settings) is unchanged; a table written before the current schema is loaded with a warning and its estimates fall back to `k0` (see [Physical descriptors](physical_descriptors.md)).
 
 ## Using multiple lammps instances 
 

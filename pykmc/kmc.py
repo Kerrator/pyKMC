@@ -209,7 +209,7 @@ class KMC:
             total_time = restart_info["last_time"]
             self.loggers.info(
                 "log",
-                ":=> last step = {}, last_end_time = {}ps".format(
+                ":=> last step = {}, last_time = {} s (simulated time carried over)".format(
                     last_step, total_time
                 ),
             )
