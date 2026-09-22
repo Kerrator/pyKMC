@@ -30,7 +30,9 @@ def test_native_constrained_two_endpoint_transaction():
             verbosity=0,
         ),
         frozen_atoms=RegionConfig(indices=[1]),
-        reconstruction=SimpleNamespace(push_fraction=0.1),
+        reconstruction=SimpleNamespace(
+            push_fraction=0.1, n_movers=3, containment_margin=1.0, shell_tolerance=1e-7
+        ),
         psr=SimpleNamespace(matching_score_thr=1e-7),
     )
     constraints = ResolvedConstraints.resolve(

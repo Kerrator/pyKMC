@@ -77,7 +77,12 @@ def config(style="global/reconstruction", active=True, radius=1.3, thr=1e-7):
         control=SimpleNamespace(active_volume=active),
         activevolume=SimpleNamespace(rmov=radius, ract=2.25),
         basin=SimpleNamespace(style=style),
-        reconstruction=SimpleNamespace(push_fraction=0.1),
+        # The standard test rcut (tests/data/input.in); containment is not
+        # under test here.
+        atomicenvironment=SimpleNamespace(rcut=6.5),
+        reconstruction=SimpleNamespace(
+            push_fraction=0.1, n_movers=3, containment_margin=1.0, shell_tolerance=thr
+        ),
         psr=SimpleNamespace(matching_score_thr=thr),
     )
 

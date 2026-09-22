@@ -1202,6 +1202,7 @@ class KMC:
                 self.system.cell,
                 self.config.psr.matching_score_thr,
                 neighbors,
+                central_atom=central_atom,
             )
         except ConstraintViolationError as exc:
             return Err(

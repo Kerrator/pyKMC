@@ -132,7 +132,9 @@ class EndpointManager:
 
 def reconstruct(manager, pbc, first, saddle, final):
     cfg = SimpleNamespace(
-        reconstruction=SimpleNamespace(push_fraction=0.5),
+        reconstruction=SimpleNamespace(
+            push_fraction=0.5, n_movers=3, containment_margin=1.0, shell_tolerance=1e-10
+        ),
         psr=SimpleNamespace(matching_score_thr=1e-10),
     )
     return Reconstruction(cfg, manager, types=["Cu"], pbc=pbc).reconstruct(

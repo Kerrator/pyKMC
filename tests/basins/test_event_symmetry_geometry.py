@@ -135,7 +135,9 @@ def test_basin_stationary_triplet_keeps_initial_aligned_and_source_immutable(
             assert constraints.source_ids == IDS
             assert tuple(pbc) == (True, True, True)
 
-        def reconstruct(self, first, last, working_saddle, cell, threshold, neighbors):
+        def reconstruct(
+            self, first, last, working_saddle, cell, threshold, neighbors, **kwargs
+        ):
             np.testing.assert_allclose(first, SOURCE, atol=ATOL, rtol=0)
             np.testing.assert_allclose(last, final, atol=ATOL, rtol=0)
             np.testing.assert_allclose(working_saddle, saddle, atol=ATOL, rtol=0)

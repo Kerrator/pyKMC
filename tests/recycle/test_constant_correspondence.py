@@ -70,7 +70,9 @@ def setup_case(monkeypatch, crop_ids, saddle, final):
         def __init__(self, config, manager, **kwargs):
             calls["constructor"].append(kwargs)
 
-        def reconstruct(self, initial, final, working, cell, threshold, indices):
+        def reconstruct(
+            self, initial, final, working, cell, threshold, indices, **kwargs
+        ):
             calls["reconstruct"].append(
                 {
                     "initial": np.array(initial, copy=True),

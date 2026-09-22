@@ -37,8 +37,16 @@ def test_basin_initialize_then_reconstruct_keeps_source_global_ids(monkeypatch, 
             region_type="plane", normal="y", side="above", threshold=3.3
         ),
         basin=SimpleNamespace(style=style),
+        # The standard test rcut (tests/data/input.in); containment is not
+        # under test here.
+        atomicenvironment=SimpleNamespace(rcut=6.5),
         psr=SimpleNamespace(matching_score_thr=1e-10),
-        reconstruction=SimpleNamespace(push_fraction=0.25),
+        reconstruction=SimpleNamespace(
+            push_fraction=0.25,
+            n_movers=3,
+            containment_margin=1.0,
+            shell_tolerance=1e-10,
+        ),
     )
     full_source = System(
         positions=initial.copy(),

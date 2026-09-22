@@ -812,6 +812,21 @@ class ReconstructionConfig(BaseModel):
         default=0.15,
         description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
     )
+    n_movers: int = Field(
+        default=3,
+        gt=0,
+        description="Size of the core of an event, its most-displaced atoms (min1->min2). Every atom whose event displacement exceeds psr.matching_score_thr is tight-checked against that threshold, however many there are; only when no atom exceeds it (a sub-threshold event) are the top n_movers atoms tight-checked instead. Peripheral atoms that did not move during the event do not veto the match. The top-n_movers core is also the set measured by the rcut containment guard, so a collective event's small elastic ripple near the shell edge does not count against containment.",
+    )
+    containment_margin: float = Field(
+        default=1.0,
+        gt=0,
+        description="Radius margin (Angstrom): the event movers must sit within (atomicenvironment.rcut - containment_margin) of the central atom at min1, the saddle, AND min2, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained. Must be > 0 and < atomicenvironment.rcut.",
+    )
+    shell_tolerance: float = Field(
+        default=1.0,
+        gt=0,
+        description="Looser whole-rcut-shell acceptance bound (Angstrom). On top of the tight n_movers check, EVERY atom in the rcut shell must land within shell_tolerance of its expected min1/min2 position. This catches a peripheral (non-mover) atom that relaxed into a distinct site (a large displacement) while tolerating the small wiggle of atoms that merely settled around the event; the movers-only check alone would accept such a wrong overall state. Set well above the expected peripheral relaxation (~tenths of an Angstrom) but below a nearest-neighbour site change.",
+    )
 
 
 class BasinConfig(BaseModel):
@@ -1259,6 +1274,41 @@ class Config(BaseModel):
         """Propagate control.verbosity to lammps.verbosity when not explicitly set."""
         if self.lammps is not None and self.lammps.verbosity is None:
             self.lammps.verbosity = self.control.verbosity
+        return self
+
+    @model_validator(mode="after")
+    def validate_containment_margin(self) -> "Config":
+        """Ensure the reconstruction containment margin fits inside ``rcut``.
+
+        ``reconstruction.containment_margin`` is subtracted from
+        ``atomicenvironment.rcut`` to form the mover-containment limit
+        (``rcut - containment_margin``). A margin that meets or exceeds ``rcut``
+        drives that limit to <= 0, so every event with a nonzero-radius mover is
+        rejected as not contained and the run silently purges its whole
+        catalogue. The field-level ``gt=0`` already forbids the zero/negative
+        margin that would disable the guard; this cross-field check forbids the
+        too-large one.
+
+        Returns
+        -------
+        Self
+            The validated `Config` instance.
+
+        Raises
+        ------
+        ValueError
+            If ``containment_margin >= atomicenvironment.rcut``.
+
+        """
+        rcut = self.atomicenvironment.rcut
+        margin = self.reconstruction.containment_margin
+        if rcut is not None and margin >= rcut:
+            raise ValueError(
+                "reconstruction.containment_margin ({}) must be < "
+                "atomicenvironment.rcut ({}); otherwise the containment limit "
+                "(rcut - containment_margin) is <= 0 and every event is rejected "
+                "as not contained.".format(margin, rcut)
+            )
         return self
 
 

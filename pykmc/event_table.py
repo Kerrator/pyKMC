@@ -2468,6 +2468,25 @@ class ActiveEventTable:
         self._full_saddles = {}
         self._full_saddle_constraints = {}
 
+    def row_crop_ids(self, label: int) -> "tuple[int, ...] | None":
+        """Return one row's stored crop identities, from whichever channel holds them.
+
+        The htst/rpa styles carry them in the row (``crop_atom_ids``); the
+        constant style keeps the legacy table schema and holds them beside it
+        in ``_constant_crop_ids``. Returns ``None`` when the row has none
+        (a legacy row), so callers fall back instead of aligning on nothing.
+        """
+        if not self.uses_prefactors:
+            ids = self._constant_crop_ids.get(int(label))
+            if ids is not None:
+                return ids
+        if "crop_atom_ids" not in self.table.columns:
+            return None
+        stored = self.table.at[label, "crop_atom_ids"]
+        if stored is None or (isinstance(stored, float) and math.isnan(stored)):
+            return None
+        return stored
+
     def has_crop_correspondence(self, label: int) -> bool:
         """Distinguish absent legacy metadata from invalid declared identities."""
         if int(label) in self._constant_crop_ids:
@@ -3481,7 +3500,13 @@ class ActiveEventTable:
             a, b = self.table.loc[first], self.table.loc[second]
             left, right = np.asarray(a.saddle_positions), np.asarray(b.saddle_positions)
             try:
-                ids_a, ids_b = _indices(a.crop_atom_ids), _indices(b.crop_atom_ids)
+                # Both channels: a constant row's identities live beside the
+                # table, and without them the compare below is positional --
+                # which silently compares different atoms once a recycled row
+                # keeps its event-time crop order and a fresh row follows the
+                # current neighbour list.
+                ids_a = _indices(self.row_crop_ids(first))
+                ids_b = _indices(self.row_crop_ids(second))
             except (AttributeError, TypeError, ValueError):
                 if (
                     not self.uses_prefactors
@@ -3552,14 +3577,19 @@ class ActiveEventTable:
 
                 for i, idx in enumerate(indices):  # Loop over indice of subset
                     central_atom1 = subset.loc[idx, "atom_index"]
-                    if "crop_atom_ids" in self.table.columns:
+                    # A table that carries the column (htst/rpa) always compares
+                    # by identity, so a row without identities is never
+                    # compared; a constant row takes that branch when it has
+                    # its own.
+                    if (
+                        "crop_atom_ids" in self.table.columns
+                        or self.row_crop_ids(idx) is not None
+                    ):
                         for jdx in indices[i + 1 :]:
                             if central_atom1 == subset.loc[jdx, "atom_index"]:
                                 continue
                             try:
-                                other_ids = _indices(
-                                    self.table.at[jdx, "crop_atom_ids"]
-                                )
+                                other_ids = _indices(self.row_crop_ids(jdx))
                                 center_id = int(
                                     neighbors_list.system.index[int(central_atom1)]
                                 )
@@ -3583,6 +3613,10 @@ class ActiveEventTable:
 
                     for jdx in indices[i + 1 :]:  # to not compare two times
                         central_atom2 = subset.loc[jdx, "atom_index"]
+                        if self.row_crop_ids(jdx) is not None:
+                            # Its crop follows its stored identities, not the
+                            # current neighbour order: nothing to compare on.
+                            continue
                         if (
                             central_atom1 != central_atom2
                         ):  # if yes already done in part 1.

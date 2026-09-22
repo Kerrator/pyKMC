@@ -532,6 +532,18 @@
   <details><summary>Description</summary>
   Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
+- **`n_movers`** : `int`, default = `3`
+  <details><summary>Description</summary>
+  Size of the core of an event, its most-displaced atoms (min1->min2). Every atom whose event displacement exceeds psr.matching_score_thr is tight-checked against that threshold, however many there are; only when no atom exceeds it (a sub-threshold event) are the top n_movers atoms tight-checked instead. Peripheral atoms that did not move during the event do not veto the match. The top-n_movers core is also the set measured by the rcut containment guard, so a collective event's small elastic ripple near the shell edge does not count against containment.
+  </details>
+- **`containment_margin`** : `float`, default = `1.0`
+  <details><summary>Description</summary>
+  Radius margin (Angstrom): the event movers must sit within (atomicenvironment.rcut - containment_margin) of the central atom at min1, the saddle, AND min2, else the event is judged too large for the rcut neighbourhood and reconstruction is rejected as not contained. Must be > 0 and < atomicenvironment.rcut.
+  </details>
+- **`shell_tolerance`** : `float`, default = `1.0`
+  <details><summary>Description</summary>
+  Looser whole-rcut-shell acceptance bound (Angstrom). On top of the tight n_movers check, EVERY atom in the rcut shell must land within shell_tolerance of its expected min1/min2 position. This catches a peripheral (non-mover) atom that relaxed into a distinct site (a large displacement) while tolerating the small wiggle of atoms that merely settled around the event; the movers-only check alone would accept such a wrong overall state. Set well above the expected peripheral relaxation (~tenths of an Angstrom) but below a nearest-neighbour site change.
+  </details>
 
 ---
 
