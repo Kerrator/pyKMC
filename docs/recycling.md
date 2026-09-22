@@ -106,12 +106,13 @@ Increase it for interstitials, for collective events that move many atoms, or wh
 To check a cutoff, run the same system with `recycle = False` (or with `distance_thr` doubled) for a comparable number of steps and compare the barriers of the executed events and the total energies reported in the KMC log.
 Because event selection is stochastic, the two runs follow different trajectories: compare the distributions over many steps rather than step by step.
 Barriers or energies that only the recycled run produces mean that stale events are being selected and the cutoff must be raised.
-The two log lines quoted above tell you how much refinement work a given cutoff saves.
+The two log lines quoted above tell you how much refinement work a given cutoff saves (with `htst`/`rpa`, fewer; see below).
 
 ## Interactions with other features
 
 - **Basins.** When the selected event triggers a basin super-event, recycling is suspended for that step: the super-event moves many atoms, so the active table is cleared entirely and the next step refines everything. Recycling resumes on the following ordinary step.
 - **Active volumes.** Recycling applies no special handling to active volumes; recycled rows are used as they are. This combination has not been validated.
+- **`htst` / `rpa` rate constants.** The displacement rule is only the first filter for these styles. Before refinement and again before selection, every recycled row is also checked against its dependency region: it is dropped, and re-refined like a fresh row, if any atom within `free_radius + interaction_range` of its moving atom moved by more than 1e-8 Å, if its stored neighbour identities no longer match, or if it has no usable prefactor state. With the default `interaction_range` this sphere has a 19 Å radius, so almost every executed event drops every recycled row, and C in the example above would normally be re-refined. The `Recycling N events from the previous step` line is printed before this check, so N overstates the refinements actually saved. See [Physical descriptors](physical_descriptors.md) and the `interaction_range` section of the [User Guide](user_guide.md). With `style = constant` the check does nothing.
 - **Reconstruction.** A recycled event is reconstructed at selection time like any other active event. A failed reconstruction is handled exactly as for a freshly refined event: it is logged, the active event is removed, the selection is repeated, and the underlying reference event is dropped from the catalogue.
 
 ## Extending

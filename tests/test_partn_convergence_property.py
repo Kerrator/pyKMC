@@ -32,7 +32,8 @@ class _FakeArtn:
         self.calls: list[tuple[str, Any]] = []
 
     def reset_input(self) -> None:
-        """Match the pypARTn API; nothing to reset on the fake."""
+        """Forget earlier sets, as pARTn does: a value set before the reset is lost."""
+        self.calls.clear()
 
     def set(self, key: str, value: Any) -> None:
         """Record one parameter transmission."""
