@@ -1138,7 +1138,13 @@ class TestConstantPathIsolation:
             """
         )
         root = Path.cwd()
-        env = dict(os.environ, PYTHONPATH=str(root))
+        # Prepend, never replace: IRA/pARTn may come only from PYTHONPATH
+        # (the Linux box, the DRAC preamble).
+        inherited = os.environ.get("PYTHONPATH")
+        pythonpath = os.pathsep.join(
+            [str(root), inherited] if inherited else [str(root)]
+        )
+        env = dict(os.environ, PYTHONPATH=pythonpath)
         proc = subprocess.run(
             [sys.executable, "-c", script],
             cwd=root,
