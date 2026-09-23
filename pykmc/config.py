@@ -8,8 +8,9 @@ from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator, ValidationError, field_validator
 import configparser
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from dataclasses import dataclass
+from numbers import Real
 
 
 @dataclass
@@ -507,23 +508,192 @@ class PartnConfig(BaseModel):
 
 
 class RateConstantConfig(BaseModel):
-    """Rate constant computation parameters."""
+    """Rate constant computation parameters.
 
-    style: Literal["constant"] = Field(
+    The rate of an event is ``k = k_prefactor * exp(-dE / (kb * T))`` with every
+    rate and prefactor in ps^-1. ``style`` selects the prefactor backend in
+    ``pykmc.rate_constant.backends``:
+
+    - ``constant``: ``k_prefactor = k0`` for every event.
+    - ``htst``: harmonic transition state theory; ``k_prefactor`` is the
+      per-event Vineyard frequency ``nu0`` (computed in Hz by the HTST kernel
+      and converted to ps^-1 once), falling back to ``k0`` when no estimate is
+      available for that event.
+    - ``rpa``: registered alias of ``htst``; bare Vineyard, no recrossing
+      correction is implemented.
+
+    The HTST-only fields (``free_radius``, ``free_region_center``, ``fd_step``,
+    ``zone_radius``, ``interaction_range``, ``nu0_min_THz``, ``nu0_max_THz``,
+    ``premin``) are validated for every style and ignored by ``constant``.
+    """
+
+    K0_MAX_PS_INV: ClassVar[float] = 1.0e4
+    """Largest ``k0`` (ps^-1) accepted for ``htst``/``rpa``; a larger value is read as Hz."""
+
+    style: Literal["constant", "htst", "rpa"] = Field(
         default=...,
-        description="Method used to compute the prefactor of the rate constant. ",
+        description="Method used to compute the prefactor of the rate constant: "
+        "'constant' (fixed `k0`), 'htst' (per-event harmonic TST / Vineyard prefactor "
+        "with `k0` as the fallback) or 'rpa' (alias of 'htst': bare Vineyard, no "
+        "recrossing correction is implemented).",
     )
     k0: float = Field(
         default=1.0,
-        description="When `style` is set to **'constant'**, this value is used directly as the pre-exponential factor ($k_0$) "
+        gt=0.0,
+        allow_inf_nan=False,
+        description="Prefactor in ps^-1 (1.0 = 1 THz). When `style` is **'constant'** "
+        "it is used directly as the pre-exponential factor ($k_0$); for **'htst'** "
+        "and **'rpa'** it is the per-event fallback when no Vineyard prefactor is "
+        "available. For 'htst'/'rpa' a value above 1e4 ps^-1 is rejected because it "
+        "was almost certainly entered in Hz."
         "\n"
         "$$ k = k_{0} \\exp\\left(-\\frac{\\Delta E}{k_{b}T}\\right) $$"
         "\n",
     )
     T: float = Field(
-        default=300,
+        default=300.0,
+        gt=0.0,
+        allow_inf_nan=False,
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
+    free_radius: float = Field(
+        default=6.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: radius (Angstrom) around the moving atom selecting the free "
+        "(movable) atoms of the partial Hessian; every other atom is frozen. The "
+        "log reports the free-set size per request.",
+    )
+    free_region_center: Literal["saddle", "min1"] = Field(
+        default="saddle",
+        description="HTST: geometry in which the free (movable) region of the "
+        "partial Hessians is selected around the moving atom. 'saddle' (default) "
+        "centres the one common free region on the atom's saddle-point position, "
+        "which is symmetric between the two minima by construction. 'min1' centres "
+        "it on the atom's initial position (the original model); on the symmetric "
+        "SW-Si vacancy hop this gives forward and backward prefactors that differ "
+        "by 20 percent (23.6 vs 19.6 THz) purely through the frozen-boundary "
+        "choice, so 'min1' exists only for comparison with older results.",
+    )
+    fd_step: float = Field(
+        default=0.01,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: central finite-difference displacement (Angstrom) used to "
+        "build the Hessian.",
+    )
+    force_tol: float = Field(
+        default=0.005,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: maximum raw force norm (eV/Angstrom) on any atom of "
+        "the common vibrational set at each stationary geometry, after premin "
+        "and cropping. Fixed-atom reaction forces are excluded. Larger or "
+        "nonfinite forces reject the native prefactor calculation.",
+    )
+    zone_radius: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: optional radius (Angstrom) around the moving atom used to "
+        "crop the scratch system on which the Hessians are computed. None (default) "
+        "uses the full system.",
+    )
+    interaction_range: float = Field(
+        default=13.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: interaction range (Angstrom) of the force model, the "
+        "largest distance over which a fixed atom's position enters the partial "
+        "Hessian of a free atom: the pair-style cutoff for a pair potential, up "
+        "to twice the cutoff for an embedded-atom, moment-tensor or three-body "
+        "potential. Used only when recycling active events between steps: a "
+        "stored site prefactor depends on every atom within "
+        "`free_radius + interaction_range` of the moving atom (within "
+        "`zone_radius` when the calculation was zone-cropped) and any motion of "
+        "one of them invalidates the recycled row. It never enters a computed "
+        "prefactor. The default is twice the 6.5 Angstrom cutoff of the Ni EAM "
+        "potential shipped with the tests, the largest of the shipped potentials; "
+        "a value matched to the potential keeps more recycled rows valid.",
+    )
+    nu0_min_THz: float = Field(
+        default=1.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: lower bound (THz) of the acceptance window for the Vineyard "
+        "prefactor nu0. The window is applied by the HTST kernel: an estimate below "
+        "it is rejected and the event falls back to `k0`. Must be < `nu0_max_THz`.",
+    )
+    nu0_max_THz: float = Field(
+        default=100.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="HTST: upper bound (THz) of the acceptance window for the Vineyard "
+        "prefactor nu0. The window is applied by the HTST kernel: an estimate above "
+        "it is rejected and the event falls back to `k0`. Must be > `nu0_min_THz`.",
+    )
+    premin: bool = Field(
+        default=False,
+        description="HTST: relax the surroundings of the event with the event core "
+        "frozen before computing the Hessians.",
+    )
+
+    @field_validator("zone_radius", mode="before")
+    @classmethod
+    def _parse_optional_zone_radius(cls, v: Any) -> Any:
+        """Accept the INI spelling ``None`` for an absent ``zone_radius``."""
+        if v is None or (isinstance(v, str) and v.strip().lower() == "none"):
+            return None
+        return v
+
+    @field_validator("force_tol", mode="before")
+    @classmethod
+    def _require_force_tolerance_number(cls, v: Any) -> Any:
+        """Do not interpret a boolean as a force tolerance."""
+        if not isinstance(v, (str, Real)) or isinstance(v, bool):
+            raise ValueError("force_tol must be a finite positive number, not bool")
+        return v
+
+    @model_validator(mode="after")
+    def _check_nu0_window(self) -> RateConstantConfig:
+        """Require an ordered ``nu0`` acceptance window."""
+        if self.nu0_min_THz >= self.nu0_max_THz:
+            raise ValueError(
+                "nu0_min_THz must be < nu0_max_THz, got "
+                f"nu0_min_THz={self.nu0_min_THz} and nu0_max_THz={self.nu0_max_THz}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_zone_radius(self) -> RateConstantConfig:
+        """Require the crop zone to enclose the free region when it is set."""
+        if self.zone_radius is not None and self.zone_radius <= self.free_radius:
+            raise ValueError(
+                "zone_radius must be > free_radius when set (the frozen shell "
+                f"between them is the Hessian boundary), got zone_radius="
+                f"{self.zone_radius} and free_radius={self.free_radius}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_k0_units(self) -> RateConstantConfig:
+        """Reject a Hz-scale ``k0`` for the ``htst``/``rpa`` styles.
+
+        Those backends convert a successful Vineyard ``nu0`` from Hz to ps^-1
+        but use ``k0`` as is when the estimate is unavailable. A ``k0`` entered
+        in Hz would make every fallback event ~1e12 times too fast, dominate the
+        selection and freeze the KMC clock, so a value above ``K0_MAX_PS_INV``
+        is treated as a unit error. The ``constant`` style keeps accepting any
+        positive ``k0`` (there it only rescales the absolute time).
+        """
+        if self.style in ("htst", "rpa") and self.k0 > self.K0_MAX_PS_INV:
+            raise ValueError(
+                f"k0 is in ps^-1 (1.0 = 1 THz), got k0={self.k0:g} for style "
+                f"'{self.style}', above the {self.K0_MAX_PS_INV:g} ps^-1 limit. A value "
+                "such as 1e12 means the prefactor was entered in Hz: divide it by "
+                "1e12 (k0 = 1.0 for a 1 THz fallback)."
+            )
+        return self
 
 
 class PSRConfig(BaseModel):

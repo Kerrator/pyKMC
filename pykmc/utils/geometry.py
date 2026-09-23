@@ -7,9 +7,72 @@ __all__ = [
     "compute_delr",
     "per_atom_displacement",
     "minimum_image_distance",
+    "normalize_pbc",
+    "wrap_positions",
+    "minimum_image_displacement",
+    "periodic_tree_inputs",
 ]
 import ase.geometry
 import numpy as np
+
+
+def normalize_pbc(pbc: bool | np.ndarray) -> np.ndarray:
+    """Return an owned three-axis boolean array, rejecting ambiguous shapes."""
+    axes = np.asarray(pbc)
+    if axes.ndim == 0 and axes.dtype.kind == "b":
+        return np.full(3, bool(axes), dtype=bool)
+    if axes.shape != (3,) or axes.dtype.kind != "b":
+        raise ValueError("PBC must be a boolean scalar or three boolean axes")
+    return axes.copy()
+
+
+def wrap_positions(
+    positions: np.ndarray, cell: np.ndarray, pbc: bool | np.ndarray = True
+) -> np.ndarray:
+    """Wrap periodic coordinates without changing open-axis displacements."""
+    axes = normalize_pbc(pbc)
+    values = np.array(positions, dtype=float, copy=True)
+    if values.ndim != 2 or values.shape[1] != 3 or not np.isfinite(values).all():
+        raise ValueError("positions must be a finite (N, 3) array")
+    if not axes.any():
+        return values
+    # eps=0 keeps periodic orthorhombic coordinates in [0, L), without a
+    # Cartesian clamp that would destroy negative nonperiodic coordinates.
+    return ase.geometry.wrap_positions(values, cell=cell, pbc=axes, eps=0)
+
+
+def minimum_image_displacement(
+    displacement: np.ndarray, cell: np.ndarray | None, pbc: bool | np.ndarray = True
+) -> np.ndarray:
+    """Return displacement vectors using only the declared periodic axes."""
+    axes = normalize_pbc(pbc)
+    values = np.array(displacement, dtype=float, copy=True)
+    if not np.isfinite(values).all() or values.shape[-1:] != (3,):
+        raise ValueError("displacement must contain finite three-vectors")
+    if cell is None or not axes.any():
+        return values
+    return ase.geometry.find_mic(values, cell=cell, pbc=axes)[0]
+
+
+def periodic_tree_inputs(
+    positions: np.ndarray, cell: np.ndarray, pbc: bool | np.ndarray = True
+) -> tuple[np.ndarray, np.ndarray]:
+    """Prepare orthorhombic coordinates and cKDTree box sizes with open axes."""
+    axes = normalize_pbc(pbc)
+    cell = np.asarray(cell, dtype=float)
+    if cell.shape != (3, 3) or not np.isfinite(cell).all():
+        raise ValueError("neighbor queries require a finite orthorhombic cell")
+    lengths = np.diag(cell)
+    if not np.allclose(cell, np.diag(lengths), rtol=0, atol=1e-12):
+        raise ValueError("neighbor queries support orthorhombic cells only")
+    if np.any(lengths[axes] <= 0):
+        raise ValueError("periodic cell lengths must be positive")
+    values = wrap_positions(positions, cell, axes)
+    # A value infinitesimally below zero may round to L during wrapping.
+    for axis in np.flatnonzero(axes):
+        values[values[:, axis] >= lengths[axis], axis] = 0.0
+    # cKDTree uses zero boxsize for open axes, including negative positions.
+    return values, np.where(axes, lengths, 0.0)
 
 
 def transform_positions(

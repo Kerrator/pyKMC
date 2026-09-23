@@ -4,6 +4,7 @@ import numpy as np
 import ctypes
 import functools
 import os
+from dataclasses import dataclass, replace
 from typing import Protocol
 from .base import Engine
 from ase.cell import Cell
@@ -24,6 +25,7 @@ from ..activevolume.active_volume import (
     position_results_AV,
 )
 from ..atomic_environment import AtomicEnvironment
+from ..physics import EnginePhysics, ForceModel
 from ..result import (
     ErrorInfo,
     EventSearchOutput,
@@ -59,6 +61,185 @@ def lammps_error_handler(method):
             ) from e
 
     return wrapper
+
+
+# ----------------------------------------------------------------------
+# Species / type / mass rule (one authoritative implementation)
+# ----------------------------------------------------------------------
+
+
+def species_map(
+    types: list[str] | np.ndarray,
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Return the potential species order and the masses LAMMPS is given.
+
+    This is the default rule for chemical symbols without an explicit map:
+    species are ``sorted(set(types))`` (alphabetical),
+    species ``i`` (0-based) is LAMMPS type ``i + 1`` and its mass is the ASE
+    standard atomic mass in amu. ``LammpsEngine.initialize_system`` and the
+    standalone active-volume helpers both use it. Real active-volume crops
+    instead reuse the initialized full-system descriptor, preserving explicit
+    species order, absent slots and post-potential masses.
+
+    Consequently the elements of a multi-element ``pair_coeff`` **must be
+    listed in this alphabetical order when this default map is used**
+    (for example ``* * NiFeCr.eam Cr Ni``
+    for a Ni/Cr system), and ``types`` must be the *full* system's symbols:
+    a crop that holds only a subset of the species still needs the full map.
+
+    Parameters
+    ----------
+    types : list[str] | np.ndarray
+        Chemical symbols, one per atom (full system).
+
+    Returns
+    -------
+    tuple[tuple[str, ...], tuple[float, ...]]
+        ``(species, masses)``: plain tuples of ``str`` and ``float`` in LAMMPS
+        type order, ready to be stored on an ``HTSTEventRequest``.
+
+    Raises
+    ------
+    ValueError
+        If ``types`` is empty or contains an unknown chemical symbol.
+
+    """
+    symbols = [str(t) for t in types]
+    if not symbols:
+        raise ValueError("species_map: `types` must contain at least one atom")
+    species = tuple(sorted(set(symbols)))
+    try:
+        masses = tuple(float(atomic_masses[atomic_numbers[s]]) for s in species)
+    except KeyError as exc:
+        raise ValueError(f"species_map: unknown chemical symbol {exc}") from exc
+    return species, masses
+
+
+def types_to_int(types: list[str] | np.ndarray, species: tuple[str, ...]) -> np.ndarray:
+    """Map chemical symbols to 1-based LAMMPS integer types.
+
+    Parameters
+    ----------
+    types : list[str] | np.ndarray
+        Chemical symbols, one per atom (any subset of the full system).
+    species : tuple[str, ...]
+        Species order from ``species_map`` (built from the *full* system).
+
+    Returns
+    -------
+    np.ndarray
+        ``int32`` array, ``species.index(symbol) + 1`` for every entry.
+
+    Raises
+    ------
+    ValueError
+        If a symbol in ``types`` is not in ``species``.
+
+    """
+    lookup = {s: i + 1 for i, s in enumerate(species)}
+    try:
+        return np.array([lookup[str(t)] for t in types], dtype=np.int32)
+    except KeyError as exc:
+        raise ValueError(
+            f"types_to_int: symbol {exc} is not in the species map {species}"
+        ) from exc
+
+
+def _validate_species_override(
+    species: tuple[str, ...], masses: tuple[float, ...]
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Check an explicit ``(species, masses)`` map for ``initialize_system``.
+
+    The override lets a scratch instance that holds only a subset of the atoms
+    (an HTST zone crop) keep the *full* system's type numbering and masses, so
+    an integer type means the same species in every instance built from the
+    same full system and a multi-element ``pair_coeff`` still matches
+    ``create_box``.
+
+    Parameters
+    ----------
+    species : tuple[str, ...]
+        Potential species order (``pair_coeff`` order); non-empty, unique.
+    masses : tuple[float, ...]
+        One finite positive mass in amu per species, in ``species`` order.
+
+    Returns
+    -------
+    tuple[tuple[str, ...], tuple[float, ...]]
+        ``(species, masses)`` as plain tuples of ``str`` and ``float``.
+
+    Raises
+    ------
+    ValueError
+        If either sequence is malformed or their lengths differ.
+
+    """
+    if isinstance(species, str) or not species:
+        raise ValueError("initialize_system: species must be a non-empty sequence")
+    species_t = tuple(str(s) for s in species)
+    if len(set(species_t)) != len(species_t):
+        raise ValueError(f"initialize_system: species contains duplicates: {species_t}")
+    if len(masses) != len(species_t):
+        raise ValueError(
+            f"initialize_system: masses has {len(masses)} entries but species has "
+            f"{len(species_t)}"
+        )
+    masses_t = []
+    for symbol, mass in zip(species_t, masses, strict=True):
+        if isinstance(mass, (bool, np.bool_)):
+            raise ValueError(f"initialize_system: mass of {symbol!r} must be a number")
+        value = float(mass)
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"initialize_system: mass of {symbol!r} must be finite and > 0, "
+                f"got {mass!r}"
+            )
+        masses_t.append(value)
+    return species_t, tuple(masses_t)
+
+
+@dataclass(frozen=True, eq=False)
+class FullSystem:
+    """What ``LammpsEngine`` remembers about the last fully initialised system.
+
+    Positions are deliberately not stored: they change every KMC step and the
+    caller that needs a restore always has the current ones. ``cell`` is a
+    private copy; ``pbc`` is a plain tuple.
+
+    Attributes
+    ----------
+    types : tuple[str, ...]
+        Chemical symbol of every atom, in engine (LAMMPS id - 1) order.
+    species : tuple[str, ...]
+        Potential species order (see ``species_map``). Together with
+        ``masses`` it is the explicit map an HTST scratch instance is built
+        from, so a crop holding a subset of the species keeps the full
+        system's type numbering.
+    masses : tuple[float, ...]
+        Mass of each species in amu, in ``species`` order, as the live
+        instance holds them: ``initialize_system`` records the ASE values it
+        emitted and ``initialize_potential`` refreshes them from
+        ``extract_atom("mass")`` after ``pair_coeff``, because a potential
+        file that carries masses (``eam/alloy``, ``eam/fs``) overrides the
+        emitted ones. Between the two calls they are the ASE values.
+    cell : np.ndarray
+        (3, 3) cell in the ASE frame.
+    pbc : tuple[bool, bool, bool]
+        Periodicity per axis.
+
+    """
+
+    types: tuple[str, ...]
+    species: tuple[str, ...]
+    masses: tuple[float, ...]
+    cell: np.ndarray
+    pbc: tuple[bool, bool, bool]
+    physics: EnginePhysics | None = None
+
+    @property
+    def natoms(self) -> int:
+        """Number of atoms in the full system."""
+        return len(self.types)
 
 
 class LammpsConfigProtocol(Protocol):
@@ -160,6 +341,8 @@ class LammpsEngine(Engine):
         self.engine_id = engine_id
         self._is_orthorhombic = None
         self.lmp = None
+        # Remembered full system (set by initialize_system).
+        self.full_system: FullSystem | None = None
 
     # Convenience
     @property
@@ -216,9 +399,46 @@ class LammpsEngine(Engine):
         positions: np.ndarray,
         cell: Cell,
         pbc: list[bool] | np.ndarray[bool],
+        *,
+        species: tuple[str, ...] | None = None,
+        masses: tuple[float, ...] | None = None,
     ) -> None:
+        """Define the box, atoms, integer types and per-type masses.
+
+        Parameters
+        ----------
+        types : list[str] | np.ndarray
+            Chemical symbol of every atom.
+        positions : np.ndarray
+            ``(N, 3)`` positions in the ASE frame.
+        cell : Cell
+            Simulation cell (anything ``Cell.new`` accepts).
+        pbc : list[bool] | np.ndarray
+            Periodicity per axis.
+        species : tuple[str, ...], optional
+            Keyword-only. Explicit potential species order to use instead of
+            ``species_map(types)``. Pass it together with ``masses`` when the
+            instance holds only a subset of a larger system (an HTST zone
+            crop) so the full system's type numbering and masses are kept.
+            When omitted the behaviour is exactly ``species_map(types)``.
+        masses : tuple[float, ...], optional
+            Keyword-only. Masses in amu in ``species`` order; required with
+            ``species``.
+
+        Raises
+        ------
+        ValueError
+            If ``pbc`` is malformed, if only one of ``species``/``masses`` is
+            given, if the override is malformed, or if a symbol in ``types``
+            is not in the species map.
+
+        """
         # system parameters
         natoms = len(types)
+        cell = Cell.new(cell)
+        pbc = tuple(bool(p) for p in pbc)
+        if len(pbc) != 3:
+            raise ValueError(f"initialize_system: pbc must have 3 entries, got {pbc}")
         # To deal with Lammps convention if non orthonhombic cell
         self._is_orthorhombic = cell.orthorhombic
         if not self._is_orthorhombic:
@@ -243,12 +463,19 @@ class LammpsEngine(Engine):
         self.lmp.command(f"boundary {boundary}")
 
         ind = np.arange(1, natoms + 1)  # Lammps ids start at 1
-        # map type to int alphabetic order create a dictionary with atom id and mass, eg {'H' : {'ref': 1, 'mass' : 1.00}, 'Ni': {'ref' : 2, 'mass' : 58.69} }
-        map_type = {
-            atom_type: {"ref": i + 1, "mass": atomic_masses[atomic_numbers[atom_type]]}
-            for i, atom_type in enumerate(sorted(set(types)))
-        }
-        int_types = [map_type[element]["ref"] for element in types]  # map to integer
+        # One rule for species -> 1-based LAMMPS type and mass (see species_map):
+        # alphabetical species order, ASE masses. pair_coeff must follow it. An
+        # explicit (species, masses) pair carries a full system's map into a
+        # scratch instance that holds only some of its atoms.
+        if (species is None) != (masses is None):
+            raise ValueError(
+                "initialize_system: species and masses must be given together"
+            )
+        if species is None:
+            species, masses = species_map(types)
+        else:
+            species, masses = _validate_species_override(species, masses)
+        int_types = types_to_int(types, species).tolist()
 
         # lammps create system
         # ortho
@@ -259,23 +486,61 @@ class LammpsEngine(Engine):
             self.lmp.command(
                 f"region box prism 0.0 {xhi} 0.0 {yhi} 0.0 {zhi} {xy} {xz} {yz}"
             )
-        self.lmp.command("create_box {} box".format(len(map_type)))
+        self.lmp.command("create_box {} box".format(len(species)))
         self.lmp.create_atoms(natoms, ind, int_types, x)
         # Set masses
-        for key in map_type.keys():
-            self.lmp.command(
-                "mass {} {}".format(map_type[key]["ref"], map_type[key]["mass"])
-            )
+        for i, mass in enumerate(masses):
+            self.lmp.command("mass {} {}".format(i + 1, mass))
         # Label atoms name to type :
         self.lmp.command(
-            "labelmap atom "
-            + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
+            "labelmap atom " + " ".join(f"{i + 1} {s}" for i, s in enumerate(species))
+        )
+        # Remember the full system: HTST scratch instances are built from it.
+        self.full_system = FullSystem(
+            types=tuple(str(t) for t in types),
+            species=species,
+            masses=masses,
+            cell=np.array(cell, dtype=np.float64, copy=True),
+            pbc=(pbc[0], pbc[1], pbc[2]),
         )
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
+        """Issue ``pair_style`` / ``pair_coeff`` and complete the live system.
+
+        Refreshes ``full_system.masses`` from the live instance (a potential
+        file may override the emitted masses) and records the engine physics
+        (force model, species and masses) the HTST extension verifies.
+        """
+        force_model = ForceModel.capture(self.config)
         self.lmp.command("pair_style {}".format(self.config.pair_style))
         self.lmp.command("pair_coeff {}".format(self.config.pair_coeff))
+        self._refresh_full_system_masses()
+        if ForceModel.capture(self.config) != force_model:
+            raise RuntimeError("force-model contents changed during initialization")
+        if self.full_system is not None:
+            fs = self.full_system
+            self.full_system = replace(
+                fs, physics=EnginePhysics.capture(self.config, fs.species, fs.masses)
+            )
+
+    def _refresh_full_system_masses(self) -> None:
+        """Record the per-type masses the live instance holds after ``pair_coeff``.
+
+        ``eam/alloy``-style potentials re-set the masses from the potential
+        file, so ``full_system.masses`` (what an HTST request is built from)
+        follows the live instance rather than the ASE values emitted earlier.
+        Per-type masses are global, so every rank reads the same values.
+        """
+        fs = self.full_system
+        if fs is None or self.lmp is None:
+            return
+        live = self.lmp.extract_atom("mass")
+        if live is None:
+            return
+        masses = tuple(float(live[i + 1]) for i in range(len(fs.species)))
+        if masses != fs.masses:
+            self.full_system = replace(fs, masses=masses)
 
     @lammps_error_handler
     def get_positions(self) -> np.ndarray | None:
@@ -295,6 +560,39 @@ class LammpsEngine(Engine):
         positions = np.ascontiguousarray(positions)
         c_array = (ctypes.c_double * len(positions))(*positions)
         self.lmp.scatter_atoms("x", 1, 3, c_array)
+
+    @lammps_error_handler
+    def get_forces(
+        self, positions: np.ndarray | None = None, recompute: bool = True
+    ) -> np.ndarray | None:
+        """Return the forces on every atom in eV/Å, in the ASE frame.
+
+        Like the energy getters this mutates *positions only* (when
+        ``positions`` is given) and restores nothing.
+
+        Parameters
+        ----------
+        positions : np.ndarray, optional
+            ``(N, 3)`` positions to scatter first (ASE frame).
+        recompute : bool, optional
+            Run ``run 0 post no`` before gathering so the forces match the
+            current positions. ``False`` returns the forces of the last run.
+
+        Returns
+        -------
+        np.ndarray | None
+            ``(N, 3)`` float64 copy of the forces on rank 0; ``None`` elsewhere.
+
+        """
+        if positions is not None:
+            self.set_positions(positions=positions)
+        if recompute:
+            self.lmp.command("run 0 post no")
+        result = self.lmp.gather_atoms("f", 1, 3)
+        if self._is_rank0:
+            forces = np.ctypeslib.as_array(result).reshape(-1, 3).astype(np.float64)
+            return self._positions_from_lammps(positions=forces)
+        return None
 
     @lammps_error_handler
     def get_total_energy(

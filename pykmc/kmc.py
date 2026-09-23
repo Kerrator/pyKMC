@@ -58,6 +58,27 @@ from .bias import Bias
 # TODO: Add reconstruction info
 
 
+def reject_unwired_prefactor_style(config: Config) -> None:
+    """Refuse the ``htst``/``rpa`` rate styles, which this loop cannot honour.
+
+    ``RateConstantConfig`` and ``pykmc.rate_constant`` accept them, but this
+    loop requests no per-event prefactor, so every event would silently take
+    the ``k0`` fallback. Wiring the prefactor lifecycle in removes this check.
+
+    Raises
+    ------
+    ValueError
+        If ``config.rateconstant.style`` is not ``constant``.
+
+    """
+    style = config.rateconstant.style
+    if style != "constant":
+        raise ValueError(
+            f"rateconstant.style = {style} is not wired into the KMC loop yet: "
+            "every event would silently use the k0 fallback. Use style = constant."
+        )
+
+
 class KMC:
     """Manage and execute the Kinetic Monte Carlo (KMC) simulation.
 
@@ -89,6 +110,7 @@ class KMC:
     """
 
     def __init__(self, config: Config) -> None:
+        reject_unwired_prefactor_style(config)
         self.config = config
         self.loggers = None
         self.system = None

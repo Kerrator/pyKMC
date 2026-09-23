@@ -6,7 +6,7 @@ from an input file, initializes the KMC simulation, and runs it.
 
 import argparse
 from mpi4py import MPI
-from .kmc import KMC
+from .kmc import KMC, reject_unwired_prefactor_style
 from pykmc.factory import EngineManagerFactory
 from .config import Config
 
@@ -24,6 +24,9 @@ def main() -> None:
 
     # Config
     config = Config.from_ini_file(args.input)
+    # Refuse before any worker starts: a rank-0 error after the launch
+    # would leave every worker waiting.
+    reject_unwired_prefactor_style(config)
     comm = MPI.COMM_WORLD
     group_size = (
         (comm.Get_size() - 1)
