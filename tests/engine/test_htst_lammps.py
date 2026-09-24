@@ -46,6 +46,7 @@ from pykmc.htst import (  # noqa: E402
     fd_hessian_fn,
     select_free_indices,
 )
+from pykmc.htst.site_state import DEFAULT_INTERACTION_RANGE  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SI_SW = _ROOT / "examples" / "Si_vac" / "Si.sw"
@@ -720,6 +721,55 @@ class TestLammpsHTSTSerial:
         crop_engine = scratch_log[-1]
         assert 37 < crop_engine.full_system.natoms == zone_atoms.size < 1727
         assert crop_engine.full_system.species == ("Si",)
+        _assert_all_closed(scratch_log, 2)
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="zone_radius='auto' (free_radius + interaction_range, D5) arrives "
+        "in P2; this test flips to green with it",
+    )
+    def test_auto_zone_matches_full_system(
+        self,
+        search_engine: LammpsEngine,
+        hop_request: Callable[..., HTSTEventRequest],
+        scratch_log: list[LammpsEngine],
+    ) -> None:
+        """``zone_radius="auto"`` reproduces the full system to 1e-9 relative.
+
+        ``auto`` (D5) resolves to ``free_radius + interaction_range``. No range
+        is declared here, so it is ``DEFAULT_INTERACTION_RANGE`` (13 Å, the
+        ``RateConstantConfig`` default) and the zone is 6 + 13 = 19 Å about
+        the saddle: 1297 of the 1727 atoms. The 13 Å frozen shell is over
+        three SW cutoffs (3.77 Å) wide and the 4 Å shell of
+        ``test_zone_crop_matches_full_system`` is already exact to 1e-12, so
+        every free-atom Hessian block is complete and the crop must be exact.
+        The provenance records the resolved zone: a strict subset of the
+        system that contains the free set, and the atoms the crop held.
+        """
+        ext = LammpsHTSTExtension(search_engine)
+        full = ext.compute_event_prefactors(hop_request(free_radius=6.0))
+        request = hop_request(free_radius=6.0, zone_radius="auto")
+        auto = ext.compute_event_prefactors(request)
+        assert auto.n_free == full.n_free == 37
+        for cropped, reference in (
+            (auto.forward, full.forward),
+            (auto.backward, full.backward),
+        ):
+            assert cropped.ok and reference.ok
+            assert cropped.nu0_hz == pytest.approx(reference.nu0_hz, rel=1e-9)
+        resolved = select_free_indices(
+            request.saddle_positions,
+            request.center_index,
+            request.settings.free_radius + DEFAULT_INTERACTION_RANGE,
+            request.cell,
+            request.pbc,
+        )
+        assert resolved.size == 1297
+        provenance = auto.provenance
+        assert provenance.zone_indices == tuple(int(i) for i in resolved)
+        free = set(provenance.free_indices)
+        assert free < set(provenance.zone_indices) < set(range(len(request.types)))
+        assert scratch_log[-1].full_system.natoms == resolved.size
         _assert_all_closed(scratch_log, 2)
 
     def test_zone_crop_keeps_species_absent_from_the_crop(
