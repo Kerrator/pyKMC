@@ -613,6 +613,54 @@ class TestExitStatus:
             run_module.main()
         assert manager.shutdowns == 1 and aborted == [1]
 
+    def test_initiating_error_is_on_stderr_before_the_abort(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The traceback is printed before comm.Abort(1).
+
+        Under mpirun the abort kills every rank at once, so an error re-raised
+        after it never reaches Python's traceback printer (the preflight
+        refusal showed only the MPI_ABORT banner).
+        """
+        stderr_at_abort: list[str] = []
+
+        class FakeFactory:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def launch(self) -> Any:
+                return FakeManager()
+
+        class FakeKMC:
+            def __init__(self, config: Any, manager: Any = None) -> None:
+                pass
+
+            def _initialize(self) -> None:
+                raise ValueError("sentinel initialization failure 7f3a")
+
+            def run(self) -> None:
+                pass
+
+        class FakeComm:
+            def Get_size(self) -> int:
+                return 2
+
+            def Abort(self, status: int) -> None:
+                stderr_at_abort.append(capsys.readouterr().err)
+
+        ini = TestRunWiring._ini(tmp_path, "constant")
+        monkeypatch.setattr(run_module, "EngineManagerFactory", FakeFactory)
+        monkeypatch.setattr(run_module, "KMC", FakeKMC)
+        monkeypatch.setattr(run_module.MPI, "COMM_WORLD", FakeComm())
+        monkeypatch.setattr(sys, "argv", ["pykmc", "-in", str(ini)])
+        with pytest.raises(ValueError, match="sentinel"):
+            run_module.main()
+        assert len(stderr_at_abort) == 1
+        assert "ValueError: sentinel initialization failure 7f3a" in stderr_at_abort[0]
+
 
 class TestSeed:
     """``control.seed`` makes the searched atoms reproducible."""
