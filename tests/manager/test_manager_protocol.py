@@ -865,8 +865,8 @@ class _SideEffectExtension(EngineExtension):
 
     @functools.cached_property
     def cached_tolerance(self) -> float:
-        # The S5 shape: a side-effecting lazy attribute (e.g. one that builds a
-        # scratch engine) that must not run during discovery on any rank.
+        # A side-effecting lazy attribute (e.g. one that builds a scratch
+        # engine) that must not run during discovery on any rank.
         type(self).evaluations += 1
         return self.param * 0.02
 

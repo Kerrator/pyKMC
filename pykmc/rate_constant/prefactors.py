@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("log")
 
 PREFACTOR_OPERATION: str = "compute_event_prefactors"
-"""Worker operation exposed by ``LammpsHTSTExtension`` (contracts section 6)."""
+"""Worker operation exposed by ``LammpsHTSTExtension``."""
 
 
 def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
@@ -154,7 +154,7 @@ class PrefactorService:
         species order (``htst_preflight`` returns it). When set, every request
         carries it and each ``types`` entry must be one of its species; when
         ``None`` the map is derived from ``types`` through ``species_map``
-        (ASE masses). Contracts section 7d, N3.
+        (ASE masses).
 
     Attributes
     ----------
@@ -443,8 +443,8 @@ class PrefactorService:
                     raise HTSTRequestError(str(exc)) from exc
         # Report every request's free set here, on the submitting rank (worker
         # ranks have no INFO handler): a free set shrunk by user-fixed atoms or
-        # by the active-volume shell is never silent (contracts 7f policy 5 as
-        # amended by R14/N09). INFO when the shell shrank it, DEBUG otherwise.
+        # by the active-volume shell is never silent. INFO when the shell
+        # shrank it, DEBUG otherwise.
         from pykmc.htst.free_region import free_set_report
 
         for req in requests:

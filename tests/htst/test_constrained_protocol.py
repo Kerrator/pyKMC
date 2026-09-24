@@ -1,4 +1,4 @@
-"""Independent N04 constraint protocol; no native engine is started.
+"""Independent constraint protocol; no native engine is started.
 
 The mobile ID 42 has U=(q**2-1)**2+2*(y**2+z**2), q=x-3.
 Fixed ID 0 has curvature 4+12*q**2 in each of its three coordinates;
@@ -9,7 +9,6 @@ Including fixed ID 0 spuriously multiplies the result by eight.
 
 The force-model descriptor in service tests is only protocol metadata;
 the literal callback describes this polynomial, not a native pair potential.
-The unchanged archived polynomial and the native LJ5 gates remain separate.
 """
 
 from copy import deepcopy

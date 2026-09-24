@@ -1,9 +1,5 @@
 """A basin exit must carry the sampled physical edge through existing output.
 
-Promoted from the frozen external copy
-``repair-execution/R11/consumer-preparation-01/test_exit_edge_consumers_v1.py``
-(review directory ``docs/reviews/2026-09-19-htst-overnight``); assertions unchanged.
-
 Completed graphs/states are explicit inputs, not a graph-discovery claim.
 Real execute, reordering, absorbing refinement, rate conversion and FPTA run;
 PSR and manager futures are recording external-work boundaries. No native

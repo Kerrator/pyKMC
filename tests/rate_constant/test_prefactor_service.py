@@ -314,7 +314,7 @@ class TestCompute:
 
 
 class TestSpeciesMasses:
-    """An engine map given at construction is authoritative for every request (N3)."""
+    """An engine map given at construction is authoritative for every request."""
 
     def test_override_reaches_the_request_in_engine_order(self) -> None:
         """Species order and masses are the engine's, not the alphabetical ASE map."""

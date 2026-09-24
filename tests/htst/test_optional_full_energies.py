@@ -1,9 +1,10 @@
 """Optional full-energy protocol; no native engine or MPI job is opened.
 
-Extends the frozen producing-contract scratch. Real native-adapter orchestration,
-request/provenance validation and Vineyard kernel execute; only scratch resource
-operations and the terminal Hessian are protocol doubles. These are ordering and
-resource assertions, not a native or potential-energy accuracy claim.
+Extends the ``producing_helpers`` recording scratch. Real native-adapter
+orchestration, request/provenance validation and Vineyard kernel execute; only
+scratch resource operations and the terminal Hessian are protocol doubles. These
+are ordering and resource assertions, not a native or potential-energy accuracy
+claim.
 """
 
 from __future__ import annotations

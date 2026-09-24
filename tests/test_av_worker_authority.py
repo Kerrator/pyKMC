@@ -1,8 +1,9 @@
-"""Independent worker-side N02 authority supplement; no native execution.
+"""Independent worker-side authority supplement; no native execution.
 
-Uses the frozen v1 recording endpoint. Native engine entrypoints/helpers remain
-real. A supplied execution union cannot replace captured user authority, and
-the source AV center is compared using actual PBC before any native mutation.
+Uses the recording endpoint of ``test_av_search_transport`` (imported as
+``v1``). Native engine entrypoints/helpers remain real. A supplied execution
+union cannot replace captured user authority, and the source AV center is
+compared using actual PBC before any native mutation.
 """
 
 from dataclasses import replace

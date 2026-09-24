@@ -1,4 +1,4 @@
-"""Geometric admission gate and one-row self-reverse fallback (contracts 7f policy 6).
+"""Geometric admission gate and one-row self-reverse fallback.
 
 In htst/rpa mode ``find_matching_event`` (topology + 0.25 eV + IRA saddle-crop
 match) is the admission duplicate gate exactly as in constant mode, so a

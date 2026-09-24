@@ -1,4 +1,4 @@
-"""Seven no-launch N04 checks for resolved user-policy provenance and row maps.
+"""Seven no-launch checks for resolved user-policy provenance and row maps.
 
 Expected masks are literal. The analytic callback gives the moving atom minimum
 curvature (8,4,4), saddle (-4,4,4), and constant spectator factors; no production

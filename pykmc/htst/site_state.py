@@ -296,7 +296,7 @@ class SiteState:
         ):
             return False
         # Initialized user authority is the only fixed-coordinate contract of
-        # a request (contracts 7f policy 5); a changed one ends the binding.
+        # a request; a changed one ends the binding.
         user = service.global_constraints
         if user is not None and user != self.source.user_constraints:
             return False

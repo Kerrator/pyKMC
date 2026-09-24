@@ -1,20 +1,20 @@
 """The active-volume shell is fixed for the Hessian, never a free-set member.
 
-Contracts 7f policy 5 as amended by R14/N09: an HTST/RPA request carries the
-user+AV union as its free-set constraint. Shell atoms (beyond
-``activevolume.rmov`` from the search centre) that fall inside ``free_radius``
-are excluded from the Vineyard free set like user-frozen atoms, because the
-search relaxed the core only while ``fix setforce`` held the shell: a shell
-atom carries a residual force and is not at a stationary point. The user view
-stays the coordinate contract. The adapter logs the free-set size and the
-number of shell atoms it excluded.
+An HTST/RPA request carries the user+AV union as its free-set constraint.
+Shell atoms (beyond ``activevolume.rmov`` from the search centre) that fall
+inside ``free_radius`` are excluded from the Vineyard free set like
+user-frozen atoms, because the search relaxed the core only while
+``fix setforce`` held the shell: a shell atom carries a residual force and is
+not at a stationary point. The user view stays the coordinate contract. The
+service logs the free-set size and the number of shell atoms the request
+excluded.
 
-Unit-level copy of the R04 LJ6 callers' site channel: the buffer atom inside
-``free_radius`` carries 0.009 eV/Å (> ``force_tol`` 0.005). With the union the
-free set is the mover alone (n_free 1) and the estimate is accepted; with the
-user projection (the pre-R14 request) the buffer atom is free, n_free 2, and
-the stationarity guard rejects every geometry. The free-set line is logged by
-the service on the submitting rank (worker ranks have no INFO handler).
+A unit-level site channel: the buffer atom inside ``free_radius`` carries
+0.009 eV/Å (> ``force_tol`` 0.005). With the union the free set is the mover
+alone (n_free 1) and the estimate is accepted; with the user projection (a
+request carrying only the user constraints) the buffer atom is free, n_free 2,
+and the stationarity guard rejects every geometry. The free-set line is logged
+by the service on the submitting rank (worker ranks have no INFO handler).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ CELL = np.eye(3) * 20.0
 PBC = (False, False, False)
 FREE_RADIUS = 1.1
 RMOV = 1.2
-BUFFER_FORCE = (0.0, 0.0, 0.00908203125)  # the R04 oracle's BUFFER_FORCE_Z
+BUFFER_FORCE = (0.0, 0.0, 0.00908203125)  # 0.009 eV/Å, above force_tol
 FAR_FORCE = (100.0, -200.0, 300.0)
 
 
@@ -243,7 +243,7 @@ def test_union_request_excludes_the_shell_from_the_free_set_and_is_accepted(
 def test_user_projection_request_puts_the_buffer_in_the_free_set_and_is_rejected(
     caplog,
 ) -> None:
-    """The pre-R14 request (policy 5 as first implemented) rejects on the buffer."""
+    """A request carrying only the user constraints rejects on the buffer."""
     config = av_config()
     source = geometries()[0]
     calls: list = []

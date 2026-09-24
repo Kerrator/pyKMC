@@ -4,7 +4,7 @@ Overlay/endpoint validation applies to the user constraint set only
 (``config.frozen_atoms``), at a tolerance tied to ``psr.matching_score_thr``,
 and re-clamps user rows with ``protect_positions``; a violated user constraint
 on the reconstruction/basin paths is ``Err(RECONSTRUCTION_INVALID_EVENT_DATA)``,
-never a bare ``ValueError`` out of the KMC loop (contracts 7f policy 5). The
+never a bare ``ValueError`` out of the KMC loop. The
 AV-resolved union still travels to the manager for transport/freezing.
 """
 

@@ -243,7 +243,7 @@ def _ini_dict(**sections: dict) -> dict:
 def test_active_volume_rmov_below_rcut_is_rejected() -> None:
     """Under active_volume the movable radius must reach the rcut environment.
 
-    contracts 7f policy 5: a catalogue event overlays the whole ``rcut``
+    A catalogue event overlays the whole ``rcut``
     environment; with ``rmov < rcut`` part of it lies in the frozen AV shell.
     """
     data = _ini_dict(

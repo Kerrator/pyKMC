@@ -1,7 +1,8 @@
 """Fresh opaque results are current, but never verified recycled/cache physics.
 
-The immutable R09 coupled-polynomial worker provides actual analytic HTST
-results. No native backend, source mutation, or guard monkeypatch is used.
+The immutable coupled-polynomial worker of ``test_site_recycling`` provides
+actual analytic HTST results. No native backend, source mutation, or guard
+monkeypatch is used.
 """
 
 import numpy as np
@@ -103,8 +104,8 @@ def test_fresh_allowance_does_not_cross_changed_context(boundary):
     else:
         # A changed interacting neighbour (inside free_radius) breaks the
         # source binding; same-step freshness cannot waive it. Adapted from a
-        # distant-atom move: F06 repair invariant / C1 dependency-region
-        # contract, motion outside the dependency region keeps the row.
+        # distant-atom move: by the dependency-region rule, motion outside the
+        # dependency region keeps the row.
         sim.system.positions[1, 0] = 12.0
     with pytest.raises(
         ValueError, match="No active events with current physical dependencies"

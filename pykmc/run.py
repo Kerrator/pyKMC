@@ -33,9 +33,9 @@ def main() -> None:
         if config.control.group_size == -1
         else config.control.group_size
     )
-    # The HTST engine extension is registered only for the htst/rpa styles
-    # (contracts section 6); its module is LAMMPS/HTST bound and is never
-    # imported on the constant path.
+    # The HTST engine extension is registered only for the htst/rpa styles;
+    # its module is LAMMPS/HTST bound and is never imported on the constant
+    # path.
     engine_extensions = None
     if create_rate_constant(config.rateconstant).backend.requires_event_prefactors:
         from pykmc.engine.htst_lammps import LammpsHTSTExtension

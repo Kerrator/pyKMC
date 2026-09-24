@@ -1,8 +1,9 @@
-"""N04: an explicit constraint payload cannot weaken known user constraints.
+"""An explicit constraint payload cannot weaken known user constraints.
 
-No native launch. The Hessian is the literal independent polynomial from the
-earlier protocol oracle; fixed global ID 0 is local row 1 before permutation.
-Service pair commands are descriptor metadata, not its analytic force model.
+No native launch. The Hessian is the literal independent polynomial of
+``test_constrained_protocol.py``; fixed global ID 0 is local row 1 before
+permutation. Service pair commands are descriptor metadata, not its analytic
+force model.
 """
 
 from copy import deepcopy

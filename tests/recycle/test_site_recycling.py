@@ -7,12 +7,12 @@ At r=1,2 and q=±1,0 the gradient vanishes. Minimum curvatures are
 [8(1+a),1,1,32,1,1], saddle [-4+2a,1,1,32,1,1], a=(r−1)².
 Thus changing the noncentral free atom r1→r2 changes nu by sqrt(2).
 
-The completed other event is injected, as in the archived oracle. A labeled
+The completed other event is injected. A labeled
 refine_single seam supplies its analytically known current stationary saddle;
 it does not claim an actual pARTn search. Refinement.execute, crop/estimate
 handoff, ActiveEventTable, actual analytic HTST kernel, site service and BKL
-are real. The archived engine config is metadata for this analytic worker;
-no LAMMPS calculation or native stationarity claim is made.
+are real. The engine config (``tests/data/input.in``) is metadata for this
+analytic worker; no LAMMPS calculation or native stationarity claim is made.
 """
 
 from concurrent.futures import Future
@@ -38,7 +38,7 @@ from pykmc.refinement import Refinement
 from pykmc.result import EventRefinementOutput, Ok
 from pykmc.system import System
 
-METHOD = "fd"  # Match the archived analytic callback's kernel method label.
+METHOD = "fd"  # Match the analytic callback's kernel method label.
 SOURCE_IDS = (17, 23, 91)
 
 
@@ -150,7 +150,7 @@ def add_candidate(table, system):
         full_saddle_positions=saddle,
         constraints=constraints_for(table.config, system),
     )
-    # Assignment also permits the pre-repair dataclass to reach the scientific
+    # Assignment also lets a dataclass without that field reach the scientific
     # stale-site assertion rather than failing with an unexpected keyword.
     output.crop_atom_ids = (int(system.index[0]),)
     table.add_events(output)
@@ -354,7 +354,7 @@ def recycle_and_fresh(changed_neighbor):
     and the dependency region, free_radius 6.0 + the default interaction_range
     13.0) never enters the candidate's site spectrum, so
     its motion alone must keep the recycled row and its actual producer
-    (F06 repair invariant: preserve unchanged-local-geometry reuse). A moved
+    (unchanged local geometry keeps its reuse). A moved
     neighbour inside free_radius changes the spectrum and must rebuild.
     """
     cfg, system, manager, svc, active, old_row = initial_active()

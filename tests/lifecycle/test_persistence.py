@@ -1,4 +1,4 @@
-"""Reference-table persistence (architecture rule 6).
+"""Reference-table persistence.
 
 HTST tables carry versioned unit metadata inside the pickle (pandas
 ``DataFrame.attrs`` round-trip through ``to_pickle``/``read_pickle``);
@@ -257,8 +257,8 @@ def _donor_era_pickle(
     """Write a donor-era HTST pickle: the 15 base columns + k_prefactor + nu0.
 
     No ``nu0_status``/``nu0_reason`` columns and no attrs, with ``k`` rated
-    through the Hz frequency (``hz_to_per_ps``), as the pre-S6 HTST branches
-    persisted their tables.
+    through the Hz frequency (``hz_to_per_ps``): the unversioned layout in
+    which earlier HTST implementations (the donor code) persisted tables.
     """
     table = protocol_table(_config("constant", k0=1.0, T=T))
     _populate(table, system, [0, 1])
@@ -393,7 +393,7 @@ class TestConstantModeUnchanged:
     ) -> None:
         """A partial HTST column set (k_prefactor + nu0, no attrs) is stripped too.
 
-        Regression: the strip used to fire only for the complete S6 column
+        Regression: the strip used to fire only for the complete HTST column
         set, so a donor-era pickle was loaded unchanged with its HTST-derived
         rates in a constant run.
         """
@@ -463,7 +463,7 @@ def _warnings(records: list[logging.LogRecord]) -> list[str]:
 
 
 class TestReloadCompatibility:
-    """Contracts section 7d, F2: changed settings invalidate, the window re-applies."""
+    """Changed settings invalidate, the window re-applies."""
 
     @staticmethod
     def _saved(
@@ -546,7 +546,11 @@ class TestReloadCompatibility:
     def test_pre_7c_table_without_the_centring_key_counts_as_min1(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
     ) -> None:
-        """A legacy center default cannot establish missing producing provenance."""
+        """A legacy center default cannot establish missing producing provenance.
+
+        "pre-7c" names a table saved before ``free_region_center`` was persisted
+        with the settings.
+        """
         saved = self._saved(
             _config("htst", k0=1.0, T=300.0, free_region_center="min1"),
             system_single_type_fcc,
@@ -744,7 +748,7 @@ class TestReloadCompatibility:
 
 
 class TestSchemaOneInvalidation:
-    """Policy 2: a schema-1 table is invalidated loudly and recoverably.
+    """A schema-1 table is invalidated loudly and recoverably.
 
     Schema 1 persisted no per-calculation producing provenance, so its accepted
     estimates cannot be trusted (or rebuilt from the local crops). Reload keeps
@@ -795,7 +799,7 @@ class TestSchemaOneInvalidation:
         assert "2 accepted" in message and "3 row" in message
         assert "legacy" in message and "k0" in message
         assert "recover" in message.lower()
-        assert "policy 2" in message
+        assert "never persisted" in message
         assert list(loaded.table["nu0_status"]) == ["legacy"] * 3
         assert all(math.isnan(v) for v in loaded.table["nu0"])
         assert set(loaded.table["k_prefactor"]) == {2.0}

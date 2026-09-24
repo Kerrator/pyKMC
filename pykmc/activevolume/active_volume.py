@@ -421,7 +421,7 @@ def partn_refine_AV(
     # Only user-declared fixed atoms are a coordinate contract: validate them at
     # the PSR tolerance and re-clamp their rows. The AV shell is a crop
     # restriction held by ``f_buffer``/``f_core``, so a shell atom is placed
-    # wherever the caller put it (contracts 7f policy 5).
+    # wherever the caller put it.
     proposed = np.array(positions, copy=True)
     proposed[saddle_idx] = saddle_positions
     constraints.validate_positions(

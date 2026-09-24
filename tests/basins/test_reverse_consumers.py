@@ -1,6 +1,7 @@
-"""Protocol fixtures extend R2 through refined rows, logical ids and explorer.
+"""Protocol fixtures extend reverse identity through refined rows, ids and explorer.
 
-No native engine/MPI pool. Expected barriers are directly specified data.
+The base cases are in ``test_reverse_identity.py``. No native engine/MPI pool.
+Expected barriers are directly specified data.
 Logical ids (17,42) intentionally differ from pandas labels (104,8).
 """
 

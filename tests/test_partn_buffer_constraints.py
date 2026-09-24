@@ -3,8 +3,8 @@
 Native commands and the pARTn object are explicit recording substitutes.
 Actual public search/refine methods, their implementation bodies, make_AV,
 frozen helper decisions and exception/restoration dispatch execute unchanged.
-This tests command ordering only; the unchanged native LJ5 gate must prove
-that native coordinates/returned tau obey the fixed-buffer contract.
+This tests command ordering only; that native coordinates and the returned
+tau obey the fixed-buffer contract needs a native run.
 """
 
 from types import SimpleNamespace
@@ -36,7 +36,7 @@ class Recorder:
         self.fixes = {}
         self.groups = {"all"}
         self.minimizations = []
-        # Adapter v2: installed fix-external Python registry and local arrays.
+        # Harness: installed fix-external Python registry and local arrays.
         self.callback = {}
         self.velocity = np.ones((3, 3))
         self.force = np.zeros((3, 3))
@@ -99,7 +99,7 @@ class FakeARTn:
         self.lib = SimpleNamespace(_name="recorded-partn-not-a-library")
 
     def destroy(self):
-        # Lifecycle adapter: provide the installed explicit-destroy API.
+        # Harness: provide the installed explicit-destroy API.
         pass
 
     def reset_input(self):
@@ -139,7 +139,7 @@ class Harness(LammpsEngine):
         self.engine_id = 23
         self._is_orthorhombic = True
         self._cleared_since_init = False
-        # Adapter v2: public validation now needs actual source cell/PBC/types.
+        # Harness: public validation needs the actual source cell/PBC/types.
         self.full_system = FullSystem(
             types=tuple(TYPES),
             species=("Cu",),

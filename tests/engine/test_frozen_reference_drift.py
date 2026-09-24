@@ -1,11 +1,12 @@
-"""A user-frozen atom that drifted from its initialisation reference (V6).
+"""A user-frozen atom that drifted from its initialisation reference.
 
 ``resolve_event_constraints`` validates the CURRENT positions of the
 user-frozen atoms against the reference captured at initialisation (1e-10 A)
 and raises ``ConstraintViolationError`` (a ``ValueError``). That check sat
 outside the ``Err`` guard of ``KMC._reconstruction_active_event``, unguarded
 in ``Refinement.refine_single`` and in ``EventSearch.execute``, so a drift
-left ``KMC.run`` as a bare ``ValueError`` (contracts 7f policy 5 forbids it).
+left ``KMC.run`` as a bare ``ValueError``, which a violated user constraint
+must never do.
 
 Reconstruction and refinement now return the same
 ``Err(RECONSTRUCTION_INVALID_EVENT_DATA)`` their overlay guards produce; the

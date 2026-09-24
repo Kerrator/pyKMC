@@ -161,9 +161,10 @@ default (13 Å) is twice the 6.5 Å cutoff of the Ni EAM potential shipped with
 the tests, the largest of the shipped potentials (Cu EAM 5.5 Å, SW-Si 3.77 Å,
 LJ 2.5 σ); a value matched to the
 potential keeps more recycled rows valid, a too-small one lets a moved
-interacting atom keep a stale spectrum (the R09 `changed` control of the
-review record: `free_radius` 0.25 Å, anchors at 1.12 Å inside a 2.5 Å cutoff,
-executed centre 20 Å away). The neighbour-list `rcut` is the catalogue crop
+interacting atom keep a stale spectrum (the `changed` case of
+`tests/recycle/test_interaction_shell_dependency.py`: `free_radius` 0.25 Å,
+anchors at 1.12 Å inside a 2.5 Å cutoff, executed centre 20 Å away). The
+neighbour-list `rcut` is the catalogue crop
 radius, not an interaction range. The range never enters a computed prefactor
 and is not part of the persisted table settings, so changing it does not
 demote catalogued estimates. With `premin` the relaxation of the surroundings
@@ -238,7 +239,7 @@ source before cropping. The initialized user mask is carried separately: moving
 an unfrozen atom across a configured spatial boundary does not silently change
 which source identities were frozen.
 
-The two halves of the union have different authority (contracts 7f policy 5).
+The two halves of the union have different authority.
 The user-declared atoms (`frozen_atoms`) are a fixed-coordinate contract: a
 PSR-mapped overlay or catalogue endpoint may displace them by at most
 `psr.matching_score_thr` (the same tolerance the registration itself is

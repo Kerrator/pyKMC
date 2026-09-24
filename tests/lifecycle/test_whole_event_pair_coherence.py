@@ -56,7 +56,7 @@ def links_and_values(table):
 
 
 def test_two_direction_matches_must_target_one_existing_pair(monkeypatch):
-    # contracts 7f policy 6: B and C are geometric duplicates of A and never
+    # B and C are geometric duplicates of A and never
     # reach the worker, so no second or third directional pair can be spliced.
     table, worker = table_and_worker(
         monkeypatch,
@@ -144,7 +144,7 @@ def test_shared_self_reverse_survivor_needs_direct_spectral_agreement(monkeypatc
     results = table.add_events(events, pbc=base.PBC)
     batch.audit(table, worker, events, before)
     print("nontransitive_rows", links_and_values(table))
-    # contracts 7f policy 6: the first exact positive collapses to one
+    # The first exact positive collapses to one
     # self-linked row, which then rejects the identical second search at the
     # geometric gate; its would-be disagreeing spectra are never computed.
     assert len(worker.requests) == 1

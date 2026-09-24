@@ -212,7 +212,7 @@ def test_common_mapping_and_equal_prefactors_can_collapse():
 
 
 def test_rejected_reverse_collapses_to_one_row_and_is_archived():
-    # contracts 7f policy 6: a rejected backward never proves the collapse and
+    # A rejected backward never proves the collapse and
     # never becomes a second selectable row sharing the event_id.
     table = admitted(
         SYMMETRIC_SADDLE,

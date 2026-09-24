@@ -349,10 +349,9 @@ class TestLammpsSpeciesStateSerial:
     ) -> None:
         """``frozen_atoms`` + active volume is supported, not refused.
 
-        contracts 7f policy 1 (adapter): the former preflight rejection was
-        an intermediate safety measure. The resolved payload carries the user
-        atom as user-declared together with the AV shell, the crop is built
-        and the engine restores afterwards.
+        The former preflight rejection was an intermediate safety measure. The
+        resolved payload carries the user atom as user-declared together with
+        the AV shell, the crop is built and the engine restores afterwards.
         """
         system = ni_orthorhombic
         _initialize(engine, system)
@@ -411,7 +410,7 @@ class TestLammpsSpeciesStateSerial:
     ) -> None:
         """A too-short or too-long array is refused instead of a silent scatter.
 
-        Regression for the review of the first S4 pass: ``scatter_atoms``
+        Regression: ``scatter_atoms``
         silently truncated a full-system array on a cropped instance and read
         past the buffer (NaN coordinates) for a short array on a full one.
         """
@@ -447,7 +446,7 @@ class TestLammpsSpeciesStateSerial:
     ) -> None:
         """A NaN saddle position under AV is a ``ValueError`` before any LAMMPS call.
 
-        Regression for the review of the first S4 pass: the guard lived only in
+        Regression: the guard lived only in
         ``LammpsEngine.set_positions`` and the AV module's own ``set_positions``
         scattered the NaN, giving LAMMPS's per-rank "Non-numeric atom coords"
         error (a hang on a multi-rank engine).
@@ -746,7 +745,7 @@ class TestLammpsSpeciesStateMPI:
     ) -> None:
         """A NaN saddle position raises symmetrically before any collective call.
 
-        Regression for the review of the first S4 pass: the unguarded AV
+        Regression: the unguarded AV
         ``set_positions`` let LAMMPS raise on the owning rank only and the
         4-rank engine hung.
         """

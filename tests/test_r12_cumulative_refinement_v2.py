@@ -1,10 +1,9 @@
-"""R12 / N07: cumulative pre-dispatch refinement coverage (contracts 7f policy 3).
+"""Cumulative pre-dispatch refinement coverage of the htst/rpa styles.
 
 The actual dispatcher (``Refinement.execute``), the active-table transport and
 the site-prefactor path run with pARTn, PSR and the Hessian kernel substituted
-by protocol doubles, as the frozen refinement-coverage oracle does. Every N07
-bullet of the acceptance table has a case here. The constant style is a
-byte-identity control, not a participant in the ledger.
+by protocol doubles, as ``tests/test_refinement_coverage.py`` does. The
+constant style is a byte-identity control, not a participant in the ledger.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ ROT90 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 GET_ENERGY_THR_REFINE_SHA256 = (
     "276331434ebc83ce13f3476f2bb9680b31b4d657c6d1a4c343d346598b78d658"
 )
-"""sha256 of ``inspect.getsource(Refinement.get_energy_thr_refine)`` at ``fe1dbe1``."""
+"""sha256 of ``inspect.getsource(Refinement.get_energy_thr_refine)`` before htst/rpa."""
 
 
 # --------------------------------------------------------------------------- #
@@ -699,7 +698,7 @@ def test_retained_unrefined_row_whose_psr_fails_now_counts_as_retained(monkeypat
     assert result.manager.submitted == []
     assert result.active.refined.tolist() == ["F"]
     # Selected but not refinable this step: an explicit shortfall, never a
-    # silent "refined 0 %, shortfall 0 %" (review R12, minor).
+    # silent "refined 0 %, shortfall 0 %".
     assert cov["selected_ids"] == (17,) and cov["n_selected_unrefined"] == 1
     assert cov["refined_fraction"] == pytest.approx(0.0)
     assert cov["shortfall_fraction"] == pytest.approx(1.0)
@@ -710,7 +709,7 @@ def test_partial_failure_of_a_multisymmetry_retained_pair_keeps_the_failed_fallb
 ):
     # Reference 17 has two symmetric applications on atom 0, both retained as
     # generic rows; the rotated one fails on re-dispatch. Only the fallback
-    # row of the successful application may leave (review R12, blocker).
+    # row of the successful application may leave.
     result = run(
         monkeypatch,
         [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],
@@ -743,7 +742,7 @@ def test_retained_unrefined_pair_with_a_rejected_prospective_rate_still_counts(
 ):
     # The reference row lost its rate this step (NaN): its prospective channel
     # is rejected, the retained generic row is still a valid channel with its
-    # own rate and the ledger says so (review R12, minor).
+    # own rate and the ledger says so.
     result = run(
         monkeypatch,
         [row(17, 0.4, [0], k=float("nan"))],
@@ -766,7 +765,7 @@ def test_mixed_flag_retained_pair_redispatches_only_the_unrefined_application(
 ):
     # One application of the pair is already refined (T), the other retained
     # generic (F): only the generic one is re-dispatched and the refined one
-    # counts once with its site rate (review R12, latent minor).
+    # counts once with its site rate.
     result = run(
         monkeypatch,
         [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],
@@ -791,8 +790,8 @@ def test_excluded_application_keeps_its_generic_row_when_a_sibling_refines(
     # Only the identity application's generic row was retained; this step
     # that application is excluded by the constraint check while the rotated
     # sibling is dispatched and refines. The lone row must not be handed to
-    # the sibling (review R12 re-review, minor): it stays as the fallback and
-    # is reported as a selected retained row left unrefined.
+    # the sibling: it stays as the fallback and is reported as a selected
+    # retained row left unrefined.
     result = run(
         monkeypatch,
         [row(17, 0.4, [0], syms=[np.eye(3), ROT90])],

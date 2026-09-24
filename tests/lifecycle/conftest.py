@@ -1,6 +1,6 @@
 """Shared fixtures for the catalogue-lifecycle tests (no LAMMPS, no MPI).
 
-The doubles here stand in for the frozen cross-slice contracts:
+The doubles here stand in for the HTST kernel and manager interfaces:
 
 * :func:`accepted` / :func:`rejected` build ``DirectionalPrefactor`` values
   exactly as ``pykmc.htst`` produces them;

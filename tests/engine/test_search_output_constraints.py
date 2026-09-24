@@ -2,12 +2,12 @@
 
 The engine validates the returned geometry against the user view of the
 resolved constraints and attaches the union it transported to every successful
-``EventSearchOutput`` / ``EventRefinementOutput`` (contracts 7f policy 5 as
-amended by R14/N09). The HTST request built from that output therefore excludes
-both the user-frozen atoms and the active-volume shell (atoms beyond ``rmov``,
-held by ``fix setforce`` during the search, hence not relaxed) from the Vineyard
-free set, while the shell stays outside the coordinate contract: a refined
-saddle that keeps a placed shell overlay is a valid constrained event.
+``EventSearchOutput`` / ``EventRefinementOutput``. The HTST request built from
+that output therefore excludes both the user-frozen atoms and the active-volume
+shell (atoms beyond ``rmov``, held by ``fix setforce`` during the search, hence
+not relaxed) from the Vineyard free set, while the shell stays outside the
+coordinate contract: a refined saddle that keeps a placed shell overlay is a
+valid constrained event.
 
 Real public wrappers, payload resolution and result validation run; the pARTn
 implementation and the full-system restore are recording seams.

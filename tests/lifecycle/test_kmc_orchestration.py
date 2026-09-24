@@ -335,7 +335,7 @@ class TestComposition:
             assert [op for op, _ in manager.group_calls] == expected[:4]
             if expected[-1] == "htst_preflight":
                 # broadcast returns nothing: the root's report comes back
-                # through the Future of the same operation (N3).
+                # through the Future of the same operation.
                 assert [op for op, _ in manager.submitted] == ["htst_preflight"]
                 assert kmc.htst_preflight["species"] == ("Ni",)
                 assert kmc.htst_preflight["masses"] == (58.6934,)
@@ -727,7 +727,7 @@ class TestSeed:
         )
 
     def test_atomic_environment_returns_new_ids_sorted(self) -> None:
-        """``AtomicEnvironment.get_new_environments`` itself sorts (contract 7c)."""
+        """``AtomicEnvironment.get_new_environments`` itself sorts."""
         from pykmc.atomic_environment import AtomicEnvironment
 
         ids = [f"env-{i:02d}-{'y' * (i % 5)}" for i in range(40)]
@@ -780,8 +780,8 @@ class TestSeed:
             """
         )
         root = Path.cwd()
-        # Prepend, never replace: IRA/pARTn may come only from PYTHONPATH
-        # (the Linux box, the DRAC preamble).
+        # Prepend, never replace: IRA and pARTn may be importable only through
+        # PYTHONPATH (for example in module-based HPC environments).
         inherited = os.environ.get("PYTHONPATH")
         pythonpath = os.pathsep.join(
             [str(root), inherited] if inherited else [str(root)]
@@ -1115,7 +1115,7 @@ class TestStepOrdering:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A refined row without its full saddle keeps its estimate; the step says so (F1)."""
+        """A refined row without a full saddle keeps its estimate; the step says so."""
         config = _step_config("htst", k0=1.0)
         manager = FakeManager(
             lambda req: protocol_event_prefactors(req, accepted(6e12), accepted(6e12))
@@ -1193,8 +1193,8 @@ class TestConstantPathIsolation:
             """
         )
         root = Path.cwd()
-        # Prepend, never replace: IRA/pARTn may come only from PYTHONPATH
-        # (the Linux box, the DRAC preamble).
+        # Prepend, never replace: IRA and pARTn may be importable only through
+        # PYTHONPATH (for example in module-based HPC environments).
         inherited = os.environ.get("PYTHONPATH")
         pythonpath = os.pathsep.join(
             [str(root), inherited] if inherited else [str(root)]
@@ -1298,7 +1298,7 @@ class TestOutputFormats:
 
 
 class TestReconstructionPurgeLabels:
-    """The failed row is dropped by a label that is still valid (contracts section 7d, F4)."""
+    """The failed row is dropped by a label that is still valid."""
 
     def test_dangling_row_is_removed_before_the_reference_purge_relabels(
         self,

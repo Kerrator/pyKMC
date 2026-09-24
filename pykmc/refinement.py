@@ -13,7 +13,7 @@ enters the active table with the generic (reference) saddle as a
     rows above it are not refined. Every ``(atom, reference)`` pair already in
     the active table is skipped.
 
-``htst``/``rpa`` styles (contracts 7f policy 3)
+``htst``/``rpa`` styles
     ``refine_thr`` is a cumulative pre-dispatch rate coverage over an immutable
     candidate ledger: the retained valid active channels (their current site or
     reference rate, once each) plus every prospective PSR-valid
@@ -271,7 +271,7 @@ class Refinement:
         )
         if self._carry_prefactors:
             # htst/rpa: no barrier threshold; the ledger decides once every
-            # application has been matched (contracts 7f policy 3). A retained
+            # application has been matched. A retained
             # unrefined pair stays a candidate.
             e_thr = None
             skipped_pairs = existing_pairs - self._redispatchable_pairs(
@@ -466,7 +466,7 @@ class Refinement:
             except ConstraintViolationError as exc:
                 # A user-frozen atom drifted from its initialisation reference:
                 # the same recoverable Err as an overlay that moves one, never
-                # a bare ValueError out of the KMC loop (contracts 7f policy 5).
+                # a bare ValueError out of the KMC loop.
                 self.loggers.warning(
                     "log",
                     "\t :=> Reference event {} on atom {}: a user-fixed atom has "
@@ -529,8 +529,7 @@ class Refinement:
                 # PSR residual within the matching tolerance is re-clamped, a
                 # larger one is a different event and is reported as an Err
                 # (never a ValueError out of the KMC loop). The AV shell is
-                # placed as given and held by fix setforce (contracts 7f
-                # policy 5).
+                # placed as given and held by fix setforce.
                 try:
                     constraints.validate_positions(
                         working, tolerance=tolerance, user_only=True

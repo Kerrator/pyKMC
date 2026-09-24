@@ -117,15 +117,14 @@ class Initializer:
         )
         self.kmc.manager.broadcast("initialize_potential")
         if self.kmc.uses_event_prefactors:
-            # Capability preflight of the HTST extension (contracts section
-            # 6): fails fast when LAMMPS lacks PHONON or the potential cannot
-            # be initialised in a scratch instance. Constant style: no call.
+            # Capability preflight of the HTST extension: fails fast when LAMMPS
+            # lacks PHONON or the potential cannot be initialised in a scratch
+            # instance. Constant style: no call.
             self.kmc.manager.broadcast("htst_preflight")
             # ``broadcast`` returns nothing; one worker session's report (the
-            # engine's authoritative species/mass map, contracts section 7d,
-            # N3) comes back through the Future of the same operation. Every
-            # session initialised the same potential, so the map is the same
-            # whichever session answers.
+            # engine's authoritative species/mass map) comes back through the
+            # Future of the same operation. Every session initialised the same
+            # potential, so the map is the same whichever session answers.
             self.kmc.htst_preflight = self._preflight_report(
                 self.kmc.manager.submit("htst_preflight").result()
             )
@@ -196,7 +195,7 @@ class Initializer:
         so ``free_radius`` is independent of the ``rcut`` crop radius. The
         service carries the engine's species/mass map from the preflight
         report kept by :meth:`initialize_engine`, so every live request
-        describes the potential's masses (contracts section 7d, N3).
+        describes the potential's masses.
 
         Raises
         ------

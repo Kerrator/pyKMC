@@ -1,4 +1,4 @@
-"""``Refinement.execute`` and the optional ``System.index`` (V7).
+"""``Refinement.execute`` and the optional ``System.index``.
 
 ``System.index`` defaults to ``None`` and is populated by ``System.from_file``
 and the basin copies; a programmatic ``System()`` has none. The result loop

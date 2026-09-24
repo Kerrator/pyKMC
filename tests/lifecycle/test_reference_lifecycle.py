@@ -1,4 +1,4 @@
-"""Reference-table prefactor lifecycle (architecture rule 1).
+"""Reference-table prefactor lifecycle.
 
 Accepted events only cost a Hessian; one request per accepted event yields
 both directions; rows are patched by logical id (never by position); the
@@ -94,7 +94,7 @@ def _insert(table: ReferenceEventTable, row: pd.Series, idx_ref: int) -> None:
 
 
 class TestSchema:
-    """Constant tables keep the S0 schema; htst/rpa append exactly four columns."""
+    """Constant tables keep the base schema; htst/rpa append exactly four columns."""
 
     def test_constant_schema_is_the_baseline(self, constant_config: Any) -> None:
         """Exactly the 15 baseline columns, in order."""
@@ -226,7 +226,7 @@ class TestOnlyAcceptedEventsCostRequests:
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
         """Energy rejection and the geometric duplicate gate cost no request."""
-        # contracts 7f policy 6: same topology within 0.25 eV with a matching
+        # Same topology within 0.25 eV with a matching
         # saddle crop is a duplicate whatever its barrier gap or prefactors
         responses = {(0, 1): (accepted(5.0e12), accepted(3.0e12))}
         table, fake = _table_with_service(htst_config, responses)
@@ -378,7 +378,7 @@ class TestSelfReverseThroughAddEvents:
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
         """Equal topologies with different spectra keep one row; the backward is archived."""
-        # contracts 7f policy 6: an unproven candidate is one self-linked row
+        # An unproven candidate is one self-linked row
         responses = {(0, 1): (accepted(5.0e12), accepted(3.0e12))}
         table, _ = _table_with_service(htst_config, responses)
         sys_ = system_single_type_fcc

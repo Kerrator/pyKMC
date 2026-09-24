@@ -1,15 +1,12 @@
-"""F1: exercise full-saddle transport through refinement and native site HTST.
+"""Exercise full-saddle transport through refinement and native site HTST.
 
-Promoted unchanged in substance from the independent review's red-to-green
-pack (``test_site_geometry_native.py``); every assertion and tolerance is the
-pack's. Only the expensive pARTn/PSR producer and scheduling estimates are
+Only the expensive pARTn/PSR producer and scheduling estimates are
 substituted. ``Refinement.execute``, result transport, active-table updates,
 service, scratch LAMMPS Hessians and numerical prefactors all execute for
 real.
 
-Adapters: data paths resolve from the repository root; the serial-only guard
-is the engine tests' ``pytest.skip`` under ``mpirun`` (the pack asserted a
-single rank instead).
+Data paths resolve from the repository root; the serial-only guard is the
+engine tests' ``pytest.skip`` under ``mpirun``.
 """
 
 from __future__ import annotations

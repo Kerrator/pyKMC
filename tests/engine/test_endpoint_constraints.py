@@ -258,7 +258,7 @@ def test_injected_fixed_push_proposal_cannot_reach_endpoint_minimization(monkeyp
 
 
 class ProtocolSystem:
-    """Explicitly excludes R05 wrapping; positions here are already canonical."""
+    """Explicitly excludes periodic wrapping; positions here are already canonical."""
 
     def __init__(self, positions, types, cell, pbc, index):
         self.positions = np.array(positions, copy=True)
@@ -300,8 +300,8 @@ def test_basin_callers_resolve_before_overlay_and_transport_types_and_both_endpo
         second[1, 0] += 0.2
     # The rigid case is a rotation + translation + permutation whose mapped
     # initial leaves a 0.01 A residual on the user-frozen row, inside the 0.1 A
-    # matching tolerance: it must be re-clamped, not rejected (contracts 7f
-    # policy 5). The identity case keeps the exact 1e-7 tolerance.
+    # matching tolerance: it must be re-clamped, not rejected. The identity
+    # case keeps the exact 1e-7 tolerance.
     rigid = psr_kind == "rigid"
     cfg, expected = config(style, thr=0.1 if rigid else 1e-7), payload()
     manager = RecordingManager(

@@ -91,8 +91,7 @@ class Reconstruction:
             # references at the PSR tolerance; projecting an incompatible event
             # would silently change its physics, so it is reported as an Err
             # and the caller purges the reference. The AV shell is a transport
-            # restriction that protect_positions re-clamps below (contracts 7f
-            # policy 5).
+            # restriction that protect_positions re-clamps below.
             tolerance = overlay_tolerance(self.config)
             try:
                 self.constraints.validate_positions(

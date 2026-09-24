@@ -478,8 +478,8 @@ class KMC:
                     basin_err = result_basin.err_value()
                     if basin_err.type is ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA:
                         # A catalogue row rejected on the basin path is purged
-                        # like a failed reconstruction (contracts 7f policy 5);
-                        # the Err names it in variables["idx_ref"].
+                        # like a failed reconstruction; the Err names it in
+                        # variables["idx_ref"].
                         offender = (basin_err.variables or {}).get("idx_ref")
                         if offender is None:
                             self.loggers.warning(
@@ -652,7 +652,7 @@ class KMC:
         per-process string hash (``PYTHONHASHSEED`` is random on every rank
         under ``mpirun``); sorting at this, its only call site, is what makes
         ``central_atoms_research`` and therefore ``control.seed`` reproducible
-        without ``PYTHONHASHSEED`` (contracts section 7c).
+        without ``PYTHONHASHSEED``.
 
         Returns
         -------
@@ -875,7 +875,7 @@ class KMC:
             persistent active table (carried over from the previous step).
             The constant style skips them all; the htst/rpa styles skip the
             refined ones and keep a retained ``refined == "F"`` pair as a
-            candidate of the cumulative ledger (contracts 7f policy 3).
+            candidate of the cumulative ledger.
 
         Returns
         -------
@@ -1087,11 +1087,11 @@ class KMC:
         """Purge a catalogue row rejected on the basin path.
 
         The purge :meth:`reconstruction` performs after a failed
-        reconstruction (contracts 7f policy 5), with two differences: the
-        reference leaves the catalogue (with the row its backward link names
-        and, in the htst/rpa styles, the reverse-link closure), every active
-        row referencing a removed id is dropped and the removed topologies
-        are forgotten so they are searched again. The first difference is the
+        reconstruction: the reference leaves the catalogue (with the row its
+        backward link names and, in the htst/rpa styles, the reverse-link
+        closure), every active row referencing a removed id is dropped and
+        the removed topologies are forgotten so they are searched again. It
+        differs in two ways. The first difference is the
         executed row: it was reconstructed successfully on the current state
         and is applied by this step, and the step log and the end-of-step
         prune read it by label, so it is kept (even when its own reference is
@@ -1145,7 +1145,8 @@ class KMC:
         self.loggers.info(
             "log",
             "\t :=> Basin rejected reference event {} ({}); purging reference "
-            "events {} (reverse-link closure), {} active row(s) and their "
+            "events {} (the rejected event, its backward and, in the htst/rpa "
+            "styles, the reverse-link closure), {} active row(s) and their "
             "topologies from the known environments; the executed event "
             "(reference {}) is applied as selected.".format(
                 idx_ref, reason, list(removed.idx_refs), len(labels), executed_ref
@@ -1191,10 +1192,10 @@ class KMC:
         # initialisation reference (raised by the resolution) or the event
         # moves one (raised by the reconstruction), is a recoverable rejection
         # of this catalogue row: it must reach the purge loop as an Err, never
-        # abort the run as a bare ValueError (contracts 7f policy 5). Only that
-        # violation is converted: any other ValueError (a shape or mapping
-        # mismatch) is a programming error that would otherwise purge one
-        # reference per selection and drain the catalogue.
+        # abort the run as a bare ValueError. Only that violation is converted:
+        # any other ValueError (a shape or mapping mismatch) is a programming
+        # error that would otherwise purge one reference per selection and
+        # drain the catalogue.
         try:
             constraints = resolve_event_constraints(
                 self.config,

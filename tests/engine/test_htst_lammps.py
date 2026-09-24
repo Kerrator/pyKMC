@@ -430,13 +430,13 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """Both directions accepted on the tracked vacancy hop; nothing leaks.
 
-        Measured (free_radius 6, dx 0.01, premin False, full system) with the
-        S7 measurement script and reproduced here without tuning: the
-        saddle-centred free region (default) holds 37 atoms and gives forward
+        Measured (free_radius 6, dx 0.01, premin False, full system) and
+        reproduced here without tuning: the saddle-centred free region
+        (default) holds 37 atoms and gives forward
         21.1588 / backward 21.1844 THz (symmetric to 0.12 %, as the hop is);
         the min1-centred region of the original model holds 43 atoms and gives
         23.6139 / 19.6167 THz, a 20 % asymmetry that is entirely the
-        frozen-boundary choice (the donor's 23.6 THz / 43 atoms).
+        frozen-boundary choice.
         """
         ext = LammpsHTSTExtension(search_engine)
         before = _engine_state(search_engine)
@@ -503,7 +503,7 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """A site request from the full refined saddle equals the reference; a crop does not.
 
-        The S7 '(iv)' bias: the request ``ActiveEventTable.request_site_prefactors``
+        The crop bias: the request ``ActiveEventTable.request_site_prefactors``
         builds (current minimum as min1, full saddle, min2 unused, forward only)
         gives the reference forward nu0 to 1e-9, whereas the previous
         construction (the ``rcut`` crop of the saddle pasted into the minimum,
@@ -1118,7 +1118,7 @@ class TestLammpsHTSTSerial:
         assert report["species"] == ("Fe", "Ni")
         assert len(report["masses"]) == 2
 
-    # -- authoritative masses (contracts section 7d, N3) ----------------------
+    # -- authoritative masses -------------------------------------------------
 
     def test_engine_mass_override_reaches_the_request_and_scales_nu0(
         self, sw_config: _SWConfig, si_hop: dict[str, Any]

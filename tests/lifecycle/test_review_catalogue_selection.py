@@ -1,7 +1,4 @@
-"""F4: catalogue invalidation must remain coherent through a real KMC step.
-
-Promoted unchanged in substance from the independent review's red-to-green
-pack (``test_catalogue_selection.py``); every assertion is the pack's.
+"""Catalogue invalidation must remain coherent through a real KMC step.
 
 These are behavioural regressions, not a requirement to keep deleted refs
 alive. The implementation may invalidate and retry selection, or defer a
@@ -221,7 +218,7 @@ def _run_invalidation_step(
 def test_selected_event_and_recycling_stay_coherent_after_reverse_link_purge(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, basin: bool
 ) -> None:
-    """F4 red: a rejected alias must not strand the successful selected event."""
+    """A rejected alias must not strand the successful selected event."""
     _run_invalidation_step(monkeypatch, tmp_path, basin=basin, incoming_alias=True)
 
 
@@ -237,7 +234,7 @@ def test_ordinary_reciprocal_component_does_not_disrupt_other_selected_event(
 
 
 def test_removal_preserves_reverse_link_closure_for_incoming_alias() -> None:
-    """Positive guard: an F4 fix must not reintroduce dangling reverse links."""
+    """Positive guard: the removal must not reintroduce dangling reverse links."""
     table = ReferenceEventTable(_config(basin=False))
     table.table = _rows(incoming_alias=True)
     table.remove([2])

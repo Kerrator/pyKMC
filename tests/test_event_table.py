@@ -27,7 +27,7 @@ S0_REFERENCE_COLUMNS = [
     "idx_backward",
     "dra",
 ]
-"""Constant-mode reference schema recorded at S0 (contracts section 7)."""
+"""Constant-mode reference schema ("S0": the schema before the htst/rpa styles)."""
 
 S0_ACTIVE_COLUMNS = [
     "atom_index",
@@ -38,7 +38,7 @@ S0_ACTIVE_COLUMNS = [
     "num_reference_event",
     "refined",
 ]
-"""Constant-mode active schema recorded at S0 (contracts section 7)."""
+"""Constant-mode active schema ("S0": the schema before the htst/rpa styles)."""
 
 
 def _build_trivial_series(config, system):
@@ -144,11 +144,10 @@ class TestReferenceTableTypes:
 class TestReferenceTablePeriodicity:
     """The catalogue builds its scratch systems on the real periodic axes.
 
-    Regression for review cluster C2 (R05 ``f7bc418``): an unspecified
-    ``System`` is non-periodic, so a bare scratch system truncated every
-    catalogued environment at the cell faces while the runtime ids stayed
-    periodic. Atom 0 of the 4x4x4 fixture sits at the cell corner, so its
-    rcut shell wraps across all three faces.
+    Regression: an unspecified ``System`` is non-periodic, so a bare scratch
+    system truncated every catalogued environment at the cell faces while the
+    runtime ids stayed periodic. Atom 0 of the 4x4x4 fixture sits at the cell
+    corner, so its rcut shell wraps across all three faces.
     """
 
     @staticmethod

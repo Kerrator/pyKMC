@@ -102,7 +102,7 @@ class AtomicEnvironment:
         the per-process string hash (random on every rank under ``mpirun``),
         and ``central_atoms_research`` draws from this list, so a sorted
         order is what makes ``control.seed`` reproducible without
-        ``PYTHONHASHSEED`` (contracts section 7c).
+        ``PYTHONHASHSEED``.
 
         Parameters
         ----------

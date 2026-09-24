@@ -1,8 +1,8 @@
 """Batch-order identity oracle; geometric/typed-protocol evidence only.
 
-Imports the frozen early-admission fixture by a registered module name. Actual
-table admission, service dispatch, archive and finalizers run; no native MEP or
-numerical Hessian is represented by the literal protocol spectra.
+Imports the ``test_whole_event_admission`` fixtures by a registered module
+name. Actual table admission, service dispatch, archive and finalizers run; no
+native MEP or numerical Hessian is represented by the literal protocol spectra.
 """
 
 from concurrent.futures import Future
@@ -196,7 +196,7 @@ def test_same_batch_and_sequential_have_one_physical_pair(reverse_second, monkey
         sequential.add_events([ev], pbc=base.PBC)
     audit(batch, batch_worker, batch_events, batch_before)
     audit(sequential, sequential_worker, sequential_events, sequential_before)
-    # contracts 7f policy 6: the geometric gate rejects the exact repeat (or
+    # The geometric gate rejects the exact repeat (or
     # its exact reverse) before dispatch, in the same batch as well.
     assert [r.is_ok() for r in batch_results] == [True, False]
     assert len(batch_worker.requests) == 1
@@ -219,7 +219,7 @@ def test_same_batch_disagreeing_actual_spectra_are_not_merged(monkeypatch):
     before = input_copy(events)
     results = table.add_events(events, pbc=base.PBC)
     audit(table, worker, events, before)
-    # contracts 7f policy 6: the exact repeat never reaches the worker, so no
+    # The exact repeat never reaches the worker, so no
     # second spectrum exists to disagree with; the first pair stands alone.
     assert [r.is_ok() for r in results] == [True, False]
     assert len(worker.requests) == 1

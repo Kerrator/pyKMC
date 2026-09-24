@@ -308,7 +308,7 @@ def test_early_admission_needs_whole_event(
     print("saddle_only_candidate_id", table.find_matching_event(probe))
     results = table.add_events([ev], pbc=PBC)
     assert len(results) == 1
-    # contracts 7f policy 6: the geometric gate (topology + barrier + saddle
+    # The geometric gate (topology + barrier + saddle
     # crop) decides admission exactly as in constant mode, so a different
     # endpoint behind the same saddle crop is a duplicate of the catalogued
     # direction; the whole-event proof only decides collapses.

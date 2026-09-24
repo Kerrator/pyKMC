@@ -1,7 +1,7 @@
 """Conservative whole-event identity under one physical rigid map.
 
-IRA proposes a witness on the moving atom's crop (contracts 7f policy 6); the
-proposed rigid map is extended to every atom and every vertex, and the full
+IRA proposes a witness on the moving atom's crop; the proposed rigid map is
+extended to every atom and every vertex, and the full
 producing environment must then satisfy that *same* witness. Failure to find
 one is not an inequivalence proof. Callers retain both channels whenever these
 sufficient checks fail.

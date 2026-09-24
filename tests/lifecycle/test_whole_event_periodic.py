@@ -1,4 +1,4 @@
-"""R08 periodic-lattice protocol oracle, not a native MEP or Hessian claim.
+"""Periodic-lattice protocol oracle, not a native MEP or Hessian claim.
 
 Actual validated requests and directional producing records feed the public
 catalogue path and calculations_equivalent. The worker declares equal 5 THz;

@@ -3,10 +3,10 @@
 Under active volume the fixed set is ~N (every atom beyond ``rmov``), so a
 per-row tuple scan makes ``local_fixed_indices``, ``validate_positions`` and
 ``protect_positions`` quadratic (seconds per call at 32k atoms, several calls
-per refinement). Membership is a frozenset, the local rows and their reference
-coordinates are cached on the frozen payload, and the engine validates a
-transported payload once per public operation instead of once per helper
-(contracts 7f policy 5, "local_fixed_indices must be O(N)").
+per refinement). Membership is a frozenset and the local rows and their
+reference coordinates are cached on the frozen payload, so
+``local_fixed_indices`` stays O(N); the engine validates a transported payload
+once per public operation instead of once per helper.
 """
 
 import time

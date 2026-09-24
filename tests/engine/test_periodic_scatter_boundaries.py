@@ -1,6 +1,6 @@
 """Periodic faces and reduced AV crops preserve native pair physics.
 
-Imports shared independent LJ setup/oracles from the promoted regression file.
+Imports shared independent LJ setup/oracles from ``test_periodic_scatter``.
 No native work occurs on import.
 """
 

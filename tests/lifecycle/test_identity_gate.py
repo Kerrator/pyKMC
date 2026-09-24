@@ -1,7 +1,7 @@
 """Directional identity gate of the reference catalogue.
 
 Constant mode retains its topology-based representation. HTST/RPA use the
-same geometric admission gate (contracts 7f policy 6), retain provisional
+same geometric admission gate, retain provisional
 reciprocal rows until accepted directional calculations and a single
 whole-event physical map authorize a merge, and collapse an unproven
 same-topology candidate back to one self-linked forward row (two rows sharing
@@ -25,8 +25,8 @@ from pykmc.event_table import (
     self_reverse_prefactors_agree,
 )
 
-# Contract 7c (Diagnostics): every [htst] reference line ends with the free-atom
-# count and the wall time of the batch that produced it.
+# Every [htst] reference line ends with the free-atom count and the wall time
+# of the batch that produced it.
 from pykmc.htst.free_region import common_free_indices
 from pykmc.rate_constant import create_rate_constant, rate_from_prefactor
 from pykmc.rate_constant.prefactors import PrefactorService
@@ -269,7 +269,7 @@ class TestSelfReverseRecording:
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
         """Disagreement keeps one forward row; the backward value is archived."""
-        # contracts 7f policy 6: an unproven candidate is one self-linked row
+        # An unproven candidate is one self-linked row
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(3.0e12)
         )
@@ -303,7 +303,7 @@ class TestSelfReverseRecording:
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
         """Rejected backward: one accepted forward row, the rejection archived."""
-        # contracts 7f policy 6: an unproven candidate is one self-linked row
+        # An unproven candidate is one self-linked row
         table, _ = _table_with_service(
             htst_config, accepted(5.0e12), rejected("bwd window")
         )
@@ -327,7 +327,7 @@ class TestSelfReverseRecording:
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
         """Rejected forward keeps k0 on the single row; the backward is archived."""
-        # contracts 7f policy 6: an unproven candidate is one self-linked row
+        # An unproven candidate is one self-linked row
         table, _ = _table_with_service(
             htst_config, rejected("fwd window"), accepted(4.0e12)
         )
@@ -384,7 +384,7 @@ class TestSelfReverseRecording:
         """Every reference line reports the free-atom count and the batch wall time.
 
         The forward line and the whole-event comparison line both
-        end with the ``(n_free N, batch T s)`` suffix of contract 7c.
+        end with the ``(n_free N, batch T s)`` suffix.
         """
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(5.0e12)
@@ -467,7 +467,7 @@ class TestLinkingNotesCarryBatchData:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A coarse matcher seam cannot discard an unequal accepted direction."""
-        # contracts 7f policy 6: the unequal backward value survives in the archive
+        # The unequal backward value survives in the archive
         monkeypatch.setattr(
             ReferenceEventTable, "_saddle_crops_match", lambda self, fwd, bwd: False
         )
@@ -501,7 +501,7 @@ class TestLinkingNotesCarryBatchData:
         self, htst_config: Any, system_single_type_fcc: Any, htst_log_records: Any
     ) -> None:
         """A catalogued reverse (even bare) links the lone forward row, as the base."""
-        # contracts 7f policy 6: the geometric gate decides, whatever row 7's status
+        # The geometric gate decides, whatever row 7's status
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(3.0e12)
         )
@@ -563,7 +563,7 @@ class TestReverseAlreadyCatalogued:
         fwd, bwd = self._catalogue_with_reverse(table, system)
         event = _hop_event(system, 0, 0.5, 0.7, np.zeros(3))
         request = table._event_request(event, system.pbc, event_key=("existing", 7))
-        # contracts 7f policy 6: the geometric gate proposes the catalogued
+        # The geometric gate proposes the catalogued
         # reverse whatever its prefactor status, with or without a request.
         assert table._admit_series(fwd, bwd).ok_value().reverse_idx_ref == 7
         assert (
@@ -616,7 +616,7 @@ class TestReverseAlreadyCatalogued:
         self, htst_config: Any, system_single_type_fcc: Any
     ) -> None:
         """A catalogued reverse links the lone forward row; its estimate stands."""
-        # contracts 7f policy 6: one forward row, backward estimate archived
+        # One forward row, backward estimate archived
         table, fake, fwd, bwd, event, request = self._resolved_catalogue_with_reverse(
             htst_config, system_single_type_fcc
         )
@@ -786,8 +786,8 @@ class TestSparseReorderedCatalogue:
 class TestConstantModeFixedSequence:
     """Constant-mode admission of a fixed sequence equals the base catalogue.
 
-    The expectations were recorded by running the same sequence through the
-    integration base (``3974ace``): the pickled tables are byte-identical.
+    The expectations were recorded by an earlier run of the same sequence:
+    the pickled tables are byte-identical.
     """
 
     @staticmethod
@@ -872,12 +872,12 @@ class TestConstantModeFixedSequence:
     ) -> None:
         """HTST admits the constant-mode sequence; unproven candidates are one row.
 
-        Admission is the constant-mode geometric gate (contracts 7f policy 6):
-        the same five events are dispatched. The hop at atom 5 is a lattice
-        translation of the hop at atom 0 that the saddle-crop IRA does not
-        match, so both are admitted; after resolution the whole-event proof
-        maps the new pair onto rows 4/5 with agreeing spectra and merges it
-        (policy 4), so that search is reported as not new.
+        Admission is the constant-mode geometric gate: the same five events
+        are dispatched. The hop at atom 5 is a lattice translation of the hop
+        at atom 0 that the saddle-crop IRA does not match, so both are
+        admitted; after resolution the whole-event proof maps the new pair
+        onto rows 4/5 with agreeing spectra and merges it, so that search is
+        reported as not new.
         """
         table, fake = _table_with_service(
             htst_config, accepted(5.0e12), accepted(4.0e12)
@@ -918,7 +918,7 @@ class TestConstantModeFixedSequence:
 
 
 class TestSameTopologyBarriersDecide:
-    """htst/rpa: same-topology admission is decided by the barriers (contracts 7d, F3)."""
+    """htst/rpa: same-topology admission is decided by the barriers."""
 
     def test_unequal_barriers_admit_two_directional_rows(
         self, htst_config: Any, system_single_type_fcc: Any
@@ -1017,7 +1017,7 @@ class TestSameTopologyBarriersDecide:
 
 
 class TestRemoveReport:
-    """``remove`` reports the complete removed set with its topologies (contracts 7d, F4)."""
+    """``remove`` reports the complete removed set with its topologies."""
 
     @staticmethod
     def _catalogue(table: ReferenceEventTable, system: Any) -> None:

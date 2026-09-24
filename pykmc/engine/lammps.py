@@ -1600,9 +1600,9 @@ class LammpsEngine(Engine):
         # validated on the user view. The output carries the transported
         # user+AV union: the shell was held while the core relaxed, so an
         # HTST request built from the output fixes it for the Hessian and
-        # excludes it from the Vineyard free set like a user-frozen atom
-        # (contracts 7f policy 5 as amended by R14/N09); the union also keeps
-        # the search centre the active-volume recompute path needs.
+        # excludes it from the Vineyard free set like a user-frozen atom; the
+        # union also keeps the search centre the active-volume recompute path
+        # needs.
         user = constraints.user_view()
         # All ranks take the same failure path; output arrays live on rank zero.
         failure = None

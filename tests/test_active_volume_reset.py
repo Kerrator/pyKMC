@@ -297,9 +297,9 @@ def test_partn_refine_av_places_saddle_atom_displaced_past_ract() -> None:
     """An in-crop shell atom relaxed 0.05 A past ``ract`` is placed, not rejected.
 
     The active-volume shell (beyond ``rmov``) is a crop/transport restriction
-    held by ``fix setforce``, not a fixed-coordinate contract (contracts 7f
-    policy 5): only membership in the crop is checked, and the saddle
-    position is scattered as given and held by ``f_core``.
+    held by ``fix setforce``, not a fixed-coordinate contract: only membership
+    in the crop is checked, and the saddle position is scattered as given and
+    held by ``f_core``.
     """
     pytest.importorskip("lammps")
     types, positions, cell = _fcc_ni_cell(0)
@@ -322,7 +322,7 @@ def test_partn_refine_av_rejects_user_frozen_overlay_before_mutation() -> None:
 
     Negative twin of the shell-placement test above: the same 0.05 A overlay
     on the same atom is a ``ValueError`` before any LAMMPS command once that
-    atom is declared in ``frozen_atoms`` (contracts 7f policy 5).
+    atom is declared in ``frozen_atoms``.
     """
     pytest.importorskip("lammps")
     types, positions, cell = _fcc_ni_cell(0)
@@ -708,10 +708,10 @@ def test_crop_boundary_follows_slab_pbc() -> None:
 def test_partn_refine_av_real_places_shell_atom_displaced_past_ract() -> None:
     """Real LAMMPS: a 5NN shell atom relaxed 0.05 A past ``ract`` is refined.
 
-    Same input as the review probe (FCC Ni 4x4x4, ``ract=5.6``, ``rmov=3.0``,
-    outer shell atom displaced radially outward): the crop is built, the
-    saddle position is placed and held by ``f_core`` through the core
-    minimisation, and the engine restores afterwards.
+    FCC Ni 4x4x4, ``ract=5.6``, ``rmov=3.0``, an outer shell atom displaced
+    radially outward: the crop is built, the saddle position is placed and
+    held by ``f_core`` through the core minimisation, and the engine restores
+    afterwards.
     """
     _require_serial()
     types, positions, cell = _fcc_ni_cell(0)

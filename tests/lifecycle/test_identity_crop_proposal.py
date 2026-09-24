@@ -1,4 +1,4 @@
-"""Whole-event witness proposed on the mover's rcut crop (contracts 7f policy 6).
+"""Whole-event witness proposed on the mover's rcut crop.
 
 The IRA proposal of ``_common_map`` runs on the atoms within ``rcut`` of the
 moving atom; the proposed rigid map is then extended to, and verified on, the
@@ -111,7 +111,7 @@ def test_catalogue_collapse_proposes_on_the_rcut_crop(ira_sizes: list[int]) -> N
 def test_asymmetric_saddle_still_keeps_two_rows_with_the_crop_proposal(
     ira_sizes: list[int],
 ) -> None:
-    """The policy-4 counterexample is unchanged by the crop-first proposal."""
+    """The asymmetric-saddle counterexample is unchanged by the crop-first proposal."""
     table = base.admitted(base.ASYMMETRIC_SADDLE)
     assert len(table.table) == 2
     assert set(

@@ -1,4 +1,4 @@
-"""Basin rates under htst/rpa (architecture rule 5).
+"""Basin rates under htst/rpa.
 
 ``refine_absorbing`` re-rates a transient -> absorbing transition through the
 reference row's resolved prefactor at the refined barrier and stores a

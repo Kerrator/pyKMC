@@ -1,4 +1,4 @@
-"""N04 scalar/identity input contract; pure, no native or manager dispatch."""
+"""Scalar/identity input contract; pure, no native or manager dispatch."""
 
 from types import SimpleNamespace
 

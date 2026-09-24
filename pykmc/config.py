@@ -1212,9 +1212,9 @@ class Config(BaseModel):
         A catalogue event overlays the whole ``rcut`` environment of its central
         atom; with ``rmov < rcut`` part of that environment lies in the frozen
         active-volume shell, so refinements would place atoms that ``fix
-        setforce`` then holds (contracts 7f policy 5). The movable sphere must
-        itself lie inside the active volume (``ract >= rmov``), otherwise the
-        shell is empty and the crop smaller than the movable set. Mirrors the
+        setforce`` then holds. The movable sphere must itself lie inside the
+        active volume (``ract >= rmov``), otherwise the shell is empty and the
+        crop smaller than the movable set. Mirrors the
         ``zone_radius > free_radius`` check of the rate-constant section. The
         active volume must also exceed ``rcut`` strictly: ``EventSearch.execute``
         refuses ``ract <= rcut`` at the first search, so the loader refuses the

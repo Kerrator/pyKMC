@@ -1,14 +1,14 @@
 """Bookkeeping failures on the active-table step path degrade, never abort.
 
 A row that cannot declare stable crop identities is not a crop-only fallback
-(contracts section 7d, F1 covers rows with stable identities and no full
-saddle): in htst mode reconstruction resolves the stored identities against
+(that fallback covers rows with stable identities and no full saddle): in
+htst mode reconstruction resolves the stored identities against
 the current source, so such a row cannot be reconstructed and selecting it
 would purge its reference from the catalogue. It is therefore dropped before
 selection at the point where it is reported (WARNING level, naming the row
 and the stage), never counted under ``no_geometry`` and never kept behind a
 message that says otherwise; its ``(atom, reference)`` pair is re-refined
-next step (ACCEPTANCE N06: a dropped row is unavailable before selection). A
+next step (a dropped row is unavailable before selection). A
 configuration error raised by the prefactor service while validating
 recycled rows is reported with the affected row's identity and reason rather
 than being absorbed silently.
@@ -81,7 +81,7 @@ def _assert_dropped_truthfully(table, system, neighbors, manager, summary, text)
 
 def test_identityless_refined_row_is_dropped_before_selection(caplog):
     # Adapted from the no_geometry-fallback assertion: an identity-less row is
-    # not a 7d F1 crop-only row, it is unreconstructable (N06).
+    # not a crop-only row, it is unreconstructable.
     cfg, system, manager, svc = h.setup()
     table, neighbors = identityless_refined_row(cfg, system, svc)
     # Control: the reconstruction path (crop_indices without capture) cannot
@@ -112,7 +112,7 @@ def test_identityless_drop_keeps_the_other_rows_and_their_context():
     cfg, system, manager, svc = h.setup()
     table, neighbors = identityless_refined_row(cfg, system, svc)
     # A second, healthy crop-only row (stable identities, no full saddle):
-    # a 7d F1 fallback that keeps its inherited estimate and stays selectable.
+    # a crop-only fallback that keeps its inherited estimate and stays selectable.
     saddle = h.full_saddle(system)
     table.add_events(
         EventRefinementOutput(

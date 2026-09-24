@@ -1,14 +1,12 @@
-"""Behavioural regressions for review findings F1, F2 and F3 (promoted pack).
+"""Behavioural regressions for crop-only rows, reload settings and reverse barriers.
 
-Promoted unchanged in substance from the independent review's red-to-green
-pack (``test_lifecycle_contracts.py``); every assertion, tolerance and
-accepted-policy branch is the pack's. These tests use real table admission,
-graph/IRA identity, request construction and HTST mathematics; only the
-worker/Hessian provider is analytic. No LAMMPS instance or MPI pool is
-created. Config fixtures resolve from the imported checkout.
+These tests use real table admission, graph/IRA identity, request
+construction and HTST mathematics; only the worker/Hessian provider is
+analytic. No LAMMPS instance or MPI pool is created. Config fixtures resolve
+from the imported checkout.
 
-The F1 test deliberately supplies only a crop: safe reference retention is
-an acceptable result. The separate native module
+The crop-only test deliberately supplies only a crop: safe reference
+retention is an acceptable result. The separate native module
 (``tests/engine/test_htst_site_geometry_native.py``) proves that full
 geometries survive ``Refinement.execute`` and yield a site estimate.
 
@@ -19,8 +17,8 @@ settings metadata. If the implementation adopts explicit per-row provenance
 instead, extend that assertion to verify the new documented schema rather
 than removing it.
 
-Adapter: the pack's ``AnalyticManager`` is the repository ``FakeManager``
-(same ``submit`` and ``prefactor_requests`` surface).
+The analytic manager is the repository ``FakeManager`` (``submit`` and
+``prefactor_requests``).
 """
 
 from __future__ import annotations
@@ -210,7 +208,7 @@ def assert_invalidated_fallback(table: ReferenceEventTable) -> None:
 def test_changed_settings_do_not_reuse_or_relabel_cached_spectra(
     tmp_path: Path, changed: dict[str, Any]
 ) -> None:
-    """F2: a changed kernel setting invalidates the cached estimate truthfully."""
+    """A changed kernel setting invalidates the cached estimate truthfully."""
     path = saved_table(tmp_path, incomplete=True)
     original = pd.read_pickle(path)
     settings = {"free_radius": 6.0, "fd_step": 0.01, **changed}
@@ -245,7 +243,7 @@ def test_changed_settings_do_not_reuse_or_relabel_cached_spectra(
 def test_reload_rechecks_current_acceptance_window(
     tmp_path: Path, window: dict[str, float]
 ) -> None:
-    """F2: both bounds of the current window apply to a reloaded estimate."""
+    """Both bounds of the current window apply to a reloaded estimate."""
     path = saved_table(tmp_path, nu0=20e12)
     loaded = load_or_explicit_rejection(
         path,
@@ -281,7 +279,7 @@ def test_same_settings_reload_preserves_accepted_frequency_and_provenance(
 def test_crop_only_refinement_does_not_overwrite_valid_reference_with_fake_geometry() -> (
     None
 ):
-    """F1: a crop-only refined row keeps its valid inherited estimate."""
+    """A crop-only refined row keeps its valid inherited estimate."""
     cfg = config(free_radius=0.5)
     positions = np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]])
     saddle = np.array([[0.1, 0.0, 0.0], [1.2, 0.0, 0.0]])
@@ -387,7 +385,7 @@ def admit_with_analytic_hessian(
 
 
 def test_unequal_barriers_keep_both_directions_even_with_equal_prefactors() -> None:
-    """F3: equal curvatures never delete a physically different reverse barrier."""
+    """Equal curvatures never delete a physically different reverse barrier."""
     saddle = np.array(
         [[1.1, 1.0, 1.0], [3.0, 1.0, 1.0], [1.0, 3.5, 1.0], [1.0, 1.0, 4.0]]
     )

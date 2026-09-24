@@ -1,4 +1,4 @@
-"""Independent R08 geometry/constraint oracle, with actual producing requests.
+"""Independent geometry/constraint oracle, with actual producing requests.
 
 Only the worker's equal 5 THz directional values are declared protocol inputs.
 No native stationary geometry, Hessian, force or numerical-rate claim is made.

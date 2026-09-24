@@ -1,11 +1,11 @@
-"""Exit-channel selection at the sampled exit time (contracts 7f, R11 / F03).
+"""Exit-channel selection at the sampled exit time.
 
 Rates are in ps^-1. The reversible model 0->1=1, 1->0=2, 0->A=1, 1->B=1 entered
 in state 0 has transient occupation q0=(2e^-t+e^-4t)/3, q1=(e^-t-e^-4t)/3,
 survival e^-t and the conditional channel law P(A|T=t)=(2+e^-3t)/3: 17/24 at
-t=ln2, while cumulative absorption up to ln2 would give 79/96. The frozen
-19-case CTMC oracle keeps the statistical claim; these tests pin the law, the
-transition identity and the numerical failure policy on the repository API.
+t=ln2, while cumulative absorption up to ln2 would give 79/96. These tests
+pin the law, the transition identity and the numerical failure policy on the
+repository API; they make no statistical sampling claim.
 """
 
 import math
@@ -189,8 +189,7 @@ class TestTransitionIdentity:
 
     def test_absorbing_transitions_are_structural_not_the_flag(self):
         """A row flagged transient whose destination is never a source is an
-        exit of the generator; the frozen oracle's single-transient control
-        relies on it."""
+        exit of the generator; a single-transient basin relies on it."""
         table = connectivity([(0, 1, 2.0), (0, 2, 1.0)])
         table.df.loc[0, "transient"] = True
         assert list(table.absorbing_transitions().index) == [0, 1]

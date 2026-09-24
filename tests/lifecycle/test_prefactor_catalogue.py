@@ -336,8 +336,8 @@ def test_opaque_fresh_result_never_becomes_verified_by_serialization(
 def test_rejected_recomputation_keeps_the_saved_barrier(tmp_path, caplog):
     """A geometry-invalidating recompute never rewrites the catalogued barrier.
 
-    Review R07 major (7c406b2): the energies of a saddle the kernel just
-    declared non-stationary under the current potential are not a barrier.
+    The energies of a saddle the kernel just declared non-stationary under the
+    current potential are not a barrier.
     The row falls back to k0 with the rejection recorded; the saved barrier,
     the attempt and a warning survive.
     """
@@ -416,7 +416,7 @@ def test_validated_rows_are_memoised_before_the_source_is_rebuilt(
 ):
     """A second selection of an unchanged row costs no request rebuild or hash.
 
-    Review R07 major (7c406b2, 8026a63): the memo was consulted only after
+    Regression: the memo was consulted only after
     ``request_from_snapshot`` and a full-geometry ``RequestSnapshot`` capture,
     so ``has_id_subset_table`` paid O(N_source) per row per KMC step. The
     cheap key (service, method, physics, producing id, row digest, T, k0) is

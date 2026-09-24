@@ -1,6 +1,6 @@
 """The interaction shell belongs to a recycled site row's dependency region.
 
-The frozen R09/N06 ``changed`` case at unit level: with ``free_radius`` 0.25 Å
+The ``changed`` case at unit level: with ``free_radius`` 0.25 Å
 the free sphere holds the centre alone, the four anchors sit at r0 = 2^(1/6) Å,
 inside the 2.5 Å ``lj/cut`` range but outside the free sphere and the one-row
 crop, and the executed centre is 20 Å away so the recycler's distance filter
@@ -46,7 +46,7 @@ PBC = (False, False, False)
 
 
 def geometry(a: float, *, remote_shift: float = 0.0) -> np.ndarray:
-    """Frozen R09 LJ6 case: the centre, four anchors at r0 and a remote atom at 20 Å."""
+    """Six-atom LJ case: the centre, four anchors at r0 and a remote atom at 20 Å."""
     b = math.sqrt(R0 * R0 - a * a)
     return (
         np.array(
@@ -93,7 +93,7 @@ def source_snapshot(settings: HTSTSettings) -> RequestSnapshot:
 
 def site_state(settings: HTSTSettings | None = None, **kwargs) -> SiteState:
     source = source_snapshot(settings or HTSTSettings(free_radius=FREE_RADIUS))
-    # The crop is the centre alone, as in the frozen fixture (rcut = 0.25 Å).
+    # The crop is the centre alone (rcut = 0.25 Å).
     signature = (
         SOURCE_IDS[0],
         REF,
@@ -144,7 +144,10 @@ def test_frozen_changed_case_anchor_geometry() -> None:
 
 
 def test_moved_anchor_inside_the_interaction_range_invalidates_the_site_row() -> None:
-    """R09 ``changed``: anchors move about 0.10 Å, the centre stays, the remote atom is 20 Å away."""
+    """``changed``: anchors move about 0.10 Å and the centre stays.
+
+    The remote atom is 20 Å away.
+    """
     state = site_state()
     assert unchanged(state, geometry(1.0))
     assert not unchanged(state, geometry(0.95, remote_shift=0.1)), (
@@ -154,7 +157,7 @@ def test_moved_anchor_inside_the_interaction_range_invalidates_the_site_row() ->
 
 
 def test_motion_beyond_the_interaction_shell_keeps_the_site_row() -> None:
-    """R09 ``same`` control: only the remote executed centre, 20 Å away, moves."""
+    """``same`` control: only the remote executed centre, 20 Å away, moves."""
     state = site_state()
     assert unchanged(state, geometry(1.0, remote_shift=0.1))
 

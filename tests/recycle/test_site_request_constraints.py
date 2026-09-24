@@ -1,8 +1,8 @@
 """Site requests carry the user+AV union; the recycled-row binding stays user-only.
 
-Contracts 7f policy 5 as amended by R14/N09: the AV outer shell (atoms beyond
-``activevolume.rmov``) is a crop/transport restriction held by ``fix setforce``
-during a search, not a fixed-coordinate contract, but it was never relaxed, so
+The AV outer shell (atoms beyond ``activevolume.rmov``) is a crop/transport
+restriction held by ``fix setforce`` during a search, not a fixed-coordinate
+contract, but it was never relaxed, so
 an HTST/RPA request built for an active row receives the user+AV union as its
 free-set constraint: the Vineyard free set is ``free_radius`` about the mover
 minus user-fixed atoms minus shell atoms. This holds on both request paths of

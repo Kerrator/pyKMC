@@ -1,4 +1,4 @@
-"""Independent N04 native-event stationarity protocol; no native handle opens.
+"""Independent native-event stationarity protocol; no native handle opens.
 
 The literal matrices only establish known valid saddle/minimum spectra. Forces
 are independent protocol inputs, so no matrix can stand in for stationarity.

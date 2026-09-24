@@ -349,12 +349,12 @@ class ConstraintViolationError(ValueError):
     Raised by :meth:`ResolvedConstraints.validate_positions`. It is the only
     constraint error that names a property of one catalogue row: the
     reconstruction, basin and refinement paths convert it (and only it) to
-    ``Err(RECONSTRUCTION_INVALID_EVENT_DATA)`` so the reference is purged
-    (contracts 7f policy 5). Every other ``ValueError`` of the constraint
-    machinery (shape, cell/PBC or mapping mismatches) is a programming or
-    data error and propagates: converting it would purge a reference per
-    selection and drain the catalogue. A ``ValueError`` subclass, so callers
-    catching the base class keep working.
+    ``Err(RECONSTRUCTION_INVALID_EVENT_DATA)`` so the reference is purged.
+    Every other ``ValueError`` of the constraint machinery (shape, cell/PBC or
+    mapping mismatches) is a programming or data error and propagates:
+    converting it would purge a reference per selection and drain the
+    catalogue. A ``ValueError`` subclass, so callers catching the base class
+    keep working.
     """
 
 
@@ -371,7 +371,7 @@ class ResolvedConstraints:
     ``user_fixed_ids`` names the subset of ``fixed_ids`` the USER declared
     (``config.frozen_atoms``). The remaining fixed identities are the
     active-volume shell: a crop/transport restriction held by ``fix setforce``
-    during a search, not a fixed-coordinate contract (contracts 7f policy 5).
+    during a search, not a fixed-coordinate contract.
     Overlay validation therefore applies to the user subset only; the AV shell
     only enters ``protect_positions`` and the native freeze groups. ``None``
     denotes a legacy payload whose whole fixed set is treated as user-declared.
@@ -601,7 +601,7 @@ class ResolvedConstraints:
         ``tolerance`` is the accepted displacement in Angstrom (exact, 1e-10,
         for native results; ``overlay_tolerance`` for PSR-mapped overlays).
         With ``user_only`` only the user-declared fixed atoms are checked: the
-        active-volume shell is not a coordinate contract (contracts 7f policy 5).
+        active-volume shell is not a coordinate contract.
         """
         pos = self._positions(positions)
         if (cell is None) != (pbc is None):
@@ -653,11 +653,11 @@ class ResolvedConstraints:
     def user_view(self) -> ResolvedConstraints:
         """Return the user constraint set only: no AV shell, no AV context.
 
-        The coordinate contract of a returned geometry and of a recycled row
-        (contracts 7f policy 5 as amended by R14/N09). HTST/RPA requests carry
-        the user+AV union as their free-set constraint, so the Vineyard free
-        set excludes the shell as well as the user-fixed atoms; this view is
-        used for validation and for reporting which excluded rows are user's.
+        The coordinate contract of a returned geometry and of a recycled row.
+        HTST/RPA requests carry the user+AV union as their free-set constraint,
+        so the Vineyard free set excludes the shell as well as the user-fixed
+        atoms; this view is used for validation and for reporting which
+        excluded rows are user's.
         """
         user = self._user_ids()
         fixed_ids = tuple(i for i in self.fixed_ids if i in user)
@@ -685,7 +685,7 @@ class ResolvedConstraints:
     # once per instance (a crop or replace() is a new instance with its own
     # cache). Membership is a frozenset and the row scan is a single O(N) pass;
     # the per-row tuple scan it replaces was O(N x F), quadratic under an
-    # active-volume mask where F ~ N (contracts 7f policy 5).
+    # active-volume mask where F ~ N.
 
     def _cache(self) -> dict:
         cache = self.__dict__.get("_derived")
@@ -962,8 +962,8 @@ def overlay_tolerance(config) -> float:
     The pipeline accepts a registration whose matching score is at most
     ``psr.matching_score_thr``; a user-fixed atom displaced by more than that
     describes a genuinely different event, anything below is a mapping residual
-    that ``protect_positions`` re-clamps (contracts 7f policy 5). A config
-    without a PSR section keeps the exact 1e-10 A check.
+    that ``protect_positions`` re-clamps. A config without a PSR section keeps
+    the exact 1e-10 A check.
     """
     thr = getattr(getattr(config, "psr", None), "matching_score_thr", None)
     if thr is None:

@@ -79,7 +79,7 @@ def test_saved_presearch_center_survives_minimum_relaxation(
         constraints=execution,
     )
     # The actual triplet is stationary; only its source restriction predates
-    # relaxation. The frozen worker independently checks all analytic forces.
+    # relaxation. The polynomial worker independently checks all analytic forces.
     result = service.compute([request], compute_energies=True)[request.event_key]
     assert result.forward.ok and result.backward.ok
     assert (

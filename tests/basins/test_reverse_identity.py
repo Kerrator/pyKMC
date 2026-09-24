@@ -1,9 +1,8 @@
 """Logical reverse identity at the public basin detector/explorer boundaries.
 
-The literal pair and units are inherited unchanged from the archived reverse
-consumer oracle. A recording catalogue subset is the only consumer seam; the
-detector, explorer, and connectivity storage are real. No native physics or
-first-passage sampling is claimed.
+The literal pair and its units are fixed inputs. A recording catalogue subset
+is the only consumer seam; the detector, explorer, and connectivity storage are
+real. No native physics or first-passage sampling is claimed.
 """
 
 import re
@@ -127,7 +126,7 @@ def test_refined_forward_barrier_is_not_replaced_by_generic_barrier(
     active_barrier, expected
 ):
     frame = reference_pair()
-    # Only this explicit threshold control differs from the archived 0.5/0.7
+    # Only this explicit threshold control differs from the literal 0.5/0.7
     # pair: the refined site's forward is lower than its generic forward.
     frame.loc[104, "energy_barrier"] = 0.9
     frame.loc[8, "energy_barrier"] = 0.4
@@ -212,7 +211,7 @@ def test_legitimate_self_link_uses_its_own_reverse_metadata():
     frame = reference_pair()
     frame.loc[104, "idx_backward"] = 17
     frame.loc[8, "idx_backward"] = 42
-    # Row 42 remains a distinct same-topology row with the archived 0.7/.25
+    # Row 42 remains a distinct same-topology row with the literal 0.7/.25
     # values; the declared self-link resolves to row 17's own 0.5/3.0 instead.
     before = independent_copy(frame)
     assert DetectorThreshold().detect(frame.loc[104], frame, 0.6)

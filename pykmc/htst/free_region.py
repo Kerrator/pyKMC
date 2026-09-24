@@ -162,8 +162,7 @@ def free_set_report(request: HTSTEventRequest) -> tuple[int, int, int, int]:
     centre in the centring geometry, and how many of those the request's
     constraints excluded because they are user-fixed or because they belong to
     the active-volume shell (fixed rows that are not user-declared). The
-    service logs these per request so a shrunken free set is never silent
-    (contracts 7f policy 5 as amended by R14/N09).
+    service logs these per request so a shrunken free set is never silent.
     """
     positions = (
         request.saddle_positions

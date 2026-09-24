@@ -1,4 +1,4 @@
-"""Active-table prefactor lifecycle (architecture rules 2-4).
+"""Active-table prefactor lifecycle.
 
 Inheritance from the reference estimate, one site request per newly accepted
 refined row after dedup, success override, rejection fallback hierarchy, one
@@ -345,7 +345,7 @@ class TestSiteRequests:
     def test_missing_full_saddle_keeps_the_inherited_estimate(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any
     ) -> None:
-        """A crop-only refined row is no error: inherited estimate, no request (F1)."""
+        """A crop-only refined row is no error: inherited estimate, no request."""
         import logging
 
         records: list[logging.LogRecord] = []
@@ -697,7 +697,7 @@ class TestSiteRequests:
             "identityless": 0,
         }
         assert len(fake.prefactor_requests) == 2
-        # R09 rechecks current admissibility before reuse. The disallowed
+        # Reuse rechecks current admissibility first. The disallowed
         # inherited row is unavailable; the unchanged rejected row is not retried.
         assert list(table.table["atom_index"].astype(int)) == [5]
         assert math.isnan(table.table.iloc[0]["nu0"])
@@ -835,7 +835,7 @@ class TestSiteRequests:
 
 
 class TestDropReferenceEvents:
-    """``drop_reference_events`` keeps the active table in step with the catalogue (F4)."""
+    """``drop_reference_events`` keeps the active table in step with the catalogue."""
 
     def test_drops_rows_of_removed_references_and_relabels(
         self, htst_config: Any, system_single_type_fcc: Any, neighbors_list: Any

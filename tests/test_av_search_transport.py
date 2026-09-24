@@ -1,4 +1,4 @@
-"""Independent N02 caller/first-mutation protocol, never a native physics gate.
+"""Independent caller/first-mutation protocol, never a native physics gate.
 
 Real System, callers, tables, service request validation, AV helpers and engine
 scatter run. Manager execution, PSR mapping and the native command endpoint are
@@ -135,10 +135,10 @@ def capturing_service(cfg, user):
 
 
 def assert_request(request, triplet, user):
-    # contracts 7f policy 5 as amended by R14/N09: outputs and HTST requests
-    # carry the user+AV union as their free-set constraint (the AV shell is
-    # fixed for the Hessian, the user view stays the coordinate contract);
-    # the initialized user snapshot travels separately.
+    # Outputs and HTST requests carry the user+AV union as their free-set
+    # constraint (the AV shell is fixed for the Hessian, the user view stays
+    # the coordinate contract); the initialized user snapshot travels
+    # separately.
     for name, expected in zip(FIELDS, triplet, strict=True):
         np.testing.assert_array_equal(getattr(request, name), expected)
     assert_union(request.constraints, triplet[0], user)
@@ -236,8 +236,8 @@ def reference_row(triplet):
             "sym_matrix": [np.eye(3)],
             "sym_perm": [np.arange(len(rows))],
             # The resolved k0 rate every reference row carries; the htst/rpa
-            # refinement ledger ranks applications by it (contracts 7f
-            # policy 3) and rejects a row without one.
+            # refinement ledger (cumulative rate coverage) ranks applications
+            # by it and rejects a row without one.
             "k": 1.0,
             "nu0_status": "rejected",
             "nu0_reason": "protocol has no frequency",
@@ -533,9 +533,9 @@ class _CropBuilt(RuntimeError):
 
 
 def test_public_refinement_outer_buffer_overlay_is_placed_not_rejected(monkeypatch):
-    # contracts 7f policy 5: the AV shell (row 4, beyond rmov) is a crop
-    # restriction held by fix setforce, not a coordinate contract. Its overlay
-    # reaches the crop and is scattered as given; formerly asserted ValueError.
+    # The AV shell (row 4, beyond rmov) is a crop restriction held by fix
+    # setforce, not a coordinate contract. Its overlay reaches the crop and is
+    # scattered as given; formerly asserted ValueError.
     from pykmc.engine import lammps as lammps_module
 
     cfg, types, payload, engine = crop_context()

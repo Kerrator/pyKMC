@@ -149,8 +149,8 @@ def test_basin_stationary_triplet_keeps_initial_aligned_and_source_immutable(
     assert result.is_ok()
     assert len(dispatches) == 1
     np.testing.assert_allclose(result.ok_value().positions, final, atol=ATOL, rtol=0)
-    # R04 requires validation of the complete claimed triplet before either
-    # caller overlays it. That boundary exposes the initial even in global mode.
+    # The complete claimed triplet must be validated before either caller
+    # overlays it. That boundary exposes the initial even in global mode.
     assert len(validations) >= 3
     for actual, expected in zip(validations[:3], (SOURCE, saddle, final)):
         np.testing.assert_allclose(actual, expected, atol=ATOL, rtol=0)

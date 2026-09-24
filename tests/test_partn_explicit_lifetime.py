@@ -35,7 +35,7 @@ class Recorder:
         self.fixes = {}
         self.groups = {"all"}
         self.minimizations = []
-        # Adapter v2: installed fix-external Python registry and local arrays.
+        # Harness: installed fix-external Python registry and local arrays.
         self.callback = {}
         self.velocity = np.ones((3, 3))
         self.force = np.zeros((3, 3))
@@ -134,7 +134,7 @@ class Harness(LammpsEngine):
         self.engine_id = 23
         self._is_orthorhombic = True
         self._cleared_since_init = False
-        # Adapter v2: public validation now needs actual source cell/PBC/types.
+        # Harness: public validation needs the actual source cell/PBC/types.
         self.full_system = FullSystem(
             types=tuple(TYPES),
             species=("Cu",),

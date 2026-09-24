@@ -338,8 +338,7 @@ class LammpsHTSTExtension(EngineExtension):
         )
         # The free set is the sphere minus the request's fixed rows: the
         # user-frozen atoms and, under active volume, the shell held during
-        # the search (contracts 7f policy 5 as amended by R14/N09). The
-        # service reports the exclusion per request on rank 0
+        # the search. The service reports the exclusion per request on rank 0
         # (``free_set_report``); worker ranks have no INFO handler.
         relaxation_locks = np.union1d(core_global, fixed_global).astype(int)
         zone: np.ndarray | None = None

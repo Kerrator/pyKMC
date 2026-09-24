@@ -1,7 +1,6 @@
-# Promoted from the frozen refinement-coverage oracle of the 2026-09-19 HTST
-# audit (sha256 93af76e60a510c47...) through its versioned adapter 01 (R12,
-# contracts 7f policy 3). The assertions are the adapter's, unchanged; the
-# harness edits are documented in the adapter's ADAPTER.md. Do not widen.
+# Refinement-coverage regression oracle. Its assertions are fixed: do not
+# widen them. Comments marked "Harness:" explain where its doubles follow
+# the current interfaces.
 """Actual dispatch/active-table/site-path coverage with deterministic boundaries.
 
 Native pARTn and PSR are protocol doubles; selection, refinement.execute,
@@ -27,8 +26,8 @@ from pykmc.refinement import Refinement
 import pykmc.refinement as refinement_module
 from pykmc.result import EventRefinementOutput, Ok, PSROutput
 
-# Adapter 01: the site boundary is now the run's PrefactorService (R07..R09:
-# typed requests, request snapshots and producing calculations); the
+# Harness: the site boundary is the run's PrefactorService (typed requests,
+# request snapshots and producing calculations); the
 # synthetic typed worker of the repository's own unit fixtures stands in for
 # the Hessian kernel with this file's per-row accepted/rejected frequencies.
 from pykmc.rate_constant import create_rate_constant
@@ -87,8 +86,8 @@ def run_case(monkeypatch, rowspecs, style="htst", temperature=300.0, threshold=0
         cell = np.eye(3) * 1000.0
         types = ["Si"] * total_sites
         pbc = [False, False, False]
-        # Adapter 01 (R09, `1aa110a`..`fe1dbe1`): htst/rpa refinement requires
-        # stable atom identities (System.index); the double predates R09.
+        # Harness: htst/rpa refinement requires stable atom identities
+        # (System.index), which this double now provides.
         index = np.arange(total_sites)
 
         def update_positions(self, new_positions, atom_idx=None):
@@ -120,7 +119,7 @@ def run_case(monkeypatch, rowspecs, style="htst", temperature=300.0, threshold=0
             return future
 
     class SiteBoundary(PrefactorService):
-        # Adapter 01: a real PrefactorService (rate facade, settings, typed
+        # Harness: a real PrefactorService (rate facade, settings, typed
         # requests, producing calculations) over a synthetic typed worker.
         def __init__(self):
             def worker(request):
@@ -175,7 +174,7 @@ def run_case(monkeypatch, rowspecs, style="htst", temperature=300.0, threshold=0
     )
     count, supposed_total = refinement.get_total_refinements_todo(frame)
     refinement.execute(frame, total_energy=0.0)
-    # Adapter 01: the constant path never carries a PrefactorService (the
+    # Harness: the constant path never carries a PrefactorService (the
     # service refuses that backend); only htst/rpa attach the site boundary.
     site = None if style == "constant" else SiteBoundary()
     active = ActiveEventTable(cfg, prefactor_service=site)
@@ -268,7 +267,7 @@ def test_rejected_reference_and_site_keep_fallback_control(monkeypatch, style):
     row = result.active.query("num_reference_event == 17").iloc[0]
     assert row.nu0_status == "rejected" and row.nu0_source == "k0"
     assert row.k_prefactor == 1.0
-    # Adapter 01 (R09): the summary also reports identity-less rows dropped
+    # Harness: the summary also reports identity-less rows dropped
     # before selection; none here. The four original counts are unchanged.
     assert result.summary == {
         "attempted": 2,
@@ -286,12 +285,11 @@ def test_equal_prefactor_low_rate_heuristic_control(monkeypatch, style):
         assert result.active.refined.tolist() == ["T", "F"]
         assert len(result.manager.submitted) == 1
     else:
-        # Adapter 01 (contracts 7f policy 3, decided 2026-09-19): htst/rpa
-        # select by cumulative pre-dispatch rate coverage. The .525 eV row
-        # carries 0.78 % of the snapshot total at 300 K, above the 0.01 %
-        # the default refine_thr leaves uncovered, so both rows are
-        # selected. The former "equal prefactors select exactly the
-        # constant set" requirement is withdrawn with 7e R4.
+        # htst/rpa select by cumulative pre-dispatch rate coverage. The .525 eV
+        # row carries 0.78 % of the snapshot total at 300 K, above the 0.01 %
+        # the default refine_thr leaves uncovered, so both rows are selected.
+        # The former "equal prefactors select exactly the constant set"
+        # requirement does not hold for htst/rpa.
         assert result.active.refined.tolist() == ["T", "T"]
         assert len(result.manager.submitted) == 2
 

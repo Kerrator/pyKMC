@@ -1,8 +1,9 @@
 """Bounded physical-dependency, correspondence and rate-only site controls.
 
-The frozen analytic consumer helper supplies actual polynomial kernel results.
-These tests assert physical behavior through public table/service boundaries;
-no SiteState signature or private side-store representation is inspected.
+The analytic consumer helper of ``test_site_recycling`` supplies actual
+polynomial kernel results. These tests assert physical behavior through public
+table/service boundaries; no SiteState signature or private side-store
+representation is inspected.
 """
 
 import shlex

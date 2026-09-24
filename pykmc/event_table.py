@@ -62,7 +62,7 @@ REFERENCE_BASE_COLUMNS: tuple[str, ...] = (
     "idx_backward",
     "dra",
 )
-"""Constant-mode reference schema (S0 baseline, contracts section 7)."""
+"""Constant-mode reference schema, unchanged from before the htst/rpa styles."""
 
 REFERENCE_HTST_COLUMNS: tuple[str, ...] = (
     "k_prefactor",
@@ -81,7 +81,7 @@ ACTIVE_BASE_COLUMNS: tuple[str, ...] = (
     "num_reference_event",
     "refined",
 )
-"""Constant-mode active schema (S0 baseline, contracts section 7)."""
+"""Constant-mode active schema, unchanged from before the htst/rpa styles."""
 
 ACTIVE_HTST_COLUMNS: tuple[str, ...] = (
     "k_prefactor",
@@ -118,7 +118,7 @@ RELOAD_SETTINGS: tuple[str, ...] = (
     "zone_radius",
     "premin",
 )
-"""Kernel settings compared on reload (contracts section 7d, F2).
+"""Kernel settings compared on reload.
 
 A stored table whose ``settings`` differ from the current configuration in any
 of these invalidates every accepted row (``stale``). The acceptance window is
@@ -177,7 +177,7 @@ class EventAdmission:
 
     HTST/RPA admit two reciprocal provisional rows, or one forward row when
     ``reverse_idx_ref`` names the catalogued row the geometric gate matched
-    for the backward direction (contracts 7f policy 6, as in constant mode).
+    for the backward direction (as in constant mode).
     ``same_topology`` and ``self_reverse_candidate`` propose self-reversal
     only; the whole-event proof after resolution decides the collapse, and an
     unproven candidate falls back to one self-linked forward row. Constant
@@ -271,15 +271,15 @@ class ReferenceEventTable:
 
     Notes
     -----
-    Lifecycle of a reference prefactor (architecture rule 1): admission and
-    species-aware dedup run first; the full search geometry of every accepted
+    Lifecycle of a reference prefactor: admission and species-aware dedup run
+    first; the full search geometry of every accepted
     event is kept until its directional logical ids are known; exactly one
     request per accepted event (both directions) is submitted; rows are
     patched by logical id; the batch is resolved before :meth:`add_events`
     returns, so refinement never reads an unresolved reference ``k``. The
-    admission duplicate gate is :meth:`find_matching_event` in every style
-    (contracts 7f policy 6), so a catalogued event stays a duplicate whatever
-    its prefactor status. A self-reverse candidate starts with two provisional
+    admission duplicate gate is :meth:`find_matching_event` in every style, so
+    a catalogued event stays a duplicate whatever its prefactor status. A
+    self-reverse candidate starts with two provisional
     rows; only accepted, agreeing estimates and a common full physical map
     permit a proven collapse, and an unproven candidate collapses back to one
     self-linked forward row with the backward estimate kept in the archive.
@@ -357,8 +357,8 @@ class ReferenceEventTable:
         """
         results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]] = []
         accepted: list[tuple[int, int | None, EventAdmission, EventSearchOutput]] = []
-        # Admission is geometric (contracts 7f policy 6): the full physical
-        # source is built once per accepted event, in _resolve_prefactors.
+        # Admission is geometric: the full physical source is built once per
+        # accepted event, in _resolve_prefactors.
         for ev in events:
             res = self._admit(
                 min1_positions=ev.min1_positions,
@@ -810,10 +810,10 @@ class ReferenceEventTable:
             )
             return
         fwd, bwd = pre.forward, pre.backward
-        # Policy 6: a rejected or disagreeing backward estimate collapses the
+        # A rejected or disagreeing backward estimate collapses the
         # candidate back to one self-linked forward row (the backward value
         # stays in the archive). Accepted agreeing spectra without one common
-        # whole-event map keep both rows (policy 4 counterexample).
+        # whole-event map keep both rows: agreeing spectra alone prove no merge.
         collapse = True
         if fwd.ok and bwd.ok:
             differs = 100.0 * abs(fwd.nu0_hz - bwd.nu0_hz) / fwd.nu0_hz
@@ -1388,7 +1388,7 @@ class ReferenceEventTable:
         """Apply the geometric admission gate, then the style's row policy.
 
         :meth:`find_matching_event` (topology + 0.25 eV + IRA saddle-crop
-        match) is the duplicate gate in every style (contracts 7f policy 6):
+        match) is the duplicate gate in every style:
         a catalogued event is a duplicate whatever its prefactor status, so a
         k0-fallback row is never re-admitted. Constant mode keeps its original
         row policy. HTST/RPA admit two provisional reciprocal rows so both
@@ -1396,7 +1396,7 @@ class ReferenceEventTable:
         already matches a catalogued row geometrically: then one forward row is
         admitted and linked to that row, as in constant mode. Whether a
         resolved pair may be collapsed is decided after resolution by the
-        whole-event proof (policy 4), never here. ``request`` is accepted for
+        whole-event proof, never here. ``request`` is accepted for
         signature compatibility and ignored: admission never reads the full
         source, which is built once per accepted event for the worker.
         """
@@ -2037,7 +2037,7 @@ class ReferenceEventTable:
             if metadata:
                 self.prefactor_archive.legacy_metadata.append(metadata)
             reason = "legacy table: missing per-calculation producing provenance"
-            # Policy 2: invalidation is allowed, silence is not. One WARNING
+            # Invalidation is allowed, silence is not. One WARNING
             # per table says what was lost, why, and how to get it back.
             accepted_rows = (
                 int((df["nu0_status"] == NU0_OK).sum())
@@ -2048,7 +2048,7 @@ class ReferenceEventTable:
                 "Reference table %s: %s (stored %s, current schema %d); %d row(s) "
                 "kept with their event geometry, %d accepted estimate(s) demoted to "
                 "status 'legacy' with the k0 fallback (%g ps^-1) because their "
-                "producing calculations were never persisted (contracts policy 2). "
+                "producing calculations were never persisted. "
                 "Recovery: reference prefactors cannot be rebuilt from local crops; "
                 "run with a prefactor service so refined sites get site estimates, "
                 "or regenerate the catalogue under schema %d. Re-saving never "
@@ -2312,8 +2312,8 @@ class ActiveEventTable:
 
     Notes
     -----
-    Lifecycle of an active prefactor (architecture rules 2-4): a row is built
-    from the estimate inherited through ``EventRefinementOutput`` (source
+    Lifecycle of an active prefactor: a row is built from the estimate
+    inherited through ``EventRefinementOutput`` (source
     ``reference`` when the reference estimate is accepted, else ``k0``) with
     ``k`` recomputed at the refined barrier. After duplicates are removed,
     :meth:`request_site_prefactors` submits one request per newly accepted
@@ -2337,9 +2337,8 @@ class ActiveEventTable:
     anything. Crop identities are stable global atom IDs, so source or crop
     ordering changes do not silently change correspondence. A refined row
     with explicit crop IDs but no full saddle keeps its inherited estimate, is
-    marked attempted and is counted as ``no_geometry`` (contracts section 7d,
-    F1); no request is ever built from an ``rcut`` crop pasted into the
-    minimum.
+    marked attempted and is counted as ``no_geometry``; no request is ever
+    built from an ``rcut`` crop pasted into the minimum.
 
     """
 
@@ -2544,8 +2543,8 @@ class ActiveEventTable:
     def _warn_crop_identity(self, label, exc: Exception, stage: str) -> None:
         """Report a row that cannot declare stable crop identities (never raise).
 
-        Such a row is not a crop-only fallback (contracts section 7d, F1
-        covers rows with stable identities and no full saddle): reconstruction
+        Such a row is not a crop-only fallback (that fallback covers rows with
+        stable identities and no full saddle): reconstruction
         resolves the stored identities against the current source, so the row
         cannot be reconstructed and selecting it would purge its reference.
         :meth:`remove_duplicates` only reports it (the row is not compared by
@@ -2822,8 +2821,8 @@ class ActiveEventTable:
         ``k0`` rate), its ``refined`` flag, and the stored crop identities and
         saddle crop (``crop_atom_ids``, ``saddle_positions``) by which
         ``Refinement.execute`` recognises the symmetric application a
-        ``refined == "F"`` row stands for (contracts 7f policy 3). The labels
-        stay valid until the next :meth:`remove`.
+        ``refined == "F"`` row stands for. The labels stay valid until the
+        next :meth:`remove`.
 
         Returns
         -------
@@ -3070,8 +3069,8 @@ class ActiveEventTable:
         if constraints is None:
             # Under active volume the resolver returns the user+AV union, the
             # request's free-set constraint: the rmov shell was held during
-            # the search and is fixed for the Hessian (contracts 7f policy 5
-            # as amended by R14/N09). The user snapshot travels separately.
+            # the search and is fixed for the Hessian. The user snapshot travels
+            # separately.
             constraints = resolve_event_constraints(
                 self.prefactor_service.config,
                 system.positions,
@@ -3179,8 +3178,8 @@ class ActiveEventTable:
         neighbors_list : NeighborsList
             The neighbour list refinement cropped with.
 
-        Crop-only rows (contracts section 7d, F1): an eligible row whose
-        producer handed over no full refined saddle keeps its inherited
+        Crop-only rows: an eligible row whose producer handed over no full refined
+        saddle keeps its inherited
         estimate untouched (``nu0``, ``nu0_status``, ``nu0_source``, ``k``,
         ``k_prefactor``), is marked ``nu0_site_attempted``, is counted under
         ``no_geometry`` and logged once at info level; nothing is submitted

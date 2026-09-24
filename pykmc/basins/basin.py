@@ -481,7 +481,7 @@ class BasinsGenericEvents:
         # shell is a transport restriction re-clamped by protect_positions, not
         # a coordinate contract; a user atom displaced beyond the PSR tolerance
         # is a different event and purges the reference through the Result
-        # contract (contracts 7f policy 5).
+        # contract.
         tolerance = overlay_tolerance(self.config)
         try:
             for vertex in (
@@ -496,7 +496,7 @@ class BasinsGenericEvents:
                 )
         except ConstraintViolationError as exc:
             # ``variables["idx_ref"]`` names the offending catalogue row so
-            # KMC.run can purge it (contracts 7f policy 5).
+            # KMC.run can purge it.
             return Err(
                 ErrorInfo(
                     type=ErrorType.RECONSTRUCTION_INVALID_EVENT_DATA,
@@ -669,8 +669,7 @@ class BasinsGenericEvents:
                     user_constraints=getattr(self, "global_constraints", None),
                 )
                 # User-fixed atoms only, at the PSR tolerance; the AV shell is
-                # placed as given and held by fix setforce (contracts 7f
-                # policy 5).
+                # placed as given and held by fix setforce.
                 proposed = tmp_system.positions.copy()
                 proposed[neighbors] = saddle_positions
                 try:

@@ -1,7 +1,5 @@
 """Restore contract of ``LammpsEngine``: explicit species map and retryable rebuild.
 
-Promoted from the independent review's red-to-green pack (findings F5 and F6
-of the HTST/backend integration review), assertions unchanged.
 ``ensure_full_system`` must replay the *remembered* species/mass map, so a
 system initialised with a species map larger than its own symbols keeps its
 type numbering and explicit masses, and a rebuild counts as complete only once
@@ -146,7 +144,7 @@ def test_intact_engine_restore_is_a_noop_and_has_real_pair_energy() -> None:
 
 
 def test_restore_preserves_absent_species_type_ids_and_nondefault_masses() -> None:
-    """F5: a subset atom array must retain the full potential's type map."""
+    """A subset atom array must retain the full potential's type map."""
     expected = dict(EXPLICIT_MAP_STATE)
     with initialized_engine(**EXPLICIT_MAP) as engine:
         assert live_species_state(engine) == expected  # Initial setup is valid.
@@ -164,7 +162,7 @@ def test_restore_preserves_absent_species_type_ids_and_nondefault_masses() -> No
 def test_failed_potential_restore_stays_dirty_and_retry_rebuilds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """F6: a one-shot replay failure cannot make an incomplete engine clean."""
+    """A one-shot replay failure cannot make an incomplete engine clean."""
     with initialized_engine() as engine:
         assert engine.get_total_energy() == pytest.approx(EXPECTED_PAIR_ENERGY)
         original_potential = engine.initialize_potential
@@ -207,11 +205,11 @@ def test_failed_system_replay_keeps_the_explicit_map_for_the_retry(
 ) -> None:
     """A failure in the first replay step keeps the authoritative descriptor.
 
-    F5 and F6 together: with ``initialize_system`` failing once after the
-    ``clear``, ``full_system`` must still be the pre-failure descriptor (same
-    object, explicit ``('Fe', 'Ni')`` / ``(56, 60)`` map) and the retry must
-    rebuild the same live types and masses, not an inferred one-species
-    system.
+    The two restore rules above together: with ``initialize_system`` failing
+    once after the ``clear``, ``full_system`` must still be the pre-failure
+    descriptor (same object, explicit ``('Fe', 'Ni')`` / ``(56, 60)`` map) and
+    the retry must rebuild the same live types and masses, not an inferred
+    one-species system.
     """
     with initialized_engine(**EXPLICIT_MAP) as engine:
         descriptor = engine.full_system

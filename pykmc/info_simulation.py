@@ -161,7 +161,7 @@ def info_refinements(
         "invalid_minima": {"n": 0, "ref_event": []},
         "event_not_found": {"n": 0, "ref_event": []},
         # A generic event that displaces a user-fixed atom beyond the overlay
-        # tolerance (Refinement.refine_single, contracts 7f policy 5).
+        # tolerance (Refinement.refine_single).
         "invalid_event_data": {"n": 0, "ref_event": []},
     }
 

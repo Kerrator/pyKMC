@@ -43,9 +43,9 @@ class BasinExitFluxError(ValueError):
 def validate_flux(values, what: str, t_exit: float) -> np.ndarray:
     """Return ``values`` as a finite, real, non-negative vector with a positive total.
 
-    Policy (contracts 7f, R11): a non-finite entry, a materially negative
-    entry, a material imaginary part or the absence of any positive entry is
-    an error, never silently repaired. Only roundoff within
+    Policy: a non-finite entry, a materially negative entry, a material
+    imaginary part or the absence of any positive entry is an error, never
+    silently repaired. Only roundoff within
     ``FLUX_ROUNDOFF_RTOL`` of the largest positive entry is discarded
     (imaginary parts dropped, negative entries clamped to zero). Tiny positive
     values are valid: the scale is the vector's own maximum.
