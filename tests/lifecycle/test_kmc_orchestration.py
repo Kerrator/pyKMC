@@ -22,6 +22,7 @@ import pandas as pd
 import pykmc.run as run_module
 import pytest
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
+from pykmc.info_simulation import info_active_events
 from pykmc.initializer import Initializer
 from pykmc.kmc import KMC
 from pykmc.rate_constant import rate_from_prefactor
@@ -1383,3 +1384,205 @@ class TestReconstructionPurgeLabels:
         assert int(table.table.loc[label, "num_reference_event"]) == 9
         assert err_reference == [5] and err_ae == ["X"]
         assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [9]
+
+
+class TestReconstructionPurgeBackwardLinks:
+    """A failed reconstruction never leaves a row whose backward event is gone."""
+
+    @staticmethod
+    def _step(
+        config: Any,
+        system: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        catalogue: dict[str, list[Any]],
+        active_refs: tuple[int, ...],
+    ) -> tuple[KMC, ActiveEventTable, list[tuple[int, int]]]:
+        """Build a constant-style step whose atom-0 row fails to reconstruct.
+
+        Active row ``i`` sits on atom ``i`` and references ``active_refs[i]``.
+        Selection takes the first reference of ``(2, 3, 1, 9, 0)`` still in
+        the active table; reconstruction fails for atom 0 only. Every attempt
+        is recorded as ``(atom, reference)``.
+        """
+        kmc = KMC(config, manager=FakeManager())
+        kmc.system = copy.deepcopy(system)
+        kmc.loggers = _Recorder()
+        kmc.reference_table = ReferenceEventTable(kmc.config)
+        kmc.reference_table.table = pd.DataFrame(catalogue)
+        kmc.neighbors_list = types.SimpleNamespace(
+            get_neighbors=lambda cutoff, atom: np.array([atom], dtype=int)
+        )
+        table = ActiveEventTable(kmc.config)
+        crop = np.zeros((1, 3))
+        table.add_events(
+            [
+                EventRefinementOutput(
+                    central_atom_index=atom,
+                    saddle_positions=crop.copy(),
+                    E_saddle=0.5,
+                    min2_positions=crop.copy(),
+                    dE_forward=0.5,
+                    num_reference_event=ref,
+                    refined="F",
+                )
+                for atom, ref in enumerate(active_refs)
+            ]
+        )
+        attempts: list[tuple[int, int]] = []
+
+        def select(active: ActiveEventTable) -> tuple[int, float, float]:
+            refs = active.table["num_reference_event"].astype(int)
+            for ref in (2, 3, 1, 9, 0):
+                labels = active.table.index[refs == ref]
+                if len(labels):
+                    return int(labels[0]), 1.0, 1.0
+            raise AssertionError("no selectable row")
+
+        def reconstruct(label: int, active: ActiveEventTable) -> Any:
+            atom = int(active.table.loc[label, "atom_index"])
+            ref = int(active.table.loc[label, "num_reference_event"])
+            attempts.append((atom, ref))
+            if atom == 0:
+                return types.SimpleNamespace(
+                    is_ok=lambda: False,
+                    err_value=lambda: types.SimpleNamespace(message="boom"),
+                )
+            return types.SimpleNamespace(is_ok=lambda: True, ok_value=lambda: ref)
+
+        monkeypatch.setattr(kmc, "_select_event", select)
+        monkeypatch.setattr(kmc, "_reconstruction_active_event", reconstruct)
+        return kmc, table, attempts
+
+    def test_alias_row_does_not_outlive_its_backward_event(
+        self,
+        constant_config: Any,
+        system_single_type_fcc: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The events block of the step can still be built after the failure.
+
+        A loaded catalogue need not have reciprocal links (an htst/rpa run
+        can write one): 0 <-> 1 is a pair, 2 -> 0 is an alias of it and 9 is
+        self-linked. Active rows (atom -> reference): 0 -> 2, 1 -> 1, 2 -> 9
+        and 3 -> 0. The atom-0 row is selected first and fails. In the
+        constant style the catalogue loses 2 and the row its backward link
+        names (0), but keeps 1, whose backward event 0 is now gone.
+
+        Right after ``reconstruction`` returns, ``KMC.run`` describes the
+        active rows with ``info_active_events``, which reads the backward
+        event of every row's reference. That must succeed: every surviving
+        row references a catalogue entry whose ``idx_backward`` is also in
+        the catalogue, and the step still reconstructs an event.
+        """
+        kmc, table, attempts = self._step(
+            constant_config,
+            system_single_type_fcc,
+            monkeypatch,
+            {
+                "idx_ref": [0, 1, 2, 9],
+                "idx_backward": [1, 0, 0, 9],
+                "event_id": ["A", "B", "C", "E"],
+                "energy_barrier": [0.5] * 4,
+                "dra": [0.1] * 4,
+            },
+            (2, 1, 9, 0),
+        )
+        result, _, _, label, err_reference, err_ae = kmc.reconstruction(table)
+        info = info_active_events(kmc.system.types, kmc.reference_table, table)
+        info.output_msg()
+
+        catalogue = kmc.reference_table.table
+        backward = dict(
+            zip(
+                catalogue["idx_ref"].astype(int),
+                catalogue["idx_backward"].astype(int),
+                strict=True,
+            )
+        )
+        refs = [int(ref) for ref in table.table["num_reference_event"]]
+        assert refs and all(ref in backward for ref in refs)
+        assert all(backward[ref] in backward for ref in refs)
+        assert [int(ref) for ref in info.reference_events] == refs
+        # The catalogue keeps 1 (its backward 0 is gone) and 9; the ref-1 row
+        # was dropped, so the step reconstructs the atom-2 row of reference 9.
+        assert list(catalogue["idx_ref"].astype(int)) == [1, 9]
+        assert refs == [9]
+        assert attempts == [(0, 2), (2, 9)]
+        assert result.is_ok() and result.ok_value() == 9
+        assert int(table.table.loc[label, "atom_index"]) == 2
+        assert err_reference == [0, 2] and err_ae == ["A", "C"]
+
+    def test_only_orphaned_rows_left_ends_the_run(
+        self,
+        constant_config: Any,
+        system_single_type_fcc: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Rows whose reference lost its backward event cannot carry the step.
+
+        The same catalogue as above with active rows (atom -> reference)
+        0 -> 2 and 1 -> 1. The atom-0 row fails; the catalogue loses 2 and 0,
+        and the remaining row references 1, whose backward event 0 is gone.
+        That row is dropped too, so nothing is left to reconstruct: the run
+        ends through "All event reconstuctions failed." where develop would
+        have executed the row. Entry 1 itself stays in the catalogue.
+        """
+        kmc, table, attempts = self._step(
+            constant_config,
+            system_single_type_fcc,
+            monkeypatch,
+            {
+                "idx_ref": [0, 1, 2, 9],
+                "idx_backward": [1, 0, 0, 9],
+                "event_id": ["A", "B", "C", "E"],
+                "energy_barrier": [0.5] * 4,
+                "dra": [0.1] * 4,
+            },
+            (2, 1),
+        )
+        with pytest.raises(SystemExit):
+            kmc.reconstruction(table)
+
+        assert attempts == [(0, 2)]
+        assert table.table.empty
+        assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [1, 9]
+        assert kmc.manager.shutdowns == 1
+        assert ("log", ":=> End of simulation") in kmc.loggers.messages
+
+    def test_purge_that_empties_the_active_table_still_ends_the_run(
+        self,
+        constant_config: Any,
+        system_single_type_fcc: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Losing every active row to the purge stops the simulation.
+
+        Catalogue 0 <-> 1, 2 <-> 3 and 9 (self-linked); active rows
+        (atom -> reference) 0 -> 2, 1 -> 3 and 2 -> 2. The atom-0 row fails,
+        the catalogue loses 2 and its backward event 3, and every active row
+        referenced one of them. No reconstruction is attempted on a row of a
+        removed reference: ``reconstruction`` reports that all
+        reconstructions failed and closes the simulation. The surviving
+        catalogue entries keep their backward events.
+        """
+        kmc, table, attempts = self._step(
+            constant_config,
+            system_single_type_fcc,
+            monkeypatch,
+            {
+                "idx_ref": [0, 1, 2, 3, 9],
+                "idx_backward": [1, 0, 3, 2, 9],
+                "event_id": ["A", "B", "C", "D", "E"],
+                "energy_barrier": [0.5] * 5,
+                "dra": [0.1] * 5,
+            },
+            (2, 3, 2),
+        )
+        with pytest.raises(SystemExit):
+            kmc.reconstruction(table)
+
+        assert attempts == [(0, 2)]
+        assert table.table.empty
+        assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [0, 1, 9]
+        assert kmc.manager.shutdowns == 1
+        assert ("log", ":=> End of simulation") in kmc.loggers.messages

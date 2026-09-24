@@ -2200,7 +2200,10 @@ class ReferenceEventTable:
         """Remove events with ind == idx_ref as well as its backward event.
 
         Constant mode: exactly the base rule (the event and the row its
-        ``idx_backward`` names; links are reciprocal or self there).
+        ``idx_backward`` names). A constant run writes reciprocal or self
+        links only, but a loaded catalogue written by an htst/rpa run may
+        not: a surviving row can then name a removed id as its
+        ``idx_backward``, and the base rule leaves that row in place.
 
         htst/rpa mode: links are not always reciprocal (a new forward row may
         link to an already catalogued reverse), so the removal is closed
@@ -2219,10 +2222,10 @@ class ReferenceEventTable:
         -------
         RemovedReferences
             The complete set of removed logical ids (sorted) with their
-            ``event_id``; ``KMC.reconstruction`` hands it to
-            :meth:`ActiveEventTable.drop_reference_events` so no active row
-            ever references a removed catalogue entry (contracts section 7d,
-            F4).
+            ``event_id``; ``KMC.reconstruction`` hands it, with the table
+            left behind, to :meth:`ActiveEventTable.drop_reference_events`,
+            so no active row references a removed catalogue entry, directly
+            or through the ``idx_backward`` of its reference.
 
         """
         idx_refs = set(idx_refs)  # make a set if there are doublons
@@ -2740,8 +2743,20 @@ class ActiveEventTable:
             )
         return len(dropped)
 
-    def drop_reference_events(self, removed: Iterable[int]) -> int:
-        """Drop every row whose ``num_reference_event`` left the catalogue.
+    def drop_reference_events(
+        self, removed: Iterable[int], catalogue: pd.DataFrame | None = None
+    ) -> int:
+        """Drop every row whose reference or its backward event was removed.
+
+        A row goes when its ``num_reference_event`` is in ``removed``. When
+        ``catalogue`` is given, a row also goes when its reference is still
+        catalogued but that entry's ``idx_backward`` is in ``removed``: the
+        constant style removes an event and the row its backward link names
+        only, so a loaded catalogue whose links are not reciprocal can keep
+        an entry whose backward event is gone, and describing a row of that
+        entry (``info_active_events``) would fail. In the htst/rpa styles
+        the removal already closes over reverse links, no surviving entry
+        names a removed id, and this second rule drops nothing.
 
         Recycled rows are dropped too: a row is only as valid as its
         reference. The surviving rows are relabelled ``0..n-1`` through
@@ -2752,6 +2767,10 @@ class ActiveEventTable:
         removed : Iterable[int]
             Logical ids removed from the reference table
             (``RemovedReferences.idx_refs``).
+        catalogue : pd.DataFrame, optional
+            The reference table left after the removal
+            (``ReferenceEventTable.table``). When omitted, only rows whose
+            own reference was removed are dropped.
 
         Returns
         -------
@@ -2762,13 +2781,18 @@ class ActiveEventTable:
         removed_ids = {int(i) for i in removed}
         if not removed_ids or len(self.table) == 0:
             return 0
-        mask = self.table["num_reference_event"].astype(int).isin(removed_ids)
+        references = self.table["num_reference_event"].astype(int)
+        mask = references.isin(removed_ids)
+        if catalogue is not None and len(catalogue) > 0:
+            lost_backward = catalogue["idx_backward"].astype(int).isin(removed_ids)
+            orphaned = set(catalogue.loc[lost_backward, "idx_ref"].astype(int))
+            mask |= references.isin(orphaned)
         labels = [int(label) for label in self.table.index[mask]]
         if labels:
             self.remove(labels)
             logger.info(
-                "active table: dropped %d row(s) whose reference event was "
-                "removed (%s)",
+                "active table: dropped %d row(s) whose reference event or its "
+                "backward event was removed (%s)",
                 len(labels),
                 sorted(removed_ids),
             )

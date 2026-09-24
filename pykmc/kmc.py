@@ -982,13 +982,20 @@ class KMC:
         """Select and reconstruct an active event, purging failures as they occur.
 
         After a failed reconstruction the failed reference is removed from the
-        catalogue immediately (with its reverse-link closure), every active
-        row whose reference was removed is dropped (the failed row among
-        them, recycled rows included), and the selection continues on the
-        surviving rows. The catalogue and the active table are therefore
-        consistent when this returns: basin detection, the step log, the
-        events block, recycling and the basin explorer never dereference a
-        removed reference (contracts section 7d, F4).
+        catalogue immediately (with the row its backward link names and, in
+        the htst/rpa styles, the reverse-link closure) and the active table
+        is purged to match: every row whose reference was removed is dropped
+        (the failed row among them, recycled rows included), and so is every
+        row whose reference stays catalogued but names a removed id as its
+        ``idx_backward`` (the constant style keeps such an entry when a
+        loaded catalogue's links are not reciprocal). The selection then
+        continues on the surviving rows, so when this returns no active row
+        reaches a removed reference, directly or through the backward link
+        of its reference: basin detection, the step log, the events block
+        (``info_active_events``) and recycling can dereference both. The
+        basin explorer reads catalogue entries, not active rows, so in the
+        constant style it can still reach an entry whose backward event was
+        removed in this step, as on develop.
 
         Parameters
         ----------
@@ -1045,13 +1052,18 @@ class KMC:
                     )
                     active_table.remove(idx_selected_event)
                     dropped += 1
-                dropped += active_table.drop_reference_events(removed.idx_refs)
+                dropped += active_table.drop_reference_events(
+                    removed.idx_refs, self.reference_table.table
+                )
                 err_reference.extend(removed.idx_refs)
                 err_ae.extend(removed.event_ids)
                 self.loggers.info(
                     "log",
-                    "\t :=> Removing reference events {} (reverse-link closure) "
-                    "and {} active rows.".format(list(removed.idx_refs), dropped),
+                    "\t :=> Removing reference events {} (the failed event, its "
+                    "backward and, in the htst/rpa styles, the reverse-link "
+                    "closure) and {} active rows.".format(
+                        list(removed.idx_refs), dropped
+                    ),
                 )
         else:
             self.loggers.error("log", "All event reconstuctions failed.")
@@ -1074,15 +1086,20 @@ class KMC:
     ) -> int:
         """Purge a catalogue row rejected on the basin path.
 
-        The same purge :meth:`reconstruction` performs after a failed
-        reconstruction (contracts 7f policy 5): the reference leaves the
-        catalogue with its reverse-link closure, every active row referencing
-        a removed id is dropped and the removed topologies are forgotten so
-        they are searched again. The one difference is the executed row: it
-        was reconstructed successfully on the current state and is applied by
-        this step, and the step log and the end-of-step prune read it by
-        label, so it is kept (even when its own reference is the offender)
-        and its label after the relabelling is returned.
+        The purge :meth:`reconstruction` performs after a failed
+        reconstruction (contracts 7f policy 5), with two differences: the
+        reference leaves the catalogue (with the row its backward link names
+        and, in the htst/rpa styles, the reverse-link closure), every active
+        row referencing a removed id is dropped and the removed topologies
+        are forgotten so they are searched again. The first difference is the
+        executed row: it was reconstructed successfully on the current state
+        and is applied by this step, and the step log and the end-of-step
+        prune read it by label, so it is kept (even when its own reference is
+        the offender) and its label after the relabelling is returned. The
+        second: a row whose reference stays catalogued but names a removed id
+        as its ``idx_backward`` (possible in the constant style) is not
+        dropped here; this purge runs after the step's events block is built,
+        and a basin step clears the active table at its end.
 
         Parameters
         ----------
