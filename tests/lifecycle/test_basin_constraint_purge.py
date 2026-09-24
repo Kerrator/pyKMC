@@ -5,9 +5,10 @@ A violated user constraint on the reconstruction or basin path returns
 ``KMC.reconstruction`` purges on the reconstruction path; here a real
 ``KMC.run`` step (engine stages stubbed, no LAMMPS, no MPI) enters the basin
 branch with a basin double returning that ``Err`` and the same purge must
-follow: reference removed with its reverse-link closure, every other active
-row referencing it dropped before the end-of-step prune, its topology
-forgotten, the selected event applied as before. The executed row is already
+follow: reference removed with the row its backward link names (the
+reverse-link closure in the htst/rpa styles), every other active row
+referencing it dropped before the end-of-step prune, its topology forgotten,
+the selected event applied as before. The executed row is already
 reconstructed on the current state and is read by the step log, so it is kept
 through the log and its label stays valid.
 """
