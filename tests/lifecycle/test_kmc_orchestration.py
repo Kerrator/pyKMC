@@ -779,9 +779,15 @@ class TestSeed:
             """
         )
         root = Path.cwd()
+        # Prepend, never replace: IRA/pARTn may come only from PYTHONPATH
+        # (the Linux box, the DRAC preamble).
+        inherited = os.environ.get("PYTHONPATH")
+        pythonpath = os.pathsep.join(
+            [str(root), inherited] if inherited else [str(root)]
+        )
         outputs: list[list[str]] = []
         for hash_seed in ("0", "1", "2"):
-            env = dict(os.environ, PYTHONPATH=str(root), PYTHONHASHSEED=hash_seed)
+            env = dict(os.environ, PYTHONPATH=pythonpath, PYTHONHASHSEED=hash_seed)
             proc = subprocess.run(
                 [sys.executable, "-c", script],
                 cwd=root,
