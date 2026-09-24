@@ -51,8 +51,11 @@ class Recycling(ABC):
         Returns
         -------
         pd.DataFrame
-            Subset of `active_table.table` to carry into step N+1. Empty
-            DataFrame if nothing is recyclable.
+            Subset of `active_table.table` to carry into step N+1. The rows
+            keep their `active_table.table` index labels (do not reset the
+            index): `ActiveEventTable.prune_for_recycling` keeps the rows
+            whose labels it returns. Empty DataFrame if nothing is
+            recyclable.
 
         """
 

@@ -13,7 +13,7 @@ still-live row and that the prune still ran afterwards.
 """
 
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pytest
@@ -41,9 +41,6 @@ class _FakeManager:
     def submit(self, op_name: str, **kwargs: Any) -> None:
         """Fail loudly: the constant style must never submit a worker job here."""
         raise AssertionError(f"unexpected manager.submit({op_name!r})")
-
-    def set_all_positions(self, positions: Optional[np.ndarray] = None) -> None:
-        """Pretend to broadcast positions to the engines."""
 
     def shutdown(self) -> None:
         """Pretend to shut the pool down."""

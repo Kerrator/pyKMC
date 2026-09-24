@@ -8,10 +8,10 @@ enters the active table with the generic (reference) saddle as a
 
 ``constant`` style
     The inherited barrier rule, unchanged: the fastest reference row whose
-    multiplicity-weighted rate lies under ``refine_thr * ktot`` fixes a barrier
-    threshold ``E_ref + 0.1 eV`` (:meth:`Refinement.get_energy_thr_refine`);
-    rows above it are not refined. Every ``(atom, reference)`` pair already in
-    the active table is skipped.
+    rate lies under ``refine_thr * ktot`` fixes a barrier threshold
+    ``E_ref + 0.1 eV`` (:meth:`Refinement.get_energy_thr_refine`); rows above
+    it are not refined. Every ``(atom, reference)`` pair already in the active
+    table is skipped.
 
 ``htst``/``rpa`` styles
     ``refine_thr`` is a cumulative pre-dispatch rate coverage over an immutable
