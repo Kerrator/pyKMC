@@ -12,7 +12,7 @@ Binary fixtures tracked under `tests/data/`. Load `.npz` files with
 | Event | pARTn-found symmetric vacancy migration; moving atom `central_atom_idx = 1033`; `dE_forward = 0.50889 eV`, `dE_backward = 0.50889 eV` (NEB-validated when the fixture was generated); all positions inside `[0, L)` |
 | Keys | `idx_ref_forward` (4), `idx_ref_backward` (-1), `central_atom_idx`, `min1_positions`, `saddle_positions`, `min2_positions` (each `(1727, 3)` float64 Å), `types` (`(1727,)` `<U2`, all `Si`), `cell` (`(3, 3)` Å), `dE_forward`, `dE_backward` (eV) |
 | sha256 | `7d081092a46e60547bb0adebcb3d368b304da221c5a0a5d9daebdc918638194b` (108103 bytes) |
-| Origin | Full-system `min1`/`saddle`/`min2` of one reference event of a pyKMC HTST run on this cell: the geometry the prefactor path assembles for a reference event (what `PrefactorService.build_request` receives), tracked unchanged. The `event_geometry_output` key named here before does not exist on this tree, and the run that wrote the file cannot be re-derived from it. In the file the mover's `min1` position is the cell centre to 4e-15 Å, so the three geometries carry the rigid periodic translation of pyKMC's catalogue centring; on this tree `build_request` receives the uncentred search coordinates, and energies, forces and Hessians are invariant under that translation |
+| Origin | Full-system `min1`/`saddle`/`min2` of one reference event of a pyKMC HTST run on this cell, in pyKMC's catalogue-centred frame (the mover's `min1` position is the cell centre), tracked unchanged; on this tree `PrefactorService.build_request` receives the same geometry up to that rigid periodic translation. The `event_geometry_output` key named here before does not exist on this tree, and the run that wrote the file cannot be re-derived from it. In the file the mover's `min1` position is the cell centre to 4e-15 Å, so the three geometries carry the rigid periodic translation of pyKMC's catalogue centring; on this tree `build_request` receives the uncentred search coordinates, and energies, forces and Hessians are invariant under that translation |
 
 Expected HTST results with `LammpsHTSTExtension` (`dynamical_matrix ... eskm`,
 `fd_step = 0.01 Å`, `premin = False`, frozen-boundary partial Hessian,
@@ -74,7 +74,7 @@ prefactor path) was 22.0389 / 22.0388 THz with 83 free atoms.
 | Item | Value |
 | --- | --- |
 | System | 10x10x10 conventional bcc Fe cell, one vacancy: 1999 atoms, a = 2.855325 Å (the potential's P = 0 lattice parameter), cubic cell 28.55325 Å, fully periodic (the file carries no `pbc`; use `(True, True, True)`) |
-| Potential | `Fe_mm.eam.fs` from the LAMMPS distribution's `potentials/` directory (Mendelev et al., Philos. Mag. 83, 3977 (2003), potential 2; not tracked in this repository; sha256 `d7b15f435a3f5192e8ed264d0dcbc052f1d5641ba5db610eab88199d77d20f7c`; `pair_style eam/fs`, `pair_coeff * * Fe_mm.eam.fs Fe`, cutoff 5.3 Å); the file sets the mass, 55.845 amu, which is what the engine map carries |
+| Potential | `tests/data/Fe_mm.eam.fs` (byte-identical to the copy in the LAMMPS distribution's `potentials/` directory; Mendelev et al., Philos. Mag. 83, 3977 (2003), potential 2; see its entry below; `pair_style eam/fs`, `pair_coeff * * Fe_mm.eam.fs Fe`, cutoff 5.3 Å); the file sets the mass, 55.845 amu, which is what the engine map carries |
 | Event | pARTn-found **first half** of the first-neighbour vacancy migration. This potential's migration path is double-humped, with a local minimum at the hop midpoint (the split vacancy; the same artefact is reported for the Ackland 2004 derivative of this potential by Brommer et al., Phys. Rev. B 90, 134109 (2014)). `min2` is that split-vacancy minimum, not the vacancy site. Moving atom `central_atom_idx = 1091`, in the vacancy's first-neighbour shell in `min1` (2.400 Å from the vacancy site; the 8-atom shell spans 2.400-2.401 Å, the next shell starts at 2.893 Å). In `min2` it sits 0.037 Å from the midpoint between its `min1` position and the vacancy site, and 1.237 Å from the vacancy site (displacement 1.163 Å); every other atom is within 0.125 Å of its `min1` position (0.159 Å at the saddle). `dE_forward = 0.628734 eV` (the 1NN migration barrier of this potential), `dE_backward = 0.092396 eV`: **not symmetric**, E(`min2`) - E(`min1`) = 0.5363 eV. A full-system CG relaxation from `min2`, and from `min2` with the mover displaced 0.1 or 0.3 Å either way along the hop, returns to the same split-vacancy minimum. Largest atomic force 1.7e-3 / 1.5e-3 / 1.0e-3 eV/Å in `min1` / saddle / `min2`; LAMMPS recomputes both barriers from the stored geometry to 1e-11 eV; all positions inside `[0, L)` |
 | Keys | `idx_ref_forward` (0), `idx_ref_backward` (1), `central_atom_idx`, `min1_positions`, `saddle_positions`, `min2_positions` (each `(1999, 3)` float64 Å), `types` (`(1999,)` `<U2`, all `Fe`), `cell` (`(3, 3)` Å), `dE_forward`, `dE_backward` (eV); deflate-compressed like the SW-Si file |
 | sha256 | `13b5a39b35414d3507c6b20cb07db232049883650f9a8d12f169daab8388fed8` (121853 bytes) |
@@ -99,6 +99,15 @@ and `3 * n_free` stable modes at each minimum:
 
 Between `free_radius = 4` and `6` the forward value changes by a factor of 2.1
 and the backward value by 21 percent.
+
+## `Fe_mm.eam.fs` (Mendelev 2003 bcc Fe EAM potential)
+
+| Item | Value |
+| --- | --- |
+| Potential | Mendelev, Han, Srolovitz, Ackland, Sun, Asta, Phil. Mag. 83 (2003) 3977, as shipped in the LAMMPS `potentials/` directory (copied unchanged from the LAMMPS 22 Jul 2025 distribution; the file header dates it 2007-06-11 and names only the authors; the NIST Interatomic Potentials Repository entry for this file identifies it as the paper's potential 2) |
+| Format | Finnis-Sinclair EAM, one element: `pair_style eam/fs`, `pair_coeff * * Fe_mm.eam.fs Fe`; cutoff 5.3 Å; the file sets the mass, 55.845 amu |
+| sha256 | `d7b15f435a3f5192e8ed264d0dcbc052f1d5641ba5db610eab88199d77d20f7c` (756468 bytes) |
+| Consumers | `htst_fe_bcc_vacancy_hop.npz` was generated with it; `tests/validation/test_free_radius_convergence.py` (opt-in, `PYKMC_RUN_VALIDATION=1`) computes the Fe hop's prefactors with it |
 
 ## `constant_endpoint_develop_c6f2824.json` (constant-mode develop oracle for `tests/regression`)
 

@@ -36,6 +36,7 @@ doc = [
 [tool.pytest.ini_options]
 markers = [
     "mpi: collective test that needs a real MPI launch (mpirun -n N); guarded or skipped under plain pytest",
+    "validation: opt-in physical validation; set PYKMC_RUN_VALIDATION=1",
 ]
 
 [tool.ty.environment]
