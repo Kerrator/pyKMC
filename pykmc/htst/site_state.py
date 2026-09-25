@@ -49,8 +49,9 @@ def dependency_radius(
     recycler's movement and distance filters remain the guard for the
     executed event's own surroundings.
 
-    The settings carry no cutoff and LAMMPS exposes none to the caller, so
-    the range is the user's declaration for the potential
+    The settings carry no cutoff and LAMMPS exposes only the communication
+    cutoff as text (pair cutoff plus neighbour skin), never a many-body
+    range, so the range is the user's declaration for the potential
     (``RateConstantConfig.interaction_range``): the pair cutoff for a pair
     potential, up to twice the cutoff for an embedded-atom, moment-tensor or
     three-body potential, whose energy terms couple a free atom to its second

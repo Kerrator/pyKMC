@@ -237,7 +237,8 @@ class Initializer:
         elif settings.zone_radius == "auto":
             zone_text = (
                 "zone_radius auto = {:g} A (free_radius + interaction_range "
-                "{:g} A)".format(zone, settings.interaction_range)
+                "{:g} A), exact only while interaction_range covers the "
+                "potential's range".format(zone, settings.interaction_range)
             )
         else:
             zone_text = "zone_radius {:g} A".format(zone)

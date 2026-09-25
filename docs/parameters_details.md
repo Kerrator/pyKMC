@@ -224,7 +224,7 @@
   </details>
 - **`free_radius`** : `float`, default = `6.0`
   <details><summary>Description</summary>
-  HTST: radius (Angstrom) around the moving atom selecting the free (movable) atoms of the partial Hessian; every other atom is frozen. User-frozen atoms and, under active volume, the shell atoms beyond `rmov` that fall inside this radius are excluded from the free set as well (the search held them, so they carry residual forces); the log reports the free-set size and the excluded shell count per request.
+  HTST: radius (Angstrom) around the moving atom selecting the free (movable) atoms of the partial Hessian; every other atom is frozen. User-frozen atoms and, under active volume, the shell atoms beyond `rmov` that fall inside this radius are excluded from the free set as well (the search held them, so they carry residual forces); the log reports the free-set size and the excluded shell count per request. The 6.0 default is a cost compromise, not a converged value: on the tracked Ni v6 and Mendelev Fe vacancy hops it is 19 and 24 percent from the 12 Angstrom value; 8 (Ni v6) and 10 (Mendelev Fe) Angstrom are within 5 percent (docs/physical_descriptors.md, free radius per potential).
   </details>
 - **`free_region_center`** : `Literal['saddle', 'min1']`, default = `'saddle'`
   <details><summary>Description</summary>

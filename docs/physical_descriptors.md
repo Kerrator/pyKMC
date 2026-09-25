@@ -213,6 +213,50 @@ without relaxing them. The Python configuration and native energy therefore
 refer to the same geometry when refinement begins. Fresh runs retain their
 initial minimization and adopt its returned coordinates and energy.
 
+## Free radius and interaction range per potential
+
+The partial Hessian converges with `free_radius`, and the rate of convergence
+depends on the potential and the crystal. The opt-in validation
+`tests/validation/test_free_radius_convergence.py` (run with
+`PYKMC_RUN_VALIDATION=1`; tables in the layout of Lazauskas et al. 2014, Table 1)
+measures the Vineyard prefactor of the tracked bcc Fe (Mendelev 2003,
+`Fe_mm.eam.fs`, first half of the 1NN vacancy hop) and fcc Ni (v6,
+`Ni_v6_2.0_LKBeland2016.eam`, symmetric 1NN vacancy hop) fixtures at
+`free_radius` 2 to 12 Å with the `auto` zone, the full cell and a one-cutoff
+zone. Measured on the 28 Å cells of the fixtures (reference: the 12 Å value
+of the same cell):
+
+| Potential | `free_radius` for ≤ 5 % of the 12 Å value | Error at the 6 Å default | `interaction_range` (2 × cutoff) |
+| --- | --- | --- | --- |
+| Ni v6 (fcc, cutoff 6.5 Å) | **8 Å** (1.75 %; 10 Å 0.44 %) | 19 % | 13.0 Å |
+| Fe Mendelev 2003 (bcc, cutoff 5.3 Å) | **10 Å** (1.55 % / 0.41 %; 8 Å 9.5 % / 3.6 %) | 24 % / 7 % | 10.6 Å |
+
+The code default `free_radius = 6.0` is a cost compromise, not a converged
+value: a site Hessian costs about `6 n_free` full-zone force evaluations (one per
+signed displacement), and
+`n_free` grows from 83 (Ni, 6 Å) to 193 (8 Å) and 383 (10 Å). Set
+`free_radius` per potential from a table like the one above, and declare
+`interaction_range` as the potential's full range (twice the cutoff for an
+embedded-atom potential: Bonny 2013 FeNiCr 10.4 Å, LKB2017 11.2 Å, Ni v6 13 Å,
+Mendelev 2003 Fe 10.6 Å, the shipped Cu EAM 11.0 Å; the SW-Si cutoff 3.77 Å
+gives 7.5 Å). The 12 Å reference of a 28 Å cell is a value for that cell (at
+12 Å some free atoms interact with periodic images of other free atoms; at the
+recommended radii almost none do), so a larger cell can shift the last percent.
+
+The exact `auto` zone (`free_radius + interaction_range`) holds most of a cell
+of a few thousand atoms: 93 % of the 2047-atom Ni cell at `free_radius` 6 and
+99 % at 8, so on such cells it makes the Hessian only a few percent cheaper
+(1.07× per Hessian on Ni-2047, ν₀ bit-identical); the gain grows with the cell
+(the zone is a fixed sphere). A **one-cutoff zone** (`free_radius + cutoff`,
+obtained by declaring `interaction_range` = the cutoff itself) is not exact
+but differs from the full cell by at most 3.2e-4 relative on both fixtures at
+every radius (1.1e-4 and 3.1e-5 at the recommended radii), and costs 1.3× (Fe,
+10 Å) to 1.8× (Ni, 8 Å) less than the exact zone on the 28 Å cells, about 3×
+at 6 Å. It is an option to take knowingly: with `interaction_range` at one
+cutoff the recycling dependency sphere is narrower by the same amount, and
+the start-up line and the stored `zone_radius` record the narrower zone.
+The default stays exact.
+
 ## Directional event identity
 
 HTST/RPA admission starts with two reciprocal directional rows. Equal topology,

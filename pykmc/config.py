@@ -607,7 +607,12 @@ class RateConstantConfig(BaseModel):
         "User-frozen atoms and, under active volume, the shell atoms beyond "
         "`rmov` that fall inside this radius are excluded from the free set as "
         "well (the search held them, so they carry residual forces); the log "
-        "reports the free-set size and the excluded shell count per request.",
+        "reports the free-set size and the excluded shell count per request. "
+        "The 6.0 default is a cost compromise, not a converged value: on the "
+        "tracked Ni v6 and Mendelev Fe vacancy hops it is 19 and 24 percent from "
+        "the 12 Angstrom value; 8 (Ni v6) and 10 (Mendelev Fe) Angstrom are "
+        "within 5 percent (docs/physical_descriptors.md, free radius per "
+        "potential).",
     )
     free_region_center: Literal["saddle", "min1"] = Field(
         default="saddle",
