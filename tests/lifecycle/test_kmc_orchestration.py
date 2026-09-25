@@ -449,7 +449,8 @@ class TestExitStatus:
             kmc.run()  # empty reference table after the first search
         assert info.value.code == 1 and seen == [True]
 
-        # every reconstruction failing is the other abort path
+        # every reconstruction failing, before and after the one re-search
+        # of the step, is the other abort path
         table = ActiveEventTable(kmc.config)
         table.table = pd.DataFrame(
             {
@@ -465,6 +466,13 @@ class TestExitStatus:
         kmc.reference_table.table = pd.DataFrame(
             {"idx_ref": [0], "event_id": ["X"], "idx_backward": [0]}
         )
+        kmc.active_table = table
+        researches: list[list[str]] = []
+
+        def research(new_environments: list[str], nsearch: int) -> tuple:
+            researches.append(list(new_environments))
+            return table, None, [], None  # the re-search finds nothing
+
         monkeypatch.setattr(kmc, "_select_event", lambda t: (0, 1.0, 1.0))
         monkeypatch.setattr(
             kmc,
@@ -474,9 +482,11 @@ class TestExitStatus:
                 err_value=lambda: types.SimpleNamespace(message="boom"),
             ),
         )
+        monkeypatch.setattr(kmc, "_search_and_refine_step_events", research)
         with pytest.raises(SystemExit) as info:
             kmc.reconstruction(table)
         assert info.value.code == 1 and seen == [True, True]
+        assert len(researches) == 1
 
     @pytest.mark.parametrize("code", [0, 1])
     def test_run_propagates_the_exit_status_after_shutting_down(
@@ -1396,13 +1406,16 @@ class TestReconstructionPurgeBackwardLinks:
         monkeypatch: pytest.MonkeyPatch,
         catalogue: dict[str, list[Any]],
         active_refs: tuple[int, ...],
-    ) -> tuple[KMC, ActiveEventTable, list[tuple[int, int]]]:
+    ) -> tuple[KMC, ActiveEventTable, list[tuple[int, int]], list[list[str]]]:
         """Build a constant-style step whose atom-0 row fails to reconstruct.
 
         Active row ``i`` sits on atom ``i`` and references ``active_refs[i]``.
         Selection takes the first reference of ``(2, 3, 1, 9, 0)`` still in
         the active table; reconstruction fails for atom 0 only. Every attempt
-        is recorded as ``(atom, reference)``.
+        is recorded as ``(atom, reference)``. Every catalogue topology is
+        present and already searched; the step's search stage is a stub that
+        records the new environments it is given and finds nothing, so a
+        purge that empties the table ends the run after that one re-search.
         """
         kmc = KMC(config, manager=FakeManager())
         kmc.system = copy.deepcopy(system)
@@ -1412,7 +1425,13 @@ class TestReconstructionPurgeBackwardLinks:
         kmc.neighbors_list = types.SimpleNamespace(
             get_neighbors=lambda cutoff, atom: np.array([atom], dtype=int)
         )
+        topologies = set(catalogue["event_id"])
+        kmc.atomic_environment = types.SimpleNamespace(
+            get_new_environments=lambda visited: topologies - set(visited)
+        )
+        kmc.visited_environments = set(topologies)
         table = ActiveEventTable(kmc.config)
+        kmc.active_table = table
         crop = np.zeros((1, 3))
         table.add_events(
             [
@@ -1449,9 +1468,16 @@ class TestReconstructionPurgeBackwardLinks:
                 )
             return types.SimpleNamespace(is_ok=lambda: True, ok_value=lambda: ref)
 
+        researches: list[list[str]] = []
+
+        def research(new_environments: list[str], nsearch: int) -> tuple:
+            researches.append(list(new_environments))
+            return table, None, [], None
+
         monkeypatch.setattr(kmc, "_select_event", select)
         monkeypatch.setattr(kmc, "_reconstruction_active_event", reconstruct)
-        return kmc, table, attempts
+        monkeypatch.setattr(kmc, "_search_and_refine_step_events", research)
+        return kmc, table, attempts, researches
 
     def test_alias_row_does_not_outlive_its_backward_event(
         self,
@@ -1474,7 +1500,7 @@ class TestReconstructionPurgeBackwardLinks:
         row references a catalogue entry whose ``idx_backward`` is also in
         the catalogue, and the step still reconstructs an event.
         """
-        kmc, table, attempts = self._step(
+        kmc, table, attempts, researches = self._step(
             constant_config,
             system_single_type_fcc,
             monkeypatch,
@@ -1510,6 +1536,9 @@ class TestReconstructionPurgeBackwardLinks:
         assert attempts == [(0, 2), (2, 9)]
         assert result.is_ok() and result.ok_value() == 9
         assert int(table.table.loc[label, "atom_index"]) == 2
+        # A surviving row carried the step: no re-search, and the removed
+        # topologies are left for the step to forget.
+        assert researches == []
         assert err_reference == [0, 2] and err_ae == ["A", "C"]
 
     def test_only_orphaned_rows_left_ends_the_run(
@@ -1523,11 +1552,13 @@ class TestReconstructionPurgeBackwardLinks:
         The same catalogue as above with active rows (atom -> reference)
         0 -> 2 and 1 -> 1. The atom-0 row fails; the catalogue loses 2 and 0,
         and the remaining row references 1, whose backward event 0 is gone.
-        That row is dropped too, so nothing is left to reconstruct: the run
-        ends through "All event reconstuctions failed." where develop would
-        have executed the row. Entry 1 itself stays in the catalogue.
+        That row is dropped too, so the purge empties the table (develop
+        would have executed the row): the removed topologies A and C are
+        searched again, once, and when that finds nothing the run ends
+        through "All event reconstuctions failed.". Entry 1 itself stays in
+        the catalogue.
         """
-        kmc, table, attempts = self._step(
+        kmc, table, attempts, researches = self._step(
             constant_config,
             system_single_type_fcc,
             monkeypatch,
@@ -1540,9 +1571,11 @@ class TestReconstructionPurgeBackwardLinks:
             },
             (2, 1),
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as raised:
             kmc.reconstruction(table)
 
+        assert raised.value.code == 1
+        assert researches == [["A", "C"]]
         assert attempts == [(0, 2)]
         assert table.table.empty
         assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [1, 9]
@@ -1555,17 +1588,18 @@ class TestReconstructionPurgeBackwardLinks:
         system_single_type_fcc: Any,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Losing every active row to the purge stops the simulation.
+        """Losing every active row to the purge, then finding nothing, stops the run.
 
         Catalogue 0 <-> 1, 2 <-> 3 and 9 (self-linked); active rows
         (atom -> reference) 0 -> 2, 1 -> 3 and 2 -> 2. The atom-0 row fails,
         the catalogue loses 2 and its backward event 3, and every active row
         referenced one of them. No reconstruction is attempted on a row of a
-        removed reference: ``reconstruction`` reports that all
-        reconstructions failed and closes the simulation. The surviving
-        catalogue entries keep their backward events.
+        removed reference: the removed topologies C and D are searched again
+        once, and as that finds nothing ``reconstruction`` reports that all
+        reconstructions failed and closes the simulation with status 1. The
+        surviving catalogue entries keep their backward events.
         """
-        kmc, table, attempts = self._step(
+        kmc, table, attempts, researches = self._step(
             constant_config,
             system_single_type_fcc,
             monkeypatch,
@@ -1578,9 +1612,11 @@ class TestReconstructionPurgeBackwardLinks:
             },
             (2, 3, 2),
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as raised:
             kmc.reconstruction(table)
 
+        assert raised.value.code == 1
+        assert researches == [["C", "D"]]
         assert attempts == [(0, 2)]
         assert table.table.empty
         assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [0, 1, 9]

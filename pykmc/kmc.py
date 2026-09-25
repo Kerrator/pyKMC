@@ -252,76 +252,13 @@ class KMC:
                     ),
                 )
 
-            # == FIND NEW GENERIC EVENTS ==
-            ##=>List of atoms(central) on which we gonna perfom an event search
-            central_atom_research_list = self.central_atoms_research(
-                new_environments, nsearch
-            )
-
-            ##=>Perform event search on each atom in central_atom_research_list
-            event_search = self.execute_event_searches(central_atom_research_list)
-
-            # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
-            ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
-            search_results = event_search.get_successes_results()
-            if self.inactive_ae is not None:
-                inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
-                search_results = [
-                    r for r in search_results if r.move_atom_index not in inactive_set
-                ]
-            results_is_valid_events = self.add_reference_events(search_results)
-
-            ##=>Close simulation if no events in the reference table
-            if len(self.reference_table.table) == 0:
-                self.loggers.error(
-                    "log",
-                    "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.",
-                )
-                self._close(failed=True)
-
-            # == Update variables ==
-            l_ids = list(set(self.atomic_environment.atomic_environment_list))
-            self.visited_environments.update(
-                set(l_ids).difference(self.visited_environments)
-            )
-            # == Refinement ==
-            ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
-            subset_reference_event_table = self.reference_table.has_id_subset_table(
-                self.atomic_environment.atomic_environment_list
-            )
-            ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
-            self.active_table.validate_recycled(
-                self.system, self.neighbors_list, allow_pending=False
-            )
-            refinement = self.execute_refinements(
-                subset_reference_event_table,
-                existing_pairs=self.active_table.existing_pairs(),
-            )
-
-            # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
-            # The persistent self.active_table is extended in place; recycled
-            # rows from the previous step are already present.
-            self.add_active_events(refinement.get_successes_results())
-            active_table = self.active_table
-
-            active_table.remove_duplicates(
-                self.system.cell, self.neighbors_list
-            )  # To be sure
-            self.loggers.info(
-                "log",
-                "\t :=> {} active events after removing duplicates.".format(
-                    len(active_table.table)
-                ),
-            )
-
-            # == Site-specific prefactors for refined events (htst/rpa) ==
-            # After dedup so duplicates never cost a Hessian; recycled rows were
-            # attempted in the step that built them and are skipped. A no-op in
-            # the constant style.
-            site_summary = active_table.request_site_prefactors(
-                self.system, self.neighbors_list
-            )
-            self._log_htst_step_summary(site_summary)
+            # == Search new environments, refine, deduplicate, prefactors ==
+            (
+                active_table,
+                event_search,
+                results_is_valid_events,
+                refinement,
+            ) = self._search_and_refine_step_events(new_environments, nsearch)
 
             # == Update System ==
             (
@@ -670,6 +607,114 @@ class KMC:
         )
         return new_environments
 
+    def _search_and_refine_step_events(
+        self, new_environments: list[str], nsearch: int
+    ) -> tuple[ActiveEventTable, EventSearch, list, Refinement]:
+        """Search the new environments and rebuild the step's active table.
+
+        The stage of a KMC step between the environment scan and the
+        selection: event searches on ``nsearch`` atoms of every new
+        environment, admission of the successes to the reference table (the
+        simulation ends with status 1 when the catalogue is left empty), the
+        current environments marked visited, refinement of every applicable
+        catalogue entry on the atoms not already carrying it in the
+        persistent active table, the refined rows added to that table,
+        duplicates removed and, in the htst/rpa styles, the site prefactors
+        requested. ``run`` calls it once per step; ``reconstruction`` calls
+        it once more when purging failed references has emptied the active
+        table.
+
+        Parameters
+        ----------
+        new_environments : list[str]
+            Environment ids of the current system not yet searched
+            (``get_new_environments``).
+        nsearch : int
+            Number of event searches per new environment.
+
+        Returns
+        -------
+        tuple[ActiveEventTable, EventSearch, list, Refinement]
+            ``(active_table, event_search, results_is_valid_events,
+            refinement)``: the persistent active table (``self.active_table``,
+            extended in place), the event searches, the admission results of
+            their successes and the refinements, for the step's info block.
+
+        """
+        # The persistent table is built by ``run`` before the first step.
+        assert self.active_table is not None
+        # == FIND NEW GENERIC EVENTS ==
+        ##=>List of atoms(central) on which we gonna perfom an event search
+        central_atom_research_list = self.central_atoms_research(
+            new_environments, nsearch
+        )
+
+        ##=>Perform event search on each atom in central_atom_research_list
+        event_search = self.execute_event_searches(central_atom_research_list)
+
+        # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
+        ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
+        search_results = event_search.get_successes_results()
+        if self.inactive_ae is not None:
+            inactive_set = set(self.inactive_ae.get_atoms_with_id("in"))
+            search_results = [
+                r for r in search_results if r.move_atom_index not in inactive_set
+            ]
+        results_is_valid_events = self.add_reference_events(search_results)
+
+        ##=>Close simulation if no events in the reference table
+        if len(self.reference_table.table) == 0:
+            self.loggers.error(
+                "log",
+                "No events have been found, empty reference events table. \n \tTry to increase nsearch or saddle point search algorithm's parameters. \n \tClosing the simulation.",
+            )
+            self._close(failed=True)
+
+        # == Update variables ==
+        l_ids = list(set(self.atomic_environment.atomic_environment_list))
+        self.visited_environments.update(
+            set(l_ids).difference(self.visited_environments)
+        )
+        # == Refinement ==
+        ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
+        subset_reference_event_table = self.reference_table.has_id_subset_table(
+            self.atomic_environment.atomic_environment_list
+        )
+        ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
+        self.active_table.validate_recycled(
+            self.system, self.neighbors_list, allow_pending=False
+        )
+        refinement = self.execute_refinements(
+            subset_reference_event_table,
+            existing_pairs=self.active_table.existing_pairs(),
+        )
+
+        # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
+        # The persistent self.active_table is extended in place; recycled
+        # rows from the previous step are already present.
+        self.add_active_events(refinement.get_successes_results())
+        active_table = self.active_table
+
+        active_table.remove_duplicates(
+            self.system.cell, self.neighbors_list
+        )  # To be sure
+        self.loggers.info(
+            "log",
+            "\t :=> {} active events after removing duplicates.".format(
+                len(active_table.table)
+            ),
+        )
+
+        # == Site-specific prefactors for refined events (htst/rpa) ==
+        # After dedup so duplicates never cost a Hessian; recycled rows were
+        # attempted in the step that built them and are skipped. A no-op in
+        # the constant style.
+        site_summary = active_table.request_site_prefactors(
+            self.system, self.neighbors_list
+        )
+        self._log_htst_step_summary(site_summary)
+        return active_table, event_search, results_is_valid_events, refinement
+
     def central_atoms_research(
         self, new_environments: list[str], nsearch: int
     ) -> list[int]:
@@ -979,7 +1024,7 @@ class KMC:
         return idx_selected_event, delta_t, ktot
 
     def reconstruction(self, active_table: ActiveEventTable) -> tuple:
-        """Select and reconstruct an active event, purging failures as they occur.
+        """Select and reconstruct an active event; purge failures, search again once.
 
         After a failed reconstruction the failed reference is removed from the
         catalogue immediately (with the row its backward link names and, in
@@ -997,10 +1042,36 @@ class KMC:
         constant style it can still reach an entry whose backward event was
         removed in this step, as on develop.
 
+        When the purges empty the active table, the step is searched again,
+        once per call: the topologies of the references removed so far are
+        forgotten (taken out of ``visited_environments``) so that
+        :meth:`get_new_environments` returns them, and
+        :meth:`_search_and_refine_step_events` searches the new environments,
+        refines every applicable catalogue entry on the current state and
+        extends the persistent active table, which ``run`` passes as
+        ``active_table``. The rebuilt rows go through the purge's
+        backward-link rule, then selection and the purge on failure continue
+        on them. The simulation ends with status 1 (``_close(failed=True)``)
+        only when the table is empty again after that re-search (it produced
+        no active row, or every re-searched row failed), when the re-search
+        leaves the catalogue empty, or when the table was already empty on
+        entry, which is not a purge and triggers no search. Without a failure
+        nothing is searched again: one selection, one reconstruction.
+
+        Invariant: the topology of every reference removed in this call is
+        forgotten exactly once. A reference removed before the re-search has
+        its topology forgotten here, before the re-search, and not returned
+        in ``err_ae``; forgetting it again at the end of the step would
+        search a topology the re-search has just searched a second time. A
+        reference removed after the re-search, or in a call that needed no
+        re-search, has its topology returned in ``err_ae`` for ``run`` to
+        forget at the end of the step, as before.
+
         Parameters
         ----------
         active_table : ActiveEventTable
-            The active table of the step; mutated in place on failures.
+            The active table of the step, ``self.active_table``; mutated in
+            place on failures and extended by the re-search.
 
         Returns
         -------
@@ -1008,17 +1079,57 @@ class KMC:
             ``(result, delta_t, ktot, idx_selected_event, err_reference,
             err_ae)``: the successful reconstruction, its time increment and
             total rate, the selected row label, every reference id removed
-            during this call and the removed rows' topologies.
+            during this call (before and after the re-search, for the step
+            log) and the topologies ``run`` must forget at the end of the
+            step (see the invariant above).
 
         """
         # TODO make a Result
 
-        err_reference = []
-        err_ae = []
+        err_reference: list[int] = []
+        err_ae: list[str] = []
         active_table.validate_recycled(
             self.system, self.neighbors_list, allow_pending=False
         )
-        while len(active_table.table) > 0:
+        # An empty table on entry was not emptied by a purge: no re-search.
+        may_research = len(active_table.table) > 0
+        while True:
+            if len(active_table.table) == 0:
+                if not may_research:
+                    self.loggers.error("log", "All event reconstuctions failed.")
+                    self._close(failed=True)
+                    break
+                may_research = False
+                # Every row was purged after failed reconstructions: forget
+                # the removed topologies now, so the environment scan returns
+                # them, and search this step again. From here on err_ae lists
+                # the removals after the re-search only (see the invariant).
+                forgotten = set(err_ae)
+                self.loggers.info(
+                    "log",
+                    "\t :=> Every active row was purged after failed "
+                    "reconstructions; forgetting topologies {} and searching "
+                    "again for this step.".format(sorted(forgotten)),
+                )
+                self.visited_environments = self.visited_environments.difference(
+                    forgotten
+                )
+                err_ae = []
+                self._search_and_refine_step_events(
+                    self.get_new_environments(), self.config.eventsearch.nsearch
+                )
+                # The purge's backward-link rule, applied to the rebuilt rows:
+                # the re-search refines every applicable catalogue entry,
+                # including one kept above although its backward event was
+                # removed (constant style, non-reciprocal loaded catalogue).
+                # Ids re-allocated to new entries meanwhile (the constant
+                # style reuses freed ids) are not treated as removed.
+                catalogue = self.reference_table.table
+                active_table.drop_reference_events(
+                    set(err_reference) - set(catalogue["idx_ref"].astype(int)),
+                    catalogue,
+                )
+                continue
             ##=>Select event
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
             ##=>Reconstruct event
@@ -1065,9 +1176,6 @@ class KMC:
                         list(removed.idx_refs), dropped
                     ),
                 )
-        else:
-            self.loggers.error("log", "All event reconstuctions failed.")
-            self._close(failed=True)
         return (
             result_reconstruction,
             delta_t,
