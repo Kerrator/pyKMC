@@ -1,7 +1,11 @@
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from pykmc.config import PhysicalConstants
 from .backends import PrefactorBackend
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,16 @@ class RateConstant:
             Rate prefactor in ps^-1.
         """
         return self._prefactor_backend.compute(**kwargs)
+
+    def compute_prefactors_batch(
+        self, payloads: "list[dict[str, object]]", config: object
+    ) -> "list[Future]":
+        """Delegate per-event batch prefactor computation to the backend.
+
+        See ``PrefactorBackend.compute_prefactors_batch`` for the contract
+        (one future per payload, each resolving to an ``EventPrefactors``).
+        """
+        return self._prefactor_backend.compute_prefactors_batch(payloads, config)
 
     def compute_rate(self, dE: float, **kwargs) -> RateComponents:
         """Compute the rate for a given energy barrier.

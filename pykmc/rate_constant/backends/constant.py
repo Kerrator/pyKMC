@@ -1,5 +1,8 @@
 from .base import PrefactorBackend
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
 
 
 class ConstantBackendConfig(Protocol):
@@ -26,8 +29,8 @@ class ConstantBackend(PrefactorBackend):
 
     name = "constant"
 
-    def __init__(self, config: ConstantBackendConfig) -> None:
-        self.config = config
+    def __init__(self, config: ConstantBackendConfig, manager: object = None) -> None:
+        self.config = config  # ``manager`` is accepted for ctor uniformity; unused
 
     def compute(self, **kwargs) -> float:
         """Return the constant prefactor.
@@ -38,3 +41,34 @@ class ConstantBackend(PrefactorBackend):
             Constant prefactor in ps^-1.
         """
         return self.config.k0
+
+    def compute_prefactors_batch(
+        self, payloads: "list[dict[str, object]]", config: object
+    ) -> "list[Future]":
+        """Constant-style batch: immediately-resolved futures, no per-event nu0.
+
+        Uniform contract with the htst/rpa backends: every returned future
+        resolves to an ``EventPrefactors``; callers read ``.nu0_forward`` /
+        ``.nu0_backward`` (both ``None`` here -> the caller keeps its
+        ``k0``-based values). ``config`` (the full pykmc ``Config``) is unused.
+        """
+        from concurrent.futures import Future
+
+        from pykmc.rate_constant.prefactor import EventPrefactors
+
+        futures: "list[Future]" = []
+        for _ in payloads:
+            f: "Future" = Future()
+            f.set_result(
+                EventPrefactors(
+                    nu0_forward=None,
+                    nu0_backward=None,
+                    n_free=0,
+                    n_neg_saddle=0,
+                    ok_forward=False,
+                    ok_backward=False,
+                    reason="constant style: no per-event nu0",
+                )
+            )
+            futures.append(f)
+        return futures

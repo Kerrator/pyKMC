@@ -509,7 +509,7 @@ class PartnConfig(BaseModel):
 class RateConstantConfig(BaseModel):
     """Rate constant computation parameters."""
 
-    style: Literal["constant"] = Field(
+    style: Literal["constant", "htst", "rpa"] = Field(
         default=...,
         description="Method used to compute the prefactor of the rate constant. ",
     )
@@ -524,6 +524,47 @@ class RateConstantConfig(BaseModel):
         default=300,
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
+    free_radius: float = Field(
+        default=6.0,
+        gt=0.0,
+        description="HTST: radius (Angstrom) around the moving atom defining the free "
+        "(movable) atoms in the partial Hessian.",
+    )
+    fd_step: float = Field(
+        default=0.01,
+        gt=0.0,
+        description="HTST: finite-difference displacement (Angstrom) for the Hessian.",
+    )
+    nu0_min_THz: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="HTST: lower acceptance bound for nu0 (THz); below this the event "
+        "falls back to k0.",
+    )
+    nu0_max_THz: float = Field(
+        default=100.0,
+        gt=0.0,
+        description="HTST: upper acceptance bound for nu0 (THz); above this the event "
+        "falls back to k0.",
+    )
+    require_one_negative_mode: bool = Field(
+        default=True,
+        description="HTST: require exactly one negative saddle mode; otherwise fall "
+        "back to k0 for that event.",
+    )
+    premin: bool = Field(
+        default=True,
+        description="HTST: before each Hessian, relax the surroundings of the event "
+        "core (atoms within atomicenvironment.rcut of the central atom held fixed, "
+        "environment minimized).",
+    )
+
+    @model_validator(mode="after")
+    def _check_nu0_window(self) -> "RateConstantConfig":
+        """Ensure the nu0 acceptance window is ordered."""
+        if self.nu0_min_THz >= self.nu0_max_THz:
+            raise ValueError("nu0_min_THz must be < nu0_max_THz")
+        return self
 
 
 class PSRConfig(BaseModel):
