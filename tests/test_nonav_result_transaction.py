@@ -52,6 +52,10 @@ class NativeStorage:
         elif words[0] == "group" and words[2] == "delete":
             assert words[1] != "user_group"
             self.groups.remove(words[1])
+        elif words[0] == "displace_atoms":
+            # set_positions migrates atoms to their owners after the restore
+            # scatter; a single-rank adapter already holds every row.
+            assert words[1:] == ["all", "move", "0", "0", "0", "units", "box"]
         else:
             raise AssertionError(f"unexpected postcondition-cleanup command: {command}")
 

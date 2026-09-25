@@ -19,6 +19,18 @@ integer image translations. Nonperiodic lattice directions retain their
 physical displacement; normalization neither reorders atoms nor modifies the
 input array. The AV refinement helper uses this same engine boundary.
 
+After the scatter the engine migrates every atom to the rank that owns its new
+coordinates (a remap followed by an irregular migration, `displace_atoms all
+move 0 0 0 units box`). The brick exchange that a run or minimization performs
+at setup offers a departing atom only to the two neighbouring sub-domains along
+each axis, so a scatter that moves an atom two or more sub-domains away would
+otherwise lose it. Whether an atom is delivered no longer depends on the
+coordinates the engine held before the scatter. The migration leaves the
+coordinates of an orthogonal box unchanged (a triclinic box goes through a
+lamda round trip at the 1e-15 Å level); it can order the atoms on a rank
+differently from the plain exchange, so forces and energies agree with a run
+without the migration to floating-point round-off, not bit for bit.
+
 A failed full-system restore retains its original descriptor and pending state
 even if the native error wrapper closes the handle. Retrying starts a fresh
 instance when necessary. Restoration verifies the force snapshot and actual

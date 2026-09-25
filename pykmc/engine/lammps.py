@@ -949,6 +949,14 @@ class LammpsEngine(Engine):
         positions = np.ascontiguousarray(positions)
         c_array = (ctypes.c_double * len(positions))(*positions)
         self.lmp.scatter_atoms("x", 1, 3, c_array)
+        # scatter_atoms writes on the rank that owns each atom now; the next
+        # setup's brick exchange only reaches the neighbouring sub-boxes, so an
+        # atom moved farther would be lost. Remap and migrate every atom to its
+        # owner here. Coordinates of an orthogonal box are unchanged (a
+        # triclinic box goes through a lamda round trip, ~1e-15 A); the
+        # per-rank atom order can differ from the plain exchange, so later
+        # force sums may differ in their last bits.
+        self.command("displace_atoms all move 0 0 0 units box")
 
     @lammps_error_handler
     def get_forces(
@@ -965,7 +973,11 @@ class LammpsEngine(Engine):
             ``(N, 3)`` positions to scatter first (ASE frame).
         recompute : bool, optional
             Run ``run 0 post no`` before gathering so the forces match the
-            current positions. ``False`` returns the forces of the last run.
+            current positions. ``False`` returns the forces of the last run;
+            after a scatter on a multi-rank engine those are no longer valid
+            per atom (atoms migrated by ``set_positions`` do not carry their
+            forces), so pass ``False`` only when no scatter happened since
+            the last run.
 
         Returns
         -------

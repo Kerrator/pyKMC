@@ -445,6 +445,10 @@ class CommandEndpoint:
             self.computes.add(fields[1])
         elif fields[0] == "uncompute":
             self.computes.remove(fields[1])
+        elif fields[0] == "displace_atoms":
+            # set_positions migrates atoms to their owners after a scatter;
+            # a single-rank adapter already holds every row.
+            assert fields[1:] == ["all", "move", "0", "0", "0", "units", "box"]
         elif fields[0] not in ("min_style", "run"):
             raise AssertionError(f"ADAPTER_PROTOCOL: unsupported command {command}")
 
