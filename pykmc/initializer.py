@@ -229,14 +229,28 @@ class Initializer:
         mass_map = ", ".join(
             "{}={:g}".format(s, m) for s, m in zip(*species_masses, strict=True)
         )
+        # The zone default changed from the full system to ``auto``: say which
+        # crop every Hessian of the run uses.
+        zone = settings.resolved_zone_radius
+        if zone is None:
+            zone_text = "full system (zone_radius None)"
+        elif settings.zone_radius == "auto":
+            zone_text = (
+                "zone_radius auto = {:g} A (free_radius + interaction_range "
+                "{:g} A)".format(zone, settings.interaction_range)
+            )
+        else:
+            zone_text = "zone_radius {:g} A".format(zone)
         self.kmc.loggers.info(
             "log",
             ":=> HTST prefactor service ready (style {}, free_radius {} A centred "
-            "on the {} geometry, fd_step {} A, nu0 window [{:.3e}, {:.3e}] Hz, "
-            "k0 fallback {} ps^-1, engine masses (amu): {})".format(
+            "on the {} geometry, Hessian scratch system {}, fd_step {} A, nu0 "
+            "window [{:.3e}, {:.3e}] Hz, k0 fallback {} ps^-1, engine masses "
+            "(amu): {})".format(
                 self.kmc.config.rateconstant.style,
                 settings.free_radius,
                 settings.free_region_center,
+                zone_text,
                 settings.fd_step,
                 settings.nu0_min_hz,
                 settings.nu0_max_hz,

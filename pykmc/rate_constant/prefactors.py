@@ -68,7 +68,10 @@ PREFACTOR_OPERATION: str = "compute_event_prefactors"
 def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
     """Build the frozen kernel settings from the rate-constant configuration.
 
-    The THz window is converted to Hz here and nowhere else.
+    The THz window is converted to Hz here and nowhere else. ``zone_radius`` is
+    passed as configured (``"auto"``, ``None`` or a number) together with the
+    declared ``interaction_range``; ``HTSTSettings.resolved_zone_radius`` turns
+    ``"auto"`` into ``free_radius + interaction_range``.
 
     Parameters
     ----------
@@ -86,6 +89,7 @@ def settings_from_config(rate_config: RateConstantConfig) -> HTSTSettings:
         fd_step=rate_config.fd_step,
         force_tol=rate_config.force_tol,
         zone_radius=rate_config.zone_radius,
+        interaction_range=rate_config.interaction_range,
         premin=rate_config.premin,
         nu0_min_hz=thz_to_hz(rate_config.nu0_min_THz),
         nu0_max_hz=thz_to_hz(rate_config.nu0_max_THz),
@@ -660,15 +664,16 @@ class PrefactorService:
             if request.settings.free_region_center == "saddle"
             else request.min1_positions
         )
+        zone_radius = request.settings.resolved_zone_radius
         zone = (
             tuple(range(len(request.types)))
-            if request.settings.zone_radius is None or self.method != "lammps_eskm"
+            if zone_radius is None or self.method != "lammps_eskm"
             else tuple(
                 int(i)
                 for i in select_free_indices(
                     centring,
                     request.center_index,
-                    request.settings.zone_radius,
+                    zone_radius,
                     request.cell,
                     request.pbc,
                 )

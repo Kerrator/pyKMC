@@ -25,9 +25,15 @@ from pykmc.event_table import (
     ReferenceEventTable,
 )
 from pykmc.rate_constant import rate_from_prefactor
-from tests.lifecycle.conftest import DATA_INPUT, accepted, rejected
+from tests.lifecycle.conftest import DATA_INPUT, FakeManager, accepted, rejected
 
-from .protocol_producers import archived_frequency, protocol_patch, protocol_table
+from .protocol_producers import (
+    archived_frequency,
+    protocol_event_prefactors,
+    protocol_patch,
+    protocol_service,
+    protocol_table,
+)
 
 LEGACY_PICKLE = Path("tests/data/reference_table_Cu_fake.pickle")
 
@@ -633,7 +639,14 @@ class TestReloadCompatibility:
     ) -> None:
         """Known setting differences survive even when partial source blocks rebuild."""
         saved = self._saved(
-            _config("htst", k0=1.0, T=300.0, free_radius=6.0, fd_step=0.01),
+            _config(
+                "htst",
+                k0=1.0,
+                T=300.0,
+                free_radius=6.0,
+                fd_step=0.01,
+                zone_radius=None,
+            ),
             system_single_type_fcc,
             tmp_path,
             incomplete=True,
@@ -662,6 +675,78 @@ class TestReloadCompatibility:
         ]
         assert archived_frequency(loaded, 12, 5.0e12)
         assert not loaded.prefactor_service.manager.prefactor_requests
+
+    def test_full_system_table_under_the_auto_default_is_stale(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """A table stored with ``zone_radius: None`` is not reused under ``auto``.
+
+        Tables written before ``auto`` became the default record the full
+        system (``None``). The default now resolves to a 19 Angstrom crop, a
+        different producing context: the reload names the change and demotes
+        the accepted row to ``stale`` like any other changed setting, and the
+        load itself never fails. Here the source is explicitly partial, so no
+        recomputation can be attempted.
+        """
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, zone_radius=None),
+            system_single_type_fcc,
+            tmp_path,
+            incomplete=True,
+        )
+        original = pd.read_pickle(saved)
+        assert original.attrs["settings"]["zone_radius"] is None
+        loaded = protocol_table(_config("htst", str(saved), k0=1.0, T=300.0))
+        assert loaded.config.rateconstant.zone_radius == "auto"
+        stale = self._row(loaded, 12)
+        assert stale["nu0_status"] == "stale"
+        assert math.isnan(stale["nu0"]) and stale["k_prefactor"] == 1.0
+        assert loaded._changed_settings(original.attrs["settings"]) == [
+            "zone_radius changed on reload (stored None, current 19.0)"
+        ]
+        assert self._row(loaded, 3)["nu0_status"] == "rejected"
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert not loaded.prefactor_service.manager.prefactor_requests
+
+    def test_complete_full_system_table_under_the_auto_default_is_recomputed(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """A complete ``None`` table is demoted by descriptor and resubmitted as ``auto``.
+
+        The stored descriptor holds ``zone_radius`` None, the current one the
+        resolved 19.0, so the physical descriptors differ: the old estimate is
+        archived as stale and one recomputation is dispatched under the
+        current settings. The protocol worker returns no producing energies,
+        so the row stays ``stale`` on the ``k0`` fallback; nothing raises.
+        """
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, zone_radius=None),
+            system_single_type_fcc,
+            tmp_path,
+        )
+        config = _config("htst", str(saved), k0=1.0, T=300.0)
+        manager = FakeManager(
+            lambda request: protocol_event_prefactors(
+                request, accepted(7.0e12), accepted(7.0e12)
+            )
+        )
+        loaded = ReferenceEventTable(
+            config, prefactor_service=protocol_service(config, manager)
+        )
+        stale = self._row(loaded, 12)
+        assert stale["nu0_status"] == "stale"
+        assert math.isnan(stale["nu0"]) and stale["k_prefactor"] == 1.0
+        history = loaded.prefactor_archive.history[12]
+        assert any(
+            entry["nu0"] == 5.0e12
+            and entry["reason"] == "stale: producing physical descriptor differs"
+            for entry in history
+        )
+        [request] = manager.prefactor_requests
+        assert request.settings.zone_radius == "auto"
+        assert request.settings.resolved_zone_radius == 19.0
+        assert request.descriptor.numerical_settings()["zone_radius"] == 19.0
+        assert self._row(loaded, 3)["nu0_status"] == "rejected"
 
     def test_window_is_reapplied_with_its_own_reason_and_warning(
         self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any

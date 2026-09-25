@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator, ValidationError, field_validator
 import configparser
-from typing import Any, ClassVar, Literal
+import math
+from typing import Any, ClassVar, Literal, Union
 from dataclasses import dataclass
 from numbers import Real
 
@@ -635,13 +636,23 @@ class RateConstantConfig(BaseModel):
         "and cropping. Fixed-atom reaction forces are excluded. Larger or "
         "nonfinite forces reject the native prefactor calculation.",
     )
-    zone_radius: Optional[float] = Field(
-        default=None,
-        gt=0.0,
-        allow_inf_nan=False,
-        description="HTST: optional radius (Angstrom) around the moving atom used to "
-        "crop the scratch system on which the Hessians are computed. None (default) "
-        "uses the full system.",
+    zone_radius: Union[Literal["auto"], float, None] = Field(
+        default="auto",
+        description="HTST: radius (Angstrom) around the moving atom of the scratch "
+        "system on which the Hessians are computed; atoms beyond it are left out. "
+        "'auto' (default) resolves to `free_radius + interaction_range` (19 "
+        "Angstrom at the defaults); None uses the full system; a positive number "
+        "is used as is and must exceed `free_radius`. The crop is exact (the "
+        "prefactor equals the full-system one) when the frozen shell "
+        "`zone_radius - free_radius` is at least the potential's full interaction "
+        "range, which 'auto' guarantees by construction as long as "
+        "`interaction_range` is declared correctly for the potential: a declared "
+        "`interaction_range` below the potential's true range makes an 'auto' "
+        "crop inexact, the same declaration the recycling of active events "
+        "already relies on. The resolved radius is what the reference table "
+        "stores and compares on reload, so 'auto' and the equal explicit radius "
+        "are interchangeable, and any other change (including to or from None) "
+        "marks the stored prefactors stale.",
     )
     interaction_range: float = Field(
         default=13.0,
@@ -651,14 +662,18 @@ class RateConstantConfig(BaseModel):
         "largest distance over which a fixed atom's position enters the partial "
         "Hessian of a free atom: the pair-style cutoff for a pair potential, up "
         "to twice the cutoff for an embedded-atom, moment-tensor or three-body "
-        "potential. Used only when recycling active events between steps: a "
-        "stored site prefactor depends on every atom within "
-        "`free_radius + interaction_range` of the moving atom (within "
+        "potential. It sizes the default `zone_radius = auto` crop "
+        "(`free_radius + interaction_range`), and it bounds the dependency of a "
+        "recycled active event: a stored site prefactor depends on every atom "
+        "within `free_radius + interaction_range` of the moving atom (within "
         "`zone_radius` when the calculation was zone-cropped) and any motion of "
-        "one of them invalidates the recycled row. It never enters a computed "
-        "prefactor. The default is twice the 6.5 Angstrom cutoff of the Ni EAM "
-        "potential shipped with the tests, the largest of the shipped potentials; "
-        "a value matched to the potential keeps more recycled rows valid.",
+        "one of them invalidates the recycled row. It never enters the Hessian "
+        "arithmetic, and is not stored with the table: only the resolved "
+        "`zone_radius` is. The default is twice the 6.5 Angstrom cutoff of the Ni "
+        "EAM potential shipped with the tests, the largest of the shipped "
+        "potentials; a value matched to the potential keeps more recycled rows "
+        "valid and a smaller `auto` crop, a value below the potential's true "
+        "range makes an `auto` crop inexact.",
     )
     nu0_min_THz: float = Field(
         default=1.0,
@@ -685,9 +700,39 @@ class RateConstantConfig(BaseModel):
     @field_validator("zone_radius", mode="before")
     @classmethod
     def _parse_optional_zone_radius(cls, v: Any) -> Any:
-        """Accept the INI spelling ``None`` for an absent ``zone_radius``."""
-        if v is None or (isinstance(v, str) and v.strip().lower() == "none"):
+        """Accept the INI spellings ``None`` and ``auto`` (any case).
+
+        Any other string must parse as a number; it is then validated as the
+        positive finite radius.
+        """
+        if v is None:
             return None
+        if isinstance(v, str):
+            word = v.strip().lower()
+            if word == "none":
+                return None
+            if word == "auto":
+                return "auto"
+            try:
+                float(v)
+            except ValueError:
+                raise ValueError(
+                    "zone_radius must be 'auto', None or a positive number "
+                    f"(Angstrom), got {v!r}"
+                ) from None
+        return v
+
+    @field_validator("zone_radius", mode="after")
+    @classmethod
+    def _require_finite_positive_zone_radius(
+        cls, v: Union[str, float, None]
+    ) -> Union[str, float, None]:
+        """Bound a numeric ``zone_radius`` like the other radii (finite, > 0)."""
+        if isinstance(v, float) and not (math.isfinite(v) and v > 0.0):
+            raise ValueError(
+                "zone_radius must be a finite number greater than 0 (Angstrom), "
+                f"got {v!r}"
+            )
         return v
 
     @field_validator("force_tol", mode="before")
@@ -708,14 +753,39 @@ class RateConstantConfig(BaseModel):
             )
         return self
 
+    @property
+    def resolved_zone_radius(self) -> Optional[float]:
+        """Return the crop radius (Angstrom) the configuration selects, or ``None``.
+
+        ``None`` stays ``None`` (full system), ``"auto"`` resolves to
+        ``free_radius + interaction_range`` and a number is returned as is;
+        the same rule as ``HTSTSettings.resolved_zone_radius``, which the
+        prefactor service uses.
+        """
+        if self.zone_radius is None:
+            return None
+        if self.zone_radius == "auto":
+            return self.free_radius + self.interaction_range
+        return float(self.zone_radius)
+
     @model_validator(mode="after")
     def _check_zone_radius(self) -> RateConstantConfig:
-        """Require the crop zone to enclose the free region when it is set."""
-        if self.zone_radius is not None and self.zone_radius <= self.free_radius:
+        """Require the crop zone to enclose the free region when it is set.
+
+        The rule applies to the resolved radius, so an ``"auto"`` zone is
+        checked as ``free_radius + interaction_range``.
+        """
+        resolved = self.resolved_zone_radius
+        if resolved is not None and resolved <= self.free_radius:
+            spelled = (
+                f"'auto' (free_radius + interaction_range = {resolved})"
+                if self.zone_radius == "auto"
+                else f"{self.zone_radius}"
+            )
             raise ValueError(
                 "zone_radius must be > free_radius when set (the frozen shell "
                 f"between them is the Hessian boundary), got zone_radius="
-                f"{self.zone_radius} and free_radius={self.free_radius}"
+                f"{spelled} and free_radius={self.free_radius}"
             )
         return self
 

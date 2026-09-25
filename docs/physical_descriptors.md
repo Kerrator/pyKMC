@@ -98,6 +98,18 @@ Recalculation resolves current initialized user constraints and AV policy while
 preserving the saved AV search center separately from the HTST moving atom.
 Triplets that would move a newly fixed atom remain unavailable.
 
+The numerical settings of the descriptor, and the `settings` saved with the
+table, record `zone_radius` resolved: the default `auto` is stored as
+`free_radius + interaction_range` (19.0 Å at the defaults), `None` as the full
+system and a number as itself. A table computed under `auto` therefore matches
+a later run with the equal explicit radius, while any other zone is a different
+numerical context. In particular a table written with the full system
+(`zone_radius = None`, which was the implicit default before `auto`) loads
+under the `auto` default with its accepted estimates `stale`: they are
+recomputed when their full source is available and otherwise run on `k0`, as
+for any changed numerical setting; the load itself does not fail. Set
+`zone_radius = None` to keep reusing such a table.
+
 When initialized user constraints and the AV policy are unchanged, reload keeps
 the actual source-resolved restriction, including its original pre-search center.
 Relaxing minimum 1 does not move that center or redefine its fixed membership.
@@ -134,9 +146,11 @@ A row's dependency region is its stored crop plus the sphere about the centre
 that bounds the Hessian: the free sphere grown by the force model's interaction
 range (`free_radius + interaction_range`), because a free atom's rows of the
 partial Hessian hold the second derivatives of its energy with every fixed
-neighbour inside that range; or `zone_radius` when the calculation was
-zone-cropped (the zone is the whole set of atoms the scratch calculation ever
-saw, so it bounds the dependency whatever the range). The sphere is taken in
+neighbour inside that range; or the resolved `zone_radius` when the
+calculation was zone-cropped (the zone is the whole set of atoms the scratch
+calculation ever saw, so it bounds the dependency whatever the range; the
+default `auto` zone is `free_radius + interaction_range` itself, so with the
+default the two descriptions coincide). The sphere is taken in
 both the producing minimum and the producing saddle so the selection is covered
 whichever `free_region_center` produced it. A recycled row
 is invalidated when a dependency atom no longer exists, changed type, or sits
@@ -165,9 +179,15 @@ interacting atom keep a stale spectrum (the `changed` case of
 `tests/recycle/test_interaction_shell_dependency.py`: `free_radius` 0.25 Å,
 anchors at 1.12 Å inside a 2.5 Å cutoff, executed centre 20 Å away). The
 neighbour-list `rcut` is the catalogue crop
-radius, not an interaction range. The range never enters a computed prefactor
-and is not part of the persisted table settings, so changing it does not
-demote catalogued estimates. With `premin` the relaxation of the surroundings
+radius, not an interaction range. The range never enters the Hessian
+arithmetic and is not itself part of the persisted table settings, but under
+the default `zone_radius = auto` it sizes the crop and the resolved zone is
+persisted and compared: changing the range then changes the zone and demotes
+the estimates catalogued under the old one (`stale`, recomputed when their full
+source is available). With an explicit `zone_radius`, or `None`, changing the
+range demotes no catalogued estimate. A declared range below the potential's
+true range also makes an `auto` crop inexact, since its frozen shell is then
+narrower than the interaction it must hold. With `premin` the relaxation of the surroundings
 can reach beyond this region; that elastic coupling is not tracked. The
 recycler's movement and distance filters remain the outer guard for the
 executed event's own surroundings: `DistanceRecycling.distance_thr` drops

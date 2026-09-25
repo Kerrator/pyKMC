@@ -20,7 +20,9 @@ def test_defaults() -> None:
     assert cfg.T == 300.0
     assert cfg.free_radius == 6.0
     assert cfg.fd_step == 0.01
-    assert cfg.zone_radius is None
+    assert cfg.zone_radius == "auto"
+    assert cfg.interaction_range == 13.0
+    assert cfg.resolved_zone_radius == 19.0
     assert cfg.nu0_min_THz == 1.0
     assert cfg.nu0_max_THz == 100.0
     assert cfg.premin is False
@@ -160,7 +162,7 @@ def test_committed_input_file_loads() -> None:
     assert rc.style == "constant"
     assert rc.k0 == 1e12
     assert rc.T == 300.0
-    assert rc.zone_radius is None
+    assert rc.zone_radius == "auto"
 
 
 def test_htst_ini_section_round_trip(tmp_path: Path) -> None:
@@ -213,11 +215,113 @@ def test_zone_radius_must_exceed_free_radius(zone_radius: float) -> None:
 
 def test_zone_radius_none_or_larger_is_accepted() -> None:
     """``None`` (full system) and a strictly larger zone both validate."""
-    assert RateConstantConfig(style="htst", free_radius=6.0).zone_radius is None
+    assert (
+        RateConstantConfig(style="htst", free_radius=6.0, zone_radius=None).zone_radius
+        is None
+    )
     assert (
         RateConstantConfig(style="htst", free_radius=6.0, zone_radius=10.0).zone_radius
         == 10.0
     )
+
+
+@pytest.mark.parametrize(
+    ("spelling", "stored"),
+    [
+        ("auto", "auto"),
+        ("Auto", "auto"),
+        (" AUTO ", "auto"),
+        ("None", None),
+        ("none", None),
+        ("12.0", 12.0),
+    ],
+)
+def test_zone_radius_ini_spellings(spelling: str, stored: object) -> None:
+    """``auto`` (any case), ``None`` and a number parse from their INI strings."""
+    rc = RateConstantConfig(style="htst", zone_radius=spelling)
+    assert rc.zone_radius == stored
+
+
+@pytest.mark.parametrize("spelling", ["auto", "Auto", "None", "12.0"])
+def test_zone_radius_ini_spellings_round_trip_through_the_loader(
+    tmp_path: Path, spelling: str
+) -> None:
+    """Each spelling survives ``Config.from_ini_file`` like any other key."""
+    text = INPUT_IN.read_text()
+    start = text.index("[RateConstant]")
+    end = text.index("[PSR]")
+    section = f"[RateConstant]\nstyle = htst\nk0 = 1.0\nzone_radius = {spelling}\n\n"
+    ini = tmp_path / "input_zone.in"
+    ini.write_text(text[:start] + section + text[end:])
+    rc = Config.from_ini_file(str(ini)).rateconstant
+    expected = {"auto": "auto", "Auto": "auto", "None": None, "12.0": 12.0}
+    assert rc.zone_radius == expected[spelling]
+
+
+@pytest.mark.parametrize(
+    ("zone_radius", "free_radius", "interaction_range", "resolved"),
+    [
+        ("auto", 6.0, 13.0, 19.0),
+        ("auto", 4.0, 5.5, 9.5),
+        (None, 6.0, 13.0, None),
+        (12.0, 6.0, 13.0, 12.0),
+    ],
+)
+def test_zone_radius_resolves_against_the_interaction_range(
+    zone_radius: object,
+    free_radius: float,
+    interaction_range: float,
+    resolved: float | None,
+) -> None:
+    """``auto`` is ``free_radius + interaction_range``; ``None`` and a number are kept.
+
+    The configuration and the kernel settings built from it resolve alike.
+    """
+    from pykmc.rate_constant.prefactors import settings_from_config
+
+    rc = RateConstantConfig(
+        style="htst",
+        free_radius=free_radius,
+        interaction_range=interaction_range,
+        zone_radius=zone_radius,
+    )
+    assert rc.zone_radius == zone_radius
+    assert rc.resolved_zone_radius == resolved
+    settings = settings_from_config(rc)
+    assert settings.zone_radius == zone_radius
+    assert settings.resolved_zone_radius == resolved
+
+
+def test_explicit_zone_radius_is_not_tied_to_the_interaction_range() -> None:
+    """A number stays itself whatever range is declared (the rule is on ``auto``)."""
+    rc = RateConstantConfig(
+        style="htst", free_radius=6.0, zone_radius=10.0, interaction_range=13.0
+    )
+    assert rc.resolved_zone_radius == 10.0
+
+
+@pytest.mark.parametrize("bogus", ["full", "automatic", "", "19 A"])
+def test_zone_radius_rejects_other_strings(bogus: str) -> None:
+    """A string that is not ``auto``, ``None`` or a number is a configuration error."""
+    with pytest.raises(ValidationError, match="zone_radius must be 'auto', None"):
+        RateConstantConfig(style="htst", zone_radius=bogus)
+
+
+def test_auto_zone_radius_is_checked_against_free_radius_when_resolved() -> None:
+    """The ``zone_radius > free_radius`` rule applies to the resolved ``auto`` value.
+
+    ``interaction_range > 0`` makes it hold today; the check itself must still
+    refuse an ``auto`` zone that resolves to ``free_radius``, so relaxing the
+    field bound cannot silently produce a crop without a frozen shell.
+    """
+    rc = RateConstantConfig(style="htst", free_radius=6.0)
+    assert rc.zone_radius == "auto" and rc.resolved_zone_radius > rc.free_radius
+    no_shell = rc.model_copy(update={"interaction_range": 0.0})
+    assert no_shell.resolved_zone_radius == no_shell.free_radius
+    with pytest.raises(ValueError, match="zone_radius must be > free_radius"):
+        no_shell._check_zone_radius()
+    with pytest.raises(ValidationError):
+        RateConstantConfig(style="htst", free_radius=6.0, interaction_range=0.0)
 
 
 # ---------------------------------------------------------------------------

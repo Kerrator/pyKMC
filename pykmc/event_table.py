@@ -124,7 +124,11 @@ A stored table whose ``settings`` differ from the current configuration in any
 of these invalidates every accepted row (``stale``). The acceptance window is
 not a compatibility setting: it is re-applied to every accepted row on reload
 instead. A stored table written before ``free_region_center`` existed counts
-as ``"min1"`` (the centring of that era).
+as ``"min1"`` (the centring of that era). ``zone_radius`` is stored and
+compared resolved (``RateConstantConfig.resolved_zone_radius``): a table
+computed under ``auto`` stores its radius (19.0 at the defaults), so it
+matches an explicit equal radius, and a table stored with ``None`` (full
+system) differs from any crop, ``auto`` included.
 """
 
 SOURCE_REFERENCE: str = "reference"
@@ -2164,7 +2168,8 @@ class ReferenceEventTable:
         dict[str, Any]
             ``schema_version``, ``style``, ``nu0_units`` (Hz),
             ``k_prefactor_units`` (ps^-1), ``T`` (K), ``k0`` (ps^-1) and the
-            kernel ``settings`` (radii and step in Angstrom, window in Hz).
+            kernel ``settings`` (radii and step in Angstrom, window in Hz;
+            ``zone_radius`` resolved, so ``auto`` is stored as its radius).
 
         """
         rc = self.config.rateconstant
@@ -2189,7 +2194,7 @@ class ReferenceEventTable:
                     "free_region_center", str(rc.free_region_center)
                 ),
                 "fd_step": numerical.get("fd_step", float(rc.fd_step)),
-                "zone_radius": numerical.get("zone_radius", rc.zone_radius),
+                "zone_radius": numerical.get("zone_radius", rc.resolved_zone_radius),
                 "premin": numerical.get("premin", bool(rc.premin)),
                 "nu0_min_hz": thz_to_hz(rc.nu0_min_THz),
                 "nu0_max_hz": thz_to_hz(rc.nu0_max_THz),

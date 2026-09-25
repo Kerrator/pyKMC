@@ -396,6 +396,40 @@ class TestComposition:
         assert "centred on the saddle geometry" in ready[0]
         assert "engine masses (amu): Ni=58.6934" in ready[0]
 
+    @pytest.mark.parametrize(
+        ("zone_radius", "text"),
+        [
+            (
+                "auto",
+                "Hessian scratch system zone_radius auto = 19 A "
+                "(free_radius + interaction_range 13 A)",
+            ),
+            (None, "Hessian scratch system full system (zone_radius None)"),
+            (12.0, "Hessian scratch system zone_radius 12 A"),
+        ],
+    )
+    def test_ready_line_names_the_hessian_zone(
+        self, htst_config: Any, zone_radius: Any, text: str
+    ) -> None:
+        """The start-up line says which crop every Hessian uses, ``auto`` resolved."""
+        from pykmc.config import RateConstantConfig
+
+        rate = RateConstantConfig(
+            style="htst",
+            k0=1.0,
+            T=htst_config.rateconstant.T,
+            free_radius=6.0,
+            zone_radius=zone_radius,
+        )
+        config = htst_config.model_copy(update={"rateconstant": rate})
+        kmc = KMC(config, manager=FakeManager())
+        kmc.loggers = _Recorder()
+        kmc.htst_preflight = dict(PREFLIGHT_REPORT)
+        Initializer(kmc).initialize_prefactor_service()
+        ready = [m for _, m in kmc.loggers.messages if "prefactor service ready" in m]
+        assert len(ready) == 1
+        assert text in ready[0]
+
 
 class TestExitStatus:
     """``_close`` chooses the status and ``run.py`` propagates it after shutdown."""

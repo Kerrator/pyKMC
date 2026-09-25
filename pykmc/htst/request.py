@@ -246,10 +246,10 @@ class HTSTEventRequest:
                 raise HTSTRequestError(
                     "request species/masses disagree with descriptor"
                 )
-            if any(
-                getattr(self.settings, key) != value
-                for key, value in self.descriptor.numerical
-            ):
+            # The descriptor records the resolved zone, so compare resolved
+            # values: an ``"auto"`` zone agrees with its radius.
+            values = self.settings.calculation_fields()
+            if any(values[key] != value for key, value in self.descriptor.numerical):
                 raise HTSTRequestError("request settings disagree with descriptor")
         if self.constraints is not None:
             if not isinstance(self.constraints, ResolvedConstraints):

@@ -195,6 +195,35 @@ def test_zone_crop_bounds_the_dependency_region_by_the_zone() -> None:
     assert not unchanged(state, entered_zone)
 
 
+def test_auto_zone_bounds_the_dependency_region_by_its_resolved_radius() -> None:
+    """``auto`` resolves to ``free_radius + interaction_range`` of the settings.
+
+    With the settings' range equal to the declared one this is the region of
+    the uncropped calculation; the zone of the settings is what the scratch
+    calculation saw, so it bounds the region even when the declared range
+    passed alongside differs.
+    """
+    settings = HTSTSettings(
+        free_radius=FREE_RADIUS, zone_radius="auto", interaction_range=LJ_CUTOFF
+    )
+    edge = FREE_RADIUS + LJ_CUTOFF
+    assert settings.resolved_zone_radius == edge
+    assert dependency_radius(settings, LJ_CUTOFF) == edge
+    assert dependency_radius(settings, 12.0) == edge
+    assert dependency_radius(
+        HTSTSettings(free_radius=FREE_RADIUS), LJ_CUTOFF
+    ) == dependency_radius(settings, LJ_CUTOFF)
+    state = site_state(settings, interaction_range=12.0)
+    assert set(state.dependency_ids) == set(SOURCE_IDS[:5])
+    assert not unchanged(state, geometry(0.95))
+    entered = geometry(1.0)
+    entered[5, 0] = 10.0 + edge - 0.01
+    assert not unchanged(state, entered), "an atom entered the auto zone"
+    beyond = geometry(1.0)
+    beyond[5, 0] = 10.0 + edge + 0.01
+    assert unchanged(state, beyond), "motion outside the auto zone keeps the row"
+
+
 def test_validate_recycled_drops_the_row_whose_shell_atom_moved() -> None:
     """Through the table: a moved atom outside ``free_radius`` but inside the range."""
     cfg, system, _, _ = h.setup()

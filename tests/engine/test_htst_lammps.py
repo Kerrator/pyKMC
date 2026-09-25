@@ -723,12 +723,6 @@ class TestLammpsHTSTSerial:
         assert crop_engine.full_system.species == ("Si",)
         _assert_all_closed(scratch_log, 2)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=ValueError,
-        reason="zone_radius='auto' (free_radius + interaction_range, D5) arrives "
-        "in P2; this test flips to green with it",
-    )
     def test_auto_zone_matches_full_system(
         self,
         search_engine: LammpsEngine,
@@ -737,7 +731,7 @@ class TestLammpsHTSTSerial:
     ) -> None:
         """``zone_radius="auto"`` reproduces the full system to 1e-9 relative.
 
-        ``auto`` (D5) resolves to ``free_radius + interaction_range``. No range
+        ``auto`` resolves to ``free_radius + interaction_range``. No range
         is declared here, so it is ``DEFAULT_INTERACTION_RANGE`` (13 Å, the
         ``RateConstantConfig`` default) and the zone is 6 + 13 = 19 Å about
         the saddle: 1297 of the 1727 atoms. The 13 Å frozen shell is over

@@ -83,6 +83,57 @@ class TestSettings:
         assert settings.premin is True
         assert settings.free_region_center == "min1"
 
+    def test_settings_from_config_carries_the_interaction_range(self) -> None:
+        """The declared range reaches the kernel settings and sizes ``auto``."""
+        config = _config(
+            "htst", k0=1.0, T=300.0, free_radius=4.5, interaction_range=7.5
+        )
+        settings = settings_from_config(config.rateconstant)
+        assert settings.interaction_range == 7.5
+        assert settings.zone_radius == "auto"
+        assert settings.resolved_zone_radius == 12.0
+        explicit = settings_from_config(
+            _config(
+                "htst", k0=1.0, T=300.0, zone_radius=None, interaction_range=7.5
+            ).rateconstant
+        )
+        assert explicit.interaction_range == 7.5
+        assert explicit.zone_radius is None and explicit.resolved_zone_radius is None
+
+    def test_default_zone_reaches_the_kernel_as_auto(self) -> None:
+        """The config default ``auto`` resolves to 6 + 13 = 19 Angstrom."""
+        settings = settings_from_config(_config("htst", k0=1.0, T=300.0).rateconstant)
+        assert settings.zone_radius == "auto"
+        assert settings.resolved_zone_radius == 19.0
+
+    def test_descriptor_records_the_resolved_zone(self) -> None:
+        """``auto`` and the equal explicit radius are one producing context.
+
+        A request built under ``auto`` validates against a descriptor that
+        stores 19.0; the explicit radius gives the same descriptor and source
+        identity, the full system (``None``) a different one.
+        """
+        from pykmc.htst.provenance import RequestSnapshot
+
+        geometry = _geometry()
+        built = {
+            zone: _service(
+                _config("htst", k0=1.0, T=300.0, zone_radius=zone), FakeManager()
+            ).build_request(event_key=("evt",), **geometry)
+            for zone in ("auto", 19.0, None)
+        }
+        auto, explicit, full = built["auto"], built[19.0], built[None]
+        auto.validate()
+        assert auto.settings.zone_radius == "auto"
+        assert auto.descriptor.numerical_settings()["zone_radius"] == 19.0
+        assert explicit.descriptor.descriptor_id == auto.descriptor.descriptor_id
+        assert (
+            RequestSnapshot.capture(explicit).snapshot_id
+            == RequestSnapshot.capture(auto).snapshot_id
+        )
+        assert full.descriptor.numerical_settings()["zone_radius"] is None
+        assert full.descriptor.descriptor_id != auto.descriptor.descriptor_id
+
     def test_free_region_center_defaults_to_the_saddle(self) -> None:
         """The config default (saddle) reaches the kernel settings unchanged."""
         config = _config("htst", k0=1.0, T=300.0)

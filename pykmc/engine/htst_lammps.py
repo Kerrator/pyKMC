@@ -25,20 +25,24 @@ Free region and zone crop
 The one common free set of the three Hessians is the sphere of
 ``settings.free_radius`` around the moving atom in the geometry named by
 ``settings.free_region_center``: the saddle by default (symmetric between the
-two minima by construction), or ``min1`` for the original model. With
-``settings.zone_radius`` set, the scratch instance holds only the atoms within
-``zone_radius`` of the centre, selected on that same centring geometry (minimum
-image in the full cell with the request's pbc), so the free set is a subset of
-the zone by construction (``free_radius < zone_radius`` on one geometry; the
-remap is checked, never assumed); the ``free_radius``..``zone_radius`` shell is
-the frozen boundary and everything beyond it is absent. The shell must
-therefore exceed the potential's interaction range or the outermost free atoms
-see a truncated environment: every energy term coupling two free atoms must have
-all of its atoms present, which for a three-body potential can reach twice the
-cutoff. On the SW-Si fixture ``zone_radius=10`` with ``free_radius=6`` (a 4 Å
-shell, cutoff 3.77 Å) reproduces the full system to 1e-12 relative; that margin
-is a per-potential choice, not a general guarantee. The crop keeps the full
-species map so integer types keep their meaning.
+two minima by construction), or ``min1`` for the original model. With a zone
+(``settings.resolved_zone_radius`` not ``None``: an explicit ``zone_radius``, or
+``"auto"``, which resolves to ``free_radius + interaction_range``), the scratch
+instance holds only the atoms within that radius of the centre, selected on
+that same centring geometry (minimum image in the full cell with the request's
+pbc), so the free set is a subset of the zone by construction
+(``free_radius < zone_radius`` on one geometry; the remap is checked, never
+assumed); the ``free_radius``..``zone_radius`` shell is the frozen boundary and
+everything beyond it is absent. The shell must therefore be at least the
+potential's full interaction range or the outermost free atoms see a truncated
+environment: every energy term coupling two free atoms must have all of its
+atoms present, which for a three-body potential can reach twice the cutoff.
+``"auto"`` makes the shell exactly the declared ``interaction_range``, so its
+crop is exact by construction when that declaration matches the potential. On
+the SW-Si fixture ``zone_radius=10`` with ``free_radius=6`` (a 4 Å shell,
+cutoff 3.77 Å) reproduces the full system to 1e-12 relative; an explicit
+margin is a per-potential choice, not a general guarantee. The crop keeps the
+full species map so integer types keep their meaning.
 
 Only the forward direction can be requested (``compute_backward=False``): the
 ``min2`` Hessian is then never computed and the backward result is
@@ -306,11 +310,10 @@ class LammpsHTSTExtension(EngineExtension):
                     "request premin solver differs from scratch inputs"
                 )
         settings = request.settings
-        if settings.zone_radius is not None and not (
-            settings.zone_radius > settings.free_radius
-        ):
+        zone_radius = settings.resolved_zone_radius
+        if zone_radius is not None and not (zone_radius > settings.free_radius):
             raise HTSTRequestError(
-                f"zone_radius ({settings.zone_radius}) must exceed free_radius "
+                f"zone_radius ({zone_radius}) must exceed free_radius "
                 f"({settings.free_radius}): the free_radius..zone_radius shell is "
                 "the frozen boundary of the scratch system and must itself be "
                 "wider than the potential's full interaction range"
@@ -342,10 +345,8 @@ class LammpsHTSTExtension(EngineExtension):
         # (``free_set_report``); worker ranks have no INFO handler.
         relaxation_locks = np.union1d(core_global, fixed_global).astype(int)
         zone: np.ndarray | None = None
-        if settings.zone_radius is not None:
-            zone = select_free_indices(
-                centring, center, settings.zone_radius, cell, request.pbc
-            )
+        if zone_radius is not None:
+            zone = select_free_indices(centring, center, zone_radius, cell, request.pbc)
         if free_global.size == 0:
             # The kernel owns the unavailable/skipped result. No scratch engine
             # or matrix is needed when constraints leave no vibrational DOFs.

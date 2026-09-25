@@ -11,6 +11,7 @@ import numpy as np
 from .free_region import select_free_indices
 from .provenance import RequestSnapshot
 from .result import DirectionalCalculation
+from .settings import DEFAULT_INTERACTION_RANGE
 from ..physics import _indices
 from ..utils.geometry import minimum_image_displacement
 
@@ -23,14 +24,9 @@ precision coordinate round trip, so only representation noise is absorbed;
 a physical move of a dependency atom always invalidates.
 """
 
-DEFAULT_INTERACTION_RANGE: float = 13.0
-"""Interaction range (Å) of a site state built without one.
-
-The same value as the ``interaction_range`` default of ``RateConstantConfig``
-(twice the 6.5 Å cutoff of the Ni EAM potential shipped with the tests, the
-largest of the shipped potentials). The active table passes the configured
-value; the default only serves direct constructions.
-"""
+# ``DEFAULT_INTERACTION_RANGE`` (13 Å, the ``RateConstantConfig`` default) is
+# defined in ``settings`` so that ``HTSTSettings`` can resolve an ``"auto"``
+# zone with it; it is re-exported here for the site state and its callers.
 
 
 def dependency_radius(
@@ -43,13 +39,15 @@ def dependency_radius(
     with every fixed neighbour inside the force model's interaction range, so
     the spectrum depends on the free sphere grown by that range
     (``free_radius + interaction_range``). When the calculation was
-    zone-cropped (``zone_radius``), the zone is the whole set of atoms the
-    scratch calculation ever saw and bounds the dependency instead, whatever
-    the range: an atom beyond the zone never entered the spectrum. Atoms
-    beyond this radius (and outside the stored crop) cannot change the
-    spectrum through the free-region Hessian; the recycler's movement and
-    distance filters remain the guard for the executed event's own
-    surroundings.
+    zone-cropped (``zone_radius``, resolved through
+    ``settings.resolved_zone_radius``, so ``"auto"`` gives the
+    ``free_radius + interaction_range`` of the settings), the zone is the
+    whole set of atoms the scratch calculation ever saw and bounds the
+    dependency instead, whatever the range: an atom beyond the zone never
+    entered the spectrum. Atoms beyond this radius (and outside the stored
+    crop) cannot change the spectrum through the free-region Hessian; the
+    recycler's movement and distance filters remain the guard for the
+    executed event's own surroundings.
 
     The settings carry no cutoff and LAMMPS exposes none to the caller, so
     the range is the user's declaration for the potential
@@ -75,8 +73,9 @@ def dependency_radius(
             f"interaction_range must be a finite number >= 0, got {interaction_range!r}"
         )
     free = float(settings.free_radius)
-    if settings.zone_radius is not None:
-        return max(free, float(settings.zone_radius))
+    zone = settings.resolved_zone_radius
+    if zone is not None:
+        return max(free, float(zone))
     return free + float(interaction_range)
 
 

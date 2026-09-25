@@ -271,8 +271,13 @@ class PhysicalDescriptor:
     def from_config(
         cls, config: Any, engine: EnginePhysics, settings: Any
     ) -> PhysicalDescriptor:
+        # The zone is recorded resolved (``HTSTSettings.calculation_fields``):
+        # an ``"auto"`` zone is stored as its radius, so a table computed under
+        # ``auto`` matches an explicit equal radius on reload and any other
+        # zone, including the full system (``None``), is a different descriptor.
+        values = settings.calculation_fields()
         numerical = tuple(
-            (key, getattr(settings, key))
+            (key, values[key])
             for key in (
                 "free_radius",
                 "free_region_center",

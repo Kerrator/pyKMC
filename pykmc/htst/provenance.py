@@ -7,7 +7,7 @@ a transport key can stand in for the full source needed for recomputation.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 import math
 from typing import Any
 
@@ -128,7 +128,13 @@ class RequestSnapshot:
 
     @property
     def snapshot_id(self) -> str:
-        """Content identity including original authority and numerical inputs."""
+        """Content identity including original authority and numerical inputs.
+
+        The numerical inputs are ``HTSTSettings.calculation_fields``: the zone
+        enters resolved, so an ``"auto"`` zone and the equal explicit radius
+        share one identity, and the digest of settings without ``"auto"`` is
+        the one computed before ``interaction_range`` became a setting.
+        """
         request = self.to_request()
         identity = request.calculation_identity()
         return _digest(
@@ -141,7 +147,7 @@ class RequestSnapshot:
                 None
                 if self.user_constraints is None
                 else self.user_constraints.constraint_id,
-                asdict(self.settings),
+                self.settings.calculation_fields(),
             )
         )
 
