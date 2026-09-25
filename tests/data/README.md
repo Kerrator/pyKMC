@@ -119,3 +119,20 @@ and the backward value by 21 percent.
 | Keys | `k_tot` (ps⁻¹) and `T` (s, the run's `total_time`) after step 10; `selected` = executed `(atom_index, energy_barrier)` per step; `reference_pairs` = sorted `(dE_forward, dE_backward)` multiset of the final catalogue built from `idx_backward` links; `steps` (per-step draws, searched atoms, new environments, attempts) for failure messages; `checks` (cross-checks against `pykmc.out` and `restart_10.npz`); `meta` (versions, command shape, placeholders for local paths) |
 | sha256 | `8d001c8266f30df2ce5d2596a171cef87521cc599b61afeca2b8b45e6d6fee48` (12741 bytes) |
 | Consumer | `tests/regression/test_constant_endpoint.py`: atom indices equal, barriers within 1e-9 eV, `k_tot` and `T` within 1e-6 relative |
+
+## `fenicr_literature_summary.json` (FeNiCr HTST campaign summary for the literature validation)
+
+| Item | Value |
+| --- | --- |
+| System | fcc FeNiCr 55/28/17 at.%, Bonny-2013 EAM (`pair_style eam/alloy`, `pair_coeff * * Bonny_2013_NiFeCr.eam Cr Fe Ni`: pyKMC numbers LAMMPS types alphabetically), cube-aligned periodic 8x8x8 cells built with exact counts 1126 Fe / 573 Ni / 349 Cr; monovacancy cells of 2047 atoms and first-neighbour divacancy cells of 2046 atoms, relaxed at T = 0 at fixed box |
+| Runs | 6 monovacancy runs (seeds 12345, 23456, 34567, 45678, 56789, 67890) and 2 divacancy runs (seeds 12345, 23456), 20 KMC steps each, 23 worker sessions, `nsearch = 25`, `[pARTn] zseed = 0` (clock-seeded searches); pyKMC `style = htst`, T = 600 K, `free_radius = 8`, `zone_radius = auto`, `interaction_range = 10.4`, `rcut = 6.0`, `nsearch = 25`, acceptance window widened to 1e6-1e16 Hz (`nu0_min_THz = 1e-6`, `nu0_max_THz = 1e4`); per-run inputs, kernel settings and the sha256 of every file read are in `meta.runs` |
+| Keys | `schema` (`fenicr-literature-summary/1`); `meta` (per-run cell kind, atom count, composition, a0, rcut, T, k0, kernel settings, window, status and source counts, file sha256; cell counts; the code-default window); `rows` (one per catalogued directed reference row of the monovacancy runs: run, `idx_ref`, `idx_backward`, direction and how it was determined, mover species, barrier in eV, `nu0_hz` (null unless `nu0_status` is `ok`), status, reason, outside-the-code-default-window flag, lattice analysis of the crop); `executed` (one per KMC step of the monovacancy runs: step, reference index, atom index, mover species, barrier, rate, the prefactor recovered from the step table, status, source); `divacancy` and `divacancy_executed` (the same for the divacancy runs, with the vacancy-pair separation class before and after each row). Every run is identified by a path-free label |
+| Counts | 1152 rows (576 directed pairs; Fe 559 / Ni 367 / Cr 226 movers; every `nu0_status` `ok`), 120 executed events (all `site`-sourced), 304 divacancy rows, 40 divacancy executed events |
+| Produced by | `tests.validation.fenicr_literature.summary_from_runs` over the archived run directories (each with `reference_table.pickle`, `input.in`, `initial_config.xyz`, `pykmc.out`, `pykmc.events`, `pykmc.log`), written by `write_summary`; run from the worktree root so that `import pykmc` resolves to the tree that wrote the tables (command below) |
+| sha256 | `8a7bacd3d56d56216042513ae6f3088c22df1f82f3ed8ba75a5e4c17be2d1bd0` (744579 bytes) |
+| Consumer | `tests/validation/test_fenicr_literature.py::test_literature_targets_on_committed_summary` (opt-in, `PYKMC_RUN_VALIDATION=1`): the acceptance criteria against Lefèvre López et al., Phys. Rev. Materials 8, 013609 (2024), Table I, and Rahman et al., Phys. Rev. Materials 10, 053606 (2026); `PYKMC_FENICR_SUMMARY` evaluates another file |
+
+```
+PYTHONPATH=. python -c "import sys; from tests.validation.fenicr_literature import summary_from_runs, write_summary; write_summary('tests/data/fenicr_literature_summary.json', summary_from_runs(sys.argv[1:]))" <run-dir> [<run-dir> ...]
+shasum -a 256 tests/data/fenicr_literature_summary.json
+```
