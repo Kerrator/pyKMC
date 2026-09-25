@@ -13,6 +13,7 @@ from .system import System
 from .neighbors_list import NeighborsList
 from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
+from .htst.pool import EventPrefactorPool
 from .bias import DirectionBias, PointBias, TopoBias
 import pickle
 
@@ -133,7 +134,11 @@ class Initializer:
             )
         else:
             self.kmc.loggers.info("log", ":=> Generate a empty reference table")
-        self.kmc.reference_table = ReferenceEventTable(self.kmc.config)
+        # The manager is attached before _initialize (run.py) so the htst/rpa
+        # backend can fan its per-event nu0 jobs out over the session pool.
+        self.kmc.reference_table = ReferenceEventTable(
+            self.kmc.config, manager=EventPrefactorPool(self.kmc.manager)
+        )
 
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""

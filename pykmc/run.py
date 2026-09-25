@@ -8,6 +8,7 @@ import argparse
 from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
+from pykmc.htst.lammps_extension import HtstLammpsExtension
 from .config import Config
 
 
@@ -37,6 +38,7 @@ def main() -> None:
         comm=comm,
         engine_config=config.lammps,
         group_size=group_size,
+        engine_extensions=[HtstLammpsExtension],
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0

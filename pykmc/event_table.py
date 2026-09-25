@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -28,6 +29,8 @@ from .utils.geometry import compute_delr
 if TYPE_CHECKING:
     from .event_recycling import Recycling
 
+logger = logging.getLogger(__name__)
+
 
 class ReferenceEventTable:
     """Store reference events and manage them.
@@ -39,24 +42,38 @@ class ReferenceEventTable:
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, manager: object = None) -> None:
         self.config = config
+        # nu0 is an HTST/RPA-only diagnostic column; a constant run's schema stays
+        # identical to the base. See gating below.
+        self._htst_active = config.rateconstant.style in ("htst", "rpa")
         self.rate_constant = create_rate_constant(
             T=config.rateconstant.T,
             prefactor_backend_name=config.rateconstant.style,
             config=config.rateconstant,
+            manager=manager,
         )
         self._initialize_table()
 
     def add_events(
-        self, events: list[EventSearchOutput]
+        self, events: list[EventSearchOutput], types: "list[str] | None" = None
     ) -> Result[pd.DataFrame, ErrorInfo]:
-        """Events events to the table dataframe.
+        """Add events to the table dataframe, then backfill per-event prefactors.
+
+        Each accepted event is added with a k0-placeholder rate; for the
+        htst/rpa styles the full-geometry payloads of ONLY the accepted events
+        are then batched through ``rate_constant.compute_prefactors_batch``
+        (one concurrent nu0 job per event) and the rows are patched in place.
+        Rejected and duplicate events never cost a Hessian.
 
         Parameters
         ----------
         events : list[EventSearchOutput]
             list of EventSearchOutput dataclass with events to be added to the table dataframe.
+        types : list[str] | None
+            Per-atom chemical symbols of the full system for the htst/rpa
+            prefactor payloads; defaults to each event's own ``types``. Unused
+            for the constant style.
 
         Returns
         -------
@@ -65,6 +82,7 @@ class ReferenceEventTable:
 
         """
         results_is_valid_events = []
+        backfill: "list[tuple[int, int | None, dict[str, object]]]" = []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self.is_valid_new_event(
@@ -79,7 +97,35 @@ class ReferenceEventTable:
             )
             results_is_valid_events.append(res)
             if res.is_ok():
-                self.add(res.ok_value())
+                df = res.ok_value()
+                self.add(df)  # assigns idx_ref/idx_backward in place
+                if self._htst_active:
+                    ev_types = ev.types if types is None else types
+                    if ev_types is None:
+                        raise RuntimeError(
+                            "htst/rpa add_events requires the system `types` to "
+                            "build the per-event prefactor payloads"
+                        )
+                    fwd_ref = int(df.iloc[0]["idx_ref"])
+                    bwd_ref = int(df.iloc[1]["idx_ref"]) if len(df) > 1 else None
+                    # Payload uses the FULL EventSearchOutput geometry (table rows
+                    # store neighbor-subset positions, unusable for the Hessian).
+                    backfill.append(
+                        (
+                            fwd_ref,
+                            bwd_ref,
+                            {
+                                "central_atom_idx": ev.move_atom_index,
+                                "min1_positions": ev.min1_positions,
+                                "saddle_positions": ev.saddle_positions,
+                                "min2_positions": ev.min2_positions,
+                                "types": list(ev_types),
+                                "cell": ev.cell,
+                            },
+                        )
+                    )
+        if self._htst_active and backfill:
+            self._backfill_prefactors(backfill)
         # df_valid_events = self.get_valid_events(results_is_valid_events)
 
         # Check if events in results are not the same :
@@ -88,6 +134,45 @@ class ReferenceEventTable:
         #    self.add(df)
 
         return results_is_valid_events
+
+    def _backfill_prefactors(
+        self, backfill: "list[tuple[int, int | None, dict[str, object]]]"
+    ) -> None:
+        """Batch-compute nu0 for newly accepted events and patch their rows.
+
+        One fan-out for the whole batch (one job per event over the session
+        pool); the forward row receives ``nu0_forward`` and the backward row
+        (when present) ``nu0_backward``. A None nu0 leaves the k0-placeholder
+        row untouched (the fallback) and is logged.
+        """
+        payloads = [item[2] for item in backfill]
+        futures = self.rate_constant.compute_prefactors_batch(payloads, self.config)
+        for (fwd_ref, bwd_ref, _payload), fut in zip(backfill, futures, strict=True):
+            pre = fut.result()
+            self._patch_row(fwd_ref, pre.nu0_forward)
+            if bwd_ref is not None:
+                self._patch_row(bwd_ref, pre.nu0_backward)
+            if pre.nu0_forward is None or (
+                bwd_ref is not None and pre.nu0_backward is None
+            ):
+                logger.info(
+                    "[htst] nu0 fallback to k0 (idx_ref %s): %s", fwd_ref, pre.reason
+                )
+
+    def _patch_row(self, idx_ref: int, nu0: "float | None") -> None:
+        """Overwrite k/k_prefactor/nu0 on the row with this idx_ref (mask-keyed).
+
+        ``idx_ref`` is a logical id (remove()/pickle can desync it from the
+        DataFrame position), so the row is located by mask, never by .iloc.
+        """
+        if nu0 is None:
+            return  # placeholder k0 values are already correct
+        mask = self.table["idx_ref"] == idx_ref
+        dE = float(self.table.loc[mask, "energy_barrier"].iloc[0])
+        rc = self.rate_constant.compute_rate(dE, nu0=nu0)
+        self.table.loc[mask, "k"] = rc.rate
+        self.table.loc[mask, "k_prefactor"] = rc.prefactor
+        self.table.loc[mask, "nu0"] = nu0
 
     def is_valid_new_event(
         self,
@@ -590,6 +675,11 @@ class ReferenceEventTable:
             }
         )
 
+        if self._htst_active:
+            # placeholder; _backfill_prefactors fills the accepted rows
+            dfevent_forward["nu0"] = None
+            dfevent_backward["nu0"] = None
+
         return dfevent_forward, dfevent_backward
 
     def max_idx_ref(self) -> int:
@@ -607,25 +697,27 @@ class ReferenceEventTable:
         if self.config.control.reference_table is not None:
             self.table = pd.read_pickle(self.config.control.reference_table)
         else:
-            self.table = pd.DataFrame(
-                {
-                    "idx_ref": pd.Series(dtype="int64"),
-                    "event_id": pd.Series(dtype="str"),
-                    "initial_positions": pd.Series(dtype="object"),
-                    "saddle_positions": pd.Series(dtype="object"),
-                    "final_positions": pd.Series(dtype="object"),
-                    "types": pd.Series(dtype="object"),
-                    "energy_barrier": pd.Series(dtype="float64"),
-                    "k": pd.Series(dtype="float64"),
-                    "id_saddle": pd.Series(dtype="str"),
-                    "id_final": pd.Series(dtype="str"),
-                    "move_atom_idx": pd.Series(dtype="int64"),
-                    "sym_matrix": pd.Series(dtype="object"),
-                    "sym_perm": pd.Series(dtype="object"),
-                    "idx_backward": pd.Series(dtype="int64"),
-                    "dra": pd.Series(dtype="float64"),
-                }
-            )
+            columns = {
+                "idx_ref": pd.Series(dtype="int64"),
+                "event_id": pd.Series(dtype="str"),
+                "initial_positions": pd.Series(dtype="object"),
+                "saddle_positions": pd.Series(dtype="object"),
+                "final_positions": pd.Series(dtype="object"),
+                "types": pd.Series(dtype="object"),
+                "energy_barrier": pd.Series(dtype="float64"),
+                "k": pd.Series(dtype="float64"),
+                "k_prefactor": pd.Series(dtype="float64"),
+                "id_saddle": pd.Series(dtype="str"),
+                "id_final": pd.Series(dtype="str"),
+                "move_atom_idx": pd.Series(dtype="int64"),
+                "sym_matrix": pd.Series(dtype="object"),
+                "sym_perm": pd.Series(dtype="object"),
+                "idx_backward": pd.Series(dtype="int64"),
+                "dra": pd.Series(dtype="float64"),
+            }
+            if self._htst_active:
+                columns["nu0"] = pd.Series(dtype="float64")
+            self.table = pd.DataFrame(columns)
 
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
@@ -679,8 +771,22 @@ class ActiveEventTable:
         config: Config,
         event_dataframe: pd.DataFrame = None,
         recycler: "Recycling | None" = None,
+        manager: object = None,
     ):
         self.config = config
+        self._htst_active = config.rateconstant.style in ("htst", "rpa")
+        # The backend is only needed for the htst/rpa refined-nu0 backfill; a
+        # constant-style table is built exactly as before.
+        self.rate_constant = (
+            create_rate_constant(
+                T=config.rateconstant.T,
+                prefactor_backend_name=config.rateconstant.style,
+                config=config.rateconstant,
+                manager=manager,
+            )
+            if self._htst_active
+            else None
+        )
         # Optional recycling plugin. If attached, `prune_for_recycling` keeps
         # the rows the recycler selects between KMC steps. If None, the table
         # is cleared at the end of each step (matching prior behavior).
@@ -700,6 +806,9 @@ class ActiveEventTable:
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
             }
+            if self._htst_active:
+                columns["nu0"] = pd.Series(dtype="float64")
+                columns["nu0_refined"] = pd.Series(dtype="bool")
             self.table = pd.DataFrame(columns)
 
     def prune_for_recycling(
@@ -825,7 +934,87 @@ class ActiveEventTable:
                 "refined": event_refinement_output.refined,
             }
         )
+        if self._htst_active:
+            dfactive["nu0"] = event_refinement_output.nu0
+            # False until backfill_refined_prefactors attempts this row; rows
+            # recycled across steps keep True and are never recomputed.
+            dfactive["nu0_refined"] = False
         return dfactive
+
+    def backfill_refined_prefactors(
+        self, system: System, neighbors_list: object
+    ) -> None:
+        """Recompute nu0 at the per-site refined saddle for refined rows.
+
+        Called AFTER ``remove_duplicates`` (duplicates never cost a Hessian)
+        and inside the KMC loop's local-mode window. Only rows with
+        ``refined == "T"`` participate -- refinement's ``e_thr`` already gates
+        these to the probable events; ``"F"``/``"B"`` rows keep the values
+        inherited from the reference table. Full event geometry is rebuilt from
+        the current system minimum plus the row's neighbor-cropped arrays (the
+        same ``get_neighbors("rcut", atom)`` crop refinement applied), one
+        batch is fanned out through the backend, and each row's ``nu0``/``k``
+        are patched in place; a None nu0 keeps the inherited values (logged).
+
+        Parameters
+        ----------
+        system : System
+            The current system (its positions are the min1 of every active event).
+        neighbors_list : NeighborsList
+            The step's neighbor list (the one refinement cropped with).
+
+        """
+        if not self._htst_active:
+            return
+        # Skip rows already attempted (e.g. recycled across KMC steps): each
+        # refined event costs at most ONE Hessian batch over its lifetime.
+        refined_rows = self.table[
+            (self.table["refined"] == "T") & (~self.table["nu0_refined"].astype(bool))
+        ]
+        if refined_rows.empty:
+            return
+        backfill: "list[tuple[int, dict[str, object]]]" = []
+        for idx, row in refined_rows.iterrows():
+            neighbors = np.asarray(
+                neighbors_list.get_neighbors("rcut", int(row["atom_index"])), dtype=int
+            )
+            full_saddle = system.positions.copy()
+            full_saddle[neighbors] = row["saddle_positions"]
+            full_min2 = system.positions.copy()
+            full_min2[neighbors] = row["final_positions"]
+            backfill.append(
+                (
+                    idx,
+                    {
+                        "central_atom_idx": int(row["atom_index"]),
+                        "min1_positions": system.positions.copy(),
+                        "saddle_positions": full_saddle,
+                        "min2_positions": full_min2,
+                        "types": list(system.types),
+                        "cell": system.cell,
+                    },
+                )
+            )
+        futures = self.rate_constant.compute_prefactors_batch(
+            [item[1] for item in backfill], self.config
+        )
+        for (idx, _payload), fut in zip(backfill, futures, strict=True):
+            pre = fut.result()
+            # Mark attempted regardless of outcome so a recycled row (or a
+            # systematically failing geometry) is never re-submitted.
+            self.table.loc[idx, "nu0_refined"] = True
+            if pre.nu0_forward is None:
+                logger.info(
+                    "[htst] refined nu0 fallback, keeping inherited values "
+                    "(active row %s): %s",
+                    idx,
+                    pre.reason,
+                )
+                continue
+            dE = float(self.table.loc[idx, "energy_barrier"])
+            rc = self.rate_constant.compute_rate(dE, nu0=pre.nu0_forward)
+            self.table.loc[idx, "k"] = rc.rate
+            self.table.loc[idx, "nu0"] = pre.nu0_forward
 
     def remove(self, ind: int | list[int]) -> None:
         """Remove event at row = ind

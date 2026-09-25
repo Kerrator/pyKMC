@@ -186,6 +186,7 @@ class EventRefinementOutput:
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
     k_prefactor: Optional[float] = None
+    nu0: Optional[float] = None
     refined: Optional[str] = None
 
 
