@@ -51,6 +51,7 @@ import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
+from .htst.pool import EventPrefactorPool
 from .bias import Bias
 
 
@@ -181,7 +182,11 @@ class KMC:
 
         # Build the persistent active event table once, with the recycler
         # plugin (built in __init__) attached.
-        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
+        self.active_table = ActiveEventTable(
+            self.config,
+            recycler=self.recycler,
+            manager=EventPrefactorPool(self.manager),
+        )
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
@@ -264,6 +269,11 @@ class KMC:
                     len(active_table.table)
                 ),
             )
+
+            # == Site-specific prefactors for refined events (htst/rpa) ==
+            # After dedup so duplicates never cost a Hessian; the batch fans out
+            # over the local session pool.
+            active_table.backfill_refined_prefactors(self.system, self.neighbors_list)
 
             # == Update System ==
             (
