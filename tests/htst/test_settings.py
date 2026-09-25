@@ -16,7 +16,7 @@ from pykmc.htst.settings import DEFAULT_INTERACTION_RANGE
 def test_defaults_match_contract() -> None:
     """The frozen defaults are the contract values."""
     s = HTSTSettings()
-    assert s.free_radius == 6.0
+    assert s.free_radius == 8.0
     assert s.fd_step == 0.01
     assert s.zone_radius is None
     assert s.resolved_zone_radius is None
@@ -169,7 +169,7 @@ def test_auto_settings_pickle_round_trip_keeps_equality() -> None:
     s = HTSTSettings(zone_radius="auto", interaction_range=11.0)
     back = pickle.loads(pickle.dumps(s))
     assert back == s and hash(back) == hash(s)
-    assert back.resolved_zone_radius == 17.0
+    assert back.resolved_zone_radius == 19.0
 
 
 def test_calculation_fields_resolve_the_zone_and_drop_the_range() -> None:

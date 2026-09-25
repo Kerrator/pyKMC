@@ -658,7 +658,7 @@ class TestReloadCompatibility:
                 str(saved),
                 k0=1.0,
                 T=300.0,
-                free_radius=8.0,
+                free_radius=10.0,
                 fd_step=0.02,
                 zone_radius=12.0,
                 premin=True,
@@ -668,7 +668,7 @@ class TestReloadCompatibility:
         assert stale["nu0_status"] == "stale"
         assert "complete source" in stale["nu0_reason"]
         assert loaded._changed_settings(original.attrs["settings"]) == [
-            "free_radius changed on reload (stored 6.0, current 8.0)",
+            "free_radius changed on reload (stored 6.0, current 10.0)",
             "fd_step changed on reload (stored 0.01, current 0.02)",
             "zone_radius changed on reload (stored None, current 12.0)",
             "premin changed on reload (stored False, current True)",
@@ -682,7 +682,7 @@ class TestReloadCompatibility:
         """A table stored with ``zone_radius: None`` is not reused under ``auto``.
 
         Tables written before ``auto`` became the default record the full
-        system (``None``). The default now resolves to a 19 Angstrom crop, a
+        system (``None``). The default now resolves to a 21 Angstrom crop, a
         different producing context: the reload names the change and demotes
         the accepted row to ``stale`` like any other changed setting, and the
         load itself never fails. Here the source is explicitly partial, so no
@@ -702,9 +702,39 @@ class TestReloadCompatibility:
         assert stale["nu0_status"] == "stale"
         assert math.isnan(stale["nu0"]) and stale["k_prefactor"] == 1.0
         assert loaded._changed_settings(original.attrs["settings"]) == [
-            "zone_radius changed on reload (stored None, current 19.0)"
+            "zone_radius changed on reload (stored None, current 21.0)"
         ]
         assert self._row(loaded, 3)["nu0_status"] == "rejected"
+        assert archived_frequency(loaded, 12, 5.0e12)
+        assert not loaded.prefactor_service.manager.prefactor_requests
+
+    def test_table_at_the_former_free_radius_default_is_stale(
+        self, system_single_type_fcc: Any, tmp_path: Path, log_records: Any
+    ) -> None:
+        """A table computed at the former 6.0 default reloads ``stale`` under 8.0.
+
+        Its ``auto`` zone resolved to 6 + 13 = 19 Angstrom, the current one to
+        8 + 13 = 21, so both settings are named; the load itself never fails.
+        Here the source is explicitly partial, so no recomputation can be
+        attempted.
+        """
+        saved = self._saved(
+            _config("htst", k0=1.0, T=300.0, free_radius=6.0),
+            system_single_type_fcc,
+            tmp_path,
+            incomplete=True,
+        )
+        original = pd.read_pickle(saved)
+        assert original.attrs["settings"]["free_radius"] == 6.0
+        loaded = protocol_table(_config("htst", str(saved), k0=1.0, T=300.0))
+        assert loaded.config.rateconstant.free_radius == 8.0
+        stale = self._row(loaded, 12)
+        assert stale["nu0_status"] == "stale"
+        assert math.isnan(stale["nu0"]) and stale["k_prefactor"] == 1.0
+        assert loaded._changed_settings(original.attrs["settings"]) == [
+            "free_radius changed on reload (stored 6.0, current 8.0)",
+            "zone_radius changed on reload (stored 19.0, current 21.0)",
+        ]
         assert archived_frequency(loaded, 12, 5.0e12)
         assert not loaded.prefactor_service.manager.prefactor_requests
 
@@ -714,7 +744,7 @@ class TestReloadCompatibility:
         """A complete ``None`` table is demoted by descriptor and resubmitted as ``auto``.
 
         The stored descriptor holds ``zone_radius`` None, the current one the
-        resolved 19.0, so the physical descriptors differ: the old estimate is
+        resolved 21.0, so the physical descriptors differ: the old estimate is
         archived as stale and one recomputation is dispatched under the
         current settings. The protocol worker returns no producing energies,
         so the row stays ``stale`` on the ``k0`` fallback; nothing raises.
@@ -744,8 +774,8 @@ class TestReloadCompatibility:
         )
         [request] = manager.prefactor_requests
         assert request.settings.zone_radius == "auto"
-        assert request.settings.resolved_zone_radius == 19.0
-        assert request.descriptor.numerical_settings()["zone_radius"] == 19.0
+        assert request.settings.resolved_zone_radius == 21.0
+        assert request.descriptor.numerical_settings()["zone_radius"] == 21.0
         assert self._row(loaded, 3)["nu0_status"] == "rejected"
 
     def test_window_is_reapplied_with_its_own_reason_and_warning(

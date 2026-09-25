@@ -126,7 +126,7 @@ not a compatibility setting: it is re-applied to every accepted row on reload
 instead. A stored table written before ``free_region_center`` existed counts
 as ``"min1"`` (the centring of that era). ``zone_radius`` is stored and
 compared resolved (``RateConstantConfig.resolved_zone_radius``): a table
-computed under ``auto`` stores its radius (19.0 at the defaults), so it
+computed under ``auto`` stores its radius (21.0 at the defaults), so it
 matches an explicit equal radius, and a table stored with ``None`` (full
 system) differs from any crop, ``auto`` included.
 """

@@ -101,16 +101,16 @@ class TestSettings:
         assert explicit.zone_radius is None and explicit.resolved_zone_radius is None
 
     def test_default_zone_reaches_the_kernel_as_auto(self) -> None:
-        """The config default ``auto`` resolves to 6 + 13 = 19 Angstrom."""
+        """The config default ``auto`` resolves to 8 + 13 = 21 Angstrom."""
         settings = settings_from_config(_config("htst", k0=1.0, T=300.0).rateconstant)
         assert settings.zone_radius == "auto"
-        assert settings.resolved_zone_radius == 19.0
+        assert settings.resolved_zone_radius == 21.0
 
     def test_descriptor_records_the_resolved_zone(self) -> None:
         """``auto`` and the equal explicit radius are one producing context.
 
         A request built under ``auto`` validates against a descriptor that
-        stores 19.0; the explicit radius gives the same descriptor and source
+        stores 21.0; the explicit radius gives the same descriptor and source
         identity, the full system (``None``) a different one.
         """
         from pykmc.htst.provenance import RequestSnapshot
@@ -120,12 +120,12 @@ class TestSettings:
             zone: _service(
                 _config("htst", k0=1.0, T=300.0, zone_radius=zone), FakeManager()
             ).build_request(event_key=("evt",), **geometry)
-            for zone in ("auto", 19.0, None)
+            for zone in ("auto", 21.0, None)
         }
-        auto, explicit, full = built["auto"], built[19.0], built[None]
+        auto, explicit, full = built["auto"], built[21.0], built[None]
         auto.validate()
         assert auto.settings.zone_radius == "auto"
-        assert auto.descriptor.numerical_settings()["zone_radius"] == 19.0
+        assert auto.descriptor.numerical_settings()["zone_radius"] == 21.0
         assert explicit.descriptor.descriptor_id == auto.descriptor.descriptor_id
         assert (
             RequestSnapshot.capture(explicit).snapshot_id

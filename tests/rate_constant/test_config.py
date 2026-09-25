@@ -18,11 +18,11 @@ def test_defaults() -> None:
     cfg = RateConstantConfig(style="constant")
     assert cfg.k0 == 1.0
     assert cfg.T == 300.0
-    assert cfg.free_radius == 6.0
+    assert cfg.free_radius == 8.0
     assert cfg.fd_step == 0.01
     assert cfg.zone_radius == "auto"
     assert cfg.interaction_range == 13.0
-    assert cfg.resolved_zone_radius == 19.0
+    assert cfg.resolved_zone_radius == 21.0
     assert cfg.nu0_min_THz == 1.0
     assert cfg.nu0_max_THz == 100.0
     assert cfg.premin is False

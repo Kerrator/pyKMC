@@ -93,7 +93,7 @@ class HTSTSettings:
 
     """
 
-    free_radius: float = 6.0
+    free_radius: float = 8.0
     fd_step: float = 0.01
     zone_radius: float | Literal["auto"] | None = None
     premin: bool = False

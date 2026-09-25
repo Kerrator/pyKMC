@@ -599,7 +599,7 @@ class RateConstantConfig(BaseModel):
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
     free_radius: float = Field(
-        default=6.0,
+        default=8.0,
         gt=0.0,
         allow_inf_nan=False,
         description="HTST: radius (Angstrom) around the moving atom selecting the free "
@@ -608,11 +608,15 @@ class RateConstantConfig(BaseModel):
         "`rmov` that fall inside this radius are excluded from the free set as "
         "well (the search held them, so they carry residual forces); the log "
         "reports the free-set size and the excluded shell count per request. "
-        "The 6.0 default is a cost compromise, not a converged value: on the "
-        "tracked Ni v6 and Mendelev Fe vacancy hops it is 19 and 24 percent from "
-        "the 12 Angstrom value; 8 (Ni v6) and 10 (Mendelev Fe) Angstrom are "
-        "within 5 percent (docs/physical_descriptors.md, free radius per "
-        "potential).",
+        "The 8.0 default is the radius at which the tracked Ni v6 vacancy hop "
+        "is within 5 percent of its 12 Angstrom value (1.75 percent); the "
+        "tracked Mendelev Fe hop needs 10 Angstrom, and the former 6.0 default "
+        "was 19 (Ni v6) and 24 (Mendelev Fe) percent off. The cost grows with "
+        "the free set: a Hessian takes about 6 force evaluations per free atom, "
+        "and the Ni free set grows from 83 atoms at 6 Angstrom to 193 at 8. The "
+        "radius is stored with the reference table, so a table computed at "
+        "another radius reloads with its estimates `stale` "
+        "(docs/physical_descriptors.md, free radius per potential).",
     )
     free_region_center: Literal["saddle", "min1"] = Field(
         default="saddle",
@@ -645,7 +649,7 @@ class RateConstantConfig(BaseModel):
         default="auto",
         description="HTST: radius (Angstrom) around the moving atom of the scratch "
         "system on which the Hessians are computed; atoms beyond it are left out. "
-        "'auto' (default) resolves to `free_radius + interaction_range` (19 "
+        "'auto' (default) resolves to `free_radius + interaction_range` (21 "
         "Angstrom at the defaults); None uses the full system; a positive number "
         "is used as is and must exceed `free_radius`. The crop is exact (the "
         "prefactor equals the full-system one) when the frozen shell "

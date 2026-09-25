@@ -100,7 +100,7 @@ Triplets that would move a newly fixed atom remain unavailable.
 
 The numerical settings of the descriptor, and the `settings` saved with the
 table, record `zone_radius` resolved: the default `auto` is stored as
-`free_radius + interaction_range` (19.0 Å at the defaults), `None` as the full
+`free_radius + interaction_range` (21.0 Å at the defaults), `None` as the full
 system and a number as itself. A table computed under `auto` therefore matches
 a later run with the equal explicit radius, while any other zone is a different
 numerical context. In particular a table written with the full system
@@ -226,15 +226,20 @@ measures the Vineyard prefactor of the tracked bcc Fe (Mendelev 2003,
 zone. Measured on the 28 Å cells of the fixtures (reference: the 12 Å value
 of the same cell):
 
-| Potential | `free_radius` for ≤ 5 % of the 12 Å value | Error at the 6 Å default | `interaction_range` (2 × cutoff) |
+| Potential | `free_radius` for ≤ 5 % of the 12 Å value | Error at 6 Å | `interaction_range` (2 × cutoff) |
 | --- | --- | --- | --- |
 | Ni v6 (fcc, cutoff 6.5 Å) | **8 Å** (1.75 %; 10 Å 0.44 %) | 19 % | 13.0 Å |
 | Fe Mendelev 2003 (bcc, cutoff 5.3 Å) | **10 Å** (1.55 % / 0.41 %; 8 Å 9.5 % / 3.6 %) | 24 % / 7 % | 10.6 Å |
 
-The code default `free_radius = 6.0` is a cost compromise, not a converged
-value: a site Hessian costs about `6 n_free` full-zone force evaluations (one per
-signed displacement), and
-`n_free` grows from 83 (Ni, 6 Å) to 193 (8 Å) and 383 (10 Å). Set
+The code default is `free_radius = 8.0`, the Ni v6 value of the table; a
+Fe-family (bcc) potential such as Mendelev 2003 should set `free_radius = 10`.
+The radius sets the cost: a site Hessian costs about `6 n_free` full-zone force
+evaluations (one per signed displacement), and `n_free` grows from 83 (Ni,
+6 Å, the former default) to 193 (8 Å) and 383 (10 Å), so the 8 Å default costs
+about 2.3× per Hessian what 6 Å did on fcc Ni. `free_radius` is one of the
+settings stored with the reference table and compared on reload, so a run that
+reloads a table computed at 6.0 (under the former default) marks its accepted
+estimates `stale`, as for any changed numerical setting. Set
 `free_radius` per potential from a table like the one above, and declare
 `interaction_range` as the potential's full range (twice the cutoff for an
 embedded-atom potential: Bonny 2013 FeNiCr 10.4 Å, LKB2017 11.2 Å, Ni v6 13 Å,
