@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pykmc.config import PhysicalConstants
 from .backends import PrefactorBackend
 
+
 @dataclass(frozen=True)
 class RateComponents:
     """Store the result of a rate computation.
@@ -14,6 +15,7 @@ class RateComponents:
     rate : float
         Total rate in ps^-1.
     """
+
     prefactor: float
     rate: float
 
@@ -77,4 +79,6 @@ class RateConstant:
             Prefactor (ps^-1) and total rate (ps^-1).
         """
         prefactor = self.compute_prefactor(**kwargs)
-        return RateComponents(prefactor=prefactor, rate=rate_from_prefactor(prefactor, dE, self.T))
+        return RateComponents(
+            prefactor=prefactor, rate=rate_from_prefactor(prefactor, dE, self.T)
+        )

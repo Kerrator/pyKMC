@@ -10,6 +10,7 @@ class ConstantBackendConfig(Protocol):
     k0 : float
         Constant prefactor value in ps^-1.
     """
+
     k0: float
 
 
@@ -22,6 +23,7 @@ class ConstantBackend(PrefactorBackend):
         Configuration object exposing a ``k0`` attribute.
         Compatible with the Pydantic ``RateConstantConfig`` used by pykmc.
     """
+
     name = "constant"
 
     def __init__(self, config: ConstantBackendConfig) -> None:

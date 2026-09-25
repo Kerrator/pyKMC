@@ -11,6 +11,7 @@ class PrefactorBackend(ABC):
 
     A ``TypeError`` is raised at class definition time if ``name`` is missing.
     """
+
     name: str
 
     def __init_subclass__(cls, **kwargs):
