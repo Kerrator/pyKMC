@@ -9,13 +9,14 @@ step, and the selection continues on the rebuilt table. The simulation
 exits with status 1 only when that single re-search leaves nothing to
 reconstruct.
 
-Setup shared by every case: a constant-style catalogue with ONE reference
-(``idx_ref`` 2, topology ``"X"``, its own backward event, as for a
-symmetric vacancy hop) and four active rows on atoms 10-13 that all point
-at it. ``_select_event`` takes the first row, ``_reconstruction_active_event``
-records the attempted atom, and the step's search stage
-(``KMC._search_and_refine_step_events``) is replaced by a stub that
-catalogues new references and adds their active rows. No LAMMPS, no MPI.
+Default setup (cases that need another catalogue or other rows say so): a
+constant-style catalogue with ONE reference (``idx_ref`` 2, topology
+``"X"``, its own backward event, as for a symmetric vacancy hop) and four
+active rows on atoms 10-13 that all point at it. ``_select_event`` takes
+the first row, ``_reconstruction_active_event`` records the attempted
+atom, and the step's search stage (``KMC._search_and_refine_step_events``)
+is replaced by a stub that catalogues new references and adds their
+active rows. No LAMMPS, no MPI.
 """
 
 from __future__ import annotations
@@ -91,7 +92,8 @@ class _Step:
     config : Config
         The committed constant-style test input.
     system : System
-        The test crystal (only ``validate_recycled`` reads it).
+        The test crystal (read by ``validate_recycled`` and, in the
+        real-stage tests, by ``remove_duplicates``).
     fails : Callable[[int, int], bool]
         ``fails(atom, reference)`` decides whether an attempt fails.
     research_adds : list[tuple[int, str, list[int]]]
@@ -406,6 +408,123 @@ def test_rebuilt_rows_of_an_entry_that_lost_its_backward_event_are_dropped(
     assert "A" not in step.visited_at_research[0]
     assert "C" not in step.visited_at_research[0]
     assert err_reference == [0, 2] and err_ae == []
+
+
+def test_orphaned_entry_rows_are_dropped_even_when_its_removed_backward_id_is_reused(
+    constant_config: Any, system_single_type_fcc: Any
+) -> None:
+    """An entry that lost its backward event stays dropped after an id reuse.
+
+    A loaded catalogue need not have reciprocal links: 0 -> 2, 1 -> 1 and
+    2 -> 2. The active rows are atom 10 -> 2 and atom 11 -> 0. The atom-10
+    row fails; the constant style removes 2 (its own backward event), and
+    the purge drops the ref-2 row and, by the backward-link rule, the ref-0
+    row, so the table is empty. The re-search refines every applicable
+    catalogue entry, entry 0 among them (atom 30), and catalogues an
+    UNRELATED event (``Y``, barrier 1.9 eV) under the freed id 2 (the
+    constant style allocates above the surviving ids 0 and 1), with a row
+    on atom 20.
+
+    Id 2 is catalogued again, but it names the new event, not the backward
+    event entry 0 lost. The rebuilt ref-0 row must be dropped as in the
+    first pass; executing it would report the unrelated event as its
+    backward in the events block and in basin detection. The new ref-2 row
+    is executed and ``info_active_events`` resolves its backward to itself.
+    """
+    step = _Step(
+        constant_config,
+        system_single_type_fcc,
+        fails=lambda atom, ref: atom == 10,
+        research_adds=[(2, "Y", [20])],
+        catalogue=pd.DataFrame(
+            {
+                "idx_ref": [0, 1, 2],
+                "idx_backward": [2, 1, 2],
+                "event_id": ["A", "B", "X"],
+                "energy_barrier": [0.5, 0.6, 0.7],
+                "dra": [0.1] * 3,
+            }
+        ),
+        first_rows=[(10, 2), (11, 0)],
+        research_rows=[(30, 0)],
+    )
+    kmc = step.kmc
+    stub = step._research
+
+    def research(new_environments: list[str], nsearch: int) -> tuple:
+        out = stub(new_environments, nsearch)
+        catalogue = kmc.reference_table.table
+        catalogue.loc[catalogue["event_id"] == "Y", "energy_barrier"] = 1.9
+        return out
+
+    kmc._search_and_refine_step_events = research
+    result, _, _, label, err_reference, err_ae = kmc.reconstruction(step.table)
+    info = info_active_events(kmc.system.types, kmc.reference_table, step.table)
+    info.output_msg()
+
+    assert step.attempts == [(10, 2), (20, 2)]
+    assert result.is_ok() and result.ok_value() == 20
+    rows = step.table.table[["atom_index", "num_reference_event"]].astype(int)
+    assert rows.values.tolist() == [[20, 2]]
+    assert int(step.table.table.loc[label, "num_reference_event"]) == 2
+    assert [int(ref) for ref in info.reference_events] == [2]
+    assert [float(e) for e in info.dE_backward] == [1.9]
+    # Entry 0 stays catalogued, as in the first pass (the constant style
+    # removes an event and the row its backward link names only).
+    assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [0, 1, 2]
+    assert err_reference == [2] and err_ae == []
+
+
+def test_new_event_under_the_freed_id_of_a_removed_orphan_is_kept(
+    constant_config: Any, system_single_type_fcc: Any
+) -> None:
+    """An orphan removed later in the pass is not an orphan after the re-search.
+
+    Catalogue: 0 (``X``, self-linked), 1 (``W``) -> 3, 2 (``A``,
+    self-linked) and 3 (``Z``) -> 0, a chain an htst/rpa run can write (a
+    forward row linked to an already catalogued reverse). The active rows
+    are atom 10 -> 0, atom 11 -> 1 and atom 12 -> 3. The atom-10 row fails:
+    0 is removed, and the ref-3 row is dropped because entry 3 lost its
+    backward event. The atom-11 row fails: 1 and the row its backward link
+    names, 3, are removed, and the table is empty. The re-search catalogues
+    an unrelated event under the freed id 3 (above the surviving id 2) with
+    a row on atom 20.
+
+    Entry 3 was removed in this call, so id 3 now names only the new event:
+    its row is executed, not dropped as the rows of the removed orphan were.
+    """
+    step = _Step(
+        constant_config,
+        system_single_type_fcc,
+        fails=lambda atom, ref: atom in (10, 11),
+        research_adds=[(3, "Y", [20])],
+        catalogue=pd.DataFrame(
+            {
+                "idx_ref": [0, 1, 2, 3],
+                "idx_backward": [0, 3, 2, 0],
+                "event_id": ["X", "W", "A", "Z"],
+                "energy_barrier": [0.5] * 4,
+                "dra": [0.1] * 4,
+            }
+        ),
+        first_rows=[(10, 0), (11, 1), (12, 3)],
+    )
+    kmc = step.kmc
+    try:
+        result, _, _, label, err_reference, err_ae = kmc.reconstruction(step.table)
+    except SystemExit as exc:
+        pytest.fail(
+            f"the new event's row was dropped and the run ended (SystemExit "
+            f"{exc.code!r}; errors {step.errors()}); attempts {step.attempts}"
+        )
+    info = info_active_events(kmc.system.types, kmc.reference_table, step.table)
+    info.output_msg()
+
+    assert step.attempts == [(10, 0), (11, 1), (20, 3)]
+    assert result.is_ok() and result.ok_value() == 20
+    assert int(step.table.table.loc[label, "num_reference_event"]) == 3
+    assert list(kmc.reference_table.table["idx_ref"].astype(int)) == [2, 3]
+    assert err_reference == [0, 1, 3] and err_ae == []
 
 
 class _NoSearch:

@@ -725,6 +725,7 @@ class TestLammpsHTSTSerial:
 
     @pytest.mark.xfail(
         strict=True,
+        raises=ValueError,
         reason="zone_radius='auto' (free_radius + interaction_range, D5) arrives "
         "in P2; this test flips to green with it",
     )

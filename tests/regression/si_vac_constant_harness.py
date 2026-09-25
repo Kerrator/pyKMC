@@ -332,7 +332,20 @@ class InProcessEngineManager:
 
 
 class _Observer:
-    """Record what a run selects, without touching its inputs, outputs or draws."""
+    """Record what a run selects, without touching its inputs, outputs or draws.
+
+    :attr:`steps` holds one record per KMC step, opened by the step's
+    ``get_new_environments`` call: ``new_environments``, ``central_atoms``,
+    ``draws`` and ``attempts`` (one entry per ``_select_event`` and
+    ``_reconstruction_active_event`` call), then the outcome of
+    ``reconstruction`` (``delta_t_ps``, ``k_tot``, ``selected_label``,
+    ``failed_references``, ``n_active``). When a purge empties the active
+    table, the endpoint's ``reconstruction`` searches the step again; the
+    calls it makes while running go into the open record instead of opening
+    a new one: ``research_environments`` (one list per
+    ``get_new_environments`` call) and ``research_central_atoms``. Develop
+    never calls either inside ``reconstruction``.
+    """
 
     WRAPPED = (
         "get_new_environments",
@@ -349,6 +362,7 @@ class _Observer:
         self.restart: tuple[int, float] | None = None
         self.reference_rows: list[dict[str, Any]] | None = None
         self.close_calls: list[dict[str, str]] = []
+        self._in_reconstruction = False
 
     def _step(self) -> dict[str, Any]:
         if not self.steps:
@@ -363,14 +377,21 @@ class _Observer:
 
         def get_new_environments(kmc: Any) -> Any:
             result = orig["get_new_environments"](kmc)
-            obs.steps.append({"new_environments": [str(e) for e in result]})
+            environments = [str(e) for e in result]
+            if obs._in_reconstruction:  # the re-search of a purged step
+                obs._step().setdefault("research_environments", []).append(environments)
+            else:
+                obs.steps.append({"new_environments": environments})
             return result
 
         def central_atoms_research(
             kmc: Any, new_environments: Any, nsearch: Any
         ) -> Any:
             result = orig["central_atoms_research"](kmc, new_environments, nsearch)
-            obs._step()["central_atoms"] = [int(a) for a in result]
+            key = (
+                "research_central_atoms" if obs._in_reconstruction else "central_atoms"
+            )
+            obs._step()[key] = [int(a) for a in result]
             return result
 
         def _select_event(kmc: Any, active_table: Any) -> Any:
@@ -394,7 +415,11 @@ class _Observer:
             return result
 
         def reconstruction(kmc: Any, active_table: Any) -> Any:
-            result = orig["reconstruction"](kmc, active_table)
+            obs._in_reconstruction = True
+            try:
+                result = orig["reconstruction"](kmc, active_table)
+            finally:
+                obs._in_reconstruction = False
             obs._step().update(
                 delta_t_ps=float(result[1]),
                 k_tot=float(result[2]),

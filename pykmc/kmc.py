@@ -1036,11 +1036,13 @@ class KMC:
         loaded catalogue's links are not reciprocal). The selection then
         continues on the surviving rows, so when this returns no active row
         reaches a removed reference, directly or through the backward link
-        of its reference: basin detection, the step log, the events block
-        (``info_active_events``) and recycling can dereference both. The
-        basin explorer reads catalogue entries, not active rows, so in the
-        constant style it can still reach an entry whose backward event was
-        removed in this step, as on develop.
+        of its reference (when the re-search below files a new event under a
+        freed id, that id names the new event, not the removed one): basin
+        detection, the step log, the events block (``info_active_events``)
+        and recycling can dereference both. The basin explorer reads
+        catalogue entries, not active rows, so in the constant style it can
+        still reach an entry whose backward event was removed in this step,
+        as on develop.
 
         When the purges empty the active table, the step is searched again,
         once per call: the topologies of the references removed so far are
@@ -1049,14 +1051,20 @@ class KMC:
         :meth:`_search_and_refine_step_events` searches the new environments,
         refines every applicable catalogue entry on the current state and
         extends the persistent active table, which ``run`` passes as
-        ``active_table``. The rebuilt rows go through the purge's
-        backward-link rule, then selection and the purge on failure continue
-        on them. The simulation ends with status 1 (``_close(failed=True)``)
-        only when the table is empty again after that re-search (it produced
-        no active row, or every re-searched row failed), when the re-search
-        leaves the catalogue empty, or when the table was already empty on
-        entry, which is not a purge and triggers no search. Without a failure
-        nothing is searched again: one selection, one reconstruction.
+        ``active_table``. The rebuilt rows of an entry kept although its
+        backward event was removed are dropped, as the purge dropped its
+        earlier rows. Such entries are recorded when the purge happens,
+        while their ids are still catalogued (an id that stays catalogued is
+        never reallocated), not re-derived from the removed ids afterwards:
+        the constant style can file an unrelated new event under a freed id,
+        which would then pass for the entry's backward event. Selection and
+        the purge on failure continue on the rebuilt rows. The simulation
+        ends with status 1 (``_close(failed=True)``) only when the table is
+        empty again after that re-search (it produced no active row, or
+        every re-searched row failed), when the re-search leaves the
+        catalogue empty, or when the table was already empty on entry, which
+        is not a purge and triggers no search. Without a failure nothing is
+        searched again: one selection, one reconstruction.
 
         Invariant: the topology of every reference removed in this call is
         forgotten exactly once. A reference removed before the re-search has
@@ -1071,7 +1079,8 @@ class KMC:
         ----------
         active_table : ActiveEventTable
             The active table of the step, ``self.active_table``; mutated in
-            place on failures and extended by the re-search.
+            place on failures and extended by the re-search. When a re-search
+            is needed on any other table, ``RuntimeError`` is raised.
 
         Returns
         -------
@@ -1083,11 +1092,18 @@ class KMC:
             log) and the topologies ``run`` must forget at the end of the
             step (see the invariant above).
 
+        Raises
+        ------
+        RuntimeError
+            The purges emptied ``active_table`` and it is not
+            ``self.active_table``, the table the re-search extends.
+
         """
         # TODO make a Result
 
         err_reference: list[int] = []
         err_ae: list[str] = []
+        orphaned: set[int] = set()
         active_table.validate_recycled(
             self.system, self.neighbors_list, allow_pending=False
         )
@@ -1100,6 +1116,14 @@ class KMC:
                     self._close(failed=True)
                     break
                 may_research = False
+                if active_table is not self.active_table:
+                    # The re-search extends self.active_table; selecting on
+                    # another table would never see the rebuilt rows.
+                    raise RuntimeError(
+                        "KMC.reconstruction: the active table being purged is "
+                        "not self.active_table, which the re-search after a "
+                        "purge extends; pass self.active_table, as run does."
+                    )
                 # Every row was purged after failed reconstructions: forget
                 # the removed topologies now, so the environment scan returns
                 # them, and search this step again. From here on err_ae lists
@@ -1118,17 +1142,15 @@ class KMC:
                 self._search_and_refine_step_events(
                     self.get_new_environments(), self.config.eventsearch.nsearch
                 )
-                # The purge's backward-link rule, applied to the rebuilt rows:
-                # the re-search refines every applicable catalogue entry,
-                # including one kept above although its backward event was
-                # removed (constant style, non-reciprocal loaded catalogue).
-                # Ids re-allocated to new entries meanwhile (the constant
-                # style reuses freed ids) are not treated as removed.
-                catalogue = self.reference_table.table
-                active_table.drop_reference_events(
-                    set(err_reference) - set(catalogue["idx_ref"].astype(int)),
-                    catalogue,
-                )
+                # The re-search refines every applicable catalogue entry,
+                # including the orphans recorded by the purges (entries kept
+                # although their backward event was removed: constant style,
+                # non-reciprocal loaded catalogue). Drop their rebuilt rows,
+                # as the purge dropped their earlier ones. The orphans are not
+                # re-derived from the removed ids: the constant style can
+                # file an unrelated new event under a freed id, which would
+                # then pass for the orphan's backward event.
+                active_table.drop_reference_events(orphaned)
                 continue
             ##=>Select event
             idx_selected_event, delta_t, ktot = self._select_event(active_table)
@@ -1165,6 +1187,20 @@ class KMC:
                     dropped += 1
                 dropped += active_table.drop_reference_events(
                     removed.idx_refs, self.reference_table.table
+                )
+                # Record the entries kept although their backward event was
+                # just removed, while their ids are still catalogued: an id
+                # that stays catalogued is never reallocated, a removed one
+                # can be (by the re-search below). An orphan recorded earlier
+                # and removed by this purge is no longer one: its id may come
+                # back naming an unrelated new entry.
+                catalogue = self.reference_table.table
+                lost_backward = (
+                    catalogue["idx_backward"].astype(int).isin(removed.idx_refs)
+                )
+                orphaned.difference_update(removed.idx_refs)
+                orphaned.update(
+                    int(ref) for ref in catalogue.loc[lost_backward, "idx_ref"]
                 )
                 err_reference.extend(removed.idx_refs)
                 err_ae.extend(removed.event_ids)
