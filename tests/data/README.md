@@ -34,3 +34,14 @@ compiler change; the eskm/FD and zone/full comparisons are the strict
 oracles). The backward prefactor differs from the forward one because one
 common free set, centred on the mover's `min1` position, feeds all three
 Hessians (contract: one common subset and ordering).
+
+## `constant_endpoint_develop_c6f2824.json` (constant-mode develop oracle for `tests/regression`)
+
+| Item | Value |
+| --- | --- |
+| System | `examples/Si_vac`: 511-atom SW-Si cell with one vacancy (`Si.sw`, `initial_config.xyz`, sha256 in `meta.example_sha256`) |
+| Run | 10 constant-mode steps, `n_sessions = 1`, `nsearch = 2`, `rcut = 6.3`, `k0 = 10`, `T = 300`; `random`/NumPy seeded 12345 immediately before `KMC` construction (develop has no `[Control] seed`), `[pARTn] zseed = 12345`; the full INI is in `meta.ini` |
+| Recorded | once, on develop `c6f28245f93893d4f997cd39525e1fb1c9a24e18` (tree `28bff77a`), with `tests/regression/si_vac_constant_harness.py` in a subprocess launched with `PYTHONHASHSEED=20260919` (develop orders new environments by string hash; this tree sorts them), cwd a scratch directory, `PYTHONPATH` the develop tree; the adapter run is bit-identical to a real `mpirun -n 2` develop run of the same input (trajectory, `pykmc.out`, reference table, restart time) |
+| Keys | `k_tot` (ps⁻¹) and `T` (s, the run's `total_time`) after step 10; `selected` = executed `(atom_index, energy_barrier)` per step; `reference_pairs` = sorted `(dE_forward, dE_backward)` multiset of the final catalogue built from `idx_backward` links; `steps` (per-step draws, searched atoms, new environments, attempts) for failure messages; `checks` (cross-checks against `pykmc.out` and `restart_10.npz`); `meta` (versions, command shape, placeholders for local paths) |
+| sha256 | `8d001c8266f30df2ce5d2596a171cef87521cc599b61afeca2b8b45e6d6fee48` (12741 bytes) |
+| Consumer | `tests/regression/test_constant_endpoint.py`: atom indices equal, barriers within 1e-9 eV, `k_tot` and `T` within 1e-6 relative |
