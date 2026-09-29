@@ -23,7 +23,7 @@ For this atom, pyKMC constructs graph-based topology IDs for the local environme
 - the saddle point,
 - the final minimum.
 
-For the forward event, the graph ID of the initial minimum is stored as the event's `event_id`. For the corresponding backward event, the graph ID of the final minimum is stored as the `event_id`. The saddle-point and opposite-minimum IDs are also stored with the reference event.
+For the forward event, the graph ID of the initial minimum is stored as the event's `event_id`. For the corresponding backward event, the transition is reversed, so the forward event's final minimum becomes the initial minimum of the backward event and its graph ID is stored as the backward event's `event_id`. The graph IDs of the saddle point and the final state of each direction are also stored with the reference event.
 
 During a KMC step, pyKMC computes atomic environment IDs for the atoms in the current configuration according to the selected `style`.
 
@@ -117,7 +117,7 @@ Instead of computing detailed graph IDs throughout the perfect crystal, graph id
 
 The `diamond/graph` style provides a similar hybrid approach for diamond-type crystalline structures.
 
-pyKMC first constructs a second-neighbor network and uses it to identify atoms belonging to the crystalline diamond environment.
+pyKMC first constructs a second-neighbor network and uses it to identify atoms belonging to the crystalline diamond environment. This identification is based on the second-neighbor structural analysis described in OVITO's [*Identify Diamond Structure* method](https://www.ovito.org/manual/reference/pipelines/modifiers/identify_diamond.html) and by Maras et al. (2016).
 
 Atoms identified as belonging to the regular diamond crystal retain the `crystal` ID, while atoms classified as `noncrystal` receive detailed graph-based IDs.
 
@@ -172,7 +172,7 @@ The value of `rcut` controls how much structural context is contained in an envi
 
 If `rcut` is too small, two physically different environments may appear identical because the structural feature distinguishing them lies outside the selected region.
 
-Increasing `rcut` includes more structural information and can distinguish environments over a larger length scale. However, it also creates larger graphs and increases the work required for graph construction and certificate computation.
+Increasing `rcut` includes more structural information and can distinguish environments over a larger length scale. However, it also creates larger graphs and increases the work required for graph construction and certificate computation. A larger `rcut` may also distinguish local topologies that share the same possible events. Because pyKMC treats distinct environment IDs as separately encountered environments, this can increase the number of event searches without necessarily introducing new event types.
 
 The goal is therefore not to make `rcut` as large as possible. It should be large enough to capture the local structural differences relevant to the events being modeled while avoiding unnecessary distant atoms.
 
@@ -248,3 +248,7 @@ In this example:
 - `neighbors_add = 1` extends graph-based identification to atoms immediately surrounding non-crystalline sites, allowing neighboring atoms involved in defect migration events to carry detailed graph IDs.
 
 The numerical values of `rnei` and `rcut` are material-dependent. They should be determined from the structure being simulated and should not be copied directly to a different material without verification.
+
+## References
+
+- E. Maras et al., *Global transition path search for dislocation formation in Ge on Si(001)*, Computer Physics Communications (2016). [https://doi.org/10.1016/j.cpc.2016.04.001](https://doi.org/10.1016/j.cpc.2016.04.001)
