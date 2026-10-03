@@ -31,12 +31,18 @@ def main() -> None:
         else config.control.group_size
     )
     # KMC
+    extensions = None
+    if config.rateconstant.style == "htst":
+        from pykmc.htst.lammps_extension import HTSTLammpsExtension
+
+        extensions = [HTSTLammpsExtension]
     factory = EngineManagerFactory(
         engine_style=config.control.engine,
         n_workers=config.control.n_sessions,
         comm=comm,
         engine_config=config.lammps,
         group_size=group_size,
+        engine_extensions=extensions,
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0

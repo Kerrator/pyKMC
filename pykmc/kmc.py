@@ -103,6 +103,8 @@ class KMC:
         self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
         self.bias: Bias | None = None
+        self.htst_shell_width: float | None = None
+        self.htst_region: str | None = None
         # The recycler decides what to carry over between KMC steps at
         # end-of-step; with no recycler the active table is cleared each
         # step (same observable behavior as prior releases).
