@@ -226,6 +226,8 @@ class KMC:
                     r for r in search_results if r.move_atom_index not in inactive_set
                 ]
             results_is_valid_events = self.add_reference_events(search_results)
+            if self.config.rateconstant.style == "htst":
+                self.add_reference_prefactors(search_results, results_is_valid_events)
 
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
@@ -266,6 +268,8 @@ class KMC:
                     len(active_table.table)
                 ),
             )
+            if self.config.rateconstant.style == "htst":
+                self.add_site_prefactors()
 
             # == Update System ==
             (
@@ -704,7 +708,351 @@ class KMC:
         # Any rows surviving from the previous step are already present and
         # are not re-added because Refinement skipped them via existing_pairs.
         self.active_table.add_events(events)
+        if self.config.rateconstant.style == "htst":
+            # The table keeps the only reference to each full-size saddle.
+            for event in events:
+                event.htst_saddle = None
         return self.active_table
+
+    def add_reference_prefactors(
+        self,
+        search_results: list[EventSearchOutput],
+        results_is_valid_events: list[Result[pd.DataFrame, ErrorInfo]],
+    ) -> None:
+        """Compute the attempt frequency of the reference events added in this step.
+
+        Each new event is one job for both of its directions. A direction whose
+        attempt frequency cannot be computed uses `k0`, and the reason is logged.
+
+        Parameters
+        ----------
+        search_results : list[EventSearchOutput]
+            The events given to `add_reference_events`.
+        results_is_valid_events : list[Result[pd.DataFrame, ErrorInfo]]
+            What `add_reference_events` returned for them: `Ok` holds the rows added
+            to the reference table (forward, then backward if any).
+
+        """
+        jobs, idx_refs = [], []
+        for event, result in zip(search_results, results_is_valid_events, strict=True):
+            if not isinstance(result, Ok):
+                continue
+            rows = result.ok_value()
+            minima = [event.min1_positions]
+            if len(rows) == 2:
+                minima.append(event.min2_positions)
+            jobs.append(
+                (event.saddle_positions, minima, event.central_atom_index, True)
+            )
+            idx_refs.append([int(idx_ref) for idx_ref in rows["idx_ref"]])
+
+        n = n_ok = 0
+        for refs, outcomes in zip(idx_refs, self._prefactor_jobs(jobs), strict=True):
+            for i, (idx_ref, outcome) in enumerate(zip(refs, outcomes, strict=True)):
+                direction = "forward" if i == 0 else "backward"
+                nu0, status = self._prefactor_outcome(
+                    f"reference event {idx_ref} ({direction})", outcome
+                )
+                try:
+                    self.reference_table.set_prefactor(
+                        idx_ref, nu0, status, self.htst_region
+                    )
+                except RuntimeError as exc:
+                    self.loggers.error("log", str(exc))
+                    raise
+                n += 1
+                n_ok += status == "ok"
+        if n > 0:
+            self.loggers.info(
+                "log", f"HTST: nu0 computed for {n_ok} of {n} new reference directions"
+            )
+        n_pending = int((self.reference_table.table["nu0_status"] == "pending").sum())
+        if n_pending > 0:
+            msg = (
+                f"HTST: internal error: {n_pending} reference rows are still pending "
+                "after the prefactor step"
+            )
+            # run.py aborts before the exception is printed: log the reason.
+            self.loggers.error("log", msg)
+            raise RuntimeError(msg)
+
+    def add_site_prefactors(self) -> None:
+        """Compute the attempt frequency of the active events refined in this step.
+
+        Each refined event is one job, from the current minimum to its refined
+        saddle. An event whose attempt frequency cannot be computed uses `k0` (not
+        the attempt frequency of its reference event), and the reason is logged.
+        """
+        table = self.active_table.table
+        rows = [
+            row
+            for row in table.index
+            if isinstance(table.at[row, "htst_saddle"], np.ndarray)
+        ]
+        names = [
+            f"active event (atom {int(table.at[row, 'atom_index'])}, "
+            f"reference event {int(table.at[row, 'num_reference_event'])})"
+            for row in rows
+        ]
+        jobs = [
+            (
+                table.at[row, "htst_saddle"],
+                [self.system.positions],
+                int(table.at[row, "atom_index"]),
+                False,
+            )
+            for row in rows
+        ]
+
+        n_ok = 0
+        outcomes = self._prefactor_jobs(jobs)
+        for row, name, outcome in zip(rows, names, outcomes, strict=True):
+            nu0, status = self._prefactor_outcome(name, outcome[0])
+            try:
+                self.active_table.set_prefactor(row, nu0, status)
+            except RuntimeError as exc:
+                self.loggers.error("log", str(exc))
+                raise
+            n_ok += status == "ok"
+        if len(rows) > 0:
+            self.loggers.info(
+                "log",
+                f"HTST: nu0 computed for {n_ok} of {len(rows)} refined active events",
+            )
+        n_pending = int((self.active_table.table["nu0_status"] == "pending").sum())
+        if n_pending > 0:
+            msg = (
+                f"HTST: internal error: {n_pending} active rows are still pending "
+                "after the prefactor step"
+            )
+            self.loggers.error("log", msg)
+            raise RuntimeError(msg)
+
+    def _prefactor_jobs(
+        self, jobs: list[tuple]
+    ) -> list[list[Result[float, ErrorInfo]]]:
+        """Run the Hessian jobs of a list of events and return their results.
+
+        Parameters
+        ----------
+        jobs : list[tuple]
+            One `(saddle, minima, centre, reference)` tuple per event: full-size
+            saddle positions, list of full-size minimum positions, index of the
+            atom the search or the refinement was centred on, and whether it is a
+            reference event.
+
+        Returns
+        -------
+        list[list[Result[float, ErrorInfo]]]
+            For each event, one result per minimum: `Ok` with the attempt frequency
+            (Hz) or `Err` with the reason there is none.
+
+        Notes
+        -----
+        It never raises: a job that cannot be built, sent or collected gets an
+        `Err` for each of its minima.
+
+        """
+        from pykmc.htst import (
+            HTSTError,
+            build_region,
+            frozen_overlap,
+            hessian_mode,
+            moving_atom,
+            wrapped_on_open_axis,
+        )
+
+        def failure(code: HTSTError, message: str, n: int) -> list:
+            return [Err(ErrorInfo(type=code, message=message))] * n
+
+        def well_formed(outcome: object) -> bool:
+            if isinstance(outcome, Ok):
+                return isinstance(outcome.ok_value(), (float, np.floating))
+            return isinstance(outcome, Err) and isinstance(
+                outcome.err_value(), ErrorInfo
+            )
+
+        try:
+            rc = self.config.rateconstant
+            mode = hessian_mode(self.config)
+            cell = np.asarray(self.system.cell)
+            pbc = tuple(bool(p) for p in self.system.pbc)
+            types = np.asarray(self.system.types)
+            species = sorted(set(self.system.types))
+            frozen_ids = (
+                np.asarray(self.frozen_ae.get_atoms_with_id("in"), dtype=np.int64)
+                if self.frozen_ae is not None
+                else np.empty(0, dtype=np.int64)
+            )
+        except Exception as exc:
+            message = f"region build failed: {type(exc).__name__}: {exc}"
+            return [
+                failure(HTSTError.ENGINE_FAILURE, message, len(minima))
+                for _, minima, _, _ in jobs
+            ]
+
+        # Submit every job before waiting for any result.
+        submitted = []
+        for saddle, minima, centre, reference in jobs:
+            n = len(minima)
+            try:
+                if mode == "av":
+                    # the active volume the search or the refinement used
+                    region = build_region(
+                        "av",
+                        self.system.positions,
+                        cell,
+                        pbc,
+                        center_index=centre,
+                        r_displaced=self.config.activevolume.rmov,
+                        r_present=self.config.activevolume.ract,
+                    )
+                elif mode == "reduced":
+                    region = build_region(
+                        "reduced",
+                        saddle,
+                        cell,
+                        pbc,
+                        center_index=moving_atom(minima[0], saddle, cell, pbc),
+                        r_displaced=rc.free_radius,
+                        r_present=rc.free_radius + self.htst_shell_width,
+                    )
+                else:
+                    region = build_region("full", saddle, cell, pbc)
+                wrapped = (
+                    reference
+                    and mode != "av"
+                    and not all(pbc)
+                    and wrapped_on_open_axis(
+                        region, (saddle, *minima), self.system.positions, cell, pbc
+                    )
+                )
+                n_frozen = frozen_overlap(region, frozen_ids)
+            except Exception as exc:
+                submitted.append(
+                    failure(
+                        HTSTError.ENGINE_FAILURE,
+                        f"region build failed: {type(exc).__name__}: {exc}",
+                        n,
+                    )
+                )
+                continue
+            if wrapped:
+                submitted.append(
+                    failure(
+                        HTSTError.WRAPPED_OPEN_AXIS,
+                        "recentring wrapped atoms across a non-periodic axis",
+                        n,
+                    )
+                )
+                continue
+            if n_frozen > 0:
+                submitted.append(
+                    failure(
+                        HTSTError.FROZEN_OVERLAP,
+                        "the frozen region overlapped the HTST calculation space "
+                        f"({n_frozen} frozen atoms among the displaced atoms)",
+                        n,
+                    )
+                )
+                continue
+            present = region.present
+            try:
+                submitted.append(
+                    self.manager.compute_htst_prefactors(
+                        config=self.config,
+                        saddle=saddle[present],
+                        minima=[minimum[present] for minimum in minima],
+                        types=types[present].tolist(),
+                        species=species,
+                        cell=cell,
+                        pbc=region.pbc,
+                        displaced=region.displaced,
+                        n_zero_modes=region.n_zero_modes,
+                    )
+                )
+            except Exception as exc:
+                submitted.append(
+                    failure(
+                        HTSTError.ENGINE_FAILURE,
+                        f"HTST job failed: {type(exc).__name__}: {exc}",
+                        n,
+                    )
+                )
+
+        results = []
+        for (_, minima, _, _), job in zip(jobs, submitted, strict=True):
+            n = len(minima)
+            if isinstance(job, list):  # not sent
+                results.append(job)
+                continue
+            try:
+                outcomes = job.result()
+            except Exception as exc:
+                results.append(
+                    failure(
+                        HTSTError.ENGINE_FAILURE,
+                        f"HTST job failed: {type(exc).__name__}: {exc}",
+                        n,
+                    )
+                )
+                continue
+            if not (
+                isinstance(outcomes, list)
+                and len(outcomes) == n
+                and all(well_formed(outcome) for outcome in outcomes)
+            ):
+                outcomes = failure(
+                    HTSTError.ENGINE_FAILURE,
+                    "HTST job returned an unexpected result: "
+                    f"{type(outcomes).__name__}",
+                    n,
+                )
+            results.append(outcomes)
+        return results
+
+    def _prefactor_outcome(
+        self, name: str, outcome: Result[float, ErrorInfo]
+    ) -> tuple[float | None, str]:
+        """Turn the result of a Hessian job into the `nu0` and status of an event.
+
+        Parameters
+        ----------
+        name : str
+            Name of the event in the log.
+        outcome : Result[float, ErrorInfo]
+            `Ok` with the attempt frequency (Hz), or `Err` with the reason there is
+            none.
+
+        Returns
+        -------
+        tuple[float | None, str]
+            The attempt frequency and 'ok', or None and the error key: the event
+            then uses `k0`, and a warning says why.
+
+        """
+        from pykmc.htst import NU0_WARN_BAND_HZ, HTSTError
+
+        if isinstance(outcome, Err):
+            error = outcome.err_value()
+            self.loggers.warning("log", f"HTST: {name} uses k0: {error.message}")
+            return None, error.type.key
+        nu0 = outcome.ok_value()
+        if not (np.isfinite(nu0) and nu0 > 0):
+            self.loggers.warning(
+                "log",
+                f"HTST: {name} uses k0: nu0 is not a finite positive number "
+                f"(value {float(nu0)!r} Hz)",
+            )
+            return None, HTSTError.NONFINITE_PREFACTOR.key
+        low, high = NU0_WARN_BAND_HZ
+        if not low <= nu0 <= high:
+            self.loggers.warning(
+                "log",
+                f"HTST: {name}: nu0 = {nu0 / 1e12:.4g} THz is outside 0.1-1000 THz; "
+                "used as computed",
+            )
+        return float(nu0), "ok"
 
     def _select_event(
         self,
