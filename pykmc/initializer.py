@@ -279,6 +279,42 @@ class Initializer:
             self.kmc.loggers.info("log", ":=> Generate a empty reference table")
         self.kmc.reference_table = ReferenceEventTable(self.kmc.config)
 
+        # A loaded table keeps the rates, and maybe the nu0, of the run that wrote it.
+        path = self.kmc.config.control.reference_table
+        htst = self.kmc.config.rateconstant.style == "htst"
+        if path is not None and (
+            htst or "nu0" in self.kmc.reference_table.table.columns
+        ):
+            counts = self.kmc.reference_table.recompute_rates(
+                self.kmc.htst_region if htst else None
+            )
+            rows = counts["rows"]
+            if not htst:
+                self.kmc.loggers.info(
+                    "log",
+                    f"HTST: reference table {path} carries nu0 for "
+                    f"{counts['with_nu0']} of {rows} rows; style = constant ignores it "
+                    "and recomputes k from k0 and T.",
+                )
+            if htst and counts["no_nu0"] > 0:
+                self.kmc.loggers.warning(
+                    "log",
+                    f"HTST: {counts['no_nu0']} of {rows} rows in reference table "
+                    f"{path} have no nu0 and use k0.",
+                )
+            if htst and counts["other_region"]:
+                other = sorted(
+                    counts["other_region"].items(), key=lambda item: (-item[1], item[0])
+                )
+                stored = "; ".join(f"{record} ({n} rows)" for record, n in other)
+                self.kmc.loggers.warning(
+                    "log",
+                    f"HTST: {sum(counts['other_region'].values())} of {rows} rows in "
+                    f"reference table {path} were computed with other region settings "
+                    f"and keep their stored nu0. Current: {self.kmc.htst_region}. "
+                    f"Stored: {stored}.",
+                )
+
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""
         bc = self.kmc.config.bias

@@ -111,6 +111,14 @@ class EventRefinementOutput:
         Index of the corresponding reference event (if matched).
     refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
+    nu0 : Optional[float]
+        Attempt frequency of the event (Hz), or None if it has none. Only set when
+        the rate constant style is 'htst'.
+    nu0_status : Optional[str]
+        Where `nu0` stands: 'pending' until it is computed, then 'ok' or the reason
+        there is none.
+    htst_saddle : Optional[np.ndarray]
+        Refined saddle positions of the whole system, kept until `nu0` is computed.
     """
 
     central_atom_index: int
@@ -120,6 +128,9 @@ class EventRefinementOutput:
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
     refined: Optional[str] = None
+    nu0: Optional[float] = None
+    nu0_status: Optional[str] = None
+    htst_saddle: Optional[np.ndarray] = None
 
 
 @dataclass
