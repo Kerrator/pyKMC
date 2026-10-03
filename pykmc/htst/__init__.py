@@ -14,6 +14,16 @@ from .constants import (
     ZERO_MODE_TOL,
 )
 from .modes import Spectrum, minimum_error, saddle_error, spectrum, vineyard_hz
+from .region import (
+    HessianRegion,
+    build_region,
+    frozen_overlap,
+    full_hessian_mb,
+    hessian_mode,
+    moving_atom,
+    region_record,
+    wrapped_on_open_axis,
+)
 from .result import HTSTError
 
 __all__ = [
@@ -25,9 +35,17 @@ __all__ = [
     "RMOV_WARN_A",
     "ZERO_MODE_TOL",
     "HTSTError",
+    "HessianRegion",
     "Spectrum",
+    "build_region",
+    "frozen_overlap",
+    "full_hessian_mb",
+    "hessian_mode",
     "minimum_error",
+    "moving_atom",
+    "region_record",
     "saddle_error",
     "spectrum",
     "vineyard_hz",
+    "wrapped_on_open_axis",
 ]
