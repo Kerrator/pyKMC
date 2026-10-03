@@ -30,6 +30,7 @@ nav:
   - Getting Started:
       - Installation: install/installation.md
       - User Guide: user_guide.md
+      - HTST prefactors: htst.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
   - Developer Guide: 
