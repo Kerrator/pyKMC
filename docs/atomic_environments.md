@@ -218,13 +218,14 @@ neighbors_add = 1
 
 graph IDs are also assigned to the first neighbors of those non-crystalline atoms.
 
+More generally, setting `neighbors_add = N` extends graph-based identification to the N-th neighbor shell of the initially non-crystalline atoms.
+
 This is particularly useful around defects such as vacancies, where atoms neighboring the defect may participate directly in migration events.
 
 <div style="text-align: center;">
 <img src="images/atomic_env_radd.png" width="400" />
 </div>
 
-> **Current implementation note:** although some parameter descriptions refer to `neighbors_add` as an N-th-shell parameter, the current implementation does not recursively expand to successive shells for values larger than `1`. In practice, `neighbors_add = 1` extends graph identification to first neighbors of the initially non-crystalline atoms. Values greater than `1` currently do not extend the region to additional shells.
 
 ---
 
