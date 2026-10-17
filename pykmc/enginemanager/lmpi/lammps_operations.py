@@ -1117,6 +1117,7 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
     import ase.geometry
     from ...utils.geometry import (
         transform_positions,
+        symmetric_event_positions,
         push_towards,
         adaptive_push_fraction,
         per_atom_displacement,
@@ -1176,11 +1177,18 @@ def _basin_reconstruct_impl(engine: "MpiApiEngine", config: "Config", from_posit
                 saddle = np.array(ref_saddle_positions, copy=True)
 
                 if sym_idx != 0:
-                    sym_matrix = sym_matrices[sym_idx]
-                    sym_perm = sym_perms[sym_idx]
-                    supposed_initial = transform_positions(supposed_initial, sym_matrix, 0, sym_perm)
-                    saddle = transform_positions(saddle, sym_matrix, 0, sym_perm)
-                    supposed_final = transform_positions(supposed_final, sym_matrix, 0, sym_perm)
+                    # Displacement form, same as basin.py system_from_state and
+                    # refinement.py: rotating the absolute reference positions moves the
+                    # whole shell.
+                    supposed_initial, saddle, supposed_final = (
+                        symmetric_event_positions(
+                            supposed_initial,
+                            saddle,
+                            supposed_final,
+                            sym_matrices[sym_idx],
+                            sym_perms[sym_idx],
+                        )
+                    )
 
                 supposed_initial = transform_positions(supposed_initial, rmat, tr, perm)
                 saddle = transform_positions(saddle, rmat, tr, perm)

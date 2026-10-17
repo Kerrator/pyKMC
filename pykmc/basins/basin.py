@@ -494,11 +494,18 @@ class BasinsGenericEvents() :
             
         # Apply symmetry matrix if sym != 0
         if sym_idx != 0 :
-            sym_matrices = ref_event["sym_matrix"]
-            sym_matrix = sym_matrices[sym_idx]
-            supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-            saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
-            supposed_final_positions = geometry.transform_positions(supposed_final_positions, sym_matrix,0, ref_event["sym_perm"][sym_idx])
+            # Symmetry variants act on the DISPLACEMENTS about the unrotated initial
+            # positions (reference events are stored in box coordinates) -- see
+            # geometry.symmetric_event_positions.
+            supposed_initial_positions, saddle_positions, supposed_final_positions = (
+                geometry.symmetric_event_positions(
+                    supposed_initial_positions,
+                    saddle_positions,
+                    supposed_final_positions,
+                    ref_event["sym_matrix"][sym_idx],
+                    ref_event["sym_perm"][sym_idx],
+                )
+            )
         supposed_initial_positions = geometry.transform_positions(supposed_initial_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
         saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
         supposed_final_positions= geometry.transform_positions(supposed_final_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
@@ -629,9 +636,13 @@ class BasinsGenericEvents() :
 
                 # Apply symmetry matrix if sym != 0
                 if row["sym"] != 0 :
-                    sym_matrices = ref_event["sym_matrix"]
-                    sym_matrix = sym_matrices[row["sym"]]
-                    saddle_positions = geometry.transform_positions(saddle_positions, sym_matrix,0, ref_event["sym_perm"][row["sym"]])
+                    _, saddle_positions, _ = geometry.symmetric_event_positions(
+                        ref_event["initial_positions"],
+                        saddle_positions,
+                        ref_event["final_positions"],
+                        ref_event["sym_matrix"][row["sym"]],
+                        ref_event["sym_perm"][row["sym"]],
+                    )
                 saddle_positions = geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
                 neighbors = self.states[row["state"]].neighbors_list.get_neighbors("rcut", row["central_atom"])
 
@@ -757,7 +768,13 @@ class BasinsGenericEvents() :
         psr_output = result.ok_value()
         saddle_positions = np.array(ref_event["saddle_positions"], copy=True)
         if sym != 0 :
-            saddle_positions = geometry.transform_positions(saddle_positions, ref_event["sym_matrix"][sym], 0, ref_event["sym_perm"][sym])
+            _, saddle_positions, _ = geometry.symmetric_event_positions(
+                ref_event["initial_positions"],
+                saddle_positions,
+                ref_event["final_positions"],
+                ref_event["sym_matrix"][sym],
+                ref_event["sym_perm"][sym],
+            )
         return geometry.transform_positions(saddle_positions, psr_output.rotation_matrix, psr_output.translation_matrix, psr_output.permutation_matrix)
 
     def _row_saddle_configuration(self, row: pd.Series) -> "tuple[np.ndarray, str] | None" :

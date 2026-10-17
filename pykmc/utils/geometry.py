@@ -2,6 +2,7 @@
 
 __all__ = [
     "transform_positions",
+    "symmetric_event_positions",
     "translate",
     "push_towards",
     "adaptive_push_fraction",
@@ -40,6 +41,54 @@ def transform_positions(
     """
     transform_positions = positions @ transformation_matrix.T + translation_matrix
     return transform_positions[permutation_matrix]
+
+
+def symmetric_event_positions(
+    initial_positions: np.ndarray,
+    saddle_positions: np.ndarray,
+    final_positions: np.ndarray,
+    sym_matrix: np.ndarray,
+    sym_perm: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the (initial, saddle, final) positions of a symmetry variant of an event.
+
+    A reference event is stored in box coordinates. Its symmetry operations
+    (``sym_matrix``, ``sym_perm`` from :func:`pykmc.symmetries.unique_symmetries`) are
+    point operations about the event's own centre, so they must be applied to the atomic
+    *displacements* (``saddle - initial``, ``final - initial``) and added back to the
+    unrotated initial positions -- exactly what the main-loop refinement does. Rotating
+    the absolute positions instead rotates the whole shell about the box origin (tens of
+    Angstrom for a shell that sits away from it), and every ``sym != 0`` basin row then
+    reconstructs a garbage state (measured 2026-08-27 on the fcc(100) pit example: 83/83
+    shell atoms displaced, up to 56 A).
+
+    Parameters
+    ----------
+    initial_positions, saddle_positions, final_positions : np.ndarray
+        Reference event positions, shape (N, 3), in the reference atom order.
+    sym_matrix : np.ndarray
+        3x3 symmetry operation (identity for variant 0).
+    sym_perm : np.ndarray
+        Permutation from the same SOFI operation, in gather form: ``sym_perm[k]`` is
+        the atom whose rotated image lands on site ``k``, i.e.
+        ``(x @ sym_matrix.T)[sym_perm] == x`` about the shell centre (as returned by
+        :func:`pykmc.symmetries.unique_symmetries`).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        ``(initial, saddle, final)`` for the variant; ``initial`` is returned unchanged
+        so the point-set registration computed against it stays valid.
+
+    """
+    initial = np.array(initial_positions, copy=True)
+    saddle = initial + transform_positions(
+        np.asarray(saddle_positions) - initial, sym_matrix, 0, sym_perm
+    )
+    final = initial + transform_positions(
+        np.asarray(final_positions) - initial, sym_matrix, 0, sym_perm
+    )
+    return initial, saddle, final
 
 
 def translate(
