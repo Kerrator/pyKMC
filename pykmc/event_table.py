@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -27,6 +28,56 @@ from .utils.geometry import compute_delr
 if TYPE_CHECKING:
     from .event_recycling import Recycling
 
+# Columns that style = htst adds to the reference table: dtype, and the value of a
+# new row. The k of a new row uses k0 until set_prefactor writes its nu0.
+_HTST_REFERENCE_COLUMNS = {
+    "nu0": ("float64", np.nan),
+    "nu0_status": ("object", "pending"),
+    "nu0_region": ("object", ""),
+}
+# Columns that style = htst adds to the active table: dtype, and the value of a new
+# row whose EventRefinementOutput field is None.
+_HTST_ACTIVE_COLUMNS = {
+    "nu0": ("float64", np.nan),
+    "nu0_status": ("object", None),
+    "htst_saddle": ("object", None),
+}
+
+
+def _refresh_k(
+    table: pd.DataFrame, rate_constant: RateConstant, rows: pd.Index | None = None
+) -> None:
+    """Compute the rate constant of table rows from their energy barrier and `nu0`.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        The event table, updated in place.
+    rate_constant : RateConstant
+        The rate constant of the run.
+    rows : pd.Index | None, optional
+        Index labels of the rows to update. None replaces the whole `k` column.
+
+    Notes
+    -----
+    A row without a finite `nu0`, or a table without the column, uses `k0`.
+
+    """
+    selected = table if rows is None else table.loc[rows]
+    if "nu0" in selected.columns:
+        nu0 = pd.to_numeric(selected["nu0"], errors="coerce")
+    else:
+        nu0 = pd.Series(np.nan, index=selected.index)
+    k = [
+        rate_constant.compute_rate(float(dE), nu0=float(v))
+        for dE, v in zip(selected["energy_barrier"], nu0, strict=True)
+    ]
+    if rows is None:
+        table["k"] = k
+    else:
+        for row, value in zip(rows, k, strict=True):
+            table.at[row, "k"] = value
+
 
 class ReferenceEventTable:
     """Store reference events and manage them.
@@ -40,7 +91,17 @@ class ReferenceEventTable:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self._htst_columns = (
+            _HTST_REFERENCE_COLUMNS if config.rateconstant.style == "htst" else {}
+        )
         self._initialize_table()
+
+    @cached_property
+    def rate_constant(self) -> RateConstant:
+        """Rate constant of the configured style, built on first use."""
+        return RateConstant.create(
+            self.config.rateconstant.style, config=self.config.rateconstant
+        )
 
     def add_events(
         self, events: list[EventSearchOutput]
@@ -536,9 +597,6 @@ class ReferenceEventTable:
             - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
         )
 
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
         dfevent_forward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
@@ -548,7 +606,7 @@ class ReferenceEventTable:
                 "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
-                "k": rate_constant.compute_rate(dE_forward),
+                "k": self.rate_constant.compute_rate(dE_forward),
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -574,7 +632,7 @@ class ReferenceEventTable:
                 "final_positions": min1_positions[neighbor_list_backward],
                 "types": local_types_backward,
                 "energy_barrier": dE_backward,
-                "k": rate_constant.compute_rate(dE_backward),
+                "k": self.rate_constant.compute_rate(dE_backward),
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -585,12 +643,9 @@ class ReferenceEventTable:
             }
         )
 
-        if self.config.rateconstant.style == "htst":
-            # k is the k0 rate until set_prefactor writes the nu0 of the event.
-            for dfevent in (dfevent_forward, dfevent_backward):
-                dfevent["nu0"] = np.nan
-                dfevent["nu0_status"] = "pending"
-                dfevent["nu0_region"] = ""
+        for dfevent in (dfevent_forward, dfevent_backward):
+            for column, (_, value) in self._htst_columns.items():
+                dfevent[column] = value
 
         return dfevent_forward, dfevent_backward
 
@@ -630,14 +685,10 @@ class ReferenceEventTable:
             raise RuntimeError(
                 f"HTST: internal error: {n} reference rows have idx_ref {idx_ref}"
             )
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
-        dE = float(self.table.loc[mask, "energy_barrier"].iloc[0])
         self.table.loc[mask, "nu0"] = np.nan if nu0 is None else float(nu0)
         self.table.loc[mask, "nu0_status"] = status
         self.table.loc[mask, "nu0_region"] = region
-        self.table.loc[mask, "k"] = rate_constant.compute_rate(dE, nu0=nu0)
+        _refresh_k(self.table, self.rate_constant, self.table.index[mask])
 
     def recompute_rates(self, region: str | None) -> dict:
         """Recompute the rate constant of every row of a loaded table.
@@ -661,17 +712,8 @@ class ReferenceEventTable:
             computed with other region settings, by settings.
 
         """
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
         other_region = {}
-        if region is None:
-            nu0 = pd.to_numeric(self.table["nu0"], errors="coerce")
-            self.table["k"] = [
-                rate_constant.compute_rate(float(dE))
-                for dE in self.table["energy_barrier"]
-            ]
-        else:
+        if region is not None:
             if "nu0" not in self.table.columns:
                 self.table["nu0"] = np.nan
             if "nu0_status" not in self.table.columns:
@@ -680,21 +722,18 @@ class ReferenceEventTable:
                 self.table["nu0_region"] = pd.Series(
                     "unknown", index=self.table.index, dtype="object"
                 )
-            nu0 = pd.to_numeric(self.table["nu0"], errors="coerce")
-            finite = np.isfinite(nu0)
+            self.table["nu0"] = pd.to_numeric(self.table["nu0"], errors="coerce")
+            finite = np.isfinite(self.table["nu0"])
             no_status = self.table["nu0_status"].isna()
-            self.table["nu0"] = nu0
             self.table.loc[no_status & finite, "nu0_status"] = "ok"
             self.table.loc[no_status & ~finite, "nu0_status"] = "none"
             self.table.loc[self.table["nu0_region"].isna(), "nu0_region"] = "unknown"
-            self.table["k"] = [
-                rate_constant.compute_rate(float(dE), nu0=float(v))
-                for dE, v in zip(self.table["energy_barrier"], nu0, strict=True)
-            ]
             other = self.table.loc[
                 finite & (self.table["nu0_region"] != region), "nu0_region"
             ]
             other_region = {str(r): int(c) for r, c in other.value_counts().items()}
+        _refresh_k(self.table, self.rate_constant)
+        nu0 = pd.to_numeric(self.table["nu0"], errors="coerce")
         with_nu0 = int(np.isfinite(nu0).sum())
         return {
             "rows": len(self.table),
@@ -730,10 +769,8 @@ class ReferenceEventTable:
                     "dra": pd.Series(dtype="float64"),
                 }
             )
-            if self.config.rateconstant.style == "htst":
-                self.table["nu0"] = pd.Series(dtype="float64")
-                self.table["nu0_status"] = pd.Series(dtype="object")
-                self.table["nu0_region"] = pd.Series(dtype="object")
+            for column, (dtype, _) in self._htst_columns.items():
+                self.table[column] = pd.Series(dtype=dtype)
 
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
@@ -793,6 +830,9 @@ class ActiveEventTable:
         # the rows the recycler selects between KMC steps. If None, the table
         # is cleared at the end of each step (matching prior behavior).
         self.recycler = recycler
+        self._htst_columns = (
+            _HTST_ACTIVE_COLUMNS if config.rateconstant.style == "htst" else {}
+        )
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -808,11 +848,16 @@ class ActiveEventTable:
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
             }
-            if config.rateconstant.style == "htst":
-                columns["nu0"] = pd.Series(dtype="float64")
-                columns["nu0_status"] = pd.Series(dtype="object")
-                columns["htst_saddle"] = pd.Series(dtype="object")
+            for column, (dtype, _) in self._htst_columns.items():
+                columns[column] = pd.Series(dtype=dtype)
             self.table = pd.DataFrame(columns)
+
+    @cached_property
+    def rate_constant(self) -> RateConstant:
+        """Rate constant of the configured style, built on first use."""
+        return RateConstant.create(
+            self.config.rateconstant.style, config=self.config.rateconstant
+        )
 
     def prune_for_recycling(
         self,
@@ -927,19 +972,15 @@ class ActiveEventTable:
             "saddle_positions": event_refinement_output.saddle_positions,
             "final_positions": event_refinement_output.min2_positions,
             "energy_barrier": event_refinement_output.dE_forward,
-            "k": RateConstant.create(
-                self.config.rateconstant.style, config=self.config.rateconstant
-            ).compute_rate(
+            "k": self.rate_constant.compute_rate(
                 event_refinement_output.dE_forward, nu0=event_refinement_output.nu0
             ),
             "num_reference_event": event_refinement_output.num_reference_event,
             "refined": event_refinement_output.refined,
         }
-        if self.config.rateconstant.style == "htst":
-            nu0 = event_refinement_output.nu0
-            row["nu0"] = np.nan if nu0 is None else nu0
-            row["nu0_status"] = event_refinement_output.nu0_status
-            row["htst_saddle"] = event_refinement_output.htst_saddle
+        for column, (_, missing) in self._htst_columns.items():
+            value = getattr(event_refinement_output, column)
+            row[column] = missing if value is None else value
         dfactive = pd.Series(row)
         return dfactive
 
@@ -962,13 +1003,9 @@ class ActiveEventTable:
         `nu0`.
 
         """
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
-        dE = float(self.table.at[row, "energy_barrier"])
         self.table.at[row, "nu0"] = np.nan if nu0 is None else float(nu0)
         self.table.at[row, "nu0_status"] = status
-        self.table.at[row, "k"] = rate_constant.compute_rate(dE, nu0=nu0)
+        _refresh_k(self.table, self.rate_constant, pd.Index([row]))
         self.table.at[row, "htst_saddle"] = None
 
     def remove(self, ind: int | list[int]) -> None:
