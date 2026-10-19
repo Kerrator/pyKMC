@@ -1,0 +1,68 @@
+[Control]
+initial_config = ./initial_config.xyz
+n_steps = 40
+engine = lammps
+verbosity = 2
+n_sessions = 7
+engine_use_rank_0 = False
+basin = True
+active_volume = True
+recycle = True
+
+[Lammps]
+pair_style = eam/alloy
+pair_coeff = * * ../NiFeCr_LKB2017.eam Ni
+min_style = cg
+minimize = 1e-10 1e-12 10000 10000
+
+[AtomicEnvironment]
+style = coordination/graph
+rnei = 3.2
+rcut = 8.0
+coordination_threshold = 8
+atom_coloring_mode = full
+
+[EventSearch]
+style = partn
+nsearch = 20
+emax_event = 5.0
+emin_event = 0.02
+
+[pARTn]
+
+[RateConstant]
+style = constant
+k0 = 10.0
+T = 300.0
+
+[PSR]
+style = ira
+matching_score_thr = 0.4
+
+[IRA]
+kmax_factor = 2.0
+sym_thr = 0.05
+
+[ActiveVolume]
+ract = 20.0
+rmov = 14.0
+
+[EventRecycling]
+style = displacement
+movement_thr = 0.02
+distance_thr = 10.0
+
+[Reconstruction]
+mover_landing_fraction = 0.35
+
+[BASIN]
+energy_thr = 0.62
+style = global
+solver = auto
+max_states = 400
+max_basin_walltime_s = 1800
+
+[inactive_atoms]
+# the 76 wall-ring atoms (xyz role "wall", 0-based indices): never event centres, so the
+# basin only contains adatom hops and its exits are adatom-at-wall / dimer states
+indices = 5411 5412 5413 5414 5415 5416 5417 5418 5419 5420 5421 5422 5423 5424 5425 5426 5427 5428 5429 5430 5431 5432 5433 5434 5435 5436 5437 5438 5439 5440 5441 5442 5443 5444 5445 5446 5447 5448 5449 5450 5451 5452 5453 5454 5455 5456 5457 5458 5459 5460 5461 5462 5463 5464 5465 5466 5467 5468 5469 5470 5471 5472 5473 5474 5475 5476 5477 5478 5479 5480 5481 5482 5483 5484 5485 5486

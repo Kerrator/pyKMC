@@ -10,6 +10,9 @@ examples/**
 !examples/**/Cu01.eam.alloy
 !examples/**/FeC-Becquart2013.eam
 !examples/**/Si.sw
+!examples/**/NiFeCr_LKB2017.eam
+!examples/*/README.md
+!examples/*/*/
 
 
 # Utils : 
