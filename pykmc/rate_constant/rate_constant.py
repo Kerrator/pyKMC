@@ -26,8 +26,8 @@ class RateConstant:
         dE : float
             The energy barrier (eV).
         nu0 : float, optional
-            Attempt frequency of this event (Hz). `None` or a non-finite value
-            means the event has none.
+            Attempt frequency of this event (THz, i.e. ps^-1). `None` or a
+            non-finite value means the event has none.
 
         Returns
         -------
