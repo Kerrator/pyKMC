@@ -666,7 +666,7 @@ class ReferenceEventTable:
         idx_ref : int
             Reference index of the event.
         nu0 : float | None
-            Attempt frequency (Hz), or None if it could not be computed: the rate
+            Attempt frequency (THz), or None if it could not be computed: the rate
             then uses `k0`.
         status : str
             'ok', or the reason there is no `nu0`.
@@ -992,7 +992,7 @@ class ActiveEventTable:
         row : int
             Index label of the event in the table.
         nu0 : float | None
-            Attempt frequency (Hz), or None if it could not be computed: the rate
+            Attempt frequency (THz), or None if it could not be computed: the rate
             then uses `k0`.
         status : str
             'ok', or the reason there is no `nu0`.

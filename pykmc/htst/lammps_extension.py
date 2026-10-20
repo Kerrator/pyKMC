@@ -18,7 +18,7 @@ from .._core.result import Err, ErrorInfo, Ok, Result
 from ..engine.base import Engine, EngineExtension
 from ..engine.lammps import LammpsEngine
 from .constants import ESKM_METAL_CONVERSION
-from .modes import Spectrum, minimum_error, saddle_error, spectrum, vineyard_hz
+from .modes import Spectrum, minimum_error, saddle_error, spectrum, vineyard_thz
 from .region import _minimum_image
 from .result import HTSTError
 
@@ -108,7 +108,7 @@ class HTSTLammpsExtension(EngineExtension):
         Returns
         -------
         list[Result[float, ErrorInfo]] or None
-            One entry per minimum: `Ok` with nu0 (Hz), or `Err` with the reason
+            One entry per minimum: `Ok` with nu0 (THz), or `Err` with the reason
             there is none. `None` on ranks other than the leader.
 
         Notes
@@ -196,7 +196,7 @@ class HTSTLammpsExtension(EngineExtension):
                         results.append(Err(error))
                         continue
                     results.append(
-                        vineyard_hz(
+                        vineyard_thz(
                             minimum_spectrum.ok_value(), saddle_spectrum.ok_value()
                         )
                     )

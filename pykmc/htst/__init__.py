@@ -7,13 +7,13 @@ here: it is loaded only when `[RateConstant] style = htst`.
 from .constants import (
     AV_BUFFER_WARN_A,
     ESKM_METAL_CONVERSION,
-    H_EV_S,
+    H_EV_PS,
     HBAR_OMEGA_EV,
-    NU0_WARN_BAND_HZ,
+    NU0_WARN_BAND_THZ,
     RMOV_WARN_A,
     ZERO_MODE_TOL,
 )
-from .modes import Spectrum, minimum_error, saddle_error, spectrum, vineyard_hz
+from .modes import Spectrum, minimum_error, saddle_error, spectrum, vineyard_thz
 from .region import (
     HessianRegion,
     build_region,
@@ -29,9 +29,9 @@ from .result import HTSTError
 __all__ = [
     "AV_BUFFER_WARN_A",
     "ESKM_METAL_CONVERSION",
-    "H_EV_S",
+    "H_EV_PS",
     "HBAR_OMEGA_EV",
-    "NU0_WARN_BAND_HZ",
+    "NU0_WARN_BAND_THZ",
     "RMOV_WARN_A",
     "ZERO_MODE_TOL",
     "HTSTError",
@@ -46,6 +46,6 @@ __all__ = [
     "region_record",
     "saddle_error",
     "spectrum",
-    "vineyard_hz",
+    "vineyard_thz",
     "wrapped_on_open_axis",
 ]

@@ -845,7 +845,7 @@ class KMC:
         -------
         list[list[Result[float, ErrorInfo]]]
             For each event, one result per minimum: `Ok` with the attempt frequency
-            (Hz) or `Err` with the reason there is none.
+            (THz) or `Err` with the reason there is none.
 
         Notes
         -----
@@ -1021,7 +1021,7 @@ class KMC:
         name : str
             Name of the event in the log.
         outcome : Result[float, ErrorInfo]
-            `Ok` with the attempt frequency (Hz), or `Err` with the reason there is
+            `Ok` with the attempt frequency (THz), or `Err` with the reason there is
             none.
 
         Returns
@@ -1031,7 +1031,7 @@ class KMC:
             then uses `k0`, and a warning says why.
 
         """
-        from pykmc.htst import NU0_WARN_BAND_HZ, HTSTError
+        from pykmc.htst import NU0_WARN_BAND_THZ, HTSTError
 
         if isinstance(outcome, Err):
             error = outcome.err_value()
@@ -1042,14 +1042,14 @@ class KMC:
             self.loggers.warning(
                 "log",
                 f"HTST: {name} uses k0: nu0 is not a finite positive number "
-                f"(value {float(nu0)!r} Hz)",
+                f"(value {float(nu0)!r} THz)",
             )
             return None, HTSTError.NONFINITE_PREFACTOR.key
-        low, high = NU0_WARN_BAND_HZ
+        low, high = NU0_WARN_BAND_THZ
         if not low <= nu0 <= high:
             self.loggers.warning(
                 "log",
-                f"HTST: {name}: nu0 = {nu0 / 1e12:.4g} THz is outside 0.1-1000 THz; "
+                f"HTST: {name}: nu0 = {nu0:.4g} THz is outside 0.1-1000 THz; "
                 "used as computed",
             )
         return float(nu0), "ok"

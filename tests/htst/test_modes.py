@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 
 from pykmc.htst import (
-    H_EV_S,
+    H_EV_PS,
     HBAR_OMEGA_EV,
     HTSTError,
     minimum_error,
     saddle_error,
     spectrum,
-    vineyard_hz,
+    vineyard_thz,
 )
 from pykmc.htst.modes import _classify
 
@@ -23,9 +23,9 @@ def test_vineyard_diagonal_spectrum_gives_known_nu0() -> None:
 
     assert minimum_error(min_spec) is None
     assert saddle_error(sad_spec) is None
-    nu0 = vineyard_hz(min_spec, sad_spec).ok_value()
+    nu0 = vineyard_thz(min_spec, sad_spec).ok_value()
 
-    expected = HBAR_OMEGA_EV * np.prod(np.sqrt(a)) / np.prod(np.sqrt(c)) / H_EV_S
+    expected = HBAR_OMEGA_EV * np.prod(np.sqrt(a)) / np.prod(np.sqrt(c)) / H_EV_PS
     assert isinstance(nu0, float)
     assert nu0 == pytest.approx(expected, rel=1e-12)
 

@@ -120,7 +120,7 @@ def test_finite_nu0_reaches_the_active_table(tmp_path, monkeypatch) -> None:
     )
     assert isinstance(outcome[0], Ok)
     nu0 = outcome[0].ok_value()
-    assert abs(nu0 / 1e12 - 22.0389) <= 1e-4
+    assert abs(nu0 - 22.0389) <= 1e-4
 
     # A refined event waits for its nu0 with its full-size saddle.
     table = ActiveEventTable(config)

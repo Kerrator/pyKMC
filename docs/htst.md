@@ -27,10 +27,11 @@ $$
 
 The Hessians are computed by finite differences with the LAMMPS `dynamical_matrix` command.
 
-**Units.** Rate constants are in ps⁻¹. $\nu_0$ is stored in Hz (1 THz = 1 ps⁻¹). `k0` is in
-ps⁻¹: `k0 = 10` is $10^{13}$ Hz. Under `style = htst`, `k0` is the prefactor of every event that
-has no $\nu_0$, and a `k0` above 1000 ps⁻¹ is refused at startup: a value typed in Hz by mistake
-would make every such event dominate the simulation.
+**Units.** Rate constants are in ps⁻¹. $\nu_0$ is in THz (1 THz = 1 ps⁻¹), the unit LAMMPS
+reports frequencies in and the unit of `k0`. `k0` is in ps⁻¹: `k0 = 10` is $10^{13}$ Hz. Under
+`style = htst`, `k0` is the prefactor of every event that has no $\nu_0$, and a `k0` above
+1000 ps⁻¹ is refused at startup: a value typed in Hz by mistake would make every such event
+dominate the simulation.
 
 **Requirements.** LAMMPS built with the PHONON package, and an orthogonal simulation cell.
 
@@ -288,7 +289,7 @@ WARNING : HTST: active event (atom 1423, reference event 3) uses k0: saddle has 
 | `HTSTError.NO_FROZEN_BOUNDARY` | every atom present is displaced, but the region is not the whole system |
 | `HTSTError.ENGINE_FAILURE` | the calculation failed (a LAMMPS error, atoms lost outside a non-periodic boundary, an incomplete Hessian file, or a job that could not be sent or collected); the message gives the error |
 
-The reference table stores, for each event, `nu0` (Hz), `nu0_status` (`ok`, one of the
+The reference table stores, for each event, `nu0` (THz), `nu0_status` (`ok`, one of the
 statuses above, or `none` for an event loaded without a $\nu_0$) and `nu0_region` (the region
 settings it was computed with, or `unknown` for a loaded event that has none).
 

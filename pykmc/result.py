@@ -112,7 +112,7 @@ class EventRefinementOutput:
     refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
     nu0 : Optional[float]
-        Attempt frequency of the event (Hz), or None if it has none. Only set when
+        Attempt frequency of the event (THz), or None if it has none. Only set when
         the rate constant style is 'htst'.
     nu0_status : Optional[str]
         Where `nu0` stands: 'pending' until it is computed, then 'ok' or the reason

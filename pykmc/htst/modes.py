@@ -7,7 +7,7 @@ import numpy as np
 
 from pykmc._core.result import Err, ErrorInfo, Ok, Result
 
-from .constants import H_EV_S, HBAR_OMEGA_EV, ROTATION_MODE_TOL, ZERO_MODE_TOL
+from .constants import H_EV_PS, HBAR_OMEGA_EV, ROTATION_MODE_TOL, ZERO_MODE_TOL
 from .result import HTSTError
 
 
@@ -178,7 +178,7 @@ def minimum_error(spec: Spectrum) -> Optional[ErrorInfo]:
     return None
 
 
-def vineyard_hz(min_spec: Spectrum, sad_spec: Spectrum) -> Result[float, ErrorInfo]:
+def vineyard_thz(min_spec: Spectrum, sad_spec: Spectrum) -> Result[float, ErrorInfo]:
     r"""Compute the Vineyard prefactor of a minimum and a saddle.
 
     It uses the following equation :
@@ -192,12 +192,12 @@ def vineyard_hz(min_spec: Spectrum, sad_spec: Spectrum) -> Result[float, ErrorIn
     Returns
     -------
     Result[float, ErrorInfo]
-        `Ok` with nu0 in Hz, or `Err` (`NONFINITE_PREFACTOR`) when the value is
+        `Ok` with nu0 in THz (ps^-1), or `Err` (`NONFINITE_PREFACTOR`) when the value is
         not finite and positive.
 
     """
     with np.errstate(over="ignore", under="ignore"):
-        nu0 = np.exp(min_spec.log_hbar_omega - sad_spec.log_hbar_omega) / H_EV_S
+        nu0 = np.exp(min_spec.log_hbar_omega - sad_spec.log_hbar_omega) / H_EV_PS
     if not np.isfinite(nu0) or nu0 <= 0.0:
-        return Err(_nonfinite(f"value {float(nu0)!r} Hz"))
+        return Err(_nonfinite(f"value {float(nu0)!r} THz"))
     return Ok(float(nu0))
