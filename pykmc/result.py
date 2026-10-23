@@ -111,6 +111,9 @@ class EventRefinementOutput:
         Index of the corresponding reference event (if matched).
     refined: Optional[str]
         If the event has been refined (T: True, F: False, B: In basin)
+    neighbors : Optional[np.ndarray]
+        Atom indices that `saddle_positions` and `min2_positions` are ordered by
+        (the rcut neighbors of the central atom when the event was refined).
     """
 
     central_atom_index: int
@@ -120,6 +123,7 @@ class EventRefinementOutput:
     dE_forward: Optional[float] = None
     num_reference_event: Optional[int] = None
     refined: Optional[str] = None
+    neighbors: Optional[np.ndarray] = None
 
 
 @dataclass
