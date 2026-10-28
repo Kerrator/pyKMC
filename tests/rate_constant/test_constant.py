@@ -1,10 +1,15 @@
 """Tests for the rate constant strategies and the constant strategy."""
 
+import json
 import math
+import subprocess
+import sys
+from pathlib import Path
 from typing import Optional
 
 import pytest
 
+import pykmc
 from pykmc.config import PhysicalConstants, RateConstantConfig
 from pykmc.rate_constant import RateConstant, RateConstantStrategy
 
@@ -63,3 +68,33 @@ def test_constant_strategy_has_no_per_event_prefactor() -> None:
     rate_constant.setup(None, None, None, None)  # type: ignore[arg-type]
     with pytest.raises(NotImplementedError):
         rate_constant.compute_prefactors([], None, None)  # type: ignore[arg-type]
+
+
+def test_import_registers_every_strategy_without_loading_lammps() -> None:
+    """`import pykmc` registers htst and leaves LAMMPS unloaded.
+
+    An eager LAMMPS import in the htst package would load LAMMPS in every run,
+    and where LAMMPS is missing it would drop the style silently: a strategy
+    module that fails to import is skipped. The check runs in a fresh
+    interpreter, as other tests load LAMMPS.
+    """
+    code = (
+        "import json, sys\n"
+        "import pykmc\n"
+        "from pykmc.rate_constant import RateConstantStrategy\n"
+        "print(json.dumps({'file': pykmc.__file__,"
+        " 'lammps': 'lammps' in sys.modules,"
+        " 'registered': sorted(RateConstantStrategy._registry),"
+        " 'import_errors': sorted(RateConstantStrategy._import_errors)}))\n"
+    )
+    root = Path(pykmc.__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    found = json.loads(result.stdout.splitlines()[-1])
+
+    assert Path(found["file"]).resolve() == Path(pykmc.__file__).resolve()
+    assert not found["lammps"]
+    assert {"constant", "htst"} <= set(found["registered"])
+    assert found["import_errors"] == []
