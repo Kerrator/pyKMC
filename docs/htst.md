@@ -166,7 +166,17 @@ Converge `free_radius` on your own system:
    import pandas as pd
 
    table = pd.read_pickle("reference_table.pickle")
-   print(table[["idx_ref", "energy_barrier", "prefactor", "prefactor_status", "prefactor_settings"]])
+   print(
+       table[
+           [
+               "idx_ref",
+               "energy_barrier",
+               "prefactor",
+               "prefactor_status",
+               "prefactor_settings",
+           ]
+       ]
+   )
    ```
 4. Take the largest radius as the reference. Choose the smallest radius whose $\nu_0$ is within
    5 % of it, at that radius and at every larger one.
