@@ -52,6 +52,7 @@ from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
+from .rate_constant import RateConstant
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -85,11 +86,15 @@ class KMC:
         Track atomic environments already explored. Those for which event searches as been previously done.
     total_energy : float
         The total energy of the system.
+    rate_constant : RateConstant
+        The rate constant of the run, shared by the event tables and the
+        refinement.
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, rate_constant: RateConstant) -> None:
         self.config = config
+        self.rate_constant = rate_constant
         self.loggers = None
         self.system = None
         self.manager = None
@@ -181,7 +186,9 @@ class KMC:
 
         # Build the persistent active event table once, with the recycler
         # plugin (built in __init__) attached.
-        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
+        self.active_table = ActiveEventTable(
+            self.config, recycler=self.recycler, rate_constant=self.rate_constant
+        )
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
@@ -331,7 +338,9 @@ class KMC:
                         result_basin.ok_value().from_state
                     ].neighbors_list
                     # construct new active table with only event : new_actual_state - > exit_state
-                    tmp_active_table = ActiveEventTable(self.config)
+                    tmp_active_table = ActiveEventTable(
+                        self.config, rate_constant=self.rate_constant
+                    )
                     tmp_event = EventRefinementOutput(
                         central_atom_index=result_basin.ok_value().central_atom,
                         saddle_positions=result_basin.ok_value().saddle_positions,
@@ -675,6 +684,7 @@ class KMC:
             self.neighbors_list,
             self.atomic_environment,
             self.manager,
+            self.rate_constant,
         )
         # refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(

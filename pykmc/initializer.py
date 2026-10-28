@@ -35,6 +35,7 @@ class Initializer:
         self.initialize_loggers()
         self.initialize_system()
         self.initialize_engine()
+        self.initialize_rate_constant()
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()
@@ -100,6 +101,12 @@ class Initializer:
         )
         self.kmc.manager.submit_group("initialize_potential")
 
+    def initialize_rate_constant(self) -> None:
+        """Let the rate constant check that it can run, once the engines exist."""
+        self.kmc.rate_constant.setup(
+            self.kmc.config, self.kmc.manager, self.kmc.system, self.kmc.loggers
+        )
+
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""
         self.kmc.loggers.info("log", ":=> Constructing Neighbors Lists")
@@ -133,7 +140,9 @@ class Initializer:
             )
         else:
             self.kmc.loggers.info("log", ":=> Generate a empty reference table")
-        self.kmc.reference_table = ReferenceEventTable(self.kmc.config)
+        self.kmc.reference_table = ReferenceEventTable(
+            self.kmc.config, self.kmc.rate_constant
+        )
 
     def initialize_bias(self) -> None:
         """Instantiate the bias object from the config, or set it to None."""

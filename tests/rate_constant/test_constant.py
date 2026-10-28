@@ -14,7 +14,7 @@ class DoublingStrategy(RateConstantStrategy):
 
     name = "doubling_test_strategy"
 
-    def prefactor(self, nu0: Optional[float] = None) -> float:
+    def prefactor(self, value: Optional[float] = None) -> float:
         """Return twice `k0`."""
         return 2.0 * self.config.k0
 
@@ -26,7 +26,7 @@ def test_constant_strategy_returns_k0_boltzmann_rate() -> None:
     for dE in (0.0, 0.5, 1.2):
         expected = config.k0 * math.exp(-dE / (PhysicalConstants.kb * config.T))
         assert rate_constant.compute_rate(dE) == expected
-        assert rate_constant.compute_rate(dE, nu0=22.0) == expected
+        assert rate_constant.compute_rate(dE, prefactor=22.0) == expected
 
 
 def test_constant_prefactor_is_k0_whatever_nu0() -> None:
@@ -51,3 +51,15 @@ def test_strategy_without_prefactor_is_abstract() -> None:
 
     with pytest.raises(TypeError):
         RateConstantStrategy(config)  # type: ignore[abstract]
+
+
+def test_constant_strategy_has_no_per_event_prefactor() -> None:
+    config = RateConstantConfig(style="constant", k0=10.0, T=300.0)
+    rate_constant = RateConstant.create("constant", config=config)
+
+    assert rate_constant.per_event_prefactor is False
+    assert rate_constant.engine_extensions == ()
+    assert rate_constant.settings_record == ""
+    rate_constant.setup(None, None, None, None)  # type: ignore[arg-type]
+    with pytest.raises(NotImplementedError):
+        rate_constant.compute_prefactors([], None, None)  # type: ignore[arg-type]

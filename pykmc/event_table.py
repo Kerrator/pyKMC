@@ -35,11 +35,14 @@ class ReferenceEventTable:
     ----------
     config : Config
         The atomic simulations configuration.
+    rate_constant : RateConstant
+        The rate constant of the run.
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, rate_constant: RateConstant) -> None:
         self.config = config
+        self.rate_constant = rate_constant
         self._initialize_table()
 
     def add_events(
@@ -531,9 +534,6 @@ class ReferenceEventTable:
             - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
         )
 
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
         dfevent_forward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
@@ -543,7 +543,7 @@ class ReferenceEventTable:
                 "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
-                "k": rate_constant.compute_rate(dE_forward),
+                "k": self.rate_constant.compute_rate(dE_forward),
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -569,7 +569,7 @@ class ReferenceEventTable:
                 "final_positions": min1_positions[neighbor_list_backward],
                 "types": local_types_backward,
                 "energy_barrier": dE_backward,
-                "k": rate_constant.compute_rate(dE_backward),
+                "k": self.rate_constant.compute_rate(dE_backward),
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -661,6 +661,8 @@ class ActiveEventTable:
         The atomic simulations configuration.
     event_dataframe : pd.DataFrame, optional
         An table with active event use to initialize the table. by default 'None'.
+    rate_constant : RateConstant
+        The rate constant of the run (keyword only).
 
     """
 
@@ -669,12 +671,15 @@ class ActiveEventTable:
         config: Config,
         event_dataframe: pd.DataFrame = None,
         recycler: "Recycling | None" = None,
+        *,
+        rate_constant: RateConstant,
     ):
         self.config = config
         # Optional recycling plugin. If attached, `prune_for_recycling` keeps
         # the rows the recycler selects between KMC steps. If None, the table
         # is cleared at the end of each step (matching prior behavior).
         self.recycler = recycler
+        self.rate_constant = rate_constant
 
         if event_dataframe is not None:
             if not isinstance(event_dataframe, pd.DataFrame):
@@ -806,9 +811,9 @@ class ActiveEventTable:
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
                 "energy_barrier": event_refinement_output.dE_forward,
-                "k": RateConstant.create(
-                    self.config.rateconstant.style, config=self.config.rateconstant
-                ).compute_rate(event_refinement_output.dE_forward),
+                "k": self.rate_constant.compute_rate(
+                    event_refinement_output.dE_forward
+                ),
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined,
             }

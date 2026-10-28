@@ -9,6 +9,7 @@ from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .manager import Manager
+from .rate_constant import RateConstant
 import ase.geometry
 import numpy as np
 import pandas as pd
@@ -32,6 +33,8 @@ class Refinement:
         The atomic environment of the system.
     engine : Engine
         The engine to use for the refinement.
+    rate_constant : RateConstant
+        The rate constant of the run.
 
     """
 
@@ -43,8 +46,10 @@ class Refinement:
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
         manager: Manager,
+        rate_constant: RateConstant,
     ) -> None:
         self.config = config
+        self.rate_constant = rate_constant
         self.loggers = loggers
         self.system = system
         self.neighbors_list = neighbors_list
