@@ -10,6 +10,8 @@ pyKMC relies on several objects to perform specific tasks:
 - `AtomicEnvironments` _(todo)_
 - `ReferenceTable` _(todo)_
 - `ActiveTable` _(todo)_
+- `RateConstant` _(todo)_
+- `PSR`
 - `RateConstant`
 - `PSR` _(todo)_
 - `EventSearch` _(todo)_
