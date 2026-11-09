@@ -30,8 +30,14 @@ from pykmc import System
 from pykmc.event_table import ActiveEventTable
 from pykmc.kmc import KMC
 from pykmc.refinement import Refinement
-from pykmc.result import Err, ErrorInfo, ErrorType, Ok, PSROutput
+from pykmc.config import RateConstantConfig
+from pykmc.psr import PSROutput
+from pykmc.rate_constant import RateConstant
+from pykmc.result import Err, ErrorInfo, ErrorType, Ok
 
+_RATE_CONSTANT = RateConstant.create(
+    "constant", config=RateConstantConfig(style="constant", k0=10.0, T=300.0)
+)
 _CELL = np.diag([20.0, 20.0, 20.0])
 # Positions indexed by absolute atom id; atom 0 is the central atom, atom 1 hops.
 _MIN = np.array(
@@ -69,9 +75,21 @@ class _IdentityPSR:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
-    def match(self) -> Ok[PSROutput]:
+    @classmethod
+    def create(cls, *args: Any, **kwargs: Any) -> "_IdentityPSR":
+        """Mirror the strategy factory of `PointSetRegistration`."""
+        return cls()
+
+    def match_and_check(self, *args: Any, **kwargs: Any) -> Ok[PSROutput]:
         """Return the identity transformation."""
-        return Ok(PSROutput(np.eye(3), np.zeros(3), np.arange(len(_MIN)), 0.0))
+        return Ok(
+            PSROutput(
+                matching_score=0.0,
+                rotation_matrix=np.eye(3),
+                translation_matrix=np.zeros(3),
+                permutation_matrix=np.arange(len(_MIN)),
+            )
+        )
 
 
 class _RecordingReconstruction:
@@ -108,7 +126,9 @@ def _config() -> SimpleNamespace:
     return SimpleNamespace(
         control=SimpleNamespace(recycle=False, active_volume=False, refine_thr=0.5),
         eventsearch=SimpleNamespace(refined_energy_thr=0.1),
-        psr=SimpleNamespace(matching_score_thr=0.4),
+        psr=SimpleNamespace(style="ira", matching_score_thr=0.4),
+        ira=SimpleNamespace(),
+        atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
         rateconstant=SimpleNamespace(style="constant", k0=10.0, T=300.0),
     )
 
@@ -121,6 +141,8 @@ def _reference_events() -> pd.DataFrame:
                 "event_id": "env",
                 "idx_ref": 0,
                 "initial_positions": _MIN[_REFINED_ORDER].copy(),
+                "types": ["Ni"] * len(_MIN),
+                "move_atom_idx": 1,
                 "saddle_positions": _SADDLE[_REFINED_ORDER].copy(),
                 "final_positions": _FINAL[_REFINED_ORDER].copy(),
                 "sym_matrix": [np.eye(3)],
@@ -167,11 +189,12 @@ def test_carried_row_is_reconstructed_on_its_own_atoms(
         _NeighborsList(_REFINED_ORDER),
         atomic_environment,
         Mock(),
+        _RATE_CONSTANT,
     )
     refinement.execute(_reference_events(), _TOTAL_ENERGY)
-    kmc = KMC(config)
+    kmc = KMC(config, rate_constant=_RATE_CONSTANT)
     kmc.system = system
-    kmc.active_table = ActiveEventTable(config)
+    kmc.active_table = ActiveEventTable(config, rate_constant=_RATE_CONSTANT)
     kmc.add_active_events(refinement.get_successes_results())
     assert len(kmc.active_table.table) == 1
 

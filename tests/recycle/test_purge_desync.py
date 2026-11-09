@@ -29,9 +29,10 @@ import pytest
 from ase.geometry import find_mic
 
 from pykmc.basins.detection import DetectorThreshold
-from pykmc.config import EventRecyclingConfig
+from pykmc.config import EventRecyclingConfig, RateConstantConfig
 from pykmc.event_table import ReferenceEventTable
 from pykmc.kmc import KMC
+from pykmc.rate_constant import RateConstant
 from pykmc.result import Err, ErrorInfo, ErrorType, EventRefinementOutput, Ok
 
 from .conftest import make_active_table, row
@@ -57,11 +58,16 @@ def _ref_row(idx_ref: int, idx_backward: int, event_id: str) -> dict:
     }
 
 
+def _constant_rate() -> RateConstant:
+    """Constant-style rate constant for tables built outside ``KMC``."""
+    return RateConstant.create("constant", config=RateConstantConfig(style="constant"))
+
+
 def _stub_reference_table(rows: list[dict]) -> ReferenceEventTable:
     """Build a ReferenceEventTable whose ``table`` is a tiny stub frame."""
     config = Mock()
     config.control.reference_table = None
-    rt = ReferenceEventTable(config)
+    rt = ReferenceEventTable(config, rate_constant=_constant_rate())
     rt.table = pd.DataFrame(rows)
     return rt
 
@@ -152,8 +158,9 @@ class _RecordingLoggers:
         step: int,
         delta_t: float,
         total_time: float,
-        num_reference_event: Any,
+        total_energy: Any,
         energy_barrier: Any,
+        num_reference_event: Any,
         k_event: Any,
         *args: Any,
     ) -> None:
@@ -203,12 +210,12 @@ def test_run_evicts_recycled_orphan_after_prune(
         style="displacement", movement_thr=0.02, distance_thr=0.5 * dist[c]
     )
 
-    sim = KMC(config)
+    sim = KMC(config, rate_constant=_constant_rate())
     sim.system = system
     sim.manager = _FakeManager()
     sim.loggers = _RecordingLoggers()
     sim.visited_environments = set()
-    sim.reference_table = ReferenceEventTable(config)
+    sim.reference_table = ReferenceEventTable(config, rate_constant=sim.rate_constant)
     sim.reference_table.table = pd.DataFrame(
         [
             _ref_row(0, 1, "topo0"),
