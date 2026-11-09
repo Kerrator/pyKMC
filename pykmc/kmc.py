@@ -45,6 +45,7 @@ from .info_simulation import (
 from .eventsearch import EventSearch
 from .refinement import Refinement
 from .log import Colors
+import os
 import time
 from .utils import push_towards, compute_delr, per_atom_displacement
 import copy
@@ -115,6 +116,10 @@ class KMC:
         # end-of-step; with no recycler the active table is cleared each
         # step (same observable behavior as prior releases).
         self.recycler: Recycling | None = None
+        # Benchmark-only per-phase step timings (written to timings.csv).
+        self._bench: dict[str, float] = {}
+        self._bench_t0 = 0.0
+        self._bench_t = 0.0
         if self.config.control.recycle:
             if self.config.eventrecycling.style == "displacement":
                 self.recycler = DistanceRecycling(
@@ -198,6 +203,7 @@ class KMC:
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
             start_real = time.time()
+            self._bench_start_step()
             # Positions at the end of the previous step, for the displacement output
             step_start_positions = self.system.positions.copy()
 
@@ -224,9 +230,11 @@ class KMC:
             central_atom_research_list = self.central_atoms_research(
                 new_environments, nsearch
             )
+            self._bench_lap("t_env")
 
             ##=>Perform event search on each atom in central_atom_research_list
             event_search = self.execute_event_searches(central_atom_research_list)
+            self._bench_lap("t_search")
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
@@ -258,11 +266,13 @@ class KMC:
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
             )
+            self._bench_lap("t_ref_add")
             ##=>Refines all event in subset (skipping (atom, ref_event) pairs already carried over)
             refinement = self.execute_refinements(
                 subset_reference_event_table,
                 existing_pairs=self.active_table.existing_pairs(),
             )
+            self._bench_lap("t_refine")
 
             # == ADD ACTIVE EVENT TO ACTIVE EVENT TABLE ==
             # The persistent self.active_table is extended in place; recycled
@@ -281,6 +291,8 @@ class KMC:
             )
             if self.rate_constant.per_event_prefactor:
                 self.add_active_prefactors()
+            self._bench["n_act_rows"] = len(active_table.table)
+            self._bench_lap("t_act_add")
 
             # == Update System ==
             (
@@ -318,6 +330,7 @@ class KMC:
             self.loggers.events_file_step_first_line("events", step)
             self.loggers.events_applicable_info_line("events", sorted_selected_event)
             self.loggers.info("events", events_info)
+            self._bench_lap("t_recon")
 
             # TODO: Temporary, need to unified kmc main loop and basin operations + ugly
             detector = DetectorThreshold()
@@ -431,6 +444,7 @@ class KMC:
                 )
                 self.total_energy = result_reconstruction.ok_value().min2_etot
                 prune_detach_recycler = False
+            self._bench_lap("t_basin")
             total_time += delta_t * 10**-12  # time is in seconds
 
             # Atomic displacements since the previous step
@@ -463,6 +477,8 @@ class KMC:
             )
             self.loggers.info("info", kmc_loop_info.output_msg())
 
+            self._bench_lap("t_log")
+            self._bench["t_wall"] = self._bench_t - self._bench_t0
             elapsed_real = time.time() - start_real
 
             self.loggers.table_line_info_kmc(
@@ -516,6 +532,7 @@ class KMC:
             # would shift or drop that row; after the prune it only removes the
             # orphans carried into the next step.
             n_evicted = self.active_table.drop_orphans(removed_refs)
+            self._bench["n_orphans"] = n_evicted
             if n_evicted:
                 self.loggers.info(
                     "log",
@@ -564,6 +581,13 @@ class KMC:
             self._save()
             self._append_snapshot_to_trajectory()
             del active_table
+            self._bench_lap("t_tail")
+            self._bench_write_row(
+                step,
+                n_new_env=len(new_environments),
+                n_search=len(central_atom_research_list),
+                n_ref_rows=len(self.reference_table.table),
+            )
             # == Check if only cristalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
                 "crystal"
@@ -583,6 +607,81 @@ class KMC:
                 self._close()
         self._save_restart_file(step, total_time)
         self._close()
+
+    # -- Benchmark-only per-phase step timings --------------------------------
+    _BENCH_COLUMNS = (
+        "step",
+        "t_env",
+        "t_search",
+        "t_ref_add",
+        "t_refine",
+        "t_act_add",
+        "t_recon",
+        "t_basin",
+        "t_log",
+        "t_wall",
+        "t_tail",
+        "t_iter",
+        "t_pref",
+        "n_new_env",
+        "n_search",
+        "n_carried",
+        "n_ref_rows",
+        "n_act_rows",
+        "n_recon_fail",
+        "n_orphans",
+        "n_pref_req",
+        "hessians",
+        "n_pref_dirs",
+        "n_pref_ok",
+    )
+    _BENCH_FILE = "timings.csv"
+
+    def _bench_start_step(self) -> None:
+        """Reset the step's timers and counters (benchmark only)."""
+        self._bench = {
+            "n_carried": len(self.active_table.table) if self.active_table else 0
+        }
+        self._bench_t0 = self._bench_t = time.perf_counter()
+
+    def _bench_lap(self, key: str) -> None:
+        """Charge the time since the last lap to `key` (benchmark only)."""
+        now = time.perf_counter()
+        self._bench[key] = self._bench.get(key, 0.0) + now - self._bench_t
+        self._bench_t = now
+
+    def _bench_count_prefactors(
+        self, requests: list[PrefactorRequest], outcomes: list, seconds: float
+    ) -> None:
+        """Count the prefactor jobs of a `compute_prefactors` call (benchmark only).
+
+        Each request is one saddle Hessian plus one Hessian per minimum.
+        """
+        b = self._bench
+        b["t_pref"] = b.get("t_pref", 0.0) + seconds
+        b["n_pref_req"] = b.get("n_pref_req", 0) + len(requests)
+        b["hessians"] = b.get("hessians", 0) + sum(1 + len(r.minima) for r in requests)
+        dirs = [o for per_event in outcomes for o in per_event]
+        b["n_pref_dirs"] = b.get("n_pref_dirs", 0) + len(dirs)
+        b["n_pref_ok"] = b.get("n_pref_ok", 0) + sum(o.status == "ok" for o in dirs)
+
+    def _bench_write_row(self, step: int, **counters: int) -> None:
+        """Append the step's row to timings.csv in the run directory (benchmark only)."""
+        b = self._bench
+        b.update(counters)
+        b["step"] = step
+        b["t_iter"] = self._bench_t - self._bench_t0
+        new = not os.path.exists(self._BENCH_FILE)
+        with open(self._BENCH_FILE, "a") as f:
+            if new:
+                f.write(",".join(self._BENCH_COLUMNS) + "\n")
+            f.write(
+                ",".join(
+                    f"{b.get(c, 0):.6f}" if c.startswith("t_") else str(b.get(c, 0))
+                    for c in self._BENCH_COLUMNS
+                )
+                + "\n"
+            )
 
     def get_new_environments(self) -> list[str]:
         """Get atomic environments of the current system that has not been already explored.
@@ -800,9 +899,11 @@ class KMC:
             )
             idx_refs.append(refs)
 
+        t_pref = time.perf_counter()
         outcomes = self.rate_constant.compute_prefactors(
             requests, self.system, self._frozen_ids()
         )
+        self._bench_count_prefactors(requests, outcomes, time.perf_counter() - t_pref)
         for refs, per_direction in zip(idx_refs, outcomes, strict=True):
             for idx_ref, outcome in zip(refs, per_direction, strict=True):
                 try:
@@ -851,9 +952,11 @@ class KMC:
             for row in rows
         ]
 
+        t_pref = time.perf_counter()
         outcomes = self.rate_constant.compute_prefactors(
             requests, self.system, self._frozen_ids()
         )
+        self._bench_count_prefactors(requests, outcomes, time.perf_counter() - t_pref)
         for row, per_direction in zip(rows, outcomes, strict=True):
             try:
                 self.active_table.set_prefactor(row, per_direction[0])
@@ -933,6 +1036,7 @@ class KMC:
             if result_reconstruction.is_ok():
                 break
             else:
+                self._bench["n_recon_fail"] = self._bench.get("n_recon_fail", 0) + 1
                 num_ref_event = active_table.table.loc[idx_selected_event].at[
                     "num_reference_event"
                 ]
