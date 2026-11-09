@@ -1,8 +1,10 @@
 """Constructing KMC with a seed must make Python's RNG reproducible."""
+
 import random
 import textwrap
 from pykmc.config import Config
 from pykmc.kmc import KMC
+from pykmc.rate_constant import RateConstant
 
 from tests.recycle.test_seed_config import _MINIMAL_INI
 
@@ -14,11 +16,15 @@ def _config_with_seed(tmp_path, seed_line):
     return Config.from_ini_file(str(ini))
 
 
+def _rate(config):
+    return RateConstant.create(config.rateconstant.style, config=config.rateconstant)
+
+
 def test_seed_makes_random_reproducible(tmp_path):
     config = _config_with_seed(tmp_path, "seed = 777\n")
-    KMC(config)
+    KMC(config, rate_constant=_rate(config))
     first = [random.random() for _ in range(5)]
-    KMC(config)
+    KMC(config, rate_constant=_rate(config))
     second = [random.random() for _ in range(5)]
     assert first == second
 
@@ -29,5 +35,5 @@ def test_no_seed_does_not_pin_rng(tmp_path):
     random.seed(999)
     sentinel = random.random()
     random.seed(999)
-    KMC(config)
+    KMC(config, rate_constant=_rate(config))
     assert random.random() == sentinel  # KMC did not reseed

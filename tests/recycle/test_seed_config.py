@@ -1,4 +1,5 @@
 """The [Control] seed key must parse into config.control.seed."""
+
 import textwrap
 from pykmc.config import Config
 

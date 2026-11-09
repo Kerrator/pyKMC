@@ -124,7 +124,9 @@ class _RecordingReconstruction:
 
 def _config() -> SimpleNamespace:
     return SimpleNamespace(
-        control=SimpleNamespace(recycle=False, active_volume=False, refine_thr=0.5),
+        control=SimpleNamespace(
+            recycle=False, active_volume=False, refine_thr=0.5, seed=None
+        ),
         eventsearch=SimpleNamespace(refined_energy_thr=0.1),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.4),
         ira=SimpleNamespace(),
