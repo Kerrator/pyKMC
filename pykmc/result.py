@@ -113,6 +113,15 @@ class EventRefinementOutput:
     neighbors : Optional[np.ndarray]
         Atom indices that `saddle_positions` and `min2_positions` are ordered by
         (the rcut neighbors of the central atom when the event was refined).
+    prefactor : Optional[float]
+        Prefactor of the event (ps^-1), or None if it has none. Only set when the
+        rate constant has a prefactor per event.
+    prefactor_status : Optional[str]
+        Where `prefactor` stands: 'pending' until it is computed, then 'ok' or the
+        reason there is none.
+    full_saddle : Optional[np.ndarray]
+        Refined saddle positions of the whole system, kept until `prefactor` is
+        computed.
     """
 
     central_atom_index: int
@@ -123,6 +132,9 @@ class EventRefinementOutput:
     num_reference_event: Optional[int] = None
     refined: Optional[str] = None
     neighbors: Optional[np.ndarray] = None
+    prefactor: Optional[float] = None
+    prefactor_status: Optional[str] = None
+    full_saddle: Optional[np.ndarray] = None
 
 
 @dataclass
