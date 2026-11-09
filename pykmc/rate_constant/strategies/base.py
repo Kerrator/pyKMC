@@ -168,4 +168,6 @@ class RateConstantStrategy(Registrable, root=True):
         back to its own prefactor (`[RateConstant] k0` for `constant` and `htst`).
 
         """
-        return self.prefactor(prefactor) * math.exp(-dE / (constants.KB * self.config.T))
+        return self.prefactor(prefactor) * math.exp(
+            -dE / (constants.KB * self.config.T)
+        )
