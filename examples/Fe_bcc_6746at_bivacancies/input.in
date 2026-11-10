@@ -24,9 +24,15 @@ style = partn
 nsearch = 50
 emax_event = 5.0
 emin_event = 0.0
-nnew_chance = 3
 
-[pARTn] 
+[pARTn]
+# Search settings measured for vacancies and dumbbells in bcc Fe (see docs/best_practices.md).
+# The three changes work together: a push that also moves the first and second neighbours,
+# a stricter curvature threshold, and retries when the curvature turns positive again.
+push_dist_thr = 4.0
+push_step_size = 0.3
+eigval_thr = -0.5
+nnewchance = 3
 
 [RateConstant] 
 style = constant
