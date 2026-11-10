@@ -73,6 +73,10 @@ path and `nsearch` buys nothing.
 
 ### pARTn settings for bcc Fe
 
+**For vacancies only.** In a cell with a self-interstitial dumbbell this block gave a wrong rate table: the same
+dumbbell hop was stored under two or three central atoms and counted once per copy (16 to 20 hop rows per step
+instead of 8, in four of seven runs), and the steps were 3 to 12 times slower. Keep the defaults for interstitials.
+
 ```ini
 [pARTn]
 push_dist_thr = 4.0
@@ -94,8 +98,6 @@ Measured on 120 searches per state, 7 sessions, with an active volume:
 | vacancy, block above | 58 to 60 % | 23.5 s |
 | split vacancy, defaults | 20 to 24 % | 21 to 26 s |
 | split vacancy, block above | 84 % | 10.5 s |
-| dumbbell + vacancy, defaults | 13 % | 86 s |
-| dumbbell + vacancy, block above | 67 % | 37 s |
 
 Things to know before using it:
 
@@ -109,7 +111,10 @@ Things to know before using it:
 - On the two bcc Fe examples (another potential, no active volume) the block lowered the failed searches from 8 % to
   1 % and from 73 % to 20 %, found more events, and made the runs 1.3 and 4.7 times longer with the same executed
   events.
-- Tuned for one or two vacancies and one dumbbell with one EAM potential. Not measured: other potentials, vacancy
+- For an isolated vacancy the defaults already give the complete set of hops with 10 to 20 searches, so the block
+  buys no better catalogue there: at the same `nsearch` a 100-step run was 1.1 to 1.5 times longer, and with
+  `nsearch = 5` it cost the same as the defaults with 10.
+- Tuned for one or two vacancies with one EAM potential. Clustered vacancies were not checked for duplicated events. Not measured: other potentials, vacancy
   clusters, other values of `push_dist_thr` between 3.0 and 5.7 Å, and the block without an active volume.
 
 ## Active volume

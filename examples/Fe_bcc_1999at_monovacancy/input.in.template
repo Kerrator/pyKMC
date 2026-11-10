@@ -21,7 +21,8 @@ style = partn
 nsearch = 10
 
 [pARTn]
-# Search settings measured for vacancies and dumbbells in bcc Fe (see docs/best_practices.md).
+# Search settings measured for vacancies in bcc Fe (see docs/best_practices.md).
+# Do not use them for a cell with a self-interstitial.
 # The three changes work together: a push that also moves the first and second neighbours,
 # a stricter curvature threshold, and retries when the curvature turns positive again.
 push_dist_thr = 4.0
