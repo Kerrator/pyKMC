@@ -60,6 +60,9 @@ In bcc Fe they do not: 69 to 73 % of the searches stopped with `EIGENVALUE LOST`
 split-vacancy state and for the dumbbell.
 A failed search costs about half a successful one, so the catalogue was still correct, at roughly three times the
 search cost.
+This depends on the potential: those runs used the Ackland 2004 Fe potential, while the `Fe_bcc_1999at_monovacancy`
+example (Becquart FeC potential) loses 8 % of its searches with the same defaults.
+Count the `EIGENVALUE LOST` messages of a short run before changing anything.
 
 A key placed in the wrong section is ignored without a warning.
 `nnewchance`, `r_nnewchance` and the other pARTn keys belong in `[pARTn]`, not in `[EventSearch]`.
@@ -103,7 +106,10 @@ Things to know before using it:
 - Each launched search is 1.7 to 2.9 times slower, and more events reach the catalogue, so the steps that search are
   slower (13.7 s against 4.6 s for the two searching steps of a one-vacancy run with `nsearch = 10`). Steps without
   searches are unchanged. With most searches now useful `nsearch` can probably be lowered; that was not measured.
-- Measured for one or two vacancies and one dumbbell with one EAM potential. Not measured: other potentials, vacancy
+- On the two bcc Fe examples (another potential, no active volume) the block lowered the failed searches from 8 % to
+  1 % and from 73 % to 20 %, found more events, and made the runs 1.3 and 4.7 times longer with the same executed
+  events.
+- Tuned for one or two vacancies and one dumbbell with one EAM potential. Not measured: other potentials, vacancy
   clusters, other values of `push_dist_thr` between 3.0 and 5.7 Å, and the block without an active volume.
 
 ## Active volume
