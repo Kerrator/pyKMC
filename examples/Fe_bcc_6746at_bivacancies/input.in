@@ -21,7 +21,7 @@ neighbors_add = 1
 
 [EventSearch] 
 style = partn
-nsearch = 50
+nsearch = 20
 emax_event = 5.0
 emin_event = 0.0
 
