@@ -158,5 +158,63 @@ def test_distinct_hops_on_carried_and_fresh_rows_are_kept(vacancy_cell: Cell) ->
     table.remove_duplicates(system.cell, nl)
 
     # same atom (part 1) and same ref (part 2) pairs are all distinct hops; the
-    # c2/ref 0 copy of m3 is not compared with the c1/ref 1 one (other ref)
-    assert len(table.table) == 4
+    # c2/ref 0 copy of m3 repeats the c1/ref 1 one and goes (part 3)
+    assert table.table["atom_index"].tolist() == [c1, c1, c1]
+
+
+def test_same_hop_from_two_reference_events_on_two_atoms_is_removed(
+    vacancy_cell: Cell,
+) -> None:
+    """Part 3: one hop stored as two reference events around two central atoms.
+
+    A search result is stored around the atom that moves the most. When two atoms
+    tie (the two atoms of a bcc <110> dumbbell at its hop saddle) the same hop
+    enters the reference table twice, each copy is refined on its own central
+    atom, and the hop was counted twice (benchmark 2026-11-12, tuned dumbbell
+    runs: 16-20 hop rows per step against 8).
+    """
+    system, nl, c1, c2, m, m2, m3 = vacancy_cell
+    table = _table(
+        [
+            _row(system, c1, nl.get_neighbors("rcut", c1), m, ref=0),
+            _row(system, c2, nl.get_neighbors("rcut", c2), m, ref=1),
+        ]
+    )
+
+    table.remove_duplicates(system.cell, nl)
+
+    assert table.table["atom_index"].tolist() == [c1]
+
+
+def test_same_hop_from_two_reference_events_is_removed_from_a_carried_row(
+    vacancy_cell: Cell,
+) -> None:
+    """Part 3 compares on atom ids: the first copy is carried in an old order."""
+    system, nl, c1, c2, m, m2, m3 = vacancy_cell
+    table = _table(
+        [
+            _row(system, c1, _old_order(nl, c1), m, ref=0),
+            _row(system, c2, nl.get_neighbors("rcut", c2), m, ref=1),
+        ]
+    )
+
+    table.remove_duplicates(system.cell, nl)
+
+    assert table.table["atom_index"].tolist() == [c1]
+
+
+def test_distinct_hops_from_two_reference_events_on_two_atoms_are_kept(
+    vacancy_cell: Cell,
+) -> None:
+    """Part 3 must not merge different hops of neighbouring central atoms."""
+    system, nl, c1, c2, m, m2, m3 = vacancy_cell
+    table = _table(
+        [
+            _row(system, c1, nl.get_neighbors("rcut", c1), m, ref=0),
+            _row(system, c2, nl.get_neighbors("rcut", c2), m2, ref=1),
+        ]
+    )
+
+    table.remove_duplicates(system.cell, nl)
+
+    assert table.table["atom_index"].tolist() == [c1, c2]

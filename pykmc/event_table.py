@@ -1183,6 +1183,39 @@ class ActiveEventTable:
                             if delr < self.config.psr.matching_score_thr:
                                 duplicates.append(jdx)
 
+            # 3. Check duplicates due to one event stored as two reference events
+            # around different central atoms. A search result is stored around the
+            # atom that moves the most, and two atoms can tie (the two atoms of a bcc
+            # <110> dumbbell at its hop saddle). Duplicates have the same saddle and
+            # the same final state on the atoms their two environments share.
+            labels = self.table.index.to_list()
+            atoms = self.table["atom_index"].to_list()
+            refs = self.table["num_reference_event"].to_list()
+            energies = self.table["energy_barrier"].to_list()
+            envs = [self._saddle_atom_ids(idx, neighbors_list) for idx in labels]
+            env_sets = [set(env.tolist()) for env in envs]
+            for i, idx in enumerate(labels):
+                for j in range(i + 1, len(labels)):
+                    if atoms[i] == atoms[j] or refs[i] == refs[j]:
+                        continue  # parts 1 and 2
+                    if abs(energies[i] - energies[j]) >= tol_energy:
+                        continue
+                    if atoms[i] not in env_sets[j] or atoms[j] not in env_sets[i]:
+                        continue
+                    _, index1, index2 = np.intersect1d(
+                        envs[i], envs[j], return_indices=True
+                    )
+                    if all(
+                        compute_delr(
+                            np.asarray(self.table.at[idx, column])[index1],
+                            np.asarray(self.table.at[labels[j], column])[index2],
+                            cell,
+                        )
+                        < self.config.psr.matching_score_thr
+                        for column in ("saddle_positions", "final_positions")
+                    ):
+                        duplicates.append(labels[j])
+
         self.remove(duplicates)
 
     def save(self, outfile: str = "active_table.pickle") -> None:
