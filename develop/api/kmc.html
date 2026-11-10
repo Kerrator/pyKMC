@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -352,6 +352,34 @@
     
   
     User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../atomic_environments.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Atomic Environment
   
 
     
@@ -3800,7 +3828,7 @@ minimization, logging, and termination.</p>
 </span><span id="pykmc.kmc.KMC--source--__span-0-974"><a id="pykmc.kmc.KMC--source--__codelineno-0-974" name="pykmc.kmc.KMC--source--__codelineno-0-974"></a>
 </span><span id="pykmc.kmc.KMC--source--__span-0-975"><a id="pykmc.kmc.KMC--source--__codelineno-0-975" name="pykmc.kmc.KMC--source--__codelineno-0-975"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_save</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="pykmc.kmc.KMC--source--__span-0-976"><a id="pykmc.kmc.KMC--source--__codelineno-0-976" name="pykmc.kmc.KMC--source--__codelineno-0-976"></a><span class="w">        </span><span class="sd">"""Save the reference event table and the list of visited environments."""</span>
-</span><span id="pykmc.kmc.KMC--source--__span-0-977"><a id="pykmc.kmc.KMC--source--__codelineno-0-977" name="pykmc.kmc.KMC--source--__codelineno-0-977"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">reference_table</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">"reference_table.pickle"</span><span class="p">)</span>
+</span><span id="pykmc.kmc.KMC--source--__span-0-977"><a id="pykmc.kmc.KMC--source--__codelineno-0-977" name="pykmc.kmc.KMC--source--__codelineno-0-977"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">reference_table</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">reference_table_output</span><span class="p">)</span>
 </span><span id="pykmc.kmc.KMC--source--__span-0-978"><a id="pykmc.kmc.KMC--source--__codelineno-0-978" name="pykmc.kmc.KMC--source--__codelineno-0-978"></a>        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">control</span><span class="o">.</span><span class="n">visited_environments_output</span><span class="p">,</span> <span class="s2">"wb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
 </span><span id="pykmc.kmc.KMC--source--__span-0-979"><a id="pykmc.kmc.KMC--source--__codelineno-0-979" name="pykmc.kmc.KMC--source--__codelineno-0-979"></a>            <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">visited_environments</span><span class="p">,</span> <span class="n">file</span><span class="p">)</span>
 </span><span id="pykmc.kmc.KMC--source--__span-0-980"><a id="pykmc.kmc.KMC--source--__codelineno-0-980" name="pykmc.kmc.KMC--source--__codelineno-0-980"></a>
@@ -6206,7 +6234,7 @@ These are skipped during refinement.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "content.code.annotate", "content.code.highlight", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
