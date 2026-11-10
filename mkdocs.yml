@@ -33,6 +33,7 @@ nav:
       - Atomic Environment: atomic_environments.md
       - Event Recycling: recycling.md
       - Active Volumes: active_volumes.md
+      - Best Practices: best_practices.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
   - Developer Guide: 
