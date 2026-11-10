@@ -5,7 +5,7 @@ engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-basin = True
+basin = False
 
 [Lammps] 
 pair_style = eam/alloy 

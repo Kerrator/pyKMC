@@ -22,8 +22,11 @@
 #   2. Switch atom_coloring_mode to grey and run again.
 #   3. Compare: grep "Reconstruction fails (reference event" pykmc.log
 #
-# Tip: keep basin acceleration on. Without it, plain rejection-free KMC only
-# ever picks the clean lowest-barrier hop, and grey and full behave the same.
+# Basin acceleration is off below (basin = False, the default). Set
+# basin = True before trying the steps above: without it, plain rejection-free
+# KMC only ever picks the clean lowest-barrier hop, and grey and full behave
+# the same. With basin on the run works but is slower: ~70 s per step on
+# 7 MPI ranks (10 steps ~17 min, 100 steps ~2 h).
 #
 # Run with at least 8 MPI ranks (n_sessions = 7 + 1 driver rank):
 #   mpirun -n 8 python -m pykmc -in input.in
@@ -36,7 +39,7 @@ engine = lammps
 verbosity = 2
 n_sessions = 7
 engine_use_rank_0 = False
-basin = True
+basin = False
 active_volume = False
 
 [Lammps]
