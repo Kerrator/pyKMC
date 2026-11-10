@@ -114,7 +114,8 @@ Things to know before using it:
 - For an isolated vacancy the defaults already give the complete set of hops with 10 to 20 searches, so the block
   buys no better catalogue there: at the same `nsearch` a 100-step run was 1.1 to 1.5 times longer, and with
   `nsearch = 5` it cost the same as the defaults with 10.
-- Tuned for one or two vacancies with one EAM potential. Clustered vacancies were not checked for duplicated events. Not measured: other potentials, vacancy
+- Tuned for one or two vacancies with one EAM potential. In the four-vacancy example the events below 1.5 eV and
+  the total rate were the same as with the defaults, in the two states that run visits. Not measured: other potentials, vacancy
   clusters, other values of `push_dist_thr` between 3.0 and 5.7 Å, and the block without an active volume.
 
 ## Active volume
