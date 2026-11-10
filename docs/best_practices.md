@@ -20,7 +20,7 @@ the examples as starting points.
 | `[EventSearch] nsearch` | 10 to 20 for isolated point defects | Ni, Fe |
 | `[Control] active_volume` | `True` from about 2000 atoms, with localized defects | Ni, Fe |
 | `[ActiveVolume]` | fcc Ni: `rmov = 9`, `ract = 16`; bcc Fe vacancy: `rmov = 7.7`, `ract = 14` or 9 / 16 | Ni, Fe |
-| `[pARTn]` | defaults for fcc Ni; the defaults fail about 70 % of searches in bcc Fe | Ni, Fe |
+| `[pARTn]` | defaults for fcc Ni; for bcc Fe the block [below](#partn-settings-for-bcc-fe) | Ni, Fe |
 | `[Control] basin` | `False` unless the system flickers and you have checked the basin run | Fe and NiCr examples |
 | `[Control] recycle` | `False` by default; see [below](#event-recycling) | Ni, Fe |
 
@@ -60,11 +60,51 @@ In bcc Fe they do not: 69 to 73 % of the searches stopped with `EIGENVALUE LOST`
 split-vacancy state and for the dumbbell.
 A failed search costs about half a successful one, so the catalogue was still correct, at roughly three times the
 search cost.
-When the pARTn output shows this message often, raise `nnewchance` (the number of times a search may cross a convex
-region) before raising `nsearch`.
 
 A key placed in the wrong section is ignored without a warning.
 `nnewchance`, `r_nnewchance` and the other pARTn keys belong in `[pARTn]`, not in `[EventSearch]`.
+
+Leave `zseed` at its default of 0 for production runs.
+A fixed nonzero `zseed` reseeds pARTn before every search, so all the searches launched from one atom follow the same
+path and `nsearch` buys nothing.
+
+### pARTn settings for bcc Fe
+
+```ini
+[pARTn]
+push_dist_thr = 4.0
+push_step_size = 0.3
+eigval_thr = -0.5
+nnewchance = 3
+```
+
+With the defaults (`push_dist_thr = 1.0`, `push_step_size = 0.4`, `eigval_thr = -0.01`, `nnewchance = 0`) only the
+central atom is pushed, and a search ends the first time the curvature turns positive after it has left the basin.
+The block above pushes the central atom together with its first and second neighbours, asks for a clearly negative
+curvature before following it, and allows three retries.
+
+Measured on 120 searches per state, 7 sessions, with an active volume:
+
+| State | Searches giving an event of the starting state | Wall time per 120 such events |
+|---|---|---|
+| vacancy, defaults | 20 to 22 % | 22 to 24 s |
+| vacancy, block above | 58 to 60 % | 23.5 s |
+| split vacancy, defaults | 20 to 24 % | 21 to 26 s |
+| split vacancy, block above | 84 % | 10.5 s |
+| dumbbell + vacancy, defaults | 13 % | 86 s |
+| dumbbell + vacancy, block above | 67 % | 37 s |
+
+Things to know before using it:
+
+- The three changes go together. `nnewchance` alone raised the number of saddles found to 80 to 95 % but not the
+  number of events of the starting state, at 2 to 2.4 times the cost per event. A wide push with the default
+  `eigval_thr` and an active volume returned wrong barriers (the 0.64 eV vacancy hop reported between 0.9 and
+  1.2 eV).
+- Each launched search is 1.7 to 2.9 times slower, and more events reach the catalogue, so the steps that search are
+  slower (13.7 s against 4.6 s for the two searching steps of a one-vacancy run with `nsearch = 10`). Steps without
+  searches are unchanged. With most searches now useful `nsearch` can probably be lowered; that was not measured.
+- Measured for one or two vacancies and one dumbbell with one EAM potential. Not measured: other potentials, vacancy
+  clusters, other values of `push_dist_thr` between 3.0 and 5.7 Å, and the block without an active volume.
 
 ## Active volume
 
