@@ -100,7 +100,11 @@ class AtomicEnvironment:
         Return list of atomic environment ID that are in the current self.environment_list but not in visited_environments
         """
         # return list([]) #Set if you want to only test refinements
-        return list(set(self.atomic_environment_list).difference(visited_environments))
+        # Sorted, because set order follows Python's per-process string hashing and
+        # the central atoms are drawn in this order.
+        return sorted(
+            set(self.atomic_environment_list).difference(visited_environments)
+        )
 
     def compute_region(
         self,

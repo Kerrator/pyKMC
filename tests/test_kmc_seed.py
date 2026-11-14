@@ -2,7 +2,9 @@
 
 import random
 import textwrap
+from types import SimpleNamespace
 import numpy as np
+from pykmc.atomic_environment import AtomicEnvironment
 from pykmc.config import Config
 from pykmc.kmc import KMC
 
@@ -41,3 +43,13 @@ def test_no_seed_does_not_pin_rng(tmp_path):
     KMC(config)
     assert random.random() == sentinel  # KMC did not reseed
     assert np.random.random() == sentinel_np
+
+
+def test_new_environments_are_sorted():
+    # Set order follows Python's per-process string hashing. Without the sort, the
+    # central atoms would be drawn in a different order in every run, seed or not.
+    ids = [f"env{k:02d}" for k in range(12)]
+    stub = SimpleNamespace(atomic_environment_list=ids[::-1] * 3)
+    visited = {"env03", "env07"}
+    new = AtomicEnvironment.get_new_environments(stub, visited)
+    assert new == [i for i in ids if i not in visited]
