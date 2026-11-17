@@ -14,6 +14,7 @@ from .neighbors_list import NeighborsList
 from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
 from .rate_constant import RateConstant
+from .eventsearch import EventSearch
 from .bias import DirectionBias, PointBias, TopoBias
 import pickle
 
@@ -39,6 +40,7 @@ class Initializer:
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_rate_constant()
+        self.initialize_event_search()
         self.initialize_reference_table()
         self._initialize_visited_environments()
         self.initialize_bias()
@@ -130,6 +132,12 @@ class Initializer:
         """Initialize the rate constant shared by the event tables."""
         self.kmc.rate_constant = RateConstant.create(
             self.kmc.config.rateconstant.style, config=self.kmc.config.rateconstant
+        )
+
+    def initialize_event_search(self) -> None:
+        """Initialize the event search with the strategy named by `[EventSearch] style`."""
+        self.kmc.event_search = EventSearch.create(
+            self.kmc.config.eventsearch.style, config=self.kmc.config
         )
 
     def initialize_reference_table(self) -> None:

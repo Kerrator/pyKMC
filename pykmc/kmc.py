@@ -97,6 +97,7 @@ class KMC:
         self.neighbors_list = None
         self.atomic_environment = None
         self.rate_constant = None
+        self.event_search: EventSearch | None = None
         self.reference_table = None
         self.visited_environments = None
         self.total_energy = None
@@ -638,9 +639,10 @@ class KMC:
             The EventSearch class containing results of the event searches.
 
         """
-        event_search = EventSearch(self.config, self.system, self.manager, self.loggers)
-        event_search.execute(central_atom_research_list)
-        return event_search
+        self.event_search.execute(
+            central_atom_research_list, self.system, self.manager, self.loggers
+        )
+        return self.event_search
 
     def add_reference_events(
         self, events: list[EventSearchOutput]

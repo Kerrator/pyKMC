@@ -12,7 +12,7 @@ pyKMC relies on several objects to perform specific tasks:
 - `ActiveTable` _(todo)_
 - `RateConstant`
 - `PSR`
-- `EventSearch` _(todo)_
+- `EventSearch`
 - `Refinement` _(todo)_
 - `Basin` _(todo)_
 
