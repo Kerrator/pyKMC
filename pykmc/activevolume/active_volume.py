@@ -8,6 +8,7 @@ from typing import Protocol
 from ase.geometry import find_mic
 from ..system import System
 from ..config import Config
+from ..search_rules import artn_move_atom, map_to_full_system
 
 
 def define_AV(config, central_atom_idx: int, positions, cell):
@@ -218,34 +219,14 @@ def position_results_AV(
     min2positions = artn.extract("tau_min2")
     saddlepositions = artn.extract("tau_sad")
 
-    # find atom that moves the most; minimum image, as pARTn returns wrapped
-    # coordinates and the atom that hops may cross the cell boundary
-    _, dist = find_mic(min1positions - saddlepositions, cell, pbc=True)
-    index_move = np.argmax(dist)
-
+    # ARTn's pick runs on the active-volume arrays, then maps to the full system
+    index_move = artn_move_atom(min1positions, saddlepositions, cell, True)
     index_move_mapped = atom_map[index_move]
 
-    min1positions_mapped = positions.copy()
-    min2positions_mapped = positions.copy()
-    saddlepositions_mapped = positions.copy()
-
-    for i, atom_idx in enumerate(atom_map):
-        saddlepositions_mapped[atom_idx][0] = saddlepositions[i][0]
-        saddlepositions_mapped[atom_idx][1] = saddlepositions[i][1]
-        saddlepositions_mapped[atom_idx][2] = saddlepositions[i][2]
-
-        min1positions_mapped[atom_idx][0] = min1positions[i][0]
-        min1positions_mapped[atom_idx][1] = min1positions[i][1]
-        min1positions_mapped[atom_idx][2] = min1positions[i][2]
-
-        min2positions_mapped[atom_idx][0] = min2positions[i][0]
-        min2positions_mapped[atom_idx][1] = min2positions[i][1]
-        min2positions_mapped[atom_idx][2] = min2positions[i][2]
-
     return (
-        min1positions_mapped,
-        min2positions_mapped,
-        saddlepositions_mapped,
+        map_to_full_system(min1positions, atom_map, positions),
+        map_to_full_system(min2positions, atom_map, positions),
+        map_to_full_system(saddlepositions, atom_map, positions),
         index_move_mapped,
     )
 
