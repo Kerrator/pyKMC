@@ -386,12 +386,14 @@ def test_partn_requests_draw_nothing_from_the_run_stream() -> None:
 
 
 def test_move_atom_picks_the_hopper_across_the_periodic_boundary() -> None:
-    # Atom 0 hops 0.5 Å across the x = 0 face (raw displacement -9.5 Å); atom 1,
-    # a bystander, moves 0.3 Å.
-    start = np.array([[0.2, 5.0, 5.0], [3.0, 5.0, 5.0], [6.0, 5.0, 5.0]])
+    # Atom 0 hops 0.5 Å across the x = 0 face (raw displacement +9.5 Å); atom 1,
+    # a bystander, moves 0.3 Å; atom 2 jitters 0.1 Å across the y = 0 face (raw
+    # displacement -9.9 Å).
+    start = np.array([[0.2, 5.0, 5.0], [3.0, 5.0, 5.0], [6.0, 9.95, 5.0]])
     saddle = start.copy()
     saddle[0, 0] = 9.7
     saddle[1, 0] += 0.3
+    saddle[2, 1] = 0.05
     raw = _raw(start, min1=start, saddle=saddle, min2=saddle + 0.0)
     request = SearchRequest(1, start, CELL, np.array(["Ni"] * 3), PBC, 7, None)
 
