@@ -189,8 +189,9 @@ Once a reference event is reused, it is refined to adapt to the current atomic c
 - The central atom moves less than `refined_minimum_delr_thr` between the current position and the refined minimum.
 - The difference in energy barriers between the generic and refined events is less than `refined_energy_thr`.
 These thresholds ensure that the refined event remains consistent with the original.
-Each refinement that fails one of these tests, or whose refined saddle moved `r_delr_sad_thr` or more (in `[pARTn]`),
-is written to the log with its reference event and the size of the difference.
+Each refinement whose barrier differs from the reference one by more than `refined_energy_thr`, or that gives up
+because its refined saddle moved `r_delr_sad_thr` or more (in `[pARTn]`), is written to the log with its reference
+event and the size of the difference.
 
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 

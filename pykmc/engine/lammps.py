@@ -752,7 +752,9 @@ class LammpsEngine(Engine):
 
         max_attempts = config.partn.r_max_attempts
         attempt = 0
-        last_delr_sad = None  # rank 0: the last saddle that moved too far
+        last_delr_sad = (
+            None  # rank 0: saddle distance of the last attempt, if it found one
+        )
         atoms_frozen = self._make_frozen_group(config, positions, types)
         self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
 
@@ -768,6 +770,7 @@ class LammpsEngine(Engine):
 
             if self._is_rank0:
                 err = artn.get_error()
+                last_delr_sad = None
                 if err[0] == 0:
                     delr_sad = artn.extract("delr_sad")
                     last_delr_sad = delr_sad

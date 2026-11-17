@@ -269,6 +269,19 @@ def test_active_volume_on_moves_atoms_within_rmov_across_the_boundary() -> None:
     assert strategy.movable_atoms(0, _system(POSITIONS)).tolist() == [0, 1, 2]
 
 
+def test_rmov_is_the_boundary_of_the_movable_sphere() -> None:
+    # Distances come from ase's find_mic, as in the active volume's own crop
+    # (define_AV), so an atom at exactly rmov carries its round-off; test either
+    # side of the boundary instead.
+    strategy = DimerStrategy(_av_config(rmov=3.0))
+    # Atom 1 is 1e-6 Å inside rmov along x, atom 2 is 1e-6 Å outside along y.
+    positions = np.array(
+        [[2.0, 5.0, 5.0], [5.0 - 1e-6, 5.0, 5.0], [2.0, 8.0 + 1e-6, 5.0]]
+    )
+
+    assert strategy.movable_atoms(0, _system(positions)).tolist() == [0, 1]
+
+
 def test_active_volume_on_honours_a_non_periodic_axis() -> None:
     strategy = DimerStrategy(_av_config(rmov=3.0))
     system = _system(POSITIONS, pbc=[False, True, True])
@@ -343,6 +356,9 @@ def test_one_control_seed_gives_the_same_seeds_for_any_completion_order(
         runs.append([kw["seed"] for _, kw in manager.calls])
 
     assert runs[0] == runs[1] == runs[2]
+    # The i-th request gets the i-th draw of the stream [Control] seed starts.
+    stream = random.Random(20261116)
+    assert runs[0] == [stream.getrandbits(32) for _ in range(n)]
     assert len(set(runs[0])) == n  # a seed per search, repeats of an atom included
 
 
@@ -359,6 +375,8 @@ def test_one_control_seed_gives_the_same_seeds_for_any_worker_count(
         per_count[n_workers] = [manager.seen[i] for i in range(len(CENTRAL))]
 
     assert per_count[1] == per_count[2] == per_count[4] == per_count[8]
+    stream = random.Random(20261116)
+    assert per_count[1] == [stream.getrandbits(32) for _ in CENTRAL]
 
 
 def test_another_control_seed_gives_other_seeds(tmp_path: Path) -> None:
