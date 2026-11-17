@@ -15,7 +15,12 @@ from ase.geometry import find_mic
 
 from ...atomic_environment import AtomicEnvironment
 from ...engine.dimer_search import DimerSearchExtension
-from ...search_rules import SearchEndpoints, move_atom, search_result
+from ...search_rules import (
+    SearchEndpoints,
+    add_search_details,
+    move_atom,
+    search_result,
+)
 from .base import EventSearchStrategy
 
 if TYPE_CHECKING:
@@ -161,6 +166,12 @@ def dimer_search_result(
     oriented by the shared rules and its move atom picked by the corrected
     rule, from the oriented initial minimum.
 
+    Every result carries the optional details (:func:`add_search_details`):
+    the backend name, the seed and the force calls up to the saddle (or the
+    failure) and after it; an event also its three energies, the saddle's
+    curvature and the unstable mode; an error also its failure reason, and the
+    saddle's energy and curvature when a saddle was found.
+
     Parameters
     ----------
     raw : DimerResult
@@ -196,13 +207,23 @@ def dimer_search_result(
             ),
         )
 
-    return search_result(
+    result = search_result(
         central_atom_index=request.central_atom,
         error=error,
         read_distances=read_distances,
         read_endpoints=read_endpoints,
         delr_threshold=delr_threshold,
         types=request.types,
+    )
+    return add_search_details(
+        result,
+        backend="dimer",
+        seed=int(raw.seed),
+        e_saddle=raw.e_saddle,
+        curvature=raw.curvature,
+        force_calls=int(raw.force_calls_saddle),
+        force_calls_endpoints=int(raw.force_calls_total - raw.force_calls_saddle),
+        mode=raw.mode,
     )
 
 

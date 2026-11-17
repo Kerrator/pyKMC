@@ -35,7 +35,9 @@ import pandas as pd
 import pickle
 from .initializer import Initializer
 from .info_simulation import (
+    event_search_log_line,
     info_atomic_environments,
+    info_event_search_records,
     info_reference_event_searches,
     info_is_valid_reference_events,
     info_refinements,
@@ -224,6 +226,9 @@ class KMC:
 
             ##=>Perform event search on each atom in central_atom_research_list
             event_search = self.execute_event_searches(central_atom_research_list)
+            event_search_records = self.log_event_searches(
+                central_atom_research_list, event_search.results
+            )
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
             ##=>Check if the event is valid, ie if not already present and has a valid energy barrier if yes add it to the reference table
@@ -455,6 +460,7 @@ class KMC:
                 reference_event_searches_info=reference_event_searches_info,
                 valid_event_info=is_valid_events_info,
                 refinements_info=refinements_info,
+                reference_event_searches=event_search_records,
             )
             self.loggers.info("info", kmc_loop_info.output_msg())
 
@@ -665,6 +671,35 @@ class KMC:
             central_atom_research_list, self.system, self.manager, self.loggers
         )
         return self.event_search
+
+    def log_event_searches(
+        self,
+        central_atoms: list[int],
+        results: list[Result[EventSearchOutput, ErrorInfo]],
+    ) -> list[dict]:
+        """Write one log line per event search and return the searches' records.
+
+        The lines are written at debug level, so only with verbosity 2. The
+        records go to the info file at the end of the step.
+
+        Parameters
+        ----------
+        central_atoms : list[int]
+            Central atom of each search, in request order.
+        results : list[Result[EventSearchOutput, ErrorInfo]]
+            Result of each search, in the same order.
+
+        Returns
+        -------
+        list[dict]
+            One record per search (see
+            :func:`pykmc.info_simulation.info_event_search_records`).
+
+        """
+        records = info_event_search_records(central_atoms, results)
+        for record in records:
+            self.loggers.debug("log", event_search_log_line(record))
+        return records
 
     def add_reference_events(
         self, events: list[EventSearchOutput]

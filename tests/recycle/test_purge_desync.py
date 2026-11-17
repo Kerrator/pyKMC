@@ -145,7 +145,9 @@ def test_run_evicts_recycled_orphan_after_prune(
         return _FakeRefinement(next(refinements))
 
     monkeypatch.setattr(sim, "minimize_system", lambda: None)
-    monkeypatch.setattr(sim, "execute_event_searches", lambda atoms: _FakeEventSearch())
+    monkeypatch.setattr(
+        sim, "execute_event_searches", lambda atoms: _FakeEventSearch(atoms)
+    )
     monkeypatch.setattr(sim, "add_reference_events", lambda results: [])
     monkeypatch.setattr(sim, "execute_refinements", _refine)
     monkeypatch.setattr(sim, "_select_event", _select_atom([b, a, d]))

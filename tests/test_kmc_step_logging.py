@@ -20,7 +20,7 @@ import pytest
 
 import pykmc.kmc as kmc_module
 from pykmc.kmc import KMC
-from pykmc.result import EventRefinementOutput
+from pykmc.result import Err, ErrorInfo, ErrorType, EventRefinementOutput
 
 
 class _FakeManager:
@@ -59,6 +59,9 @@ class _RecordingLoggers:
 
     def info(self, *args: Any, **kwargs: Any) -> None:
         """Swallow info messages."""
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        """Swallow debug messages."""
 
     def error(self, *args: Any, **kwargs: Any) -> None:
         """Swallow error messages."""
@@ -115,9 +118,13 @@ class _FakeOkResult:
 
 
 class _FakeEventSearch:
-    """Event-search output with no successful searches."""
+    """Event-search output with no successful searches: every search failed."""
 
-    results: list[Any] = []
+    def __init__(self, atoms: Any = ()) -> None:
+        self.results = [
+            Err(ErrorInfo(type=ErrorType.EVENT_NOT_FOUND, message="fake search"))
+            for _ in atoms
+        ]
 
     def get_successes_results(self) -> list[Any]:
         """No new generic events this step."""
@@ -177,7 +184,9 @@ def test_step_log_reads_executed_row_before_prune(
     )
 
     monkeypatch.setattr(sim, "minimize_system", lambda: None)
-    monkeypatch.setattr(sim, "execute_event_searches", lambda atoms: _FakeEventSearch())
+    monkeypatch.setattr(
+        sim, "execute_event_searches", lambda atoms: _FakeEventSearch(atoms)
+    )
     monkeypatch.setattr(sim, "add_reference_events", lambda results: [])
     monkeypatch.setattr(
         sim,

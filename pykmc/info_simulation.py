@@ -1,6 +1,7 @@
 """Module with functions to construct information dataclass for the output's files."""
 
 from .result import (
+    SEARCH_DETAIL_FIELDS,
     AtomicEnvironmentInfo,
     EventSearchOutput,
     ErrorInfo,
@@ -13,7 +14,8 @@ from .result import (
     EventsInfo,
 )
 from .psr import PSRError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+import math
 import numpy as np
 
 if TYPE_CHECKING:
@@ -89,6 +91,111 @@ def info_reference_event_searches(
             else:
                 n_fails["minima_not_matching_positions"] += 1
     return ReferenceEventSearchInfo(total_event_searches, n_success, n_fails)
+
+
+def info_event_search_records(
+    central_atoms: list[int],
+    results: list[Result[EventSearchOutput, ErrorInfo]],
+) -> list[dict[str, Any]]:
+    """Build one record per event search for the info file and the log.
+
+    A record holds the central atom and each optional search detail the
+    search set (see :class:`~pykmc.result.EventSearchOutput`), as plain Python
+    values, so the info file's YAML dumper writes no numpy tags. A successful
+    search has no ``failure_reason``. The unstable mode is written as one row
+    ``[atom, x, y, z]`` per atom with a non-zero component, in atom order, each
+    component to 6 significant digits.
+
+    Parameters
+    ----------
+    central_atoms : list[int]
+        Central atom of each search, in request order.
+    results : list[Result[EventSearchOutput, ErrorInfo]]
+        Result of each search, in the same order.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        The records, in request order.
+
+    """
+    records = []
+    for central_atom, result in zip(central_atoms, results, strict=True):
+        if result.is_ok():
+            output = result.ok_value()
+            details = {name: getattr(output, name) for name in SEARCH_DETAIL_FIELDS}
+        else:
+            variables = result.err_value().variables or {}
+            details = {name: variables.get(name) for name in SEARCH_DETAIL_FIELDS}
+        record: dict[str, Any] = {"central_atom": int(central_atom)}
+        for name, value in details.items():
+            if value is None:
+                continue
+            if name == "mode":
+                mode = np.asarray(value, dtype=float)
+                record[name] = [
+                    [int(atom)] + [float(f"{v:.6g}") for v in mode[atom]]
+                    for atom in np.flatnonzero(np.any(mode != 0.0, axis=1))
+                ]
+            elif name in ("backend", "failure_reason"):
+                record[name] = str(value)
+            elif name in ("seed", "force_calls", "force_calls_endpoints"):
+                record[name] = int(value)
+            else:
+                record[name] = float(value)
+        records.append(record)
+    return records
+
+
+def event_search_log_line(record: dict[str, Any]) -> str:
+    """Write one event search record as a log line.
+
+    The mode is given as its three atoms with the largest components, each
+    with the norm of its row; the whole mode is in the info file.
+
+    Parameters
+    ----------
+    record : dict[str, Any]
+        A record from :func:`info_event_search_records`.
+
+    Returns
+    -------
+    str
+        The log line.
+
+    """
+    label = [record["backend"]] if "backend" in record else []
+    if "seed" in record:
+        label.append(f"seed {record['seed']}")
+    line = f"\t :=> Search atom {record['central_atom']}"
+    if label:
+        line += " ({})".format(", ".join(label))
+    parts = []
+    if "failure_reason" in record:
+        parts.append(f"failed: {record['failure_reason']}")
+    for key, name in (
+        ("e_saddle", "saddle"),
+        ("e_initial", "initial"),
+        ("e_final", "final"),
+    ):
+        if key in record:
+            parts.append(f"{name} {record[key]:.6f} eV")
+    if "curvature" in record:
+        parts.append(f"curvature {record['curvature']:.4f} eV/A^2")
+    if "force_calls" in record:
+        calls = f"force calls {record['force_calls']}"
+        if "force_calls_endpoints" in record:
+            calls += f" + {record['force_calls_endpoints']}"
+        parts.append(calls)
+    if "mode" in record:
+        norms = [(math.hypot(*row[1:]), row[0]) for row in record["mode"]]
+        largest = sorted(norms, key=lambda pair: -pair[0])[:3]
+        parts.append(
+            "mode " + ", ".join(f"{atom} {norm:.3f}" for norm, atom in largest)
+        )
+    if parts:
+        line += ": " + ", ".join(parts)
+    return line
 
 
 def info_is_valid_reference_events(

@@ -411,3 +411,57 @@ class TestActiveAddEventsRateConstant:
         assert list(active_table.table["k"]) == pytest.approx(
             [4.0 * np.exp(-0.5 / kT), 2.0 * np.exp(-0.3 / kT)]
         )
+
+
+class TestSearchDetailsDoNotReachTheTable:
+    """The optional search details go to the log and the info file only."""
+
+    def test_same_rows_with_and_without_details(
+        self, system_binary_fcc, config_system_single_type
+    ):
+        config = config_system_single_type
+        pos = np.array(system_binary_fcc.positions, dtype=float)
+        saddle, final = pos.copy(), pos.copy()
+        saddle[0, 0] += 0.9
+        final[0, 0] += 1.8
+
+        def event() -> EventSearchOutput:
+            return EventSearchOutput(
+                central_atom_index=0,
+                min1_positions=pos.copy(),
+                saddle_positions=saddle.copy(),
+                min2_positions=final.copy(),
+                dE_forward=0.6,
+                dE_backward=0.4,
+                move_atom_index=0,
+                cell=np.array(system_binary_fcc.cell),
+                types=list(system_binary_fcc.types),
+            )
+
+        detailed = event()
+        detailed.backend = "dimer"
+        detailed.seed = 7
+        detailed.e_initial, detailed.e_saddle, detailed.e_final = -10.0, -9.4, -9.6
+        detailed.force_calls, detailed.force_calls_endpoints = 100, 50
+        detailed.curvature = -2.0
+        detailed.mode = np.ones_like(pos) / np.sqrt(pos.size)
+
+        tables = []
+        for ev in (event(), detailed):
+            table = ReferenceEventTable(config)
+            results = table.add_events([ev])
+            assert [r.is_ok() for r in results] == [True]
+            tables.append(table.table)
+
+        plain, with_details = tables
+        assert len(plain) > 0
+        assert list(plain.columns) == list(with_details.columns)
+        assert list(plain.index) == list(with_details.index)
+        for column in plain.columns:
+            for a, b in zip(plain[column], with_details[column]):
+                if isinstance(a, (np.ndarray, list)):
+                    assert np.array_equal(np.asarray(a), np.asarray(b)), column
+                elif isinstance(a, float) and np.isnan(a):
+                    assert np.isnan(b), column
+                else:
+                    assert a == b, column

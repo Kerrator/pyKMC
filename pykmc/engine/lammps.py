@@ -24,7 +24,14 @@ from ..activevolume.active_volume import (
     position_results_AV,
 )
 from ..atomic_environment import AtomicEnvironment
-from ..search_rules import SearchEndpoints, artn_move_atom, search_result
+from ..search_rules import (
+    SearchEndpoints,
+    add_search_details,
+    artn_move_atom,
+    map_to_full_system,
+    partn_search_details,
+    search_result,
+)
 from ..result import (
     ErrorInfo,
     EventRefinementOutput,
@@ -673,13 +680,42 @@ class LammpsEngine(Engine):
                     move_atom_index=index_move,
                 )
 
-            return search_result(
+            result = search_result(
                 central_atom_index=central_atom_idx,
                 error=artn.get_error(),
                 read_distances=read_distances,
                 read_endpoints=read_endpoints,
                 delr_threshold=config.eventsearch.delr_thr,
                 types=types,
+            )
+
+            # Optional details for the log and the info file (decision 18).
+            # pARTn's arrays are in this instance's frame and atom order: the
+            # active volume's, or the full system's before rotation.
+            boxlo, boxhi, xy, yz, xz, periodicity, _ = self.lmp.extract_box()
+            lengths = np.subtract(boxhi, boxlo)
+            box = np.array(
+                [[lengths[0], 0.0, 0.0], [xy, lengths[1], 0.0], [xz, yz, lengths[2]]]
+            )
+            if config.control.active_volume:
+
+                def to_full_system(array: np.ndarray) -> np.ndarray:
+                    return map_to_full_system(
+                        array, atom_map, np.zeros((len(positions), 3))
+                    )
+
+            else:
+                to_full_system = self._positions_from_lammps
+            return add_search_details(
+                result,
+                **partn_search_details(
+                    artn,
+                    accepted=isinstance(result, Ok),
+                    zseed=config.partn.zseed,
+                    cell=box,
+                    pbc=np.array(periodicity, dtype=bool),
+                    to_full_system=to_full_system,
+                ),
             )
 
     @lammps_error_handler

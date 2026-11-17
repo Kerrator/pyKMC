@@ -24,7 +24,7 @@ from pykmc.eventsearch.strategies.dimer import DimerStrategy, dimer_search_resul
 from pykmc.eventsearch.strategies.partn import PartnStrategy
 from pykmc.initializer import Initializer
 from pykmc.kmc import KMC
-from pykmc.result import ErrorType
+from pykmc.result import SEARCH_DETAIL_FIELDS, ErrorType
 from pykmc.search_rules import artn_move_atom, move_atom
 
 INPUT = Path(__file__).parents[1] / "data" / "input.in"
@@ -504,7 +504,58 @@ def test_a_saddle_not_connected_to_the_start_is_minima_not_matching() -> None:
     err = dimer_search_result(raw, _request(), 0.5).err_value()
 
     assert err.type == ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS
-    assert err.variables == {"delr1": 1.2, "delr2": 2.4}
+    assert err.variables == {
+        "delr1": 1.2,
+        "delr2": 2.4,
+        "failure_reason": "minima_not_matching_positions",
+        "backend": "dimer",
+        "seed": 7,
+        "e_saddle": -9.4,
+        "curvature": -2.0,
+        "force_calls": 100,
+        "force_calls_endpoints": 50,
+    }
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_a_dimer_event_fills_every_detail_but_the_failure_reason(
+    swapped: bool,
+) -> None:
+    raw = _raw(
+        POSITIONS, delr1=2.0 if swapped else 0.01, delr2=0.01 if swapped else 2.0
+    )
+    raw = raw._replace(mode=np.arange(15.0).reshape(5, 3))
+
+    out = dimer_search_result(raw, _request(), 0.5).ok_value()
+
+    assert out.backend == "dimer"
+    assert out.seed == 7 and type(out.seed) is int
+    assert out.e_saddle == -9.4
+    assert (out.e_initial, out.e_final) == ((-9.8, -10.0) if swapped else (-10.0, -9.8))
+    assert out.dE_forward == pytest.approx(out.e_saddle - out.e_initial)
+    assert (out.force_calls, out.force_calls_endpoints) == (100, 50)
+    assert out.curvature == -2.0
+    assert out.mode is raw.mode
+    assert out.failure_reason is None
+    assert all(
+        getattr(out, name) is not None
+        for name in SEARCH_DETAIL_FIELDS
+        if name != "failure_reason"
+    )
+
+
+def test_a_failed_dimer_search_carries_reason_force_calls_and_seed() -> None:
+    raw = _raw(POSITIONS, seed=11, success=False, reason="max_iterations")
+
+    err = dimer_search_result(raw, _request(), 0.5).err_value()
+
+    assert err.variables == {
+        "failure_reason": "max_iterations",
+        "backend": "dimer",
+        "seed": 11,
+        "force_calls": 40,
+        "force_calls_endpoints": 0,
+    }
 
 
 def test_results_come_back_in_request_order() -> None:

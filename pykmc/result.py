@@ -36,6 +36,7 @@ __all__ = [
     "ErrorInfo",
     "ErrorType",
     "EventSearchOutput",
+    "SEARCH_DETAIL_FIELDS",
     "EventRefinementOutput",
     "ReconstructionOutput",
     "BasinSelectorOutput",
@@ -57,6 +58,12 @@ __all__ = [
 class EventSearchOutput:
     """Store the output of a successful event search operation.
 
+    The fields from ``backend`` on are optional details of the search. They are
+    written to the log and the info file only: the reference table does not
+    read them. A field a backend does not report stays None. A failed search is
+    an error result, so its details ride on ``ErrorInfo.variables`` under the
+    same names (see :func:`pykmc.search_rules.add_search_details`).
+
     Attributes
     ----------
     central_atom_index : int
@@ -75,6 +82,29 @@ class EventSearchOutput:
         Index of the atom that moved the most during the transition.
     cell : Optional[np.ndarray]
         Simulation cell, if applicable.
+    types : Optional[list]
+        Atom types, if applicable.
+    backend : Optional[str]
+        Name of the search backend, e.g. ``"dimer"`` or ``"partn"``.
+    seed : Optional[int]
+        Seed of the search.
+    e_initial : Optional[float]
+        Energy of the initial minimum, eV, after orientation.
+    e_saddle : Optional[float]
+        Energy of the saddle, eV.
+    e_final : Optional[float]
+        Energy of the final minimum, eV, after orientation.
+    force_calls : Optional[int]
+        Force calls up to the saddle, or up to the failure.
+    force_calls_endpoints : Optional[int]
+        Force calls after the saddle, spent on the two minima.
+    curvature : Optional[float]
+        Curvature along the unstable mode at the saddle, eV/Å².
+    mode : Optional[np.ndarray]
+        Unstable mode at the saddle, an (N, 3) unit vector in 3N space in
+        pyKMC atom order, pointing from the initial minimum to the saddle.
+    failure_reason : Optional[str]
+        Why the search failed; None on a successful search.
 
     """
 
@@ -88,6 +118,32 @@ class EventSearchOutput:
     # map: np.ndarray
     cell: Optional[np.ndarray] = None
     types: Optional[list] = None
+    backend: Optional[str] = None
+    seed: Optional[int] = None
+    e_initial: Optional[float] = None
+    e_saddle: Optional[float] = None
+    e_final: Optional[float] = None
+    force_calls: Optional[int] = None
+    force_calls_endpoints: Optional[int] = None
+    curvature: Optional[float] = None
+    mode: Optional[np.ndarray] = None
+    failure_reason: Optional[str] = None
+
+
+# Names of the optional search details on EventSearchOutput, in the order they
+# are written to the log and the info file.
+SEARCH_DETAIL_FIELDS = (
+    "backend",
+    "seed",
+    "failure_reason",
+    "e_initial",
+    "e_saddle",
+    "e_final",
+    "force_calls",
+    "force_calls_endpoints",
+    "curvature",
+    "mode",
+)
 
 
 @dataclass
@@ -312,6 +368,10 @@ class KMCLoopInfo:
     reference_event_searches_info: ReferenceEventSearchInfo = None
     valid_event_info: ReferenceValidEventsInfo = None
     refinements_info: RefinementsInfo = None
+    # One record per event search, in request order (see
+    # pykmc.info_simulation.info_event_search_records). Last, so the lines
+    # above keep their order.
+    reference_event_searches: Optional[list[dict]] = None
 
     def output_msg(self) -> str:
         """Return a YAML-formatted summary of the loop info for logging purposes.
