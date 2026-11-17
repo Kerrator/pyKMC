@@ -80,6 +80,10 @@ only, and returned positions are wrapped on the periodic axes only.
 Frozen atoms: the movable mask is authoritative. Forces on frozen atoms are
 discarded, the mode is zero on them, and their positions never change.
 
+Translation: with every atom movable and a translation-invariant energy, rigid
+translation is a zero-curvature mode. On request (``remove_translation``) the
+net translation is kept out of the mode, as SEAKMC's ``CenterVN`` does.
+
 References
 ----------
 T. Liang and H. Xu, "Saddle point search with dynamic active volume",
@@ -128,7 +132,8 @@ class DimerResult(NamedTuple):
         Whether a saddle with negative curvature and both minima were found.
     reason : Optional[str]
         Why the search failed, ``None`` on success: ``"empty_start"`` (no
-        movable atom to draw the starting direction on), ``"zero_force"`` (the
+        movable atom to draw the starting direction on, or nothing left of the
+        direction once translation is removed), ``"zero_force"`` (the
         effective force gives no direction to move), ``"max_iterations"``,
         ``"positive_curvature"`` (the force converged where the lowest
         curvature is not negative), ``"minimisation_not_converged"`` or
@@ -210,6 +215,7 @@ def dimer_search(
     max_translations: int = 1000,
     max_minimisation_steps: int = 5000,
     min_translations: int = 5,
+    remove_translation: bool = False,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
 
@@ -264,6 +270,14 @@ def dimer_search(
         the search cannot stop at its start (SEAKMC ``IgnoreSteps = 4``: it
         tests once more than four steps are done). With 0 the start itself is
         tested.
+    remove_translation : bool
+        Keep the net translation out of the starting direction, the
+        rotational force and the mode after each rotation, when no atom is
+        frozen. Set it for a
+        translation-invariant energy, such as any interatomic potential:
+        with every atom movable, rigid translation is then a zero-curvature
+        mode the rotation would otherwise turn the dimer into. Leave it off
+        for an external field. Ignored when an atom is frozen.
 
     Returns
     -------
@@ -346,9 +360,24 @@ def dimer_search(
         selected = mask.copy()
     if not selected.any():
         return result("empty_start")
+    # With no atom frozen, rigid translation of a translation-invariant
+    # system is a zero-curvature mode that the rotation would turn the dimer
+    # into (SEAKMC's CenterVN, off there because atoms beyond its buffer are
+    # frozen); keep the mode free of it.
+    translation_free = remove_translation and bool(mask.all())
+
+    def untranslated(v: np.ndarray) -> np.ndarray:
+        # The rotational force is projected too, so every orientation the
+        # dimer tries stays free of translation.
+        return v - v.mean(axis=0) if translation_free else v
+
     mode = np.zeros((n_atoms, 3))
     mode[selected] = rng.uniform(-0.5, 0.5, size=(int(selected.sum()), 3))
-    mode /= np.linalg.norm(mode)
+    mode = untranslated(mode)
+    mode_norm = float(np.linalg.norm(mode))
+    if mode_norm == 0.0:
+        return result("empty_start")
+    mode /= mode_norm
 
     def rotate(
         x0: np.ndarray, f0: np.ndarray, mode: np.ndarray
@@ -358,6 +387,7 @@ def dimer_search(
         while True:
             _, f1 = evaluate(x0 + separation * mode)
             f_rot, curvature = _rotational_force(f0, f1, mode, separation)
+            f_rot = untranslated(f_rot)
             f_rot_norm = float(np.linalg.norm(f_rot))
             if f_rot_norm < _ROTATION_CONVERGED:
                 return mode, curvature, True
@@ -370,6 +400,7 @@ def dimer_search(
             f_rot_trial, curvature_trial = _rotational_force(
                 f0, f1_trial, trial, separation
             )
+            f_rot_trial = untranslated(f_rot_trial)
             if np.linalg.norm(f_rot_trial) < _ROTATION_CONVERGED:
                 return trial, curvature_trial, True
 
@@ -379,7 +410,7 @@ def dimer_search(
             f_rot2 = float(np.vdot(f_rot_trial, trial_direction))
             phi = 0.5 * math.atan2(f_rot1, -f_rot2)
             mode, _ = _rotate(trial, trial_direction, phi - 0.25 * math.pi)
-            mode = mode * weight
+            mode = untranslated(mode * weight)
             mode /= np.linalg.norm(mode)
 
             # Curvature along the new mode from the fit

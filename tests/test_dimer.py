@@ -470,3 +470,183 @@ def test_callback_exception_is_not_caught() -> None:
             broken,
             start_radius=1.5,
         )
+
+
+# A translation-invariant surface: the curved valley field acting on the
+# separation of two atoms, d = x0 - x1 + PAIR_OFFSET. Every rigid translation
+# is a zero-curvature mode. In the separation coordinate the saddle is the
+# field's own (d = 0, barrier 0.5 eV); along the dimer's mode (v, -v) / sqrt(2)
+# the curvature is twice the field's, -4 eV/Å², and the minima are
+# d = (+-1, 0.5, 0), sqrt(2) Å apart in 6N space.
+PAIR_OFFSET = np.array([0.0, 0.0, 3.0])
+
+
+def valley_pair(x: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return the energy and forces of the curved valley on the pair separation."""
+    energy, forces = curved_valley((x[0] - x[1] + PAIR_OFFSET)[None])
+    return energy, np.vstack([forces, -forces])
+
+
+def pair_start() -> np.ndarray:
+    """Two atoms 3 Å apart with d in the x = 1 well, nudged towards the saddle."""
+    x = np.array([[1.0, 0.5, 0.0], [0.0, 0.0, 3.0]])
+    x[0] += [-1e-3, -1e-3, 0.0]
+    return x
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_translation_removed_when_every_atom_moves(seed: int) -> None:
+    """With every atom movable the mode stays free of translation and finds the saddle."""
+    x = pair_start()
+    centroid = x.mean(axis=0)
+    result = dimer_search(
+        x,
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        seed,
+        valley_pair,
+        start_radius=1.5,
+        remove_translation=True,
+    )
+    assert result.success
+    assert_no_nan(result)
+    assert result.e_saddle == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    assert result.curvature == pytest.approx(2 * VALLEY_CURVATURE, abs=5e-3)
+    # The centroid never moves, so the saddle is fixed in space.
+    saddle = result.saddle_positions
+    np.testing.assert_allclose(
+        saddle, [centroid - PAIR_OFFSET / 2, centroid + PAIR_OFFSET / 2], atol=2e-3
+    )
+    np.testing.assert_allclose(saddle.mean(axis=0), centroid, atol=1e-12)
+    np.testing.assert_allclose(result.mode.sum(axis=0), 0.0, atol=1e-12)
+    minimum2 = result.min2_positions
+    np.testing.assert_allclose(
+        minimum2[0] - minimum2[1] + PAIR_OFFSET, [-1.0, 0.5, 0.0], atol=2e-3
+    )
+    assert result.delr1 < 2e-3
+    assert result.delr2 == pytest.approx(math.sqrt(2), abs=2e-3)
+
+
+def test_translation_left_in_drifts_on_a_translation_invariant_surface() -> None:
+    """Without the removal the same search turns into translation and never converges."""
+    result = dimer_search(
+        pair_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        1,
+        valley_pair,
+        start_radius=1.5,
+        max_translations=200,
+    )
+    assert result.reason == "max_iterations"
+
+
+def test_remove_translation_is_ignored_with_a_frozen_atom() -> None:
+    """With an atom frozen translation is no zero mode, and the option changes nothing."""
+    movable = np.array([True, False])
+    on = dimer_search(
+        pair_start(),
+        OPEN_CELL,
+        NO_PBC,
+        movable,
+        0,
+        1,
+        valley_pair,
+        start_radius=1.5,
+        remove_translation=True,
+    )
+    off = dimer_search(
+        pair_start(),
+        OPEN_CELL,
+        NO_PBC,
+        movable,
+        0,
+        1,
+        valley_pair,
+        start_radius=1.5,
+    )
+    assert on.success
+    for name, value in on._asdict().items():
+        if isinstance(value, np.ndarray):
+            np.testing.assert_array_equal(value, getattr(off, name), err_msg=name)
+        else:
+            assert value == getattr(off, name), name
+    np.testing.assert_array_equal(on.mode[1], 0.0)
+
+
+def test_remove_translation_on_one_atom_is_an_empty_start() -> None:
+    """One movable atom has nothing but translation to move along."""
+    result = dimer_search(
+        valley_start(1),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(1, bool),
+        0,
+        1,
+        curved_valley,
+        start_radius=1.5,
+        remove_translation=True,
+    )
+    assert result.reason == "empty_start"
+    assert_no_nan(result)
+
+
+def test_every_orientation_stays_free_of_translation(monkeypatch) -> None:  # noqa: ANN001
+    """Force noise with a net component does not leak translation into the dimer.
+
+    Real forces sum to zero only to rounding. Noise of 1e-9 eV/Å with a net
+    part stands in for that: every orientation the dimer evaluates, trial
+    rotations included, and the final mode keep a zero net translation.
+    """
+    import pykmc.dimer as dimer
+
+    rng = np.random.default_rng(3)
+
+    def noisy_pair(x: np.ndarray) -> tuple[float, np.ndarray]:
+        energy, forces = valley_pair(x)
+        return energy, forces + 1e-9 * rng.standard_normal(forces.shape)
+
+    nets = []
+    original = dimer._rotational_force
+
+    def record(f0, f1, mode, separation):  # noqa: ANN001, ANN202
+        nets.append(float(np.abs(mode.sum(axis=0)).max()))
+        return original(f0, f1, mode, separation)
+
+    monkeypatch.setattr(dimer, "_rotational_force", record)
+    result = dimer_search(
+        pair_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        1,
+        noisy_pair,
+        start_radius=1.5,
+        remove_translation=True,
+    )
+    assert result.success
+    assert result.e_saddle == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    assert max(nets) < 1e-14
+    assert np.abs(result.mode.sum(axis=0)).max() < 1e-14
+
+
+def test_worker_op_module_imports_without_lammps() -> None:
+    """The dimer worker op can be imported where LAMMPS is not installed."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.modules['lammps'] = None\n"
+        "from pykmc.engine.dimer_search import DimerSearchExtension\n"
+        "assert 'pykmc.engine.lammps' not in sys.modules\n"
+    )
+    root = Path(__file__).resolve().parents[1]
+    run = subprocess.run(
+        [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stderr
