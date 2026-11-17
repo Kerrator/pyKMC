@@ -199,10 +199,11 @@ its step, in search order. A record holds the central atom and what the search r
 final minimum (eV), the force calls up to the saddle (or the failure) and after it, the curvature at the saddle
 (eV/Å²), and the unstable mode at the saddle, a unit vector pointing from the initial minimum to the saddle,
 written as one row `[atom, x, y, z]` per atom with a non-zero component. A successful search has no failure
-reason. With `verbosity = 2` the log also has one line per search, with the mode's three largest atoms. pARTn
-reports the force calls only when it found a saddle, its seed only when `zseed` is not 0, and as curvature and
-mode its last Lanczos eigenvalue and vector, not recomputed at the converged saddle. These records are not read
-back by pyKMC: the reference table and restart files do not change.
+reason. With `verbosity = 2` the log also has one line per search, with the mode's three largest atoms; with
+`verbosity = 0` no record is written. pARTn reports its seed only when `zseed` is not 0, and as curvature and mode
+its last Lanczos eigenvalue and vector, not recomputed at the converged saddle. With every atom movable the mode
+has a row for every atom, so each successful search adds about 50 bytes per atom to the info file. These records
+are not read back by pyKMC: the reference table and restart files do not change.
 
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 
