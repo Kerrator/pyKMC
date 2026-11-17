@@ -24,9 +24,9 @@ from ..activevolume.active_volume import (
     position_results_AV,
 )
 from ..atomic_environment import AtomicEnvironment
+from ..search_rules import SearchEndpoints, artn_move_atom, search_result
 from ..result import (
     ErrorInfo,
-    EventSearchOutput,
     EventRefinementOutput,
     Ok,
     Err,
@@ -501,8 +501,6 @@ class LammpsEngine(Engine):
             if positions is not None:
                 self.set_positions(positions=positions)
 
-        delr_threshold = config.eventsearch.delr_thr
-
         artn = pypARTn.artn(engine="lmp")
 
         self.lmp.command(f"plugin load {artn.lib._name}")
@@ -557,79 +555,49 @@ class LammpsEngine(Engine):
         os.close(devnull)
 
         if self._is_rank0:
-            err = artn.get_error()
-            if err[0] == 0:
-                delr1 = artn.extract("delr_min1")
-                delr2 = artn.extract("delr_min2")
-                if delr1 < delr_threshold or delr2 < delr_threshold:
-                    E_sad = artn.extract("etot_sad")
-                    E_min1 = artn.extract("etot_min1")
-                    E_min2 = artn.extract("etot_min2")
-                    dE_forward = E_sad - E_min1
-                    dE_backward = E_sad - E_min2
 
-                    if config.control.active_volume:
-                        min1positions, min2positions, saddlepositions, index_move = (
-                            position_results_AV(config, artn, atom_map, positions)
-                        )
-                    else:
-                        min1positions = self._positions_from_lammps(
-                            artn.extract("tau_min1")
-                        )
-                        min2positions = self._positions_from_lammps(
-                            artn.extract("tau_min2")
-                        )
-                        saddlepositions = self._positions_from_lammps(
-                            artn.extract("tau_sad")
-                        )
-                        dist = (min1positions - saddlepositions) ** 2
-                        dist = dist.sum(axis=-1)
-                        dist = np.sqrt(dist)
-                        dist[dist > config.atomicenvironment.rcut] = 0
-                        index_move = np.argmax(dist)
+            def read_distances() -> tuple[float, float]:
+                return artn.extract("delr_min1"), artn.extract("delr_min2")
 
-                    if delr1 < delr2:
-                        return Ok(
-                            EventSearchOutput(
-                                central_atom_index=central_atom_idx,
-                                dE_forward=dE_forward,
-                                dE_backward=dE_backward,
-                                min1_positions=min1positions,
-                                saddle_positions=saddlepositions,
-                                min2_positions=min2positions,
-                                move_atom_index=index_move,
-                                types=types,
-                            )
-                        )
-                    else:
-                        return Ok(
-                            EventSearchOutput(
-                                central_atom_index=central_atom_idx,
-                                dE_forward=dE_backward,
-                                dE_backward=dE_forward,
-                                min1_positions=min2positions,
-                                saddle_positions=saddlepositions,
-                                min2_positions=min1positions,
-                                move_atom_index=index_move,
-                                types=types,
-                            )
-                        )
+            def read_endpoints() -> SearchEndpoints:
+                E_sad = artn.extract("etot_sad")
+                E_min1 = artn.extract("etot_min1")
+                E_min2 = artn.extract("etot_min2")
+                if config.control.active_volume:
+                    min1positions, min2positions, saddlepositions, index_move = (
+                        position_results_AV(config, artn, atom_map, positions)
+                    )
                 else:
-                    return Err(
-                        ErrorInfo(
-                            type=ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS,
-                            message="delr1 and delr2 > at {}".format(delr_threshold),
-                            variables={"delr1": delr1, "delr2": delr2},
-                        )
+                    min1positions = self._positions_from_lammps(
+                        artn.extract("tau_min1")
                     )
-            else:
-                return Err(
-                    ErrorInfo(
-                        type=ErrorType.EVENT_NOT_FOUND,
-                        message="No event found",
-                        details=err,
+                    min2positions = self._positions_from_lammps(
+                        artn.extract("tau_min2")
                     )
+                    saddlepositions = self._positions_from_lammps(
+                        artn.extract("tau_sad")
+                    )
+                    index_move = artn_move_atom(
+                        min1positions, saddlepositions, config.atomicenvironment.rcut
+                    )
+                return SearchEndpoints(
+                    e_min1=E_min1,
+                    e_saddle=E_sad,
+                    e_min2=E_min2,
+                    min1_positions=min1positions,
+                    saddle_positions=saddlepositions,
+                    min2_positions=min2positions,
+                    move_atom_index=index_move,
                 )
+
+            return search_result(
+                central_atom_index=central_atom_idx,
+                error=artn.get_error(),
+                read_distances=read_distances,
+                read_endpoints=read_endpoints,
+                delr_threshold=config.eventsearch.delr_thr,
+                types=types,
+            )
 
     @lammps_error_handler
     def partn_refine(

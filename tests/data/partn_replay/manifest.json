@@ -1,0 +1,278 @@
+{
+ "what": "pARTn search outputs recorded through pyKMC's LammpsEngine.partn_search, for the PR A replay test",
+ "pykmc_commit": "1f633fc2d9b1341cdf075bd5ed328ce42544ada0",
+ "pykmc_note": "upstream develop 1f633fc; search-path files identical to bc8f21f",
+ "partn": "v1.1.0, commit 9b753517 (artn.out header of every run)",
+ "lammps": "stable_22Jul2025 (20250722)",
+ "potential": "FeP_mm.eam.fs (LAMMPS potentials/, A04), md5 c5a9ec3c5e65871eafb5328e050bd7dc",
+ "cell": "bcc Fe 8x8x8, a = 2.855312 A, box 22.842496 A, 1023 atoms, one vacancy; lattice shifted -0.25 A in x",
+ "settings": "rcut 6.5, eventsearch.delr_thr 0.5, pARTn defaults with zseed 0; active volume rmov 7.7 / ract 11.4",
+ "machine": "Apple M1 Max, macOS, Open MPI 5.0.7, gfortran 15.2, Accelerate LAPACK",
+ "total_bytes": 1036701,
+ "records": [
+  {
+   "file": "avon_partn_failure.npz",
+   "case": "partn_failure",
+   "active_volume": true,
+   "central_atom": 987,
+   "partn_error": [
+    -10,
+    "EIGENVALUE LOST, try to increase nnewchance or nsmooth"
+   ],
+   "result": {
+    "kind": "err",
+    "type": "EVENT_NOT_FOUND",
+    "message": "No event found",
+    "details": [
+     -10,
+     "EIGENVALUE LOST, try to increase nnewchance or nsmooth"
+    ],
+    "variables": {}
+   },
+   "raw_pick_atom": null,
+   "min_image_largest_mover": null,
+   "source": "runs/rec_z0a_avon/dump/records/r29469_00000.npz",
+   "bytes": 11070
+  },
+  {
+   "file": "avon_plain.npz",
+   "case": "plain",
+   "active_volume": true,
+   "central_atom": 922,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 922,
+    "dE_forward": 2.6231488321550387,
+    "dE_backward": 2.620686305474692,
+    "move_atom_index": 922
+   },
+   "raw_pick_atom": 922,
+   "min_image_largest_mover": 922,
+   "source": "runs/rec_z0a_avon/dump/records/r29470_00015.npz",
+   "bytes": 87170
+  },
+  {
+   "file": "avon_swapped.npz",
+   "case": "swapped",
+   "active_volume": true,
+   "central_atom": 986,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 986,
+    "dE_forward": 0.644803790255537,
+    "dE_backward": 0.09393277539197697,
+    "move_atom_index": 986
+   },
+   "raw_pick_atom": 986,
+   "min_image_largest_mover": 986,
+   "source": "runs/rec_z0a_avon/dump/records/r29469_00009.npz",
+   "bytes": 87440
+  },
+  {
+   "file": "avon_rejected.npz",
+   "case": "rejected",
+   "active_volume": true,
+   "central_atom": 34,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "err",
+    "type": "EVENT_MINIMA_NOT_MATCH_POSITIONS",
+    "message": "delr1 and delr2 > at 0.5",
+    "details": null,
+    "variables": {
+     "delr1": 1.2160710244919537,
+     "delr2": 2.352311406583044
+    }
+   },
+   "raw_pick_atom": null,
+   "min_image_largest_mover": null,
+   "source": "runs/rec_z0a_avon/dump/records/r29471_00020.npz",
+   "bytes": 43686
+  },
+  {
+   "file": "avon_plain_boundary_bystander.npz",
+   "case": "plain_boundary_bystander",
+   "active_volume": true,
+   "central_atom": 987,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 987,
+    "dE_forward": 0.6448036473263983,
+    "dE_backward": 0.09393106537481799,
+    "move_atom_index": 915
+   },
+   "raw_pick_atom": 915,
+   "min_image_largest_mover": 987,
+   "source": "runs/rec_z0a_avon/dump/records/r29471_00008.npz",
+   "bytes": 88954
+  },
+  {
+   "file": "avon_swapped_boundary_bystander.npz",
+   "case": "swapped_boundary_bystander",
+   "active_volume": true,
+   "central_atom": 987,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 987,
+    "dE_forward": 0.6448021787780363,
+    "dE_backward": 0.09393080799713971,
+    "move_atom_index": 915
+   },
+   "raw_pick_atom": 915,
+   "min_image_largest_mover": 987,
+   "source": "runs/rec_z0a_avon/dump/records/r29471_00002.npz",
+   "bytes": 89541
+  },
+  {
+   "file": "avoff_partn_failure.npz",
+   "case": "partn_failure",
+   "active_volume": false,
+   "central_atom": 987,
+   "partn_error": [
+    -10,
+    "EIGENVALUE LOST, try to increase nnewchance or nsmooth"
+   ],
+   "result": {
+    "kind": "err",
+    "type": "EVENT_NOT_FOUND",
+    "message": "No event found",
+    "details": [
+     -10,
+     "EIGENVALUE LOST, try to increase nnewchance or nsmooth"
+    ],
+    "variables": {}
+   },
+   "raw_pick_atom": null,
+   "min_image_largest_mover": null,
+   "source": "runs/rec_z0a_avoff/dump/records/r29546_00001.npz",
+   "bytes": 9598
+  },
+  {
+   "file": "avoff_plain.npz",
+   "case": "plain",
+   "active_volume": false,
+   "central_atom": 986,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 986,
+    "dE_forward": 0.6398982720684216,
+    "dE_backward": 0.09099511769090896,
+    "move_atom_index": 986
+   },
+   "raw_pick_atom": 986,
+   "min_image_largest_mover": 986,
+   "source": "runs/rec_z0a_avoff/dump/records/r29546_00000.npz",
+   "bytes": 135490
+  },
+  {
+   "file": "avoff_swapped.npz",
+   "case": "swapped",
+   "active_volume": false,
+   "central_atom": 987,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 987,
+    "dE_forward": 5.366142756612135,
+    "dE_backward": 0.05073066103068413,
+    "move_atom_index": 987
+   },
+   "raw_pick_atom": 987,
+   "min_image_largest_mover": 987,
+   "source": "runs/rec_z0a_avoff/dump/records/r29546_00006.npz",
+   "bytes": 139241
+  },
+  {
+   "file": "avoff_rejected.npz",
+   "case": "rejected",
+   "active_volume": false,
+   "central_atom": 19,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "err",
+    "type": "EVENT_MINIMA_NOT_MATCH_POSITIONS",
+    "message": "delr1 and delr2 > at 0.5",
+    "details": null,
+    "variables": {
+     "delr1": 1.2194581271951863,
+     "delr2": 2.352297382834075
+    }
+   },
+   "raw_pick_atom": null,
+   "min_image_largest_mover": null,
+   "source": "runs/rec_z0a_avoff/dump/records/r29547_00016.npz",
+   "bytes": 73308
+  },
+  {
+   "file": "avoff_plain_boundary_bystander.npz",
+   "case": "plain_boundary_bystander",
+   "active_volume": false,
+   "central_atom": 987,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 987,
+    "dE_forward": 0.6399027198813201,
+    "dE_backward": 0.09098401702794945,
+    "move_atom_index": 915
+   },
+   "raw_pick_atom": 915,
+   "min_image_largest_mover": 987,
+   "source": "runs/rec_z0a_avoff/dump/records/r29549_00007.npz",
+   "bytes": 136447
+  },
+  {
+   "file": "avoff_swapped_boundary_bystander.npz",
+   "case": "swapped_boundary_bystander",
+   "active_volume": false,
+   "central_atom": 922,
+   "partn_error": [
+    0,
+    ""
+   ],
+   "result": {
+    "kind": "ok",
+    "central_atom_index": 922,
+    "dE_forward": 2.5953415586755,
+    "dE_backward": 2.5953415600260996,
+    "move_atom_index": 987
+   },
+   "raw_pick_atom": 987,
+   "min_image_largest_mover": 922,
+   "source": "runs/rec_z0a_avoff/dump/records/r29548_00015.npz",
+   "bytes": 134756
+  }
+ ]
+}
