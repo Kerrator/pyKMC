@@ -193,6 +193,17 @@ Each refinement whose barrier differs from the reference one by more than `refin
 because its refined saddle moved `r_delr_sad_thr` or more (in `[pARTn]`), is written to the log with its reference
 event and the size of the difference.
 
+Each event search is also recorded in the info file (`pykmc.info`), under `reference_event_searches` at the end of
+its step, in search order. A record holds the central atom and what the search reported: the backend (`dimer` or
+`partn`), its seed, the failure reason of a failed search, the energies of the initial minimum, the saddle and the
+final minimum (eV), the force calls up to the saddle (or the failure) and after it, the curvature at the saddle
+(eV/Å²), and the unstable mode at the saddle, a unit vector pointing from the initial minimum to the saddle,
+written as one row `[atom, x, y, z]` per atom with a non-zero component. A successful search has no failure
+reason. With `verbosity = 2` the log also has one line per search, with the mode's three largest atoms. pARTn
+reports the force calls only when it found a saddle, its seed only when `zseed` is not 0, and as curvature and
+mode its last Lanczos eigenvalue and vector, not recomputed at the converged saddle. These records are not read
+back by pyKMC: the reference table and restart files do not change.
+
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 
 ### pARTn 
