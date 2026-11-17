@@ -425,6 +425,7 @@ def dimer_search(
             if n_rotations >= _MAX_ROTATIONS or f_rot_norm < _ROTATION_THRESHOLD:
                 return mode, curvature, False
 
+    found: dict = {}
     try:
         x0, e0, f0 = x_start.copy(), e_start, f_start
         f_last = np.zeros_like(x0)  # effective force at the last step's start
@@ -473,7 +474,7 @@ def dimer_search(
         calls_saddle = calls
         if np.vdot(mode, saddle - x_start) < 0:
             mode = -mode
-        found: dict = dict(
+        found = dict(
             saddle_positions=_wrap(saddle, cell, pbc),
             e_saddle=e0,
             curvature=curvature,
@@ -497,7 +498,8 @@ def dimer_search(
                 )
             minima.append((x_min, e_min))
     except _NonFiniteForce:
-        return result("non_finite_force")
+        # After the saddle, keep it and count the minimisation's calls apart.
+        return result("non_finite_force", **found, force_calls_total=calls)
 
     (x_min1, e_min1), (x_min2, e_min2) = minima
     return result(

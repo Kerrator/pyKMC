@@ -36,6 +36,7 @@ __all__ = [
     "move_atom",
     "orient_mode",
     "map_to_full_system",
+    "lammps_box",
     "add_search_details",
     "partn_search_details",
 ]
@@ -327,6 +328,28 @@ def map_to_full_system(
     return mapped
 
 
+def lammps_box(
+    boxlo: np.ndarray, boxhi: np.ndarray, xy: float, yz: float, xz: float
+) -> np.ndarray:
+    """Return a LAMMPS box as cell vectors in rows, (3, 3), in LAMMPS's frame.
+
+    Parameters
+    ----------
+    boxlo, boxhi : np.ndarray
+        Lower and upper box bounds, as LAMMPS's ``extract_box`` returns them.
+    xy, yz, xz : float
+        Tilt factors, in ``extract_box``'s order.
+
+    Returns
+    -------
+    np.ndarray
+        Rows ``a = (lx, 0, 0)``, ``b = (xy, ly, 0)``, ``c = (xz, yz, lz)``.
+
+    """
+    lx, ly, lz = np.subtract(boxhi, boxlo)
+    return np.array([[lx, 0.0, 0.0], [xy, ly, 0.0], [xz, yz, lz]], dtype=float)
+
+
 def add_search_details(
     result: Result[EventSearchOutput, ErrorInfo], **details: Any
 ) -> Result[EventSearchOutput, ErrorInfo]:
@@ -369,7 +392,8 @@ def add_search_details(
     info = result.err_value()
     details.pop("mode", None)
     if info.type == ErrorType.EVENT_NOT_FOUND:
-        reason = str(info.details[1])  # type: ignore[index]
+        # The info file drops empty strings, so a failure never gets one.
+        reason = str(info.details[1]) or "no_event_found"  # type: ignore[index]
     else:
         reason = MINIMA_NOT_AT_START
     info.variables = {**(info.variables or {}), "failure_reason": reason, **details}
@@ -386,16 +410,18 @@ def partn_search_details(
 ) -> dict[str, Any]:
     """Read a pARTn search's optional details, once the search has ended.
 
-    pARTn zeroes its step counter and resets ``zseed`` to 0 when the search
-    ends, before pyKMC reads anything, so:
+    pARTn counts its steps from 0, one per force call, and keeps the step of
+    its last call in ``nevalf`` and that of the saddle in ``nevalf_sad``; its
+    report's ``evalf``, which the 2026-11-09 baseline counted, is one more. So
+    the force calls are ``nevalf_sad + 1`` up to the saddle and
+    ``nevalf - nevalf_sad`` after it, or ``nevalf + 1`` up to a failure before
+    any saddle (and 0 after it). A search that never took a step (``natoms``
+    still unset) reports no count, since ``nevalf`` is then a previous
+    search's.
 
-    - the force calls are read only when a saddle was found:
-      ``nevalf_sad + 1`` up to the saddle (pARTn counts steps from 0; its
-      report's ``evalf``, which the 2026-11-09 baseline counted, is one more),
-      and the calls after it up to the later minimum when both minima were
-      found;
-    - the seed is ``zseed`` when it is set, and unset when it is 0 (pARTn then
-      draws a seed from the clock and writes it only to its own output file).
+    pARTn resets ``zseed`` to 0 when the search ends, so the seed is ``zseed``
+    when it is set, and unset when it is 0 (pARTn then draws a seed from the
+    clock and writes it only to its own output file).
 
     The curvature is ``eigval_sad``, the Lanczos eigenvalue pARTn holds at the
     saddle step, and the mode ``eigen_sad``, its last Lanczos vector; neither is
@@ -430,17 +456,20 @@ def partn_search_details(
         "backend": "partn",
         "seed": int(zseed) if zseed else None,
     }
+    # pARTn sets natoms and nevalf together on every step and unsets natoms
+    # when the next search is set up.
+    if int(artn.extract("natoms")) <= 0:
+        return details
+    calls_last = int(artn.extract("nevalf"))
     if not bool(artn.extract("has_sad")):
+        details["force_calls"] = calls_last + 1
+        details["force_calls_endpoints"] = 0
         return details
     calls_saddle = int(artn.extract("nevalf_sad"))
     details["e_saddle"] = float(artn.extract("etot_sad"))
     details["curvature"] = float(artn.extract("eigval_sad"))
     details["force_calls"] = calls_saddle + 1
-    if bool(artn.extract("has_min1")) and bool(artn.extract("has_min2")):
-        calls_last = max(
-            int(artn.extract("nevalf_min1")), int(artn.extract("nevalf_min2"))
-        )
-        details["force_calls_endpoints"] = calls_last - calls_saddle
+    details["force_calls_endpoints"] = calls_last - calls_saddle
     if accepted:
         if artn.extract("delr_min1") < artn.extract("delr_min2"):
             initial = artn.extract("tau_min1")

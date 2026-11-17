@@ -521,6 +521,7 @@ def test_a_saddle_not_connected_to_the_start_is_minima_not_matching() -> None:
 def test_a_dimer_event_fills_every_detail_but_the_failure_reason(
     swapped: bool,
 ) -> None:
+    """A dimer event fills every detail but the failure reason."""
     raw = _raw(
         POSITIONS, delr1=2.0 if swapped else 0.01, delr2=0.01 if swapped else 2.0
     )
@@ -535,7 +536,10 @@ def test_a_dimer_event_fills_every_detail_but_the_failure_reason(
     assert out.dE_forward == pytest.approx(out.e_saddle - out.e_initial)
     assert (out.force_calls, out.force_calls_endpoints) == (100, 50)
     assert out.curvature == -2.0
-    assert out.mode is raw.mode
+    # Normalised and measured from the initial minimum: in the swapped case
+    # that is minimum 2 (start + 0.2 A), past the saddle (start + 0.1 A).
+    sign = -1.0 if swapped else 1.0
+    assert np.allclose(out.mode, sign * raw.mode / np.linalg.norm(raw.mode))
     assert out.failure_reason is None
     assert all(
         getattr(out, name) is not None
@@ -544,7 +548,28 @@ def test_a_dimer_event_fills_every_detail_but_the_failure_reason(
     )
 
 
+def test_the_dimer_mode_points_from_the_oriented_initial_minimum() -> None:
+    """The dimer mode points from the oriented initial minimum."""
+    # Atom 0: start x = 0.5, initial minimum x = 0.8 (0.3 A from the start),
+    # saddle x = 0.7. The core's mode (+x) points from the start to the saddle,
+    # but from the initial minimum the saddle lies in -x.
+    start = POSITIONS.copy()
+    initial, saddle = start.copy(), start.copy()
+    initial[0, 0] += 0.3
+    saddle[0, 0] += 0.2
+    mode = np.zeros_like(start)
+    mode[0, 0] = 1.0
+    raw = _raw(start, delr1=0.3, delr2=2.0, min1=initial, saddle=saddle)._replace(
+        mode=mode
+    )
+
+    out = dimer_search_result(raw, _request(), 0.5).ok_value()
+
+    assert np.array_equal(out.mode, -mode)
+
+
 def test_a_failed_dimer_search_carries_reason_force_calls_and_seed() -> None:
+    """A failed dimer search carries reason force calls and seed."""
     raw = _raw(POSITIONS, seed=11, success=False, reason="max_iterations")
 
     err = dimer_search_result(raw, _request(), 0.5).err_value()

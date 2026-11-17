@@ -19,6 +19,7 @@ from ...search_rules import (
     SearchEndpoints,
     add_search_details,
     move_atom,
+    orient_mode,
     search_result,
 )
 from .base import EventSearchStrategy
@@ -207,6 +208,14 @@ def dimer_search_result(
             ),
         )
 
+    mode = None
+    if raw.success:
+        # The core points the mode from the start; measure it from the
+        # oriented initial minimum, as for pARTn.
+        initial = raw.min1_positions if raw.delr1 < raw.delr2 else raw.min2_positions
+        mode = orient_mode(
+            raw.mode, initial, raw.saddle_positions, request.cell, request.pbc
+        )
     result = search_result(
         central_atom_index=request.central_atom,
         error=error,
@@ -223,7 +232,7 @@ def dimer_search_result(
         curvature=raw.curvature,
         force_calls=int(raw.force_calls_saddle),
         force_calls_endpoints=int(raw.force_calls_total - raw.force_calls_saddle),
-        mode=raw.mode,
+        mode=mode,
     )
 
 

@@ -680,7 +680,8 @@ class KMC:
         """Write one log line per event search and return the searches' records.
 
         The lines are written at debug level, so only with verbosity 2. The
-        records go to the info file at the end of the step.
+        records go to the info file at the end of the step. With verbosity 0
+        the info file is not written, so no record is built.
 
         Parameters
         ----------
@@ -696,6 +697,8 @@ class KMC:
             :func:`pykmc.info_simulation.info_event_search_records`).
 
         """
+        if self.config.control.verbosity == 0:
+            return []
         records = info_event_search_records(central_atoms, results)
         for record in records:
             self.loggers.debug("log", event_search_log_line(record))

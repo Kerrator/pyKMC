@@ -28,6 +28,7 @@ from ..search_rules import (
     SearchEndpoints,
     add_search_details,
     artn_move_atom,
+    lammps_box,
     map_to_full_system,
     partn_search_details,
     search_result,
@@ -693,10 +694,6 @@ class LammpsEngine(Engine):
             # pARTn's arrays are in this instance's frame and atom order: the
             # active volume's, or the full system's before rotation.
             boxlo, boxhi, xy, yz, xz, periodicity, _ = self.lmp.extract_box()
-            lengths = np.subtract(boxhi, boxlo)
-            box = np.array(
-                [[lengths[0], 0.0, 0.0], [xy, lengths[1], 0.0], [xz, yz, lengths[2]]]
-            )
             if config.control.active_volume:
 
                 def to_full_system(array: np.ndarray) -> np.ndarray:
@@ -712,7 +709,7 @@ class LammpsEngine(Engine):
                     artn,
                     accepted=isinstance(result, Ok),
                     zseed=config.partn.zseed,
-                    cell=box,
+                    cell=lammps_box(boxlo, boxhi, xy, yz, xz),
                     pbc=np.array(periodicity, dtype=bool),
                     to_full_system=to_full_system,
                 ),

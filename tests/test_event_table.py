@@ -417,8 +417,9 @@ class TestSearchDetailsDoNotReachTheTable:
     """The optional search details go to the log and the info file only."""
 
     def test_same_rows_with_and_without_details(
-        self, system_binary_fcc, config_system_single_type
-    ):
+        self, system_binary_fcc: object, config_system_single_type: object
+    ) -> None:
+        """A result with every detail set adds the same rows as one without."""
         config = config_system_single_type
         pos = np.array(system_binary_fcc.positions, dtype=float)
         saddle, final = pos.copy(), pos.copy()
@@ -458,7 +459,7 @@ class TestSearchDetailsDoNotReachTheTable:
         assert list(plain.columns) == list(with_details.columns)
         assert list(plain.index) == list(with_details.index)
         for column in plain.columns:
-            for a, b in zip(plain[column], with_details[column]):
+            for a, b in zip(plain[column], with_details[column], strict=True):
                 if isinstance(a, (np.ndarray, list)):
                     assert np.array_equal(np.asarray(a), np.asarray(b)), column
                 elif isinstance(a, float) and np.isnan(a):

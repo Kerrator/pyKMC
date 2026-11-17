@@ -650,3 +650,36 @@ def test_worker_op_module_imports_without_lammps() -> None:
         [sys.executable, "-c", code], cwd=root, capture_output=True, text=True
     )
     assert run.returncode == 0, run.stderr
+
+
+def test_non_finite_force_after_the_saddle_keeps_it() -> None:
+    """A non-finite force in a minimisation keeps the saddle and counts apart."""
+    clean = valley_search(valley_start())
+    saddle_calls = clean.force_calls_saddle
+
+    def bad_after_saddle(x: np.ndarray) -> tuple[float, np.ndarray]:
+        bad_after_saddle.count += 1
+        energy, forces = curved_valley(x)
+        if bad_after_saddle.count > saddle_calls + 5:
+            forces[0, 0] = np.nan
+        return energy, forces
+
+    bad_after_saddle.count = 0
+    bad = dimer_search(
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        1,
+        bad_after_saddle,
+        start_radius=1.5,
+    )
+
+    assert bad.reason == "non_finite_force"
+    assert bad.e_saddle == clean.e_saddle and bad.curvature == clean.curvature
+    np.testing.assert_array_equal(bad.saddle_positions, clean.saddle_positions)
+    assert bad.force_calls_saddle == saddle_calls
+    assert bad.force_calls_total == saddle_calls + 6
+    assert bad.min1_positions is None
+    assert_no_nan(bad)

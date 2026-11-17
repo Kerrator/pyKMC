@@ -1,12 +1,13 @@
-"""Tests for the optional search details (energies, backend, seed, force calls,
-curvature, mode, failure reason).
+"""Tests for the optional search details of an event search.
 
-They go on the search result, ride on the error of a failed search, and are
+The details are the energies, backend, seed, force calls, curvature, mode and
+failure reason. They go on the search result, ride on the error of a failed search, and are
 written to the log and the info file only. No LAMMPS or pARTn is needed: pARTn
 is replaced by a stand-in handle.
 """
 
 from dataclasses import fields
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,8 +19,6 @@ from pykmc.kmc import KMC
 from pykmc.result import (
     SEARCH_DETAIL_FIELDS,
     Err,
-    ErrorInfo,
-    ErrorType,
     EventSearchOutput,
     KMCLoopInfo,
     Ok,
@@ -28,6 +27,7 @@ from pykmc.result import (
 from pykmc.search_rules import (
     SearchEndpoints,
     add_search_details,
+    lammps_box,
     map_to_full_system,
     orient_mode,
     partn_search_details,
@@ -68,6 +68,7 @@ def _result(delr1: float, delr2: float, error: tuple = (0, "")) -> object:
 
 
 def test_the_details_are_unset_by_default() -> None:
+    """The details are unset by default."""
     out = _output()
 
     assert all(getattr(out, name) is None for name in SEARCH_DETAIL_FIELDS)
@@ -77,6 +78,7 @@ def test_the_details_are_unset_by_default() -> None:
 
 
 def test_search_result_orients_the_energies() -> None:
+    """Search result orients the energies."""
     plain = _result(0.01, 2.0).ok_value()
     swapped = _result(2.0, 0.01).ok_value()
 
@@ -87,6 +89,7 @@ def test_search_result_orients_the_energies() -> None:
 
 
 def test_search_result_leaves_the_errors_as_they_were() -> None:
+    """Search result leaves the errors as they were."""
     not_found = _result(0.01, 2.0, error=(-10, "boom")).err_value()
     rejected = _result(1.2, 2.4).err_value()
 
@@ -98,6 +101,7 @@ def test_search_result_leaves_the_errors_as_they_were() -> None:
 
 
 def test_details_are_set_on_an_event_and_none_is_skipped() -> None:
+    """Details are set on an event and none is skipped."""
     mode = np.ones((3, 3))
     result = add_search_details(
         _result(0.01, 2.0), backend="x", seed=5, curvature=None, mode=mode
@@ -111,6 +115,7 @@ def test_details_are_set_on_an_event_and_none_is_skipped() -> None:
 
 
 def test_a_failed_search_carries_its_details_on_the_error() -> None:
+    """A failed search carries its details on the error."""
     result = add_search_details(
         _result(0.01, 2.0, error=(1, "max_iterations")),
         backend="dimer",
@@ -132,6 +137,7 @@ def test_a_failed_search_carries_its_details_on_the_error() -> None:
 
 
 def test_a_rejected_search_keeps_its_distances_and_gets_a_reason() -> None:
+    """A rejected search keeps its distances and gets a reason."""
     result = add_search_details(_result(1.2, 2.4), backend="dimer", e_saddle=-9.4)
 
     assert result.err_value().variables == {
@@ -143,10 +149,18 @@ def test_a_rejected_search_keeps_its_distances_and_gets_a_reason() -> None:
     }
 
 
+def test_an_empty_backend_message_still_gives_a_failure_reason() -> None:
+    """An empty backend message still gives a failure reason."""
+    result = add_search_details(_result(0.0, 0.0, error=(-1, "")), backend="partn")
+
+    assert result.err_value().variables["failure_reason"] == "no_event_found"
+
+
 # --------------------------------------------------------------- orient_mode
 
 
 def test_orient_mode_uses_the_minimum_image_and_normalises() -> None:
+    """Orient mode uses the minimum image and normalises."""
     # Atom 0 hops +0.2 A in x across the boundary (9.9 -> 0.1); the raw
     # difference, -9.8 A, would point the other way.
     initial = np.array([[9.9, 5.0, 5.0], [5.0, 5.0, 5.0]])
@@ -170,22 +184,30 @@ class FakeArtn:
 
     def __init__(self, values: dict) -> None:
         self.values = values
-        self.read = []
+        self.read: list[str] = []
 
     def extract(self, name: str) -> object:
+        """Return a value as pypARTn would, and log the read."""
         self.read.append(name)
         return self.values[name]
 
 
-# pARTn's sentinel for a count it never set (-NAN_INT).
+# pARTn's sentinel for a count it never set (-NAN_INT), and natoms before any step.
 UNSET = -2147483647
+NO_STEP = -10
 
 
 def _artn(
-    has_sad: bool = True, has_min2: bool = True, swapped: bool = False
+    has_sad: bool = True,
+    last_step: int = 75,
+    swapped: bool = False,
+    stepped: bool = True,
 ) -> FakeArtn:
-    # Two active-volume atoms (full-system atoms 3 and 1); atom 3 hops +0.3 A
-    # in x across the boundary. pARTn's eigenvector points the other way.
+    """Return pARTn's state after a search: saddle at step 41, last call at ``last_step``.
+
+    Two active-volume atoms (full-system atoms 3 and 1); atom 3 hops +0.3 A in
+    x across the boundary. pARTn's eigenvector points the other way.
+    """
     min1 = np.array([[9.9, 5.0, 5.0], [2.0, 2.0, 2.0]])
     saddle = np.array([[0.2, 5.0, 5.0], [2.0, 2.0, 2.0]])
     min2 = np.array([[0.6, 5.0, 5.0], [2.0, 2.0, 2.0]])
@@ -193,12 +215,10 @@ def _artn(
         min1, min2 = min2, min1
     return FakeArtn(
         {
+            "natoms": np.int32(2 if stepped else NO_STEP),
+            "nevalf": np.int32(last_step),
             "has_sad": has_sad,
-            "has_min1": has_sad,
-            "has_min2": has_sad and has_min2,
             "nevalf_sad": np.int32(41) if has_sad else UNSET,
-            "nevalf_min1": np.int32(60),
-            "nevalf_min2": np.int32(75) if has_min2 else UNSET,
             "etot_sad": np.float64(-9.4),
             "eigval_sad": np.float64(-2.5),
             "delr_min1": 2.0 if swapped else 0.01,
@@ -217,6 +237,7 @@ def _to_full(array: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("swapped", [False, True])
 def test_partn_details_of_an_accepted_search(swapped: bool) -> None:
+    """Partn details of an accepted search."""
     details = partn_search_details(
         _artn(swapped=swapped), True, 12345, CELL, PBC, _to_full
     )
@@ -241,26 +262,53 @@ def test_partn_details_of_an_accepted_search(swapped: bool) -> None:
 
 
 def test_partn_seed_is_unset_when_zseed_is_zero() -> None:
+    """Partn seed is unset when zseed is zero."""
     details = partn_search_details(_artn(), True, 0, CELL, PBC, _to_full)
 
     assert details["seed"] is None
 
 
-def test_partn_failure_before_a_saddle_reads_no_count() -> None:
-    artn = _artn(has_sad=False)
+def test_partn_failure_before_a_saddle_counts_to_the_failure() -> None:
+    """Partn failure before a saddle counts to the failure."""
+    artn = _artn(has_sad=False, last_step=299)
 
     details = partn_search_details(artn, False, 0, CELL, PBC, _to_full)
 
-    assert details == {"backend": "partn", "seed": None}
-    assert artn.read == ["has_sad"]
+    assert details == {
+        "backend": "partn",
+        "seed": None,
+        "force_calls": 300,
+        "force_calls_endpoints": 0,
+    }
+    assert artn.read == ["natoms", "nevalf", "has_sad"]
 
 
-def test_partn_failure_after_the_saddle_keeps_the_count_to_it() -> None:
-    details = partn_search_details(_artn(has_min2=False), False, 0, CELL, PBC, _to_full)
+def test_partn_search_without_a_step_reports_no_count() -> None:
+    """Partn search without a step reports no count."""
+    artn = _artn(has_sad=False, stepped=False)
+
+    details = partn_search_details(artn, False, 7, CELL, PBC, _to_full)
+
+    assert details == {"backend": "partn", "seed": 7}
+    assert artn.read == ["natoms"]
+
+
+def test_partn_failure_after_the_saddle_counts_both_parts() -> None:
+    """Partn failure after the saddle counts both parts."""
+    details = partn_search_details(_artn(last_step=50), False, 0, CELL, PBC, _to_full)
 
     assert details["force_calls"] == 42
-    assert "force_calls_endpoints" not in details
+    assert details["force_calls_endpoints"] == 9
     assert "mode" not in details
+
+
+def test_lammps_box_puts_the_tilts_in_place() -> None:
+    """Lammps box puts the tilts in place."""
+    box = lammps_box(
+        np.array([1.0, 2.0, 3.0]), np.array([5.0, 7.0, 9.0]), 0.1, 0.2, 0.3
+    )
+
+    assert np.array_equal(box, [[4.0, 0.0, 0.0], [0.1, 5.0, 0.0], [0.3, 0.2, 6.0]])
 
 
 # ---------------------------------------------------- records and log lines
@@ -310,6 +358,7 @@ def _plain(value: object) -> bool:
 
 
 def test_records_hold_plain_values_and_the_sparse_mode() -> None:
+    """Records hold plain values and the sparse mode."""
     records = info_event_search_records(*_searches())
 
     assert _plain(records)
@@ -349,6 +398,7 @@ def test_records_hold_plain_values_and_the_sparse_mode() -> None:
 
 
 def test_info_file_gains_the_records_after_the_existing_lines() -> None:
+    """Info file gains the records after the existing lines."""
     central_atoms, results = _searches()
     records = info_event_search_records(central_atoms, results)
     counts = ReferenceEventSearchInfo(4, 2, {"no_event_found": 1})
@@ -377,6 +427,7 @@ def test_info_file_gains_the_records_after_the_existing_lines() -> None:
 
 
 def test_log_lines_give_every_field_a_search_set() -> None:
+    """Log lines give every field a search set."""
     records = info_event_search_records(*_searches())
 
     lines = [event_search_log_line(r) for r in records]
@@ -393,19 +444,29 @@ def test_log_lines_give_every_field_a_search_set() -> None:
 
 
 def test_kmc_logs_one_debug_line_per_search() -> None:
+    """Kmc logs one debug line per search."""
     lines = []
     loggers = SimpleNamespace(debug=lambda name, msg: lines.append((name, msg)))
     central_atoms, results = _searches()
 
-    records = KMC.log_event_searches(
-        SimpleNamespace(loggers=loggers), central_atoms, results
-    )
+    def kmc(verbosity: int) -> SimpleNamespace:
+        control = SimpleNamespace(verbosity=verbosity)
+        return SimpleNamespace(loggers=loggers, config=SimpleNamespace(control=control))
+
+    records = KMC.log_event_searches(kmc(2), central_atoms, results)
 
     assert records == info_event_search_records(central_atoms, results)
     assert lines == [("log", event_search_log_line(r)) for r in records]
+    # With verbosity 0 the info file is not written: no record is built.
+    lines.clear()
+    assert KMC.log_event_searches(kmc(0), central_atoms, results) == []
+    assert lines == []
 
 
-def test_the_restart_file_takes_no_search_data(tmp_path, monkeypatch) -> None:
+def test_the_restart_file_takes_no_search_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restart file takes no search data."""
     monkeypatch.chdir(tmp_path)
     kmc = SimpleNamespace(loggers=SimpleNamespace(_start_wall_time=0.0))
 
