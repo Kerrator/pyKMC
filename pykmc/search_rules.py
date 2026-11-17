@@ -415,9 +415,12 @@ def partn_search_details(
     report's ``evalf``, which the 2026-11-09 baseline counted, is one more. So
     the force calls are ``nevalf_sad + 1`` up to the saddle and
     ``nevalf - nevalf_sad`` after it, or ``nevalf + 1`` up to a failure before
-    any saddle (and 0 after it). A search that never took a step (``natoms``
-    still unset) reports no count, since ``nevalf`` is then a previous
-    search's.
+    any saddle (and 0 after it). ``nevalf`` keeps its value across searches,
+    so the caller sets it to -1 before the search; a search that never took a
+    step leaves it there and reports no count. pARTn prints no step line for
+    the calls of a failing last step, so on a failure the count can exceed the
+    last printed ``evalf``; it equals the "number of steps" pARTn prints, plus
+    one.
 
     pARTn resets ``zseed`` to 0 when the search ends, so the seed is ``zseed``
     when it is set, and unset when it is 0 (pARTn then draws a seed from the
@@ -432,7 +435,8 @@ def partn_search_details(
     Parameters
     ----------
     artn : pypARTn.artn
-        The pARTn handle of the search, after the search.
+        The pARTn handle of the search, after the search; its ``nevalf`` was
+        set to -1 before it.
     accepted : bool
         Whether the shared rules accepted the search.
     zseed : int
@@ -456,11 +460,9 @@ def partn_search_details(
         "backend": "partn",
         "seed": int(zseed) if zseed else None,
     }
-    # pARTn sets natoms and nevalf together on every step and unsets natoms
-    # when the next search is set up.
-    if int(artn.extract("natoms")) <= 0:
-        return details
     calls_last = int(artn.extract("nevalf"))
+    if calls_last < 0:  # still the -1 set before the search: no step taken
+        return details
     if not bool(artn.extract("has_sad")):
         details["force_calls"] = calls_last + 1
         details["force_calls_endpoints"] = 0

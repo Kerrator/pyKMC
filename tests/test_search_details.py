@@ -192,9 +192,8 @@ class FakeArtn:
         return self.values[name]
 
 
-# pARTn's sentinel for a count it never set (-NAN_INT), and natoms before any step.
+# pARTn's sentinel for a count it never set (-NAN_INT).
 UNSET = -2147483647
-NO_STEP = -10
 
 
 def _artn(
@@ -215,8 +214,7 @@ def _artn(
         min1, min2 = min2, min1
     return FakeArtn(
         {
-            "natoms": np.int32(2 if stepped else NO_STEP),
-            "nevalf": np.int32(last_step),
+            "nevalf": np.int32(last_step if stepped else -1),
             "has_sad": has_sad,
             "nevalf_sad": np.int32(41) if has_sad else UNSET,
             "etot_sad": np.float64(-9.4),
@@ -280,7 +278,7 @@ def test_partn_failure_before_a_saddle_counts_to_the_failure() -> None:
         "force_calls": 300,
         "force_calls_endpoints": 0,
     }
-    assert artn.read == ["natoms", "nevalf", "has_sad"]
+    assert artn.read == ["nevalf", "has_sad"]
 
 
 def test_partn_search_without_a_step_reports_no_count() -> None:
@@ -290,7 +288,7 @@ def test_partn_search_without_a_step_reports_no_count() -> None:
     details = partn_search_details(artn, False, 7, CELL, PBC, _to_full)
 
     assert details == {"backend": "partn", "seed": 7}
-    assert artn.read == ["natoms"]
+    assert artn.read == ["nevalf"]
 
 
 def test_partn_failure_after_the_saddle_counts_both_parts() -> None:

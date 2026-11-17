@@ -627,6 +627,9 @@ class LammpsEngine(Engine):
             artn.set("lnperp_limitation", False)
         artn.set("forc_thr", config.partn.forc_thr)
         artn.set("push_over", config.partn.push_over)
+        # pARTn sets nevalf on each step and never resets it: unset it, so a
+        # search that takes no step reports no force-call count.
+        artn.set_data("nevalf", -1)
 
         self.lmp.command(f"minimize 1e-6 1e-8 10000 {config.partn.nevalf_max}")
         self.lmp.command("unfix 10")
