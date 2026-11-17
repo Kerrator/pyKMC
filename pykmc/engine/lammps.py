@@ -377,6 +377,82 @@ class LammpsEngine(Engine):
             return result
         return None
 
+    def _gather_forces(self) -> np.ndarray | None:
+        """Gather the forces LAMMPS holds, in pyKMC atom order and frame.
+
+        Collective: every rank must call it. ``gather_atoms`` orders atoms by
+        LAMMPS id, which is the pyKMC index plus one. Forces rotate like
+        positions, so the inverse of the rotation ``Q`` brings them back.
+
+        Returns
+        -------
+        np.ndarray | None
+            (N, 3) forces on rank 0, None on the other ranks.
+
+        """
+        result = self.lmp.gather_atoms("f", 1, 3)
+        if not self._is_rank0:
+            return None
+        forces = np.reshape(np.ctypeslib.as_array(result), (-1, 3))
+        return self._positions_from_lammps(positions=forces)
+
+    @lammps_error_handler
+    def get_forces(self, positions: np.ndarray | None = None) -> np.ndarray | None:
+        """Evaluate the forces on every atom.
+
+        Every call evaluates the potential, so the forces are never stale.
+
+        Parameters
+        ----------
+        positions : np.ndarray | None
+            (N, 3) positions in pyKMC atom order and frame to evaluate at.
+            Under MPI, pass the same array on every rank. If None, the
+            positions LAMMPS holds are used.
+
+        Returns
+        -------
+        np.ndarray | None
+            (N, 3) forces in eV/Å, in pyKMC atom order and frame, on rank 0.
+            None on the other ranks.
+
+        """
+        if positions is not None:
+            self.set_positions(positions=positions)
+        self.lmp.command("run 0 post no")
+        return self._gather_forces()
+
+    @lammps_error_handler
+    def get_energy_and_forces(
+        self, positions: np.ndarray | None = None
+    ) -> tuple[float, np.ndarray] | None:
+        """Evaluate the potential energy and the forces in one evaluation.
+
+        Every call evaluates the potential, so the values are never stale.
+
+        Parameters
+        ----------
+        positions : np.ndarray | None
+            (N, 3) positions in pyKMC atom order and frame to evaluate at.
+            Under MPI, pass the same array on every rank. If None, the
+            positions LAMMPS holds are used.
+
+        Returns
+        -------
+        tuple[float, np.ndarray] | None
+            The potential energy in eV, the quantity `get_potential_energy`
+            returns, and the (N, 3) forces in eV/Å in pyKMC atom order and
+            frame, on rank 0. None on the other ranks.
+
+        """
+        if positions is not None:
+            self.set_positions(positions=positions)
+        self.lmp.command("run 0 post no")
+        energy = self.lmp.get_thermo("pe")
+        forces = self._gather_forces()
+        if self._is_rank0:
+            return energy, forces
+        return None
+
     @lammps_error_handler
     def minimize(self, positions: np.ndarray = None) -> None:
         if positions is not None:
