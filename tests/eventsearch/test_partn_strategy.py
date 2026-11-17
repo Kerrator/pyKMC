@@ -84,6 +84,7 @@ def _requests(central_atoms: list[int]) -> list[SearchRequest]:
             positions=rng.uniform(0.0, 10.0, size=(5, 3)),
             cell=np.diag([10.0, 10.0, 10.0]),
             types=np.array(["Ni"] * 5),
+            pbc=np.array([True, True, True]),
         )
         for atom in central_atoms
     ]
@@ -151,6 +152,7 @@ def test_active_volume_check_runs_at_search_time_after_the_log_line() -> None:
         positions=np.zeros((4, 3)),
         cell=np.diag([10.0, 10.0, 10.0]),
         types=np.array(["Ni"] * 4),
+        pbc=np.array([True, True, True]),
     )
     manager = ReverseStubManager(2)
     loggers = StubLoggers()
@@ -170,6 +172,7 @@ def test_results_come_back_in_request_order_when_searches_finish_out_of_order() 
         positions=np.zeros((8, 3)),
         cell=np.diag([10.0, 10.0, 10.0]),
         types=np.array(["Ni"] * 8),
+        pbc=np.array([True, True, True]),
     )
 
     event_search.execute(central_atoms, system, manager, StubLoggers())
@@ -202,6 +205,7 @@ def test_event_search_imports_without_lammps_or_partn() -> None:
         "import sys; sys.modules['lammps'] = None; sys.modules['pypARTn'] = None; "
         "from pykmc.eventsearch import EventSearchStrategy; "
         "assert 'partn' in EventSearchStrategy._registry, EventSearchStrategy._registry; "
+        "assert 'dimer' in EventSearchStrategy._registry, EventSearchStrategy._registry; "
         "assert not EventSearchStrategy._import_errors, EventSearchStrategy._import_errors"
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT)

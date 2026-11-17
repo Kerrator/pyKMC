@@ -65,6 +65,7 @@ def _system(n_atoms: int = 4) -> SimpleNamespace:
         positions=rng.uniform(0.0, 10.0, size=(n_atoms, 3)),
         cell=np.diag([10.0, 10.0, 10.0]),
         types=np.array(["Ni"] * n_atoms),
+        pbc=np.array([True, True, True]),
     )
 
 
@@ -142,11 +143,12 @@ def test_execute_sends_one_request_per_central_atom_with_own_copies() -> None:
     assert [r.central_atom for r in requests] == [3, 0, 3]
     for request in requests:
         assert isinstance(request, SearchRequest)
-        for field in ("positions", "cell", "types"):
+        assert request.seed is None and request.movable is None
+        for field in ("positions", "cell", "types", "pbc"):
             array = getattr(request, field)
             assert np.array_equal(array, getattr(system, field))
             assert not np.shares_memory(array, getattr(system, field))
-    for field in ("positions", "cell", "types"):
+    for field in ("positions", "cell", "types", "pbc"):
         assert not np.shares_memory(
             getattr(requests[0], field), getattr(requests[2], field)
         )

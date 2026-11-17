@@ -10,9 +10,9 @@ pyKMC does with them is the same whichever backend found them, and lives here:
 - orientation: the closer minimum is the initial state, so the minima and the
   barriers are swapped when the backend's second minimum is the closer one.
 
-The module also holds the plain-array steps the pARTn backend applies before
-those rules: ARTn's move-atom pick and the mapping of active-volume results
-back to the full system.
+The module also holds the plain-array steps a backend applies before those
+rules: ARTn's move-atom pick, the corrected move-atom pick the dimer uses, and
+the mapping of active-volume results back to the full system.
 
 Nothing here needs LAMMPS or pARTn, so the rules can be tested on recorded
 search outputs.
@@ -29,6 +29,7 @@ __all__ = [
     "SearchEndpoints",
     "search_result",
     "artn_move_atom",
+    "move_atom",
     "map_to_full_system",
 ]
 
@@ -188,6 +189,46 @@ def artn_move_atom(
     """
     _, dist = find_mic(min1_positions - saddle_positions, cell, pbc=pbc)
     return np.argmax(dist)
+
+
+def move_atom(
+    initial_positions: np.ndarray,
+    saddle_positions: np.ndarray,
+    cell: np.ndarray,
+    pbc: np.ndarray,
+) -> int:
+    """Pick the atom that moves most from the initial minimum to the saddle.
+
+    The corrected rule: displacements are taken from the oriented initial
+    minimum (the minimum at the start, after orientation), with the minimum
+    image on the periodic axes, so a hop across the periodic boundary picks
+    the hopping atom.
+
+    Parameters
+    ----------
+    initial_positions : np.ndarray
+        Positions of the oriented initial minimum, (N, 3).
+    saddle_positions : np.ndarray
+        Positions of the saddle, in the same atom order.
+    cell : np.ndarray
+        Cell vectors as rows, (3, 3).
+    pbc : np.ndarray
+        Periodicity of each cell axis, (3,) booleans.
+
+    Returns
+    -------
+    int
+        Index of the picked atom; the lowest index on a tie.
+
+    """
+    displacements = np.asarray(saddle_positions, dtype=float) - np.asarray(
+        initial_positions, dtype=float
+    )
+    cell = np.asarray(cell, dtype=float)
+    pbc = np.asarray(pbc, dtype=bool)
+    fractional = displacements @ np.linalg.inv(cell)
+    displacements = displacements - np.round(fractional[:, pbc]) @ cell[pbc]
+    return int(np.argmax(np.linalg.norm(displacements, axis=1)))
 
 
 def map_to_full_system(

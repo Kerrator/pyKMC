@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -12,6 +13,7 @@ from ..utils.geometry import translate
 from .strategies import EventSearchStrategy
 
 if TYPE_CHECKING:
+    from ..engine import EngineExtension
     from ..log import LogKMC
     from ..manager import Manager
     from ..system import System
@@ -34,6 +36,12 @@ class SearchRequest:
         Simulation cell, shape (3, 3).
     types : np.ndarray
         Types of the atoms of the whole system, shape (N,).
+    pbc : np.ndarray
+        Periodicity of each cell axis, shape (3,).
+    seed : int or None
+        Seed of the search, drawn by the facade when the strategy uses one.
+    movable : np.ndarray or None
+        Indices of the atoms the search may move, when the strategy sets them.
 
     """
 
@@ -41,6 +49,9 @@ class SearchRequest:
     positions: np.ndarray
     cell: np.ndarray
     types: np.ndarray
+    pbc: np.ndarray
+    seed: Optional[int] = None
+    movable: Optional[np.ndarray] = None
 
 
 class EventSearch:
@@ -100,12 +111,17 @@ class EventSearch:
                 len(central_atom_research_list)
             ),
         )
+        # Seeds are drawn here, on rank 0 and in request order, so they do not
+        # depend on how many workers run the searches or in which order they end.
         requests = [
             SearchRequest(
                 central_atom=atom,
                 positions=system.positions.copy(),
                 cell=system.cell.copy(),
                 types=system.types.copy(),
+                pbc=np.array(system.pbc, dtype=bool),
+                seed=random.getrandbits(32) if self._strategy.uses_seed else None,
+                movable=self._strategy.movable_atoms(atom, system),
             )
             for atom in central_atom_research_list
         ]
@@ -117,6 +133,11 @@ class EventSearch:
                 "progress", len(self.results), len(central_atom_research_list)
             )
 
+    @property
+    def engine_extensions(self) -> list[type[EngineExtension]]:
+        """Engine extensions the strategy needs, for the engine factory."""
+        return self._strategy.engine_extensions
+
     @classmethod
     def create(cls, style: str, **kwargs) -> "EventSearch":
         """Build an EventSearch wired with the requested strategy.
@@ -124,7 +145,7 @@ class EventSearch:
         Parameters
         ----------
         style : str
-            Name of the registered strategy (e.g. "partn").
+            Name of the registered strategy (e.g. "partn" or "dimer").
         **kwargs
             Forwarded to the strategy's constructor (e.g. ``config=config``).
 

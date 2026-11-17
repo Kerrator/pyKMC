@@ -9,6 +9,7 @@ from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
 from .config import Config
+from .eventsearch import EventSearch
 
 
 def main() -> None:
@@ -30,6 +31,9 @@ def main() -> None:
         if config.control.group_size == -1
         else config.control.group_size
     )
+    # Built on every rank: its strategy names the engine extensions the
+    # engines need, and every rank builds its own engines.
+    event_search = EventSearch.create(config.eventsearch.style, config=config)
     # KMC
     factory = EngineManagerFactory(
         engine_style=config.control.engine,
@@ -37,11 +41,13 @@ def main() -> None:
         comm=comm,
         engine_config=config.lammps,
         group_size=group_size,
+        engine_extensions=event_search.engine_extensions,
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0
         kmc = KMC(config)
         kmc.manager = manager
+        kmc.event_search = event_search
         try:
             kmc._initialize()
             kmc.run()

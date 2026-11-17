@@ -206,7 +206,11 @@ class AtomicEnvironmentConfig(BaseModel):
 class EventSearchConfig(BaseModel):
     """Event search parameters."""
 
-    style: Literal["partn"] = Field(..., description="Method used to find events.")
+    style: Literal["partn", "dimer"] = Field(
+        ...,
+        description="Method used to find events: 'partn', or 'dimer' (the dimer finds "
+        "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section).",
+    )
     nsearch: int = Field(
         ...,
         description="Number of event searches to perform per unique atomic environment.",
@@ -241,6 +245,64 @@ class EventSearchConfig(BaseModel):
         default=0.5,
         description="delr threshold between one minima and the intial configuration to consider the event valid.",
     )
+
+
+class DimerConfig(BaseModel):
+    """Dimer parameters, used when `[EventSearch] style = dimer`.
+
+    The dimer moves the atoms within `rmov` of the central atom when
+    `[Control] active_volume = True`, and every atom otherwise; atoms in
+    `[frozen_atoms]` never move. Refinement still uses pARTn and reads the
+    `[pARTn]` section.
+    """
+
+    start: Literal["local", "region"] = Field(
+        default="local",
+        description="How the starting direction is drawn: 'local' on the movable atoms "
+        "within `start_radius` of the central atom, 'region' on all movable atoms.",
+    )
+    start_radius: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Radius (in Angstrom) of the 'local' start, around the central atom. "
+        "Required when `start = local`.",
+    )
+    convergence: Literal["max_component", "norm"] = Field(
+        default="max_component",
+        description="Force measure for convergence, over the movable atoms: "
+        "'max_component', the largest absolute force component (as pARTn's `forc_thr`), "
+        "or 'norm', the 3N norm of the force.",
+    )
+    force_tolerance: float = Field(
+        default=1e-3,
+        gt=0,
+        description="Convergence threshold (in eV/Angstrom) on that measure, for the "
+        "saddle and for both minima. A saddle also needs a negative curvature.",
+    )
+    separation: float = Field(
+        default=0.005,
+        gt=0,
+        description="Distance (in Angstrom) from the dimer centre to the evaluated image.",
+    )
+    trial_step: float = Field(
+        default=0.015,
+        gt=0,
+        description="Trial translation step (in Angstrom). Must be smaller than `max_step`.",
+    )
+    max_step: float = Field(
+        default=0.05,
+        gt=0,
+        description="Largest translation step (in Angstrom).",
+    )
+
+    @model_validator(mode="after")
+    def check_start_and_steps(self) -> "DimerConfig":
+        """Require `start_radius` for the 'local' start, and `trial_step` < `max_step`."""
+        if self.start == "local" and self.start_radius is None:
+            raise ValueError("start_radius is required when start is 'local'")
+        if not self.trial_step < self.max_step:
+            raise ValueError("trial_step must be smaller than max_step")
+        return self
 
 
 class PartnConfig(BaseModel):
@@ -939,6 +1001,11 @@ class Config(BaseModel):
         default=None, description="pARTn parameters controling the event searches"
     )
 
+    dimer: Optional[DimerConfig] = Field(
+        default=None,
+        description="Dimer parameters. Required when eventsearch.style = dimer.",
+    )
+
     ira: Optional[IraConfig] = Field(default=None, description="IRA parameters.")
 
     basin: Optional[BasinConfig] = Field(default=None, description="Basin parameters")
@@ -1058,6 +1125,7 @@ class Config(BaseModel):
         validation_rules = {
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
+            ("eventsearch.style", "dimer"): ["dimer", "partn"],
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True): ["basin"],
             ("control.active_volume", True): ["activevolume"],

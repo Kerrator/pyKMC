@@ -135,7 +135,12 @@ class Initializer:
         )
 
     def initialize_event_search(self) -> None:
-        """Initialize the event search with the strategy named by `[EventSearch] style`."""
+        """Initialize the event search with the strategy named by `[EventSearch] style`.
+
+        Keeps an event search already given to the KMC object, as `run.py` does.
+        """
+        if self.kmc.event_search is not None:
+            return
         self.kmc.event_search = EventSearch.create(
             self.kmc.config.eventsearch.style, config=self.kmc.config
         )
