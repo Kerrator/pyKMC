@@ -11,3 +11,7 @@
 ::: pykmc.eventsearch.strategies.partn
     options:
         show_source: true
+
+::: pykmc.eventsearch.strategies.dimer
+    options:
+        show_source: true

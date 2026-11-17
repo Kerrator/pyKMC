@@ -49,6 +49,10 @@
   <details><summary>Description</summary>
   Number of Sessions
   </details>
+- **`group_size`** : `int`, default = `-1`
+  <details><summary>Description</summary>
+  Number of MPI worker ranks in the group communicator (replaces old global mode). -1 means all worker ranks.
+  </details>
 - **`engine_use_rank_0`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Deprecated : If use mpi rank 0 or not.
@@ -56,6 +60,10 @@
 - **`verbosity`** : `int`, default = `1`
   <details><summary>Description</summary>
   Controls the level of detail in the simulation output.
+  </details>
+- **`disp_thr`** : `float`, default = `0.05`
+  <details><summary>Description</summary>
+  Angstroms. Atoms displaced by more than this between two KMC steps are counted as moved in the output file.
   </details>
 - **`refine_thr`** : `float`, default = `0.9999`
   <details><summary>Description</summary>
@@ -76,6 +84,14 @@
 - **`bias`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Enable event selection bias. Requires a [Bias] section.
+  </details>
+- **`max_physical_time`** : `float`, optional
+  <details><summary>Description</summary>
+  Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).
+  </details>
+- **`seed`** : `int`, optional
+  <details><summary>Description</summary>
+  Seed for Python's `random` module (and numpy). When set, KMC event selection, timestep, and site choice become reproducible across runs. Leave unset for non-deterministic behavior. Must be between 0 and 2**32 - 1.
   </details>
 
 ---
@@ -119,9 +135,9 @@
   Event search parameters.
 </details>
 
-- **`style`** : `Literal['partn']`, mandatory
+- **`style`** : `Literal['partn', 'dimer']`, mandatory
   <details><summary>Description</summary>
-  Method used to find events.
+  Method used to find events: 'partn', or 'dimer' (the dimer finds the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section).
   </details>
 - **`nsearch`** : `int`, mandatory
   <details><summary>Description</summary>
@@ -222,6 +238,10 @@
 - **`frz_min`** : `str`, default = `'1.0e-6 1.0e-8 10 10'`
   <details><summary>Description</summary>
   Lammps minimize command with frozen core
+  </details>
+- **`verbosity`** : `int`, optional
+  <details><summary>Description</summary>
+  LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.
   </details>
 
 ---
@@ -416,6 +436,48 @@
 - **`r_dmax`** : `float`, default = `1.0`
   <details><summary>Description</summary>
   Refinement: dmax parameter used in fix ID all artn dmax value lammps command. should be higher than push_step_size.
+  </details>
+
+---
+
+## `Dimer` Section (optional)
+
+<details><summary>Section Overview</summary>
+  Dimer parameters, used when `[EventSearch] style = dimer`.
+  
+  The dimer moves the atoms within `rmov` of the central atom when
+  `[Control] active_volume = True`, and every atom otherwise; atoms in
+  `[frozen_atoms]` never move. Refinement still uses pARTn and reads the
+  `[pARTn]` section.
+</details>
+
+- **`start`** : `Literal['local', 'region']`, default = `'local'`
+  <details><summary>Description</summary>
+  How the starting direction is drawn: 'local' on the movable atoms within `start_radius` of the central atom, 'region' on all movable atoms.
+  </details>
+- **`start_radius`** : `float`, optional
+  <details><summary>Description</summary>
+  Radius (in Angstrom) of the 'local' start, around the central atom. Required when `start = local`.
+  </details>
+- **`convergence`** : `Literal['max_component', 'norm']`, default = `'max_component'`
+  <details><summary>Description</summary>
+  Force measure for convergence, over the movable atoms: 'max_component', the largest absolute force component (as pARTn's `forc_thr`), or 'norm', the 3N norm of the force.
+  </details>
+- **`force_tolerance`** : `float`, default = `0.001`
+  <details><summary>Description</summary>
+  Convergence threshold (in eV/Angstrom) on that measure, for the saddle and for both minima. A saddle also needs a negative curvature.
+  </details>
+- **`separation`** : `float`, default = `0.005`
+  <details><summary>Description</summary>
+  Distance (in Angstrom) from the dimer centre to the evaluated image.
+  </details>
+- **`trial_step`** : `float`, default = `0.015`
+  <details><summary>Description</summary>
+  Trial translation step (in Angstrom). Must be smaller than `max_step`.
+  </details>
+- **`max_step`** : `float`, default = `0.05`
+  <details><summary>Description</summary>
+  Largest translation step (in Angstrom).
   </details>
 
 ---

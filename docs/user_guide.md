@@ -160,7 +160,7 @@ The `[EventSearch]` section lets you define:
 - if a refinement is successful.
 
 This section requires two mandatory keys:
-- `style` : the algorithm used to perform event searches. _Currently, only partn is supported._
+- `style` : the algorithm used to perform event searches: `partn`, or `dimer` (see [Dimer](#dimer) below).
 - `nsearch` : number of event searches to perform per atomic environment.
 
 A minimal `[EventSearch]` section looks like:
@@ -189,6 +189,8 @@ Once a reference event is reused, it is refined to adapt to the current atomic c
 - The central atom moves less than `refined_minimum_delr_thr` between the current position and the refined minimum.
 - The difference in energy barriers between the generic and refined events is less than `refined_energy_thr`.
 These thresholds ensure that the refined event remains consistent with the original.
+Each refinement that fails one of these tests, or whose refined saddle moved `r_delr_sad_thr` or more (in `[pARTn]`),
+is written to the log with its reference event and the size of the difference.
 
 To further control the behavior of the selected event search algorithm (style), you must define a separate section matching the algorithm name. For instance, if you choose `style = partn` you must also include a `[pARTn]` section in your INI file to configure specific parameters for the pARTn method. 
 
@@ -205,6 +207,40 @@ r_eigval_thr = -0.02
 ```
 
 For a detailed explanation of the pARTn algorithm and its parameters, please refer to the official pARTn documentation.
+
+### Dimer
+
+With `style = dimer`, new events are found with the dimer method (ported from SEAKMC, Liang and Xu 2023), and
+refinement still uses pARTn. A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
+section configures the refinement (the `r_` parameters).
+
+Each search starts from a random direction, drawn from a seed. With `seed` set in `[Control]`, the run draws
+the same seeds in the same order whatever the number of LAMMPS instances.
+
+The atoms a dimer search may move follow the active volume setting: with `active_volume = True` in `[Control]`,
+the atoms within `rmov` of the central atom move; otherwise every atom moves. Atoms in `[frozen_atoms]` never move.
+The dimer works on the whole system, with the other atoms held fixed; it does not cut out the active volume as
+pARTn does. On a large cell with every atom movable, the dimer can follow the cell's soft long-wavelength modes
+instead of a local event, so the active volume is recommended there.
+
+A minimal `[Dimer]` section looks like:
+```INI
+[Dimer]
+start = local
+start_radius = 3.0
+```
+
+- `start` : `local` (default) draws the starting direction on the movable atoms within `start_radius` (in Å) of the
+  central atom; `region` draws it on all movable atoms. `start_radius` is required with `local`.
+- `convergence` and `force_tolerance` : the search has converged when the largest force component
+  (`max_component`, the default, as pARTn's `forc_thr`) or the 3N force norm (`norm`) is below `force_tolerance`
+  (default 1e-3 eV/Å), and the curvature at the saddle is negative.
+- `separation`, `trial_step` and `max_step` : the dimer's half-length and its two translation step sizes, in Å
+  (defaults 0.005, 0.015 and 0.05).
+
+Each dimer search runs on one LAMMPS instance of its own, on the first rank of its session. A session with several
+ranks therefore gets no speed-up on dimer force calls: its other ranks wait while the search runs. Use more
+sessions with fewer ranks each instead.
 
 ## Rate Constant 
 
