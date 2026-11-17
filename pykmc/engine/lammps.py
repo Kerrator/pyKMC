@@ -752,6 +752,7 @@ class LammpsEngine(Engine):
 
         max_attempts = config.partn.r_max_attempts
         attempt = 0
+        last_delr_sad = None  # rank 0: the last saddle that moved too far
         atoms_frozen = self._make_frozen_group(config, positions, types)
         self._apply_frozen_fix("f_frozen_pre", atoms_frozen)
 
@@ -769,6 +770,7 @@ class LammpsEngine(Engine):
                 err = artn.get_error()
                 if err[0] == 0:
                     delr_sad = artn.extract("delr_sad")
+                    last_delr_sad = delr_sad
                     if delr_sad < config.partn.r_delr_sad_thr:
                         E_sad = artn.extract("etot_sad")
                         E_result = E_sad - E_init
@@ -814,6 +816,10 @@ class LammpsEngine(Engine):
                         type=ErrorType.EVENT_NOT_FOUND,
                         message="no event found",
                         details=err,
+                        variables={
+                            "central_atom": central_atom_idx,
+                            "delr_sad": last_delr_sad,
+                        },
                     )
                 )
             return None

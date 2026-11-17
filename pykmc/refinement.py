@@ -133,17 +133,43 @@ class Refinement:
                     res.ok_value().dE_forward = res.ok_value().E_saddle
                 else:
                     res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
+                refined_barrier = res.ok_value().dE_forward
+                central_atom = res.ok_value().central_atom_index
                 res = self.check_refinement_energy(
                     res,
-                    abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
+                    abs(refined_barrier - ctx["reference_energy_barrier"]),
                     self.config.eventsearch.refined_energy_thr,
                 )
+                if not res.is_ok():
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Refinement mismatch: reference event {}, atom {}: "
+                        "barrier {:.4f} eV against {:.4f} eV, |dE| = {:.4f} eV > {} eV".format(
+                            ctx["num_reference_event"],
+                            central_atom,
+                            refined_barrier,
+                            ctx["reference_energy_barrier"],
+                            abs(refined_barrier - ctx["reference_energy_barrier"]),
+                            self.config.eventsearch.refined_energy_thr,
+                        ),
+                    )
 
             else:
                 err = res.err_value()
                 if not isinstance(err.variables, dict):
                     err.variables = {}
                 err.variables["n_ref_event"] = ctx["num_reference_event"]
+                if err.variables.get("delr_sad") is not None:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Refinement mismatch: reference event {}, atom {}: "
+                        "saddle moved {:.4f} A >= r_delr_sad_thr {} A".format(
+                            ctx["num_reference_event"],
+                            err.variables.get("central_atom"),
+                            err.variables["delr_sad"],
+                            self.config.partn.r_delr_sad_thr,
+                        ),
+                    )
 
             self.results.append(res)
 
