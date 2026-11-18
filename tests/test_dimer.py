@@ -21,7 +21,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pykmc.dimer import DimerResult, _minimum_image, _wrap, dimer_search
+import pykmc.dimer as dimer
+from pykmc.dimer import DimerResult, _dav_weights, _minimum_image, _wrap, dimer_search
 
 # curved_valley parameters
 VALLEY_A, VALLEY_B, VALLEY_C, VALLEY_BZ, VALLEY_PZ = 0.5, 2.0, 0.5, 0.5, 3.0
@@ -122,6 +123,7 @@ def test_defaults_are_the_design_record_ones() -> None:
     assert params["separation"].default == 0.005
     assert params["trial_step"].default == 0.015
     assert params["max_step"].default == 0.05
+    assert params["dav"].default is False
 
 
 def test_core_imports_only_numpy_and_the_standard_library() -> None:
@@ -143,6 +145,8 @@ def test_seakmc_licence_and_citation_are_with_the_code() -> None:
     assert "BSD 3-Clause License" in source
     assert "Neither the name of the copyright holder" in source
     assert "Comput. Mater. Sci. 228, 112354 (2023)" in source
+    # The notice names the dynamic active volume's source too.
+    assert "its dynamic active volume from class SPSearch" in source
 
 
 def test_local_start_needs_a_radius() -> None:
@@ -602,8 +606,6 @@ def test_every_orientation_stays_free_of_translation(monkeypatch) -> None:  # no
     part stands in for that: every orientation the dimer evaluates, trial
     rotations included, and the final mode keep a zero net translation.
     """
-    import pykmc.dimer as dimer
-
     rng = np.random.default_rng(3)
 
     def noisy_pair(x: np.ndarray) -> tuple[float, np.ndarray]:
@@ -683,3 +685,251 @@ def test_non_finite_force_after_the_saddle_keeps_it() -> None:
     assert bad.force_calls_total == saddle_calls + 6
     assert bad.min1_positions is None
     assert_no_nan(bad)
+
+
+# Dynamic active volume (DAV). The curved valley with a region start: the mode
+# starts spread over every atom and gathers on the one that hops, so the DAV
+# weights of the others fall below one while the dimer climbs.
+
+
+def region_start(n_atoms: int = 4) -> np.ndarray:
+    """Atoms in the x = 1 well, each nudged a different amount towards the saddle."""
+    x = np.array([[1.0, 0.5, VALLEY_PZ * i] for i in range(n_atoms)])
+    x[:, 0] -= 1e-3 * (1 + np.arange(n_atoms))
+    x[:, 1] -= 1e-3
+    return x
+
+
+# A ripple of 1e-4 eV with a 0.05 Å period along x on the curved valley. Its
+# slope is zero at the minima (x = +-1) and at the saddle (x = 0), so they stay
+# where they were, but the curvature changes sign on the way up: there the basin
+# latch and the line-search test decide whether DAV acts.
+RIPPLE_HEIGHT, RIPPLE_PERIOD = 1e-4, 0.05
+
+
+def rippled_valley(x: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return the energy and forces of the curved valley with a ripple along x."""
+    k = 2.0 * math.pi / RIPPLE_PERIOD
+    energy, forces = curved_valley(x)
+    forces[:, 0] += RIPPLE_HEIGHT * k * np.sin(k * x[:, 0])
+    return energy + RIPPLE_HEIGHT * float(np.cos(k * x[:, 0]).sum()), forces
+
+
+def dav_search(
+    x: np.ndarray,
+    seed: int,
+    movable: np.ndarray | None = None,
+    surface=curved_valley,  # noqa: ANN001
+    **kwargs: object,
+) -> DimerResult:
+    """Run the dimer with DAV on, region start, on the curved valley."""
+    if movable is None:
+        movable = np.ones(len(x), bool)
+    return dimer_search(
+        x,
+        OPEN_CELL,
+        NO_PBC,
+        movable,
+        0,
+        seed,
+        surface,
+        start="region",
+        dav=True,
+        **kwargs,
+    )
+
+
+def recording_weights(monkeypatch) -> list:  # noqa: ANN001
+    """Record every weight array DAV computes."""
+    weights = []
+    original = dimer._dav_weights
+
+    def record(mode, movable):  # noqa: ANN001, ANN202
+        weights.append(original(mode, movable))
+        return weights[-1]
+
+    monkeypatch.setattr(dimer, "_dav_weights", record)
+    return weights
+
+
+def assert_same_result(a: DimerResult, b: DimerResult) -> None:
+    """Check every field of two results is identical."""
+    for name, value in a._asdict().items():
+        if isinstance(value, np.ndarray):
+            assert np.array_equal(value, getattr(b, name)), name
+        else:
+            assert value == getattr(b, name), name
+
+
+def test_dav_weights_run_over_seakmc_sigmoid_range() -> None:
+    """The largest atom maps to sigmoid(16), the smallest to sigmoid(-4)."""
+    mode = np.array([[1.0, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, 0.01]])
+    weights = _dav_weights(mode, np.ones(3, bool))
+    assert weights[0] == pytest.approx(1.0 / (1.0 + math.exp(-16.0)), rel=1e-12)
+    assert weights[2] == pytest.approx(1.0 / (1.0 + math.exp(4.0)), rel=1e-12)
+    assert weights[2] < weights[1] < weights[0]
+
+
+def test_dav_weights_are_one_over_a_small_range() -> None:
+    """Sizes within a factor e of each other give a range below 4: no reweighting."""
+    mode = np.array([[1.0, 0.0, 0.0], [0.0, 0.5, 0.0]])
+    np.testing.assert_array_equal(_dav_weights(mode, np.ones(2, bool)), 1.0)
+
+
+def test_dav_weights_leave_frozen_atoms_out_of_the_range() -> None:
+    """A frozen atom's zero mode does not set the range, and its weight is one."""
+    mode = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.5, 0.0]])
+    movable = np.array([True, False, True])
+    np.testing.assert_array_equal(_dav_weights(mode, movable), 1.0)
+    # Counted as movable, the zero row would stretch the range and reweight.
+    assert _dav_weights(mode, np.ones(3, bool)).min() < 0.1
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_dav_finds_the_known_saddle(seed: int, monkeypatch) -> None:  # noqa: ANN001
+    """With DAV on, some weights fall below one and the dimer reaches the saddle."""
+    weights = recording_weights(monkeypatch)
+    x = region_start()
+    result = dav_search(x, seed)
+    assert result.success
+    assert_no_nan(result)
+    assert weights and min(w.min() for w in weights) < 0.5
+    moved = np.linalg.norm(result.saddle_positions - x, axis=1)
+    assert np.sum(moved > 0.5) == 1
+    assert result.e_saddle == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    assert result.curvature < 0
+    assert result.curvature == pytest.approx(VALLEY_CURVATURE, abs=5e-3)
+    assert result.delr2 == pytest.approx(2.0, abs=5e-3)
+    # It is the saddle the same seed reaches with DAV off.
+    off = dimer_search(
+        x, OPEN_CELL, NO_PBC, np.ones(4, bool), 0, seed, curved_valley, start="region"
+    )
+    np.testing.assert_allclose(result.saddle_positions, off.saddle_positions, atol=2e-3)
+    # The weights changed the search.
+    assert not np.array_equal(result.saddle_positions, off.saddle_positions)
+
+
+def test_dav_same_seed_same_result() -> None:
+    """A repeated seed repeats a DAV search exactly."""
+    assert_same_result(dav_search(region_start(), 5), dav_search(region_start(), 5))
+
+
+def test_dav_with_unit_weights_changes_nothing(monkeypatch) -> None:  # noqa: ANN001
+    """DAV acts only through the weights on the mode."""
+    off = dimer_search(
+        region_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        2,
+        curved_valley,
+        start="region",
+    )
+    calls = []
+
+    def unit_weights(mode, movable):  # noqa: ANN001, ANN202
+        calls.append(1)
+        return np.ones(len(mode))
+
+    monkeypatch.setattr(dimer, "_dav_weights", unit_weights)
+    on = dav_search(region_start(), 2)
+    assert calls
+    assert_same_result(on, off)
+
+
+@pytest.mark.parametrize(
+    "surface, seed, barrier",
+    [
+        (curved_valley, 1, VALLEY_BARRIER),
+        # Four atoms each carry the ripple's top, 1e-4 eV, at the saddle.
+        (rippled_valley, 5, VALLEY_BARRIER + 4 * RIPPLE_HEIGHT),
+    ],
+)
+def test_dav_acts_only_under_seakmc_conditions(
+    surface,  # noqa: ANN001
+    seed: int,
+    barrier: float,
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """Each reweighting follows SEAKMC's four conditions.
+
+    The curvature measured before that rotation is positive, the last line
+    search found negative curvature, no step has yet used a negative
+    curvature, and more than four translation steps are done. None happens in
+    the final rotation at the converged centre. On the rippled valley the
+    latch and the line-search test each stop reweightings the other
+    conditions would allow.
+    """
+    events = []
+    rotational_force = dimer._rotational_force
+    effective_force = dimer._effective_force
+    secant_step = dimer._secant_step
+    weights = dimer._dav_weights
+
+    def record_rotation(f0, f1, mode, separation):  # noqa: ANN001, ANN202
+        f_rot, curvature = rotational_force(f0, f1, mode, separation)
+        events.append(("measured", curvature))
+        return f_rot, curvature
+
+    def record_step(forces, mode, curvature):  # noqa: ANN001, ANN202
+        events.append(("used", curvature))
+        return effective_force(forces, mode, curvature)
+
+    def record_line(proj0, proj1, trial_step, max_step):  # noqa: ANN001, ANN202
+        events.append(("line", (proj0 - proj1) / trial_step))
+        return secant_step(proj0, proj1, trial_step, max_step)
+
+    def record_weights(mode, movable):  # noqa: ANN001, ANN202
+        events.append(("dav", None))
+        return weights(mode, movable)
+
+    monkeypatch.setattr(dimer, "_rotational_force", record_rotation)
+    monkeypatch.setattr(dimer, "_effective_force", record_step)
+    monkeypatch.setattr(dimer, "_secant_step", record_line)
+    monkeypatch.setattr(dimer, "_dav_weights", record_weights)
+    result = dav_search(region_start(), seed, surface=surface)
+    assert result.success
+    assert result.e_saddle == pytest.approx(barrier, abs=1e-5)
+    assert result.curvature < 0
+
+    kinds = [kind for kind, _ in events]
+    dav_at = [i for i, kind in enumerate(kinds) if kind == "dav"]
+    assert dav_at
+    first_negative_use = next(
+        i for i, (kind, c) in enumerate(events) if kind == "used" and c < 0
+    )
+    last_line = max(i for i, kind in enumerate(kinds) if kind == "line")
+    for i in dav_at:
+        before = events[:i]
+        # Measured before the pi/4 trial: the second-last measurement.
+        measured = [c for kind, c in before if kind == "measured"]
+        assert measured[-2] > 0
+        lines = [c for kind, c in before if kind == "line"]
+        assert len(lines) > 4 and lines[-1] < 0
+        assert i < first_negative_use
+        assert i < last_line
+
+
+def test_dav_keeps_frozen_atoms_frozen(monkeypatch) -> None:  # noqa: ANN001
+    """A frozen atom never moves and keeps weight one; the atom set is unchanged."""
+    weights = recording_weights(monkeypatch)
+    movable = np.array([True, False, True, True])
+    x = region_start()
+    x[1] += [0.2, -0.2, 0.1]  # off its minimum: a large force
+    result = dav_search(x, 3, movable)
+    assert result.success
+    # The saddle's energy is the barrier plus the frozen atom's own energy.
+    frozen_energy, _ = curved_valley(x[1:2])
+    assert result.e_saddle - frozen_energy == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    assert result.curvature == pytest.approx(VALLEY_CURVATURE, abs=5e-3)
+    for positions in (
+        result.saddle_positions,
+        result.min1_positions,
+        result.min2_positions,
+    ):
+        assert positions.shape == x.shape
+        assert np.array_equal(positions[1], x[1])
+    assert np.array_equal(result.mode[1], np.zeros(3))
+    assert weights and min(w[movable].min() for w in weights) < 0.5
+    assert all(w.shape == (4,) and w[1] == 1.0 for w in weights)

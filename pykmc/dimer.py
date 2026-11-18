@@ -1,7 +1,8 @@
 # The dimer method in this module is ported from SEAKMC_py
 # (https://github.com/SEAKMC/SEAKMC_py_parallel, seakmc_p/spsearch/SPSearch.py,
-# class Dimer; source file header: author Tao Liang, Copyright 2021), which is
-# distributed under the following licence:
+# class Dimer, and its dynamic active volume from class SPSearch; source file
+# header: author Tao Liang, Copyright 2021), which is distributed under the
+# following licence:
 #
 # BSD 3-Clause License
 #
@@ -70,8 +71,24 @@ Changes from SEAKMC:
 - the push-off is a fixed distance along the mode, and both sides are
   relaxed with FIRE through the same callback;
 - SEAKMC's TransHorizon rule, rotation conjugate gradient (unreachable there),
-  dynamic active volume, step decay, angle check and preloaded starts are not
-  ported.
+  step decay, angle check and preloaded starts are not ported.
+
+Dynamic active volume (DAV, Liang and Xu 2023), off by default (``dav``): while
+the dimer climbs out of the basin, each rotation's new mode is multiplied atom
+by atom by a weight between 0 and 1 and renormalised, so the mode gathers on
+the atoms that move most. It acts after the rotation to the analytic angle
+when the curvature measured before that rotation is positive, the last
+translation's line search found negative curvature, no translation step has
+yet used a negative curvature, and more than four translation steps are done.
+With N_i the atom's part of the mode and x_i = ln(|N_i|^4 + e^-20), the weight
+is a sigmoid of x_i rescaled so that the smallest x_i on the movable atoms maps
+to -4 and the largest to 16; when the range of x_i is below 4 every weight is
+one. Weights compound from one rotation to the next. Only the mode is reweighted: forces, steps and the atom set are
+unchanged. This is SEAKMC's ``RescaleVN`` with its default settings. Changes
+from SEAKMC: the weights come from the movable atoms only, since the frozen
+atoms' zero mode would set the range; and DAV is off in the final rotation at
+the converged centre. SEAKMC's other weightings (``RAS``, ``SUM``), its step
+scale and its moving average are not ported.
 
 Coordinates: the search keeps its own unwrapped positions and passes them to
 the callback as they are. Distances use the minimum image on the periodic axes
@@ -115,6 +132,19 @@ _ROTATION_THRESHOLD = 0.1
 _MAX_ROTATIONS = 3
 # An effective force with a smaller 3N norm gives no direction to move, eV/Å.
 _ZERO_FORCE = 1e-10
+
+# Dynamic active volume, SEAKMC's HandleVN defaults.
+# DAV acts once more than this many translation steps are done (IgnoreSteps).
+_DAV_IGNORE_STEPS = 4
+# Per-atom value ln(|N_i|**_DAV_POWER + exp(_DAV_FLOOR)) (PowerOnV, MinValue4LOGV).
+_DAV_POWER = 4
+_DAV_FLOOR = -20.0
+# Below this range of the value every weight is one (MinSpan4LOGV).
+_DAV_MIN_RANGE = 4.0
+# The sigmoid's argument runs over this many units across the range (XRange4LOGV).
+_DAV_SIGMOID_RANGE = 20.0
+# The sigmoid is centred this fraction of the range above its bottom (Ratio4Zero4LOGV).
+_DAV_CENTRE = 0.2
 
 EnergyAndForces = Callable[[np.ndarray], tuple[float, np.ndarray]]
 
@@ -216,6 +246,7 @@ def dimer_search(
     max_minimisation_steps: int = 5000,
     min_translations: int = 5,
     remove_translation: bool = False,
+    dav: bool = False,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
 
@@ -278,6 +309,10 @@ def dimer_search(
         with every atom movable, rigid translation is then a zero-curvature
         mode the rotation would otherwise turn the dimer into. Leave it off
         for an external field. Ignored when an atom is frozen.
+    dav : bool
+        Reweight the mode atom by atom while climbing out of the basin
+        (SEAKMC's dynamic active volume; see the module docstring). Applied
+        before ``remove_translation``.
 
     Returns
     -------
@@ -380,9 +415,13 @@ def dimer_search(
     mode /= mode_norm
 
     def rotate(
-        x0: np.ndarray, f0: np.ndarray, mode: np.ndarray
+        x0: np.ndarray, f0: np.ndarray, mode: np.ndarray, climbing: bool = False
     ) -> tuple[np.ndarray, float, bool]:
-        """Rotate the dimer at ``x0``; return the mode, its curvature, exact."""
+        """Rotate the dimer at ``x0``; return the mode, its curvature, exact.
+
+        ``climbing``: the step meets DAV's conditions other than the curvature,
+        which is tested before each rotation.
+        """
         n_rotations = 0
         while True:
             _, f1 = evaluate(x0 + separation * mode)
@@ -410,6 +449,10 @@ def dimer_search(
             f_rot2 = float(np.vdot(f_rot_trial, trial_direction))
             phi = 0.5 * math.atan2(f_rot1, -f_rot2)
             mode, _ = _rotate(trial, trial_direction, phi - 0.25 * math.pi)
+            if climbing and curvature > 0:
+                # DAV; ``curvature`` is still the value measured before this
+                # rotation (SEAKMC's ROCURV).
+                mode = mode * _dav_weights(mode, mask)[:, None]
             mode = untranslated(mode * weight)
             mode /= np.linalg.norm(mode)
 
@@ -430,6 +473,8 @@ def dimer_search(
         x0, e0, f0 = x_start.copy(), e_start, f_start
         f_last = np.zeros_like(x0)  # effective force at the last step's start
         search_dir = np.zeros_like(x0)  # conjugate direction
+        line_curvature = 0.0  # from the last line search (SEAKMC's TRCURV)
+        in_basin = True  # no step has used a negative curvature yet
         saddle = None
         for step in range(max_translations):
             if step > 0:
@@ -444,7 +489,12 @@ def dimer_search(
                 saddle = x0
                 break
 
-            mode, curvature, _ = rotate(x0, f0, mode)
+            climbing = (
+                dav and in_basin and line_curvature < 0 and step > _DAV_IGNORE_STEPS
+            )
+            mode, curvature, _ = rotate(x0, f0, mode, climbing)
+            if curvature < 0:
+                in_basin = False
             f_eff = _effective_force(f0, mode, curvature)
 
             # First half: Polak-Ribiere direction with Powell restart, then a
@@ -467,6 +517,7 @@ def dimer_search(
             # Second half: secant step along the direction, capped.
             proj0 = float(np.vdot(f_last, unit_dir))
             proj1 = float(np.vdot(f_eff_trial, unit_dir))
+            line_curvature = (proj0 - proj1) / trial_step
             x0 = x_trial + _secant_step(proj0, proj1, trial_step, max_step) * unit_dir
         if saddle is None:
             return result("max_iterations")
@@ -528,6 +579,25 @@ def _rotational_force(
     f_rot = (df - mode * np.vdot(df, mode)) / (2.0 * separation)
     curvature = float(np.vdot(f2 - f1, mode)) / (2.0 * separation)
     return f_rot, curvature
+
+
+def _dav_weights(mode: np.ndarray, movable: np.ndarray) -> np.ndarray:
+    """Return each atom's DAV weight, (N,), from the mode on the movable atoms.
+
+    SEAKMC's ``compute_xRescale_logdisps`` and ``generate_sigmoid_scale`` with
+    its default settings. Frozen atoms get weight one; their mode is zero.
+    """
+    weights = np.ones(len(mode))
+    size = np.linalg.norm(mode[movable], axis=1)
+    value = np.log(size**_DAV_POWER + math.exp(_DAV_FLOOR))
+    bottom = float(value.min())
+    value_range = float(value.max()) - bottom
+    if value_range < _DAV_MIN_RANGE:
+        return weights
+    scale = value_range / _DAV_SIGMOID_RANGE
+    centre = bottom + _DAV_CENTRE * value_range
+    weights[movable] = 1.0 / (1.0 + np.exp(-(value - centre) / scale))
+    return weights
 
 
 def _rotate(
