@@ -19,6 +19,7 @@ import pytest
 lammps = pytest.importorskip("lammps")
 
 from ase.cell import Cell  # noqa: E402
+from ase.geometry import wrap_positions  # noqa: E402
 from mpi4py import MPI  # noqa: E402
 
 from pykmc.dimer import DimerResult  # noqa: E402
@@ -226,6 +227,100 @@ class TestDimerSearchSerial:
         np.testing.assert_array_equal(engine.get_positions(), positions_before)
         assert engine.get_potential_energy(recompute=False) == energy_before
         assert engine.get_potential_energy() == energy_before
+
+    def test_dav_neighbor_reuse_repeats_vacancy_hop(self, engine, vacancy):
+        """Full Dav-D searches keep their saddles, endpoints and force counts."""
+        options = {**OPTIONS, "dav": True}
+        fresh = _search(engine, vacancy, options=options)
+        movable = _frozen_movable(vacancy)
+        frozen = _search(engine, vacancy, options=options, movable=movable)
+        assert fresh.success and frozen.success
+
+        reuse = {**options, "reuse_neighbor_list": True}
+        _assert_same(_search(engine, vacancy, options=reuse), fresh, atol=1e-8)
+        # Re-enter the same private engine with a different set of frozen atoms.
+        _assert_same(
+            _search(engine, vacancy, options=reuse, movable=movable), frozen, atol=1e-8
+        )
+        # Switching back restores the ordinary worker force protocol exactly.
+        _assert_same(_search(engine, vacancy, options=options), fresh, atol=0)
+        private = engine._extensions["DimerSearchExtension"]._force_engine
+        assert not private.lmp.has_id("fix", "f_dimer_displace")
+
+    def test_reused_forces_on_rotated_tilted_slab(self, vacancy, monkeypatch):
+        """Compare queries across rebuilds, repeated frames and periodic jumps."""
+        cell = np.array(vacancy.cell)
+        cell[1, 0] = 0.2 * cell[1, 1]
+        positions = vacancy.positions.copy()
+        positions[:, 0] += 0.2 * positions[:, 1]
+        positions[:, 2] += 2
+        cell[2, 2] += 4
+        rotation = np.array([[0.8, -0.6, 0], [0.6, 0.8, 0], [0, 0, 1]])
+        cell = Cell(cell @ rotation)
+        system = _Cell(
+            positions @ rotation,
+            vacancy.types,
+            cell,
+            np.array([True, True, False]),
+            vacancy.central,
+        )
+        # A one-element setfl file also has the single EAM/FS density function.
+        config = _LammpsConfig(pair_style="eam/fs")
+        engine = _make_engine(
+            config,
+            MPI.COMM_SELF,
+            system.positions,
+            system.types,
+            cell,
+            system.pbc,
+            DimerSearchExtension,
+        )
+        frozen = np.arange(1, len(positions), 4)
+        movable = np.setdiff1d(np.arange(len(positions)), frozen)
+        steps = []
+
+        def compare_frames(
+            start, _cell, _pbc, mask, central, _seed, evaluate, **kwargs
+        ):
+            probe = start.copy()
+            for increment in (
+                [0, 0, 0],
+                *([[0.1, 0.05, 0]] * 8),
+                [0, 0, 0],
+                2 * cell[0] - 3 * cell[1],
+                [-0.8, 0, 0],
+                [0.01, 0, 0],
+            ):
+                probe[central] += increment
+                energy, force = evaluate(probe)
+                # ASE wraps the reference coordinates only on periodic axes.
+                wrapped = wrap_positions(probe, cell, pbc=system.pbc, eps=0)
+                expected_energy, expected_force = engine.get_energy_and_forces(wrapped)
+                np.testing.assert_allclose(energy, expected_energy, rtol=0, atol=1e-9)
+                np.testing.assert_allclose(
+                    force[mask], expected_force[mask], rtol=0, atol=1e-9
+                )
+                np.testing.assert_array_equal(force[~mask], 0)
+                private = engine._extensions["DimerSearchExtension"]._force_engine
+                steps.append(private.lmp.get_thermo("step"))
+
+        monkeypatch.setattr("pykmc.engine.dimer_search.run_dimer", compare_frames)
+        try:
+            _search(
+                engine, system, options={"reuse_neighbor_list": True}, movable=movable
+            )
+        finally:
+            _close(engine)
+        # Small increments used successive Verlet steps. The periodic image
+        # change and the large physical jump each ran a full absolute setup.
+        assert list(np.diff(steps)) == [1] * 9 + [0, 0, 1]
+
+    def test_neighbor_reuse_rejects_unsupported_pair_style(
+        self, engine, vacancy, monkeypatch
+    ):
+        monkeypatch.setattr(engine.config, "pair_style", "hybrid/overlay eam/alloy")
+        with pytest.raises(ValueError, match="requires pair_style"):
+            _search(engine, vacancy, options={"reuse_neighbor_list": True})
 
     def test_frozen_atoms_stay_and_lammps_reports_zero_force(
         self, engine, vacancy, monkeypatch

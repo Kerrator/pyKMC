@@ -483,6 +483,10 @@
   <details><summary>Description</summary>
   Dynamic active volume (SEAKMC, Liang and Xu 2023): while the dimer climbs out of the basin, its direction is weighted atom by atom towards the atoms that move most. It never adds or removes atoms, and it is separate from `[Control] active_volume`.
   </details>
+- **`reuse_neighbor_list`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  Reuse the LAMMPS neighbor list between dimer force evaluations. Supported for the native eam/alloy and eam/fs pair styles.
+  </details>
 
 ---
 

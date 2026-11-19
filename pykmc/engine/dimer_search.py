@@ -16,13 +16,15 @@ while the leader searches.
 
 from __future__ import annotations
 
+import ctypes
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 import numpy as np
 from ase.cell import Cell
 from mpi4py import MPI
 
-from ..dimer import DimerResult
+from ..config import validate_dimer_neighbor_reuse
+from ..dimer import DimerResult, _wrap
 from ..dimer import dimer_search as run_dimer
 from .base import Engine, EngineExtension
 
@@ -34,6 +36,49 @@ __all__ = ["DimerSearchExtension"]
 # LAMMPS ids of the group and fix holding the frozen atoms during a search.
 _FROZEN_GROUP = "g_dimer_frozen"
 _FROZEN_FIX = "f_dimer_frozen"
+_NEIGHBOR_SKIN = 0.5  # Å
+
+
+class _EAMForceEvaluator:
+    """Evaluate prescribed positions on the private serial engine for one search."""
+
+    def __init__(self, engine: LammpsEngine, cell: Cell, pbc: np.ndarray) -> None:
+        self.engine = engine
+        self.cell = np.asarray(cell)
+        self.pbc = pbc
+        self.fixed_axes = None if pbc.all() else np.linalg.inv(self.cell)[:, ~pbc]
+        self.previous: np.ndarray | None = None
+
+    def __call__(self, positions: np.ndarray) -> tuple[float, np.ndarray]:
+        """Return the fresh EAM potential energy and forces at this geometry."""
+        engine = self.engine
+        delta = None if self.previous is None else positions - self.previous
+        small_step = delta is not None and np.max(np.abs(delta)) <= _NEIGHBOR_SKIN / 2
+        if small_step and self.fixed_axes is not None:
+            # Let full setup detect a lost atom immediately at a fixed face.
+            fixed = positions @ self.fixed_axes
+            small_step = np.all((fixed >= 0) & (fixed < 1))
+        if small_step:
+            # With dt = 1 in metal units, nve/noforce translates every atom by
+            # its prescribed increment. Verlet updates ghosts and checks the
+            # accumulated displacement against half the skin before computing
+            # the EAM energy and forces. Scattering x and skipping setup would
+            # bypass this part of the integration loop.
+            velocity = np.ascontiguousarray(
+                engine._positions_to_lammps(delta), dtype=np.float64
+            )
+            engine.lmp.scatter_atoms(
+                "v", 1, 3, velocity.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+            )
+            engine.command("run 1 pre no post no")
+            values = engine.lmp.get_thermo("pe"), engine._gather_forces()
+        else:
+            # A new search may change the frozen group. Use full setup for it
+            # and for large jumps, including a change of periodic image.
+            values = engine.get_energy_and_forces(_wrap(positions, self.cell, self.pbc))
+        # The minimizer can update its positions in place between calls.
+        self.previous = positions.copy()
+        return values
 
 
 class DimerSearchExtension(EngineExtension):
@@ -41,8 +86,8 @@ class DimerSearchExtension(EngineExtension):
 
     The instance takes the potential from the worker engine's configuration
     and the system (types, cell, periodicity) from the request. It is kept for
-    later searches while those stay the same; a request with another system
-    resets it with the LAMMPS ``clear`` command and sets it up again. Any
+    later searches while the system and neighbor-list mode stay the same.
+    Changing either resets it with the LAMMPS ``clear`` command. Any
     error during a search closes and drops it, so the next search builds a new
     one.
 
@@ -95,7 +140,9 @@ class DimerSearchExtension(EngineExtension):
             Keyword options of :func:`pykmc.dimer.dimer_search`, such as
             ``start``, ``start_radius`` and ``force_tolerance``. An
             interatomic potential is translation-invariant, so
-            ``remove_translation`` is True unless set here.
+            ``remove_translation`` is True unless set here. The worker option
+            ``reuse_neighbor_list`` enables Verlet neighbor-list reuse for
+            native static ``eam/alloy`` and ``eam/fs`` (default False).
 
         Returns
         -------
@@ -131,8 +178,14 @@ class DimerSearchExtension(EngineExtension):
         mask[movable] = True
         frozen = np.flatnonzero(~mask)
 
+        search_options = {"remove_translation": True, **(options or {})}
+        reuse = search_options.pop("reuse_neighbor_list", False)
+        if not isinstance(reuse, (bool, np.bool_)):
+            raise ValueError("reuse_neighbor_list must be a boolean")
+        if reuse:
+            validate_dimer_neighbor_reuse(self.engine.config.pair_style)
         try:
-            force_engine = self._dedicated_engine(types, positions, cell, pbc)
+            force_engine = self._dedicated_engine(types, positions, cell, pbc, reuse)
             if frozen.size:
                 ids = " ".join(str(i + 1) for i in frozen)
                 force_engine.command(f"group {_FROZEN_GROUP} id {ids}")
@@ -146,8 +199,10 @@ class DimerSearchExtension(EngineExtension):
                 mask,
                 central_atom,
                 seed,
-                force_engine.get_energy_and_forces,
-                **{"remove_translation": True, **(options or {})},
+                _EAMForceEvaluator(force_engine, cell, pbc)
+                if reuse
+                else force_engine.get_energy_and_forces,
+                **search_options,
             )
             if frozen.size:
                 force_engine.command(f"unfix {_FROZEN_FIX}")
@@ -166,11 +221,12 @@ class DimerSearchExtension(EngineExtension):
         positions: np.ndarray,
         cell: Cell,
         pbc: np.ndarray,
+        reuse: bool,
     ) -> LammpsEngine:
         """Return the serial instance, set up for this system.
 
-        Built on first use; reset with ``clear`` if the types, cell or
-        periodicity differ from the last search's.
+        Built on first use and reset when the types, cell, periodicity or
+        neighbor-list mode differ from the last search's.
         """
         from .lammps import LammpsEngine
 
@@ -178,6 +234,7 @@ class DimerSearchExtension(EngineExtension):
             tuple(str(t) for t in types),
             np.array(cell).tobytes(),
             tuple(bool(p) for p in pbc),
+            reuse,
         )
         force_engine = self._force_engine
         if force_engine is None:
@@ -195,8 +252,16 @@ class DimerSearchExtension(EngineExtension):
             force_engine.command("clear")
             force_engine.initialize_parameters()
         if self._force_engine_system is None:
+            if reuse:
+                positions = _wrap(positions, np.asarray(cell), pbc)
             force_engine.initialize_system(types, positions, cell, pbc)
             force_engine.initialize_potential()
+            if reuse:
+                force_engine.command(f"neighbor {_NEIGHBOR_SKIN} bin")
+                force_engine.command("neigh_modify delay 0 every 1 check yes")
+                force_engine.command("thermo_style custom step pe")
+                force_engine.command("timestep 1")
+                force_engine.command("fix f_dimer_displace all nve/noforce")
             self._force_engine_system = system
         return force_engine
 

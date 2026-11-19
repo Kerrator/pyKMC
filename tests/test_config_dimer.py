@@ -50,15 +50,37 @@ def test_dimer_defaults_follow_the_design_record(tmp_path: Path) -> None:
     assert dimer.max_step == 0.05
 
 
-def test_dimer_keys_are_the_core_keywords_with_its_defaults() -> None:
-    """The section goes to the dimer core as keywords, unchanged."""
+def test_dimer_algorithm_options_match_the_core_keywords_and_defaults() -> None:
+    """The worker consumes the engine option and forwards the algorithm options."""
     keywords = inspect.signature(dimer_search).parameters
     section = DimerConfig(start_radius=3.0).model_dump()
 
+    assert section.pop("reuse_neighbor_list") is False
     for name, value in section.items():
         assert name in keywords
         if name != "start_radius":
             assert keywords[name].default == value
+
+
+def test_dimer_neighbor_reuse_is_opt_in(tmp_path: Path) -> None:
+    path = _write_input(
+        tmp_path, dimer="start_radius = 3.0\nreuse_neighbor_list = True"
+    )
+
+    assert Config.from_ini_file(path).dimer.model_dump()["reuse_neighbor_list"] is True
+
+
+def test_dimer_rejects_unsupported_neighbor_reuse_before_dispatch(
+    tmp_path: Path,
+) -> None:
+    path = Path(_write_input(tmp_path))
+    hybrid = path.read_text().replace("eam/alloy", "hybrid/overlay eam/alloy zbl 1 2")
+    path.write_text(hybrid)
+    assert Config.from_ini_file(str(path)).dimer.reuse_neighbor_list is False
+
+    path.write_text(hybrid + "reuse_neighbor_list = True\n")
+    with pytest.raises(ValueError, match="reuse_neighbor_list requires pair_style"):
+        Config.from_ini_file(str(path))
 
 
 def test_dimer_without_dimer_section_fails(tmp_path: Path) -> None:

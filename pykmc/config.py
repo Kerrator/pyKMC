@@ -301,6 +301,11 @@ class DimerConfig(BaseModel):
         "most. It never adds or removes atoms, and it is separate from "
         "`[Control] active_volume`.",
     )
+    reuse_neighbor_list: bool = Field(
+        default=False,
+        description="Reuse the LAMMPS neighbor list between dimer force evaluations. "
+        "Supported for the native eam/alloy and eam/fs pair styles.",
+    )
 
     @model_validator(mode="after")
     def check_start_and_steps(self) -> "DimerConfig":
@@ -642,6 +647,12 @@ class ActiveVolume(BaseModel):
         default=False,
         description="Debug flag for active volume size checks",
     )
+
+
+def validate_dimer_neighbor_reuse(pair_style: str) -> None:
+    """Check that the dimer can reuse neighbor lists for this potential."""
+    if pair_style.strip() not in {"eam/alloy", "eam/fs"}:
+        raise ValueError("reuse_neighbor_list requires pair_style eam/alloy or eam/fs")
 
 
 class LammpsConfig(BaseModel):
@@ -1153,6 +1164,13 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        if (
+            self.eventsearch.style == "dimer"
+            and self.dimer is not None
+            and self.dimer.reuse_neighbor_list
+            and self.lammps is not None
+        ):
+            validate_dimer_neighbor_reuse(self.lammps.pair_style)
         return self
 
     @model_validator(mode="after")

@@ -253,6 +253,10 @@ start_radius = 3.0
 - `dav` : SEAKMC's dynamic active volume (Liang and Xu 2023), off by default. While the dimer climbs out of the
   basin, its direction is weighted atom by atom towards the atoms that move most. The weights come from the movable
   atoms only; DAV never adds or removes atoms and is separate from `active_volume` in `[Control]`.
+- Set `reuse_neighbor_list = True` to reuse LAMMPS neighbor lists between dimer force evaluations
+  with the native `eam/alloy` or `eam/fs` pair style. Each search starts with a fresh list.
+  LAMMPS checks subsequent displacements against its neighbor skin. The option defaults to `False`
+  and applies only to the dimer worker's private LAMMPS instance.
 
 Each dimer search runs on one LAMMPS instance of its own, on the first rank of its session. A session with several
 ranks therefore gets no speed-up on dimer force calls: its other ranks wait while the search runs. Use more
