@@ -77,6 +77,7 @@ class EventSearch:
 
     def __init__(self, strategy: EventSearchStrategy) -> None:
         self._strategy = strategy
+        self._cell: Optional[np.ndarray] = None
         self.system: Optional[System] = None
         self.results: Optional[list[Result[EventSearchOutput, ErrorInfo]]] = None
 
@@ -103,8 +104,8 @@ class EventSearch:
             The KMC simulation loggers.
 
         """
-        self.system = system
-        self.results = []
+        cell = system.cell.copy()
+        results = []
         loggers.info(
             "log",
             "\t :=> Searching {} reference events".format(
@@ -117,7 +118,7 @@ class EventSearch:
             SearchRequest(
                 central_atom=atom,
                 positions=system.positions.copy(),
-                cell=system.cell.copy(),
+                cell=cell.copy(),
                 types=system.types.copy(),
                 pbc=np.array(system.pbc, dtype=bool),
                 seed=random.getrandbits(32) if self._strategy.uses_seed else None,
@@ -127,11 +128,15 @@ class EventSearch:
         ]
         futures = self._strategy.submit(requests, manager)
         for f in futures:
-            self.results.append(f.result())
+            results.append(f.result())
 
             loggers.progress_bar(
-                "progress", len(self.results), len(central_atom_research_list)
+                "progress", len(results), len(central_atom_research_list)
             )
+
+        self.system = system
+        self._cell = cell
+        self.results = results
 
     @property
     def engine_extensions(self) -> list[type[EngineExtension]]:
@@ -171,7 +176,7 @@ class EventSearch:
 
         """
         # Translate atoms so that the atom that moves the most is at the center of the cell at start event, prevent pbc problem with psr
-        cell = self.system.cell
+        cell = self._cell
         ax, ay, az = cell[0][0], cell[1][1], cell[2][2]
         # displacement
         move_atom_idx = event_search_output.move_atom_index

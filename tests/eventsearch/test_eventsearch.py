@@ -88,15 +88,29 @@ def test_create_dispatches_on_eventsearch_style() -> None:
     assert event_search._strategy.config is config
 
 
-def test_kmc_builds_the_facade_once_and_passes_system_manager_loggers() -> None:
+def test_kmc_reuses_strategy_and_preserves_each_search_batch() -> None:
     class Manager:
         def __init__(self) -> None:
             self.calls = []
 
         def submit(self, op_name: str, **kwargs) -> Future:
             self.calls.append((op_name, kwargs))
+            atom = kwargs["central_atom_idx"]
+            positions = kwargs["positions"]
             future = Future()
-            future.set_result(kwargs["central_atom_idx"])
+            future.set_result(
+                Ok(
+                    EventSearchOutput(
+                        central_atom_index=atom,
+                        min1_positions=positions,
+                        saddle_positions=positions + 0.1,
+                        min2_positions=positions + 0.2,
+                        dE_forward=0.5,
+                        dE_backward=0.4,
+                        move_atom_index=atom,
+                    )
+                )
+            )
             return future
 
     config = Config.from_ini_file(str(INPUT))
@@ -108,16 +122,25 @@ def test_kmc_builds_the_facade_once_and_passes_system_manager_loggers() -> None:
     kmc.loggers = StubLoggers()
 
     first = kmc.execute_event_searches([1, 0])
+    kmc.system.cell *= 2
     second = kmc.execute_event_searches([3])
 
     assert isinstance(facade._strategy, PartnStrategy)
     assert facade._strategy.config is config
-    assert first is facade and second is facade
+    assert first._strategy is second._strategy is facade._strategy
+    assert [r.ok_value().central_atom_index for r in first.results] == [1, 0]
+    assert [r.ok_value().central_atom_index for r in second.results] == [3]
+    for batch, atoms, center in [(first, [1, 0], 5.0), (second, [3], 10.0)]:
+        successes = batch.get_successes_results()
+        assert [out.central_atom_index for out in successes] == atoms
+        for out in successes:
+            np.testing.assert_allclose(out.min1_positions[out.move_atom_index], center)
+            np.testing.assert_array_equal(out.cell, np.eye(3) * 2 * center)
     assert [c[0] for c in kmc.manager.calls] == ["partn_search"] * 3
     assert [c[1]["central_atom_idx"] for c in kmc.manager.calls] == [1, 0, 3]
     assert all(c[1]["config"] is config for c in kmc.manager.calls)
     assert facade.system is kmc.system
-    assert facade.results == [3]
+    assert kmc.event_search.results is second.results
     assert kmc.loggers.lines == [
         ("log", "\t :=> Searching 2 reference events"),
         ("log", "\t :=> Searching 1 reference events"),
@@ -223,4 +246,4 @@ def test_successes_are_centred_on_the_move_atom() -> None:
         (out.min2_positions, min2),
     ):
         assert np.allclose(got, (start + shift) % 10.0)
-    assert out.cell is system.cell
+    np.testing.assert_array_equal(out.cell, system.cell)

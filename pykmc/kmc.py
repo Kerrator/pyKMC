@@ -664,13 +664,15 @@ class KMC:
         Returns
         -------
         EventSearch
-            The EventSearch class containing results of the event searches.
+            The completed batch, retaining its results and centering cell for later use.
 
         """
         self.event_search.execute(
             central_atom_research_list, self.system, self.manager, self.loggers
         )
-        return self.event_search
+        # execute replaces the result list and cell on each call. Keep this
+        # batch's references while sharing the configured strategy.
+        return copy.copy(self.event_search)
 
     def log_event_searches(
         self,
