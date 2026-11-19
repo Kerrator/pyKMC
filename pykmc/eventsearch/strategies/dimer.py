@@ -11,9 +11,9 @@ from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import numpy as np
-from ase.geometry import find_mic
 
 from ...atomic_environment import AtomicEnvironment
+from ...dimer import _minimum_image
 from ...engine.dimer_search import DimerSearchExtension
 from ...search_rules import (
     SearchEndpoints,
@@ -85,10 +85,10 @@ class DimerStrategy(EventSearchStrategy):
         positions = np.asarray(system.positions)
         pbc = np.array(system.pbc, dtype=bool)
         if self.config.control.active_volume:
-            _, distances = find_mic(
+            offsets = _minimum_image(
                 positions - positions[central_atom], system.cell, pbc=pbc
             )
-            movable = distances <= self.config.activevolume.rmov
+            movable = np.linalg.norm(offsets, axis=1) <= self.config.activevolume.rmov
         else:
             movable = np.ones(len(positions), dtype=bool)
         if self.config.frozen_atoms is not None:

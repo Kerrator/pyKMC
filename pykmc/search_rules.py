@@ -27,6 +27,7 @@ from typing import Any, Callable, NamedTuple, Optional
 import numpy as np
 from ase.geometry import find_mic
 
+from .dimer import _minimum_image
 from .result import EventSearchOutput, Err, ErrorInfo, ErrorType, Ok, Result
 
 __all__ = [
@@ -247,16 +248,6 @@ def move_atom(
         pbc,
     )
     return int(np.argmax(np.linalg.norm(displacements, axis=1)))
-
-
-def _minimum_image(
-    displacements: np.ndarray, cell: np.ndarray, pbc: np.ndarray
-) -> np.ndarray:
-    """Return ``displacements`` with the minimum image on the periodic axes."""
-    cell = np.asarray(cell, dtype=float)
-    pbc = np.asarray(pbc, dtype=bool)
-    fractional = displacements @ np.linalg.inv(cell)
-    return displacements - np.round(fractional[:, pbc]) @ cell[pbc]
 
 
 def orient_mode(

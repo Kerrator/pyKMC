@@ -270,9 +270,6 @@ def test_active_volume_on_moves_atoms_within_rmov_across_the_boundary() -> None:
 
 
 def test_rmov_is_the_boundary_of_the_movable_sphere() -> None:
-    # Distances come from ase's find_mic, as in the active volume's own crop
-    # (define_AV), so an atom at exactly rmov carries its round-off; test either
-    # side of the boundary instead.
     strategy = DimerStrategy(_av_config(rmov=3.0))
     # Atom 1 is 1e-6 Å inside rmov along x, atom 2 is 1e-6 Å outside along y.
     positions = np.array(
@@ -287,6 +284,14 @@ def test_active_volume_on_honours_a_non_periodic_axis() -> None:
     system = _system(POSITIONS, pbc=[False, True, True])
 
     assert strategy.movable_atoms(0, system).tolist() == [0, 2]
+
+
+def test_active_volume_in_a_skew_cell_uses_the_shortest_image() -> None:
+    """Include an atom reached only by a combination of periodic translations."""
+    system = _system([[0, 0, 0], [1.5, 0, 0]])
+    system.cell = np.array([[10, 0, 0], [4.8, 0.4, 0], [0, 0, 8]])
+    strategy = DimerStrategy(_av_config(rmov=1.4))
+    assert strategy.movable_atoms(0, system).tolist() == [0, 1]
 
 
 def test_active_volume_off_moves_every_atom() -> None:
@@ -433,6 +438,34 @@ def test_move_atom_on_a_non_periodic_axis_takes_the_raw_displacement() -> None:
     assert move_atom(start, saddle, CELL, np.array([False, True, True])) == 0
     saddle[0, 0] = 0.2 + 0.1
     assert move_atom(start, saddle, CELL, np.array([False, True, True])) == 1
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_triclinic_mover_and_mode_use_the_oriented_minimum(swapped: bool) -> None:
+    """Measure the mover and mode from the closest endpoint in either order."""
+    cell = np.array([[10.0, 0, 0], [4.0, 10.0, 0], [0, 0, 20.0]])
+    start = np.array([[1.0, 1.0, 1.0], [4.0, 2.0, 3.0]])
+    saddle = start + [[6.86, 4.9, 0], [0, 0, 6.2]]
+    other = saddle.copy()
+    other[0, 0] -= 0.7
+    mode = np.zeros_like(start)
+    mode[0, 0] = 1
+    raw = _raw(
+        start,
+        min1=other if swapped else start,
+        min2=start if swapped else other,
+        delr1=8.0 if swapped else 0.0,
+        delr2=0.0 if swapped else 8.0,
+        saddle=saddle,
+    )._replace(mode=mode)
+    request = SearchRequest(0, start, cell, np.array(["Ni", "Ni"]), PBC, 7, None)
+
+    out = dimer_search_result(raw, request, delr_threshold=0.5).ok_value()
+
+    # Atom 0's shortest displacement is (-3.14, 4.9, 0), length 5.82 Å.
+    assert out.move_atom_index == 1
+    np.testing.assert_array_equal(out.mode, -mode)
+    np.testing.assert_array_equal(out.min1_positions, start)
 
 
 def test_swapped_return_measures_from_the_oriented_initial_minimum() -> None:

@@ -693,9 +693,58 @@ def _fire(
 def _minimum_image(
     displacements: np.ndarray, cell: np.ndarray, pbc: np.ndarray
 ) -> np.ndarray:
-    """Return the minimum-image displacements on the periodic axes only."""
-    fractional = displacements @ np.linalg.inv(cell)
-    return displacements - np.round(fractional[:, pbc]) @ cell[pbc]
+    """Return the shortest displacements under translations by periodic rows.
+
+    Round independent projections for an orthogonal basis. For a skew basis,
+    QR gives an upper-triangular closest-lattice-point problem with at most
+    three dimensions. Fixing integer shifts from the last axis to the first
+    makes each partial squared distance a lower bound for all its descendants.
+    """
+    basis = np.asarray(cell, dtype=float)[np.asarray(pbc, dtype=bool)]
+    if not len(basis) or not len(displacements):
+        return displacements.copy()
+    gram = basis @ basis.T
+    if np.count_nonzero(gram) == len(basis):
+        shifts = np.rint((displacements @ basis.T) / gram.diagonal())
+        return displacements - shifts @ basis
+
+    # In QR coordinates column k of the lattice basis affects only axes 0..k.
+    # Start with the image obtained by rounding one plane at a time.
+    basis = basis[np.argsort(gram.diagonal())]
+    q, r = np.linalg.qr(basis.T)
+    projected = displacements @ q
+    initial = np.zeros_like(projected)
+    for k in reversed(range(len(basis))):
+        initial[:, k] = np.rint(projected[:, k] / r[k, k])
+        projected -= initial[:, k, None] * r[:, k]
+
+    # Search only lattice planes within the current best radius. Components
+    # outside the periodic span are identical for every candidate image.
+    best_squared = np.sum(projected**2, axis=1)
+    best_shift = np.zeros_like(projected)
+    shift = np.zeros_like(projected)
+
+    def search(k: int, residual: np.ndarray) -> None:
+        centre = residual[:, k] / r[k, k]
+        nearest = np.rint(centre)
+        reach = 0  # On the last axis the nearest integer is optimal.
+        if k:
+            remaining = best_squared - np.sum(residual[:, k + 1 :] ** 2, axis=1)
+            radius = np.sqrt(np.maximum(remaining, 0.0)) / abs(r[k, k])
+            reach = int(np.max(radius + np.abs(centre - nearest)))
+        for offset in range(-reach, reach + 1):
+            shift[:, k] = nearest + offset
+            trial = residual - shift[:, k, None] * r[:, k]
+            squared = np.sum(trial[:, k:] ** 2, axis=1)
+            improved = squared < best_squared
+            if k == 0:
+                best_squared[improved] = squared[improved]
+                best_shift[improved] = shift[improved]
+            elif improved.any():
+                search(k - 1, trial)
+
+    search(len(basis) - 1, projected)
+    return displacements - (initial + best_shift) @ basis
 
 
 def _wrap(positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray) -> np.ndarray:

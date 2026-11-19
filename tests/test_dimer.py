@@ -379,6 +379,31 @@ def test_minimum_image_and_wrap_skip_non_periodic_axes() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("cell", "pbc", "displacement", "expected"),
+    [
+        (
+            [[10, 0, 0], [4, 10, 0], [0, 0, 20]],
+            [1, 1, 1],
+            [6.86, 4.9, 0],
+            [-3.14, 4.9, 0],
+        ),
+        # A short combination of two long lattice vectors can be the nearest image.
+        ([[10, 0, 0], [4.8, 0.4, 0], [0, 0, 8]], [1, 1, 1], [1.5, 0, 0], [1.1, 0.8, 0]),
+        # The nonperiodic vector must have no bearing on a periodic translation.
+        ([[10, 0, 0], [4, 2, 0], [0, 0, 8]], [1, 0, 0], [20, 10, 0], [0, 10, 0]),
+    ],
+)
+def test_minimum_image_in_a_skew_cell(
+    cell: list, pbc: list, displacement: list, expected: list
+) -> None:
+    """Verify the Cartesian minimum across the allowed periodic translations."""
+    mic = _minimum_image(
+        np.array([displacement]), np.array(cell), np.array(pbc, dtype=bool)
+    )
+    np.testing.assert_allclose(mic[0], expected)
+
+
 def test_zero_force_start_fails_with_a_reason() -> None:
     """At an exact minimum the effective force gives no direction: no NaN."""
     x = np.array([[SHIFT, SHIFT, 0.0], [SHIFT + GRID, SHIFT, GRID]])
