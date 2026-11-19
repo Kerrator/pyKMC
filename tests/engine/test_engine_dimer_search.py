@@ -322,6 +322,99 @@ class TestDimerSearchSerial:
         with pytest.raises(ValueError, match="requires pair_style"):
             _search(engine, vacancy, options={"reuse_neighbor_list": True})
 
+    @pytest.mark.parametrize(
+        ("reuse", "slab"), [(False, False), (True, False), (True, True)]
+    )
+    def test_eam_crop_matches_full_forces_and_recovers_outside_guard(
+        self, eam_config, monkeypatch, reuse, slab
+    ):
+        """Check guarded and full evaluations, energy offsets and global atom types."""
+        from pathlib import Path
+
+        from ase.build import bulk
+
+        atoms = bulk("Ni", "fcc", a=3.524, cubic=True).repeat([8, 8, 8])
+        positions = atoms.positions + SHIFT
+        # Keep the sole Fe atom outside the crop. Its absence must not renumber Ni.
+        central = 0
+        distances = np.linalg.norm(
+            _minimum_image(positions - positions[central], atoms.cell), axis=1
+        )
+        far = int(np.argmax(distances))
+        if slab:
+            cell = atoms.cell.array.copy()
+            cell[1, 0] = 0.15 * cell[1, 1]
+            positions[:, 0] += 0.15 * positions[:, 1]
+            rotation = np.array([[0.8, -0.6, 0], [0.6, 0.8, 0], [0, 0, 1]])
+            positions = positions @ rotation
+            atoms.set_cell(cell @ rotation)
+            atoms.pbc = [True, True, False]
+        types = atoms.get_chemical_symbols()
+        types[far] = "Fe"
+        potential = (
+            Path(__file__).resolve().parents[2]
+            / "examples/NiCr_fcc_447at_slab_monovacancy/Bonny_2013_NiFeCr.eam"
+        )
+        config = _LammpsConfig(pair_coeff=[f"* * {potential} Fe Ni"])
+        system = _Cell(positions, types, atoms.cell, atoms.pbc, central)
+        engine = _make_engine(
+            config,
+            MPI.COMM_SELF,
+            positions,
+            types,
+            atoms.cell,
+            atoms.pbc,
+            DimerSearchExtension,
+        )
+
+        query_sizes = []
+        gather = LammpsEngine._gather_forces
+
+        def record_gather(instance):
+            if instance is not engine:
+                query_sizes.append(instance.lmp.get_natoms())
+            return gather(instance)
+
+        monkeypatch.setattr(LammpsEngine, "_gather_forces", record_gather)
+
+        def check_frames(start, cell, pbc, mask, centre, seed, evaluate, **kwargs):
+            probe = start.copy()
+
+            def check():
+                energy, forces = evaluate(probe)
+                expected_energy, expected_forces = engine.get_energy_and_forces(probe)
+                np.testing.assert_allclose(energy, expected_energy, atol=1e-8, rtol=0)
+                np.testing.assert_allclose(
+                    forces[mask], expected_forces[mask], atol=1e-9, rtol=0
+                )
+                np.testing.assert_array_equal(forces[~mask], 0.0)
+
+            check()
+            probe[centre, 0] -= 0.05
+            check()
+            assert query_sizes[-1] < len(probe)
+            if seed == 1:
+                # Cross a periodic face and leave the guarded mobile region.
+                probe[centre, 0] -= 5.0
+            else:
+                # A displaced exterior atom changes the full energy offset.
+                probe[far, 1] += 0.2
+            check()
+            assert query_sizes[-1] == len(probe)
+
+        monkeypatch.setattr("pykmc.engine.dimer_search.run_dimer", check_frames)
+        try:
+            for seed in (1, 2):
+                _search(
+                    engine,
+                    system,
+                    seed=seed,
+                    movable=[central],
+                    options={"eam_force_crop": True, "reuse_neighbor_list": reuse},
+                )
+        finally:
+            _close(engine)
+
     def test_frozen_atoms_stay_and_lammps_reports_zero_force(
         self, engine, vacancy, monkeypatch
     ):

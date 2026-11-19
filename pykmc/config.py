@@ -306,6 +306,12 @@ class DimerConfig(BaseModel):
         description="Reuse the LAMMPS neighbor list between dimer force evaluations. "
         "Supported for the native eam/alloy and eam/fs pair styles.",
     )
+    eam_force_crop: bool = Field(
+        default=False,
+        description="Limit dimer force evaluations to the movable atoms and their "
+        "two EAM interaction shells when the remaining atoms are frozen. "
+        "Supported for the native eam/alloy and eam/fs pair styles.",
+    )
 
     @model_validator(mode="after")
     def check_start_and_steps(self) -> "DimerConfig":
@@ -649,10 +655,15 @@ class ActiveVolume(BaseModel):
     )
 
 
+def validate_dimer_eam_style(pair_style: str, option: str) -> None:
+    """Check that a dimer worker optimization supports the configured potential."""
+    if pair_style.strip() not in {"eam/alloy", "eam/fs"}:
+        raise ValueError(f"{option} requires pair_style eam/alloy or eam/fs")
+
+
 def validate_dimer_neighbor_reuse(pair_style: str) -> None:
     """Check that the dimer can reuse neighbor lists for this potential."""
-    if pair_style.strip() not in {"eam/alloy", "eam/fs"}:
-        raise ValueError("reuse_neighbor_list requires pair_style eam/alloy or eam/fs")
+    validate_dimer_eam_style(pair_style, "reuse_neighbor_list")
 
 
 class LammpsConfig(BaseModel):
@@ -1167,10 +1178,12 @@ class Config(BaseModel):
         if (
             self.eventsearch.style == "dimer"
             and self.dimer is not None
-            and self.dimer.reuse_neighbor_list
             and self.lammps is not None
         ):
-            validate_dimer_neighbor_reuse(self.lammps.pair_style)
+            if self.dimer.reuse_neighbor_list:
+                validate_dimer_neighbor_reuse(self.lammps.pair_style)
+            if self.dimer.eam_force_crop:
+                validate_dimer_eam_style(self.lammps.pair_style, "eam_force_crop")
         return self
 
     @model_validator(mode="after")

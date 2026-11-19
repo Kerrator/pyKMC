@@ -16,17 +16,18 @@ while the leader searches.
 
 from __future__ import annotations
 
-import ctypes
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 import numpy as np
 from ase.cell import Cell
 from mpi4py import MPI
 
-from ..config import validate_dimer_neighbor_reuse
+from ..config import validate_dimer_eam_style, validate_dimer_neighbor_reuse
 from ..dimer import DimerResult, _wrap
 from ..dimer import dimer_search as run_dimer
 from .base import Engine, EngineExtension
+from .dimer_forces import configure_neighbor_reuse, dimer_force_query
 
 if TYPE_CHECKING:
     from .lammps import LammpsEngine
@@ -36,49 +37,6 @@ __all__ = ["DimerSearchExtension"]
 # LAMMPS ids of the group and fix holding the frozen atoms during a search.
 _FROZEN_GROUP = "g_dimer_frozen"
 _FROZEN_FIX = "f_dimer_frozen"
-_NEIGHBOR_SKIN = 0.5  # Å
-
-
-class _EAMForceEvaluator:
-    """Evaluate prescribed positions on the private serial engine for one search."""
-
-    def __init__(self, engine: LammpsEngine, cell: Cell, pbc: np.ndarray) -> None:
-        self.engine = engine
-        self.cell = np.asarray(cell)
-        self.pbc = pbc
-        self.fixed_axes = None if pbc.all() else np.linalg.inv(self.cell)[:, ~pbc]
-        self.previous: np.ndarray | None = None
-
-    def __call__(self, positions: np.ndarray) -> tuple[float, np.ndarray]:
-        """Return the fresh EAM potential energy and forces at this geometry."""
-        engine = self.engine
-        delta = None if self.previous is None else positions - self.previous
-        small_step = delta is not None and np.max(np.abs(delta)) <= _NEIGHBOR_SKIN / 2
-        if small_step and self.fixed_axes is not None:
-            # Let full setup detect a lost atom immediately at a fixed face.
-            fixed = positions @ self.fixed_axes
-            small_step = np.all((fixed >= 0) & (fixed < 1))
-        if small_step:
-            # With dt = 1 in metal units, nve/noforce translates every atom by
-            # its prescribed increment. Verlet updates ghosts and checks the
-            # accumulated displacement against half the skin before computing
-            # the EAM energy and forces. Scattering x and skipping setup would
-            # bypass this part of the integration loop.
-            velocity = np.ascontiguousarray(
-                engine._positions_to_lammps(delta), dtype=np.float64
-            )
-            engine.lmp.scatter_atoms(
-                "v", 1, 3, velocity.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-            )
-            engine.command("run 1 pre no post no")
-            values = engine.lmp.get_thermo("pe"), engine._gather_forces()
-        else:
-            # A new search may change the frozen group. Use full setup for it
-            # and for large jumps, including a change of periodic image.
-            values = engine.get_energy_and_forces(_wrap(positions, self.cell, self.pbc))
-        # The minimizer can update its positions in place between calls.
-        self.previous = positions.copy()
-        return values
 
 
 class DimerSearchExtension(EngineExtension):
@@ -143,6 +101,8 @@ class DimerSearchExtension(EngineExtension):
             ``remove_translation`` is True unless set here. The worker option
             ``reuse_neighbor_list`` enables Verlet neighbor-list reuse for
             native static ``eam/alloy`` and ``eam/fs`` (default False).
+            ``eam_force_crop`` limits the private EAM force calculation to a
+            guarded neighborhood of the movable atoms (default False).
 
         Returns
         -------
@@ -184,6 +144,11 @@ class DimerSearchExtension(EngineExtension):
             raise ValueError("reuse_neighbor_list must be a boolean")
         if reuse:
             validate_dimer_neighbor_reuse(self.engine.config.pair_style)
+        crop = search_options.pop("eam_force_crop", False)
+        if not isinstance(crop, (bool, np.bool_)):
+            raise ValueError("eam_force_crop must be a boolean")
+        if crop:
+            validate_dimer_eam_style(self.engine.config.pair_style, "eam_force_crop")
         try:
             force_engine = self._dedicated_engine(types, positions, cell, pbc, reuse)
             if frozen.size:
@@ -192,18 +157,28 @@ class DimerSearchExtension(EngineExtension):
                 force_engine.command(
                     f"fix {_FROZEN_FIX} {_FROZEN_GROUP} setforce 0 0 0"
                 )
-            result = run_dimer(
-                positions,
-                np.array(cell),
-                pbc,
-                mask,
-                central_atom,
-                seed,
-                _EAMForceEvaluator(force_engine, cell, pbc)
-                if reuse
-                else force_engine.get_energy_and_forces,
-                **search_options,
-            )
+            with ExitStack() as resources:
+                query = dimer_force_query(
+                    force_engine,
+                    types,
+                    cell,
+                    pbc,
+                    mask,
+                    central_atom,
+                    reuse,
+                    crop,
+                    resources,
+                )
+                result = run_dimer(
+                    positions,
+                    np.array(cell),
+                    pbc,
+                    mask,
+                    central_atom,
+                    seed,
+                    query,
+                    **search_options,
+                )
             if frozen.size:
                 force_engine.command(f"unfix {_FROZEN_FIX}")
                 force_engine.command(f"group {_FROZEN_GROUP} delete")
@@ -257,11 +232,7 @@ class DimerSearchExtension(EngineExtension):
             force_engine.initialize_system(types, positions, cell, pbc)
             force_engine.initialize_potential()
             if reuse:
-                force_engine.command(f"neighbor {_NEIGHBOR_SKIN} bin")
-                force_engine.command("neigh_modify delay 0 every 1 check yes")
-                force_engine.command("thermo_style custom step pe")
-                force_engine.command("timestep 1")
-                force_engine.command("fix f_dimer_displace all nve/noforce")
+                configure_neighbor_reuse(force_engine)
             self._force_engine_system = system
         return force_engine
 

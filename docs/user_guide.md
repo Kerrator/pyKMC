@@ -232,9 +232,9 @@ the same seeds in the same order whatever the number of LAMMPS instances.
 
 The atoms a dimer search may move follow the active volume setting: with `active_volume = True` in `[Control]`,
 the atoms within `rmov` of the central atom move; otherwise every atom moves. Atoms in `[frozen_atoms]` never move.
-The dimer works on the whole system, with the other atoms held fixed; it does not cut out the active volume as
-pARTn does. On a large cell with every atom movable, the dimer can follow the cell's soft long-wavelength modes
-instead of a local event, so the active volume is recommended there.
+The dimer keeps the whole system's coordinates, with the other atoms held fixed. By default its force
+calculation also uses the full cell. On a large cell with every atom movable, the dimer can follow the
+cell's soft long-wavelength modes instead of a local event, so the active volume is recommended there.
 
 A minimal `[Dimer]` section looks like:
 ```INI
@@ -257,6 +257,13 @@ start_radius = 3.0
   with the native `eam/alloy` or `eam/fs` pair style. Each search starts with a fresh list.
   LAMMPS checks subsequent displacements against its neighbor skin. The option defaults to `False`
   and applies only to the dimer worker's private LAMMPS instance.
+- Set `eam_force_crop = True` to omit distant frozen atoms from force evaluations with native
+  `eam/alloy` or `eam/fs`. This is useful when only a small region can move. The worker keeps two
+  interaction cutoffs around the movable region so it can evaluate the electron density of the
+  movable atoms' neighbors. It uses the full system to establish the energy reference for each
+  search. It uses the full cell if less than 10% of the atoms can be omitted, and switches back
+  to the full cell if a movable atom leaves the guarded region or a frozen atom changes position.
+  The option defaults to `False` and can be combined with `reuse_neighbor_list = True`.
 
 Each dimer search runs on one LAMMPS instance of its own, on the first rank of its session. A session with several
 ranks therefore gets no speed-up on dimer force calls: its other ranks wait while the search runs. Use more

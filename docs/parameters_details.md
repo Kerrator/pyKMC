@@ -487,6 +487,10 @@
   <details><summary>Description</summary>
   Reuse the LAMMPS neighbor list between dimer force evaluations. Supported for the native eam/alloy and eam/fs pair styles.
   </details>
+- **`eam_force_crop`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  Limit dimer force evaluations to the movable atoms and their two EAM interaction shells when the remaining atoms are frozen. Supported for the native eam/alloy and eam/fs pair styles.
+  </details>
 
 ---
 
