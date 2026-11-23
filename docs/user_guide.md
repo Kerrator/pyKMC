@@ -250,7 +250,7 @@ start_radius = 3.0
   (default 1e-3 eV/Å), and the curvature at the saddle is negative.
 - `separation`, `trial_step` and `max_step` : the dimer's half-length and its two translation step sizes, in Å
   (defaults 0.005, 0.015 and 0.05).
-- `dav` : SEAKMC's dynamic active volume (Liang and Xu 2023), off by default. While the dimer climbs out of the
+- `dav` : SEAKMC's dynamic active volume (Liang and Xu 2023), on by default. While the dimer climbs out of the
   basin, its direction is weighted atom by atom towards the atoms that move most. The weights come from the movable
   atoms only; DAV never adds or removes atoms and is separate from `active_volume` in `[Control]`.
 - Set `reuse_neighbor_list = True` to reuse LAMMPS neighbor lists between dimer force evaluations

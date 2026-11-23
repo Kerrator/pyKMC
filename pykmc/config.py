@@ -295,7 +295,7 @@ class DimerConfig(BaseModel):
         description="Largest translation step (in Angstrom).",
     )
     dav: bool = Field(
-        default=False,
+        default=True,
         description="Dynamic active volume (SEAKMC, Liang and Xu 2023): while the dimer climbs "
         "out of the basin, its direction is weighted atom by atom towards the atoms that move "
         "most. It never adds or removes atoms, and it is separate from "

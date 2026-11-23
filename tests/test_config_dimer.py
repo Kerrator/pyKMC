@@ -48,6 +48,8 @@ def test_dimer_defaults_follow_the_design_record(tmp_path: Path) -> None:
     assert dimer.separation == 0.005
     assert dimer.trial_step == 0.015
     assert dimer.max_step == 0.05
+    # DAV is on unless the input turns it off.
+    assert dimer.dav is True
 
 
 def test_dimer_algorithm_options_match_the_core_keywords_and_defaults() -> None:

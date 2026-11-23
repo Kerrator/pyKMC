@@ -73,7 +73,7 @@ Changes from SEAKMC:
 - SEAKMC's TransHorizon rule, rotation conjugate gradient (unreachable there),
   step decay, angle check and preloaded starts are not ported.
 
-Dynamic active volume (DAV, Liang and Xu 2023), off by default (``dav``): while
+Dynamic active volume (DAV, Liang and Xu 2023), on by default (``dav``): while
 the dimer climbs out of the basin, each rotation's new mode is multiplied atom
 by atom by a weight between 0 and 1 and renormalised, so the mode gathers on
 the atoms that move most. It acts after the rotation to the analytic angle
@@ -246,7 +246,7 @@ def dimer_search(
     max_minimisation_steps: int = 5000,
     min_translations: int = 5,
     remove_translation: bool = False,
-    dav: bool = False,
+    dav: bool = True,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
 

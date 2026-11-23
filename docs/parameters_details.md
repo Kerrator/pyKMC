@@ -479,7 +479,7 @@
   <details><summary>Description</summary>
   Largest translation step (in Angstrom).
   </details>
-- **`dav`** : `bool`, default = `False`
+- **`dav`** : `bool`, default = `True`
   <details><summary>Description</summary>
   Dynamic active volume (SEAKMC, Liang and Xu 2023): while the dimer climbs out of the basin, its direction is weighted atom by atom towards the atoms that move most. It never adds or removes atoms, and it is separate from `[Control] active_volume`.
   </details>

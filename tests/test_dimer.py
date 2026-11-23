@@ -123,7 +123,7 @@ def test_defaults_are_the_design_record_ones() -> None:
     assert params["separation"].default == 0.005
     assert params["trial_step"].default == 0.015
     assert params["max_step"].default == 0.05
-    assert params["dav"].default is False
+    assert params["dav"].default is True
 
 
 def test_core_imports_only_numpy_and_the_standard_library() -> None:
@@ -827,7 +827,15 @@ def test_dav_finds_the_known_saddle(seed: int, monkeypatch) -> None:  # noqa: AN
     assert result.delr2 == pytest.approx(2.0, abs=5e-3)
     # It is the saddle the same seed reaches with DAV off.
     off = dimer_search(
-        x, OPEN_CELL, NO_PBC, np.ones(4, bool), 0, seed, curved_valley, start="region"
+        x,
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        seed,
+        curved_valley,
+        start="region",
+        dav=False,
     )
     np.testing.assert_allclose(result.saddle_positions, off.saddle_positions, atol=2e-3)
     # The weights changed the search.
@@ -850,6 +858,7 @@ def test_dav_with_unit_weights_changes_nothing(monkeypatch) -> None:  # noqa: AN
         2,
         curved_valley,
         start="region",
+        dav=False,
     )
     calls = []
 
