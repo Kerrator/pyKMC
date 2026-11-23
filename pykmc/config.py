@@ -302,9 +302,10 @@ class DimerConfig(BaseModel):
         "`[Control] active_volume`.",
     )
     reuse_neighbor_list: bool = Field(
-        default=False,
+        default=True,
         description="Reuse the LAMMPS neighbor list between dimer force evaluations. "
-        "Supported for the native eam/alloy and eam/fs pair styles.",
+        "Supported for the native eam/alloy and eam/fs pair styles. With another "
+        "pair style the default is off, and setting `True` is an error.",
     )
     eam_force_crop: bool = Field(
         default=False,
@@ -1180,7 +1181,13 @@ class Config(BaseModel):
             and self.dimer is not None
             and self.lammps is not None
         ):
-            if self.dimer.reuse_neighbor_list:
+            if "reuse_neighbor_list" not in self.dimer.model_fields_set:
+                # The default is on only where the option is supported.
+                self.dimer.reuse_neighbor_list = self.lammps.pair_style.strip() in {
+                    "eam/alloy",
+                    "eam/fs",
+                }
+            elif self.dimer.reuse_neighbor_list:
                 validate_dimer_neighbor_reuse(self.lammps.pair_style)
             if self.dimer.eam_force_crop:
                 validate_dimer_eam_style(self.lammps.pair_style, "eam_force_crop")

@@ -57,7 +57,7 @@ def test_dimer_algorithm_options_match_the_core_keywords_and_defaults() -> None:
     keywords = inspect.signature(dimer_search).parameters
     section = DimerConfig(start_radius=3.0).model_dump()
 
-    assert section.pop("reuse_neighbor_list") is False
+    assert section.pop("reuse_neighbor_list") is True
     assert section.pop("eam_force_crop") is False
     for name, value in section.items():
         assert name in keywords
@@ -65,13 +65,23 @@ def test_dimer_algorithm_options_match_the_core_keywords_and_defaults() -> None:
             assert keywords[name].default == value
 
 
-@pytest.mark.parametrize("option", ["reuse_neighbor_list", "eam_force_crop"])
-def test_dimer_worker_optimizations_are_opt_in(tmp_path: Path, option: str) -> None:
-    path = _write_input(tmp_path, dimer=f"start_radius = 3.0\n{option} = True")
+def test_dimer_reuses_neighbor_lists_by_default_and_crop_is_opt_in(
+    tmp_path: Path,
+) -> None:
+    settings = Config.from_ini_file(_write_input(tmp_path)).dimer.model_dump()
+    assert settings["reuse_neighbor_list"] is True
+    assert settings["eam_force_crop"] is False
 
-    settings = Config.from_ini_file(path).dimer.model_dump()
-    assert settings[option] is True
-    assert settings["reuse_neighbor_list"] != settings["eam_force_crop"]
+
+@pytest.mark.parametrize(
+    ("option", "value"), [("reuse_neighbor_list", False), ("eam_force_crop", True)]
+)
+def test_dimer_worker_optimizations_follow_the_input(
+    tmp_path: Path, option: str, value: bool
+) -> None:
+    path = _write_input(tmp_path, dimer=f"start_radius = 3.0\n{option} = {value}")
+
+    assert Config.from_ini_file(path).dimer.model_dump()[option] is value
 
 
 @pytest.mark.parametrize("option", ["reuse_neighbor_list", "eam_force_crop"])
