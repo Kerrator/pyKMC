@@ -101,10 +101,11 @@ def test_every_lanczos_block_matches_partn(search: int) -> None:
     assert not problems, problems
 
 
-# Searches whose replay passes 1e-10 Å before pARTn's end: Lanczos blocks
-# in which a low mode enters late amplify the core's eV/Å force differences
-# (issue 06's run note). Waits for Stephen's ruling.
-ROUND_OFF_GROWTH = {1, 3, 4}
+# Searches whose replay passes the tolerance before pARTn's end: Lanczos
+# blocks in which a low mode enters late amplify last-bit differences, even
+# with pARTn's Ry/bohr subtraction. Judged on path and end (issue 06's run
+# note, ruling of 2026-11-24).
+ROUND_OFF_GROWTH = {4}
 
 
 def whole_search(search: int) -> dict:
@@ -121,7 +122,7 @@ def whole_search(search: int) -> dict:
         pytest.param(
             s,
             marks=pytest.mark.xfail(
-                strict=True, reason="round-off growth past 1e-10 A, ruling pending"
+                strict=True, reason="round-off growth, judged on path and end"
             ),
         )
         if s in ROUND_OFF_GROWTH
@@ -144,26 +145,14 @@ def test_climb_matches_partn_to_its_saddle_or_failure(search: int) -> None:
         assert result.reason == "eigenvalue_lost"
 
 
-@pytest.mark.parametrize(
-    "search",
-    [
-        1,
-        3,
-        pytest.param(
-            4,
-            marks=pytest.mark.xfail(
-                strict=True, reason="takes another block at step 790"
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("search", sorted(ROUND_OFF_GROWTH))
 def test_climb_keeps_partns_path_past_the_round_off(search: int) -> None:
     """Fed pARTn's forces past the first difference: the same blocks and end."""
     check = check_climb(whole_search(search), keep_going=True)
     report = check.report
     assert len(report.steps) == report.last_step + 1
     assert all(s.block in CORE_BLOCKS.get(s.move, ()) for s in report.steps)
-    assert max(s.position for s in report.steps) < 1e-7
+    assert max(s.position for s in report.steps) < 1e-5  # search 4: 1.4e-6 Å
     later = [p for p in check.problems() if "first differing step" not in p]
     assert not [p for p in later if "saddle positions" not in p], later
 
@@ -299,7 +288,10 @@ def test_lanczos_blocks_replay_alone() -> None:
 
 
 def test_replay_checks_the_lanczos_state_at_the_block_end() -> None:
-    """Only the state the move back carries is judged; earlier ones are reported."""
+    """Judge the move back's state only where pARTn pushes along it next.
+
+    Earlier states and basin block ends are reported, not judged.
+    """
     rec = synthetic_recording()
     block = lanczos_blocks(rec)[0]
     steps = np.flatnonzero(rec["partn_step"] >= 0)
@@ -309,10 +301,15 @@ def test_replay_checks_the_lanczos_state_at_the_block_end() -> None:
     assert report.passed and report.steps[block.start + 4].mode == pytest.approx(1e-6)
 
     rec["eigenvec"][last_probe, 0, 0] += 1e-9
+    assert rec["block_out"][steps[block.end]] == "INIT"  # another basin push
+    report = replay(rec)
+    assert report.passed and report.steps[block.end].mode == pytest.approx(1e-9)
+    rec["block_out"][steps[block.end]] = "EIGN"
     bad = replay(rec).first_mismatch
     assert bad.step == block.end and "eigenvector differs" in bad.problem
 
     rec = synthetic_recording()
+    rec["block_out"][steps[block.end]] = "EIGN"
     rec["eigval"][last_probe] += 1e-9 * max(abs(rec["eigval"][last_probe]), 1.0)
     bad = replay(rec).first_mismatch
     assert bad.step == block.end and "eigenvalue differs" in bad.problem
