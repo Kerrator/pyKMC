@@ -90,8 +90,10 @@ This core leaves out, on purpose for now, the box-explosion guard.
 Other differences from pARTn:
 
 - eV and Å throughout; pARTn's constants, which are in Ry and bohr, are
-  converted once (ruling of 2026-11-23), and its unit round trip is kept only
-  where it moves the atoms (the displacement factor and dt0 above);
+  converted once (ruling of 2026-11-23), and its units are kept only where
+  it moves the atoms (the displacement factor and dt0 above) and inside a
+  Lanczos block, whose force differences are in Ry/bohr (ruling of
+  2026-11-24);
 - ``neigen`` is 1, as pARTn's setup forces it;
 - the random numbers come from NumPy's generator seeded with ``seed``; the
   push and each new chance draw on the pushed atoms only and the first
@@ -151,6 +153,13 @@ _B2A = 0.529177210903
 _AMU_RY = 911.44421386718750
 _AU_PS = 4.83776865317143e-5
 _HESSIAN = _RY2EV / _B2A**2  # 1 Ry/bohr² in eV/Å²
+# pARTn's conversions from LAMMPS metal units (convert_units.f90:386-412).
+# Lanczos takes its force differences in Ry/bohr and its eigenvalue in
+# Ry/bohr², as pARTn does: in eV/Å the subtraction's round-off grows past
+# 1e-10 Å over some climbs (finding of issue 06, ruling of 2026-11-24).
+_F2AU = (1.0 / _RY2EV) / (1.0 / _B2A)
+_L2AU = 1.0 / _B2A
+_AU2H = 1.0 / (_F2AU / _L2AU)
 
 # pARTn's hard-coded constants, converted once.
 # Curvature floor of the eigenvector step (block_pusheigen.f90:69), 0.48587 eV/Å².
@@ -159,8 +168,9 @@ _CURVATURE_FLOOR = 0.01 * _HESSIAN
 _ENERGY_LIMIT = 80.0 * _RY2EV
 # Factor of the push off the saddle (push_over_procedure.f90:31).
 _PUSH_OVER_FACTOR = 0.8
-# Lanczos stops growing its basis below this new-vector norm (lanczos.f90:257).
-_LANCZOS_BREAKDOWN = 1.0e-12 * _HESSIAN
+# Lanczos stops growing its basis below this new-vector norm, in Ry/bohr²
+# (lanczos.f90:257).
+_LANCZOS_BREAKDOWN = 1.0e-12
 # Alignment test of an out-of-basin perpendicular relaxation
 # (check_force_convergence.f90:127): the eigenvector has turned, |e.e_prev| <
 # 0.8, and the path from the start is nearly perpendicular to the push.
@@ -537,7 +547,8 @@ def artn_search(
     # pARTn carries the eigenvalue from one Lanczos block into the next block's
     # first convergence test. A search starts with pARTn's "unset" value,
     # HUGE(1.0_DP) (m_block_lanczos.f90:29, :116; h_artn_units.f90:48).
-    lowest_previous = float(np.finfo(float).max)
+    unset = float(np.finfo(float).max)
+    lowest_previous = unset  # Ry/bohr², as pARTn holds it
 
     def against(e: np.ndarray, f: np.ndarray) -> np.ndarray:
         """Point ``e`` against the force ``f`` (block_lanczos.f90:79)."""
@@ -554,7 +565,9 @@ def artn_search(
         position the last move returns to (``x0`` up to round-off), which is
         not evaluated here, and the force at the last probe. The observer
         sees, at each probe, the eigenvalue and eigenvector as pARTn holds
-        them after the call that moved there.
+        them after the call that moved there. Inside the block forces are in
+        Ry/bohr and eigenvalues in Ry/bohr², as in pARTn; the eigenvalue
+        returned and observed is in eV/Å².
         """
         nonlocal lowest_previous
         lowest = lowest_previous
@@ -563,12 +576,14 @@ def artn_search(
         alphas: list[float] = []
         betas: list[float] = []
         eigvec = against(v_in, f0)
+        f0_au, disp_au = f0 * _F2AU, lanczos_disp * _L2AU
         x = displace(x0, lanczos_disp * basis[0])
         k = 0
         while True:
             k += 1
-            _, f = evaluate(x, "lanczos", (lowest, eigvec.copy()))
-            q = -(f - f0) / lanczos_disp
+            shown = lowest if lowest == unset else lowest * _AU2H
+            _, f = evaluate(x, "lanczos", (shown, eigvec.copy()))
+            q = -(f * _F2AU - f0_au) / disp_au
             alpha = vec.dot(basis[k - 1], q)
             alphas.append(alpha)
             lowest_old = lowest
@@ -614,7 +629,7 @@ def artn_search(
             x = displace(x, lanczos_disp * (target - basis[k - 1]))
             if k >= size:
                 lowest_previous = lowest
-                return lowest, eigvec, x, f
+                return lowest * _AU2H, eigvec, x, f
 
     def result(reason: Optional[str], **found: object) -> DimerResult:
         fields: dict = dict.fromkeys(DimerResult._fields)

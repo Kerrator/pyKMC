@@ -28,9 +28,12 @@ At each step the replay compares, within ``tolerance``:
   eigenvalue's difference in eV/Å², and the eigenvector's largest component
   difference up to sign. Both are reported at every probe. They are judged at
   the end of a block, the state the move back carries, which is the only one
-  later moves use: the eigenvector within ``tolerance / eigen_step_size``, and
-  the eigenvalue within that times max(|eigenvalue|, 0.48587 eV/Å²), so that
-  an eigenvector push stays within ``tolerance`` of pARTn's.
+  later moves use, when pARTn's next step pushes along the eigenvector: the
+  eigenvector within ``tolerance / eigen_step_size``, and the eigenvalue
+  within that times max(|eigenvalue|, 0.48587 eV/Å²), so that the push stays
+  within ``tolerance`` of pARTn's. In the basin the eigenvector only seeds
+  the next block and the eigenvalue only sets basin or not, so a difference
+  there shows in the steps that follow (ruling of 2026-11-24).
 
 It stops at the first step that differs, or after ``last_step``: by default
 the last step of the first Lanczos block, the move back to where the block
@@ -460,7 +463,8 @@ def replay(
             step.eigval, step.eigval_scaled, step.mode, step.mode_sign = seen["lanczos"]
             # The move back: pARTn's call before it ended the block.
             step.block_end = not rec["in_lanczos"][steps[k - 1]]
-            if step.block_end:
+            pushed = rec["block_out"][e] in CORE_BLOCKS["eigen"]  # pARTn's next move
+            if step.block_end and pushed:
                 problems += lanczos_problems(seen["lanczos"], rec, tolerance)
         step.problem = "; ".join(problems) or None
         report.steps.append(step)
