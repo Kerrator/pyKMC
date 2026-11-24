@@ -104,6 +104,16 @@ def test_partn_constants_are_converted_to_ev_and_angstrom() -> None:
     assert artn._ENERGY_LIMIT == pytest.approx(1088.455, abs=1e-3)
 
 
+def test_displacement_and_time_step_are_where_partn_puts_them() -> None:
+    """The unit round trip of pARTn, as issue 02's recordings measured it."""
+    # The first INIT move of every recording: 0.3 Å nominal.
+    assert 0.3 * artn._DISPLACEMENT_FACTOR == pytest.approx(
+        0.29999998296888336, abs=1e-15
+    )
+    # FIRE's time step after pARTn's first reset call.
+    assert artn._DT0 == 0.0010000000000000002
+
+
 def test_finds_the_saddle_and_its_two_minima() -> None:
     """Saddle with negative curvature, both minima, energies, mode and counts."""
     x = valley_start()
