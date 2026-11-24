@@ -657,6 +657,14 @@ class ActiveVolume(BaseModel):
         description="Debug flag for active volume size checks",
     )
 
+    artn_forces: Literal["full", "crop"] = Field(
+        default="full",
+        description="Force region of a `[EventSearch] style = artn` search: 'full', the "
+        "dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or "
+        "'crop', pARTn's (only the atoms within `ract`, those beyond `rmov` with zero force), "
+        "which gives pARTn's forces for comparing the two searches. Other styles ignore it.",
+    )
+
 
 def validate_dimer_eam_style(pair_style: str, option: str) -> None:
     """Check that a dimer worker optimization supports the configured potential."""

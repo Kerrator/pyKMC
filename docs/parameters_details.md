@@ -559,6 +559,10 @@
   <details><summary>Description</summary>
   Debug flag for active volume size checks
   </details>
+- **`artn_forces`** : `Literal['full', 'crop']`, default = `'full'`
+  <details><summary>Description</summary>
+  Force region of a `[EventSearch] style = artn` search: 'full', the dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or 'crop', pARTn's (only the atoms within `ract`, those beyond `rmov` with zero force), which gives pARTn's forces for comparing the two searches. Other styles ignore it.
+  </details>
 
 ---
 
