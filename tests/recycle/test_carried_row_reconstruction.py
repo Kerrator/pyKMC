@@ -21,7 +21,7 @@ import pytest
 
 import pykmc.kmc as kmc_module
 import pykmc.refinement as refinement_module
-from pykmc import System
+from pykmc import System, constants
 from pykmc.event_table import ActiveEventTable
 from pykmc.kmc import KMC
 from pykmc.refinement import Refinement
@@ -138,7 +138,8 @@ def _reference_events() -> pd.DataFrame:
                 "sym_matrix": [np.eye(3)],
                 "sym_perm": [np.arange(len(_MIN))],
                 "energy_barrier": _BARRIER,
-                "k": 1.0,
+                # the rate of the barrier at k_pref: below the refinement threshold
+                "k": 10.0 * np.exp(-_BARRIER / (constants.KB * 300.0)),
                 "k_pref": 10.0,
             }
         ]
