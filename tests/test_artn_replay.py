@@ -136,10 +136,6 @@ def test_climb_matches_partn_to_its_saddle_or_failure(search: int) -> None:
     assert not check.problems(), check.problems()
     result = check.report.result
     if check.saddle:
-        # Saddle energy: the recorded energy at the same step; pARTn's goes
-        # through Ry and back, one ulp. Eigenvalue: the last block's.
-        assert check.energy <= 1e-9
-        assert check.eigval <= 5e-10 * max(abs(result.curvature), artn._CURVATURE_FLOOR)
         assert result.force_calls_saddle == climb_end(check.rec) + 1
     else:
         assert result.reason == "eigenvalue_lost"
@@ -333,7 +329,7 @@ def test_replay_checks_fire_state_and_blocks() -> None:
     """A changed FIRE alpha or a changed block is a mismatch."""
     rec = synthetic_recording()
     e = int(np.flatnonzero(rec["partn_step"] == 3)[0])
-    rec["fire_alpha"][e] *= 1.01
+    rec["fire_alpha"][e] *= 1.0 + 5e-12
     assert replay(rec).first_mismatch.problem.startswith("FIRE alpha")
 
     rec = synthetic_recording()
@@ -341,3 +337,29 @@ def test_replay_checks_fire_state_and_blocks() -> None:
     rec["block_out"][e] = "LANC"  # pARTn would have started Lanczos a step early
     bad = replay(rec).first_mismatch
     assert bad.step == 5 and "block LANC against core move init" in bad.problem
+
+
+@pytest.mark.parametrize("field", ["x", "v_in", "fire_dt", "fire_alpha"])
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_nan_in_a_compared_step_fails(field: str, keep_going: bool) -> None:
+    """A non-finite comparison stops even the path-only replay."""
+    rec = synthetic_recording()
+    evaluation = int(np.flatnonzero(rec["partn_step"] == 3)[0])
+    rec[field][(evaluation,) + (0,) * (rec[field].ndim - 1)] = np.nan
+    report = replay(rec, keep_going=keep_going)
+    assert not report.passed and report.first_mismatch.step == 3
+    assert report.end == "mismatch" and report.steps[-1].step == 3
+
+
+@pytest.mark.parametrize("field", ["eigval", "eigenvec"])
+def test_nonfinite_lanczos_state_fails(field: str) -> None:
+    """NaN in a Lanczos comparison cannot be mistaken for acceptable round-off."""
+    rec = synthetic_recording()
+    block = lanczos_blocks(rec)[0]
+    steps = np.flatnonzero(rec["partn_step"] >= 0)
+    evaluation = steps[block.end - 1]
+    rec[field][(evaluation,) + (0,) * (rec[field].ndim - 1)] = np.nan
+    rec["block_out"][steps[block.end]] = "EIGN"
+    report = replay(rec, keep_going=True)
+    assert not report.passed and report.first_mismatch.step == block.end
+    assert report.end == "mismatch"

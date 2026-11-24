@@ -769,3 +769,112 @@ def test_every_reduction_goes_through_the_vector_space() -> None:
             assert np.array_equal(value, getattr(counted, name)), name
         else:
             assert value == getattr(counted, name), name
+
+
+def test_fire_uses_each_atoms_mass() -> None:
+    """The first PERP kick under equal forces gives each atom its own acceleration."""
+    positions = []
+    velocities = []
+    masses = np.array([1.0, 4.0])
+    force = np.array([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        positions.append(x.copy())
+        return -float(np.sum(force * x)), force
+
+    def observe(move: str, state: tuple) -> None:
+        if move == "perp":
+            velocities.append(state[2])
+
+    artn_search(
+        np.zeros((2, 3)),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        3,
+        surface,
+        masses=masses,
+        initial_push=np.array([[1, 0, 0], [0, 0, 0]]),
+        ninit=1,
+        nperp=1,
+        nevalf_max=3,
+        observe=observe,
+        **PUSH,
+    )
+    kick = artn._DT0 * artn._FTM2V * force / masses[:, None]
+    np.testing.assert_allclose(velocities, [kick], rtol=1e-13, atol=0)
+    np.testing.assert_allclose(
+        positions[2] - positions[1], artn._DT0 * kick, rtol=1e-13, atol=0
+    )
+
+
+@pytest.mark.parametrize("mix", [0.2, 0.8])
+def test_new_chance_mixes_the_seeded_draw(mix: float) -> None:
+    """Rebuild the new push from its seed and the force at the lost block's last probe."""
+    moves, _, _ = moves_and_positions(LOST_SEED)
+    k = len(moves)
+    moves, seen, _ = moves_and_positions(
+        LOST_SEED, nnewchance=1, alpha_mix_cr=mix, nevalf_max=k + 2
+    )
+    assert moves[k : k + 2] == ["lanczos", "init"]
+    rng = np.random.default_rng(LOST_SEED)
+    initial = 0.5 - rng.random(3)  # list push on the central atom
+    initial /= np.linalg.norm(initial)
+    rng.random(seen[0].shape)  # first Lanczos vector
+    draw = initial * (0.5 - rng.random(3))
+    direction = (1 - mix) * initial + mix * draw / np.linalg.norm(draw)
+    _, probe_force = curved_valley(seen[k - 1])
+    sign = -np.sign(np.dot(probe_force[0], direction))
+    expected = np.zeros_like(seen[k])
+    expected[0] = sign * PUSH["push_step_size"] * direction / np.linalg.norm(direction)
+    np.testing.assert_allclose(
+        seen[k + 1] - seen[k], artn._DISPLACEMENT_FACTOR * expected, rtol=0, atol=1e-15
+    )
+
+
+@pytest.mark.parametrize("coupled", [False, True], ids=["zero-first", "tiny-second"])
+def test_lanczos_continues_after_small_residual(coupled: bool) -> None:
+    """A zero first residual or a tiny second one still produces another finite probe."""
+    coupling = 1e-11
+    hessian = np.diag([1.0, 3.0, 2.0])
+    if coupled:
+        hessian[0, 1] = hessian[1, 0] = 1.0
+        hessian[1, 2] = hessian[2, 1] = coupling
+    seen = []
+    moves = []
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(x.copy())
+        gradient = x @ hessian
+        return float(np.sum(x * gradient) / 2), -gradient
+
+    disp = 0.01
+    artn_search(
+        np.zeros((2, 3)),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        5,
+        surface,
+        ninit=0,
+        lanczos_disp=disp,
+        lanczos_min_size=4,
+        lanczos_max_size=4,
+        lanczos_eval_conv_thr=0.0,
+        nevalf_max=4,
+        first_lanczos_vector=np.array([[1, 0, 0], [0, 0, 0]]),
+        observe=lambda move, state: moves.append(move),
+    )
+    assert moves == ["start", "lanczos", "lanczos", "lanczos"]
+    expected = np.zeros((2, 3))
+    if coupled:
+        # Probe two follows +y. Its remaining z component in Ry/bohr² is
+        # below the breakdown threshold, so probe three moves by this unscaled residual.
+        residual = artn._DISPLACEMENT_FACTOR * coupling / artn._AU2H
+        expected[0, 2] = artn._DISPLACEMENT_FACTOR * disp * residual
+        assert seen[2][0, 1] == pytest.approx(artn._DISPLACEMENT_FACTOR * disp)
+    else:
+        np.testing.assert_array_equal(seen[2], expected)
+    np.testing.assert_allclose(seen[3], expected, rtol=1e-12, atol=0)
