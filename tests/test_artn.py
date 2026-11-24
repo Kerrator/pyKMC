@@ -88,14 +88,21 @@ def test_defaults_are_pykmc_partn_defaults() -> None:
         "lanczos_eval_conv_thr",
         "eigval_thr",
         "eigen_step_size",
+        "nsmooth",
+        "alpha_mix_cr",
+        "nnewchance",
         "nperp",
+        "nperp_limitation",
         "forc_thr",
         "convergence_property",
         "push_over",
         "nevalf_max",
         "dmax",
     ):
-        assert params[name].default == getattr(defaults, name), name
+        default = params[name].default
+        if isinstance(default, tuple):
+            default = list(default)
+        assert default == getattr(defaults, name), name
 
 
 def test_partn_constants_are_converted_to_ev_and_angstrom() -> None:
@@ -541,15 +548,183 @@ def test_force_call_budget_ends_the_search() -> None:
     assert np.array_equal(result.saddle_positions, full.saddle_positions)
 
 
+# Seed whose search loses its negative curvature out of the basin.
+LOST_SEED = 166
+
+
 def test_lost_curvature_out_of_the_basin_is_a_failure() -> None:
     """With no new chance, a positive eigenvalue out of the basin ends the search."""
     surface = counting(curved_valley)
     result = artn_search(
-        valley_start(), OPEN_CELL, NO_PBC, np.ones(4, bool), 0, 4, surface, **PUSH
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        LOST_SEED,
+        surface,
+        **PUSH,
     )
     assert not result.success and result.reason == "eigenvalue_lost"
     assert result.force_calls_total == surface.count
     assert_no_nan(result)
+
+
+def moves_and_positions(seed: int, **kwargs: object) -> tuple[list, list, DimerResult]:
+    """Run ARTn on the curved valley; return each call's move and positions."""
+    moves, seen = [], []
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(x.copy())
+        return curved_valley(x)
+
+    result = artn_search(
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        seed,
+        surface,
+        observe=lambda move, state: moves.append(move),
+        **{**PUSH, **kwargs},
+    )
+    return moves, seen, result
+
+
+def runs(moves: list, name: str) -> list:
+    """Lengths of the runs of ``name`` in ``moves``."""
+    lengths, count = [], 0
+    for move in moves + [None]:
+        if move == name:
+            count += 1
+        elif count:
+            lengths.append(count)
+            count = 0
+    return lengths
+
+
+def test_a_new_chance_pushes_again_from_the_basin() -> None:
+    """After the lost curvature: one more push and basin relaxation, then Lanczos."""
+    lost, _, _ = moves_and_positions(LOST_SEED)
+    moves, seen, result = moves_and_positions(LOST_SEED, nnewchance=1)
+    assert result.success and result.e_saddle == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    # The same search up to the lost block's last probe, then the move back and
+    # a new push in place of the failure.
+    k = len(lost)
+    assert moves[:k] == lost
+    assert moves[k : k + 2] == ["lanczos", "init"]
+    assert moves[k + 2 : k + 5] == ["perp"] * 3 and moves[k + 5] == "lanczos"
+    push = seen[k + 1] - seen[k]
+    assert np.linalg.norm(push) == pytest.approx(0.3 * artn._DISPLACEMENT_FACTOR)
+    assert np.array_equal(push[1:], np.zeros((3, 3)))  # the start's pushed atom only
+
+    # A push given for the new chance is used as given.
+    given = np.zeros((4, 3))
+    given[0] = [0.0, 0.1, -0.2]
+    moves, seen, _ = moves_and_positions(
+        LOST_SEED, nnewchance=1, new_chance_pushes=[given], nevalf_max=k + 2
+    )
+    np.testing.assert_allclose(
+        seen[k + 1] - seen[k], artn._DISPLACEMENT_FACTOR * given, rtol=0, atol=1e-15
+    )
+
+
+def test_out_of_basin_perpendicular_limits_follow_partns_list() -> None:
+    """3 FIRE steps after each basin push; out of it 3, then 4, ... at most."""
+    moves, _, result = moves_and_positions(
+        VALLEY_SEED, nsmooth=0, nperp_limitation=[4, 8, 12, 16, -1]
+    )
+    assert result.success
+    first_eigen = moves.index("eigen")
+    basin = runs(moves[:first_eigen], "perp")
+    assert basin and all(n == 3 for n in basin)
+    # On this surface each relaxation runs to its limit, the last to the saddle.
+    climb = runs(moves[first_eigen:], "perp")
+    assert climb[:-1] == [3, 4, 8, 12] and climb[-1] <= 16
+
+    # pARTn's list [3, 1, 1, -1, -1]: the basin's 3 first, then 1, 1, no limit.
+    moves, _, result = moves_and_positions(
+        VALLEY_SEED, nsmooth=0, nperp_limitation=[1, 1, -1]
+    )
+    assert result.success
+    climb = runs(moves[moves.index("eigen") :], "perp")
+    assert climb[:3] == [3, 1, 1] and max(climb[3:]) > 3
+
+
+def test_the_first_pushes_out_of_the_basin_are_blended() -> None:
+    """With nsmooth, the first eigen moves are not along the eigenvector."""
+
+    def eigen_moves(**kwargs: object) -> tuple[list, list]:
+        moves, states, seen = [], [], []
+
+        def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+            seen.append(x.copy())
+            return curved_valley(x)
+
+        artn_search(
+            valley_start(),
+            OPEN_CELL,
+            NO_PBC,
+            np.ones(4, bool),
+            0,
+            VALLEY_SEED,
+            surface,
+            observe=lambda move, state: (moves.append(move), states.append(state)),
+            **{**PUSH, **kwargs},
+        )
+        cosines, eigvec = [], None
+        for k, move in enumerate(moves):
+            if move == "lanczos":
+                eigvec = states[k][1]
+            if move == "eigen":
+                d = (seen[k] - seen[k - 1]).ravel()
+                e = eigvec.ravel()
+                cosines.append(abs(d @ e) / (np.linalg.norm(d) * np.linalg.norm(e)))
+        return cosines
+
+    plain = eigen_moves(nsmooth=0)
+    assert plain and all(c == pytest.approx(1.0, abs=1e-12) for c in plain)
+    blended = eigen_moves(nsmooth=3)
+    assert len(blended) > 3
+    assert all(c < 0.999 for c in blended[:3])
+    assert all(c == pytest.approx(1.0, abs=1e-12) for c in blended[3:])
+
+
+def test_the_call_at_nevalf_max_fails_even_at_the_saddle() -> None:
+    """As in pARTn, call number nevalf_max fails, whatever it found."""
+    full = valley_search(valley_start())
+    result = valley_search(valley_start(), nevalf_max=full.force_calls_saddle)
+    assert result.reason == "max_force_calls" and result.saddle_positions is None
+    assert result.force_calls_total == full.force_calls_saddle
+    result = valley_search(valley_start(), nevalf_max=full.force_calls_saddle + 1)
+    assert result.force_calls_saddle == full.force_calls_saddle
+    assert result.saddle_positions is not None
+
+
+def test_positions_the_engine_reports_go_to_the_alignment_test_only() -> None:
+    """A third value from the callback changes nothing when it equals the positions."""
+
+    def reporting(x: np.ndarray) -> tuple:
+        energy, forces = curved_valley(x)
+        return energy, forces, x
+
+    plain = valley_search(valley_start())
+    reported = artn_search(
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        VALLEY_SEED,
+        reporting,
+        **PUSH,
+    )
+    for name, value in plain._asdict().items():
+        if isinstance(value, np.ndarray):
+            assert np.array_equal(value, getattr(reported, name)), name
+        else:
+            assert value == getattr(reported, name), name
 
 
 def test_other_failures_return_a_reason() -> None:
