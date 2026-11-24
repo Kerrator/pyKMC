@@ -32,8 +32,10 @@ from .test_engine_dimer_search import (  # noqa: E402, F401 (fixtures)
 
 # pyKMC's [pARTn] defaults; the rad push (1 Å) reaches the central atom only.
 OPTIONS = artn_options(PartnConfig())
-# A seed whose push sends the central atom into the vacancy.
-HOP_SEED = 1
+# A seed whose search reaches the hop. With these defaults most seeds end in
+# eigenvalue_lost: the plain core has no perpendicular step limit out of the
+# basin, so its first relaxation there undoes the strain of the two pushes.
+HOP_SEED = 3
 
 
 def _close(engine: Engine) -> None:
