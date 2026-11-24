@@ -1,9 +1,11 @@
 """Step replay of pARTn v1.1.0 recordings through the ARTn core (no LAMMPS).
 
-The recorded tests replay issue 02's eight recordings, cut to the
-initial-push window, from ``tests/data/artn_step_replay`` (see its README).
+The recorded tests replay issue 02's eight recordings from
+``tests/data/artn_step_replay`` (see its README): all eight cut to the
+initial-push window, search 0 through its first Lanczos block.
 ``PYKMC_ARTN_RECORDINGS`` names a folder of full recordings to read instead
-(611 MB, outside git); the Lanczos block tests need them and skip without.
+(611 MB, outside git). The Lanczos block tests skip a recording cut before its
+first block ends, so without the full set they run on search 0 only.
 The synthetic tests check the harness itself on a recording the core makes on
 an analytic surface, with repeat evaluations added as pARTn's FIRE makes them.
 """
