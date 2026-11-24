@@ -157,9 +157,12 @@ class DimerStrategy(EventSearchStrategy):
 
 
 def dimer_search_result(
-    raw: DimerResult, request: SearchRequest, delr_threshold: float
+    raw: DimerResult,
+    request: SearchRequest,
+    delr_threshold: float,
+    backend: str = "dimer",
 ) -> Result[EventSearchOutput, ErrorInfo]:
-    """Turn one dimer search's raw output into an event search result.
+    """Turn one dimer (or ARTn) search's raw output into an event search result.
 
     A failed search gives ``EVENT_NOT_FOUND`` with ``(1, reason)`` as details.
     A saddle whose minima are both farther than ``delr_threshold`` from the
@@ -181,6 +184,9 @@ def dimer_search_result(
         The request the search was run for.
     delr_threshold : float
         ``eventsearch.delr_thr``.
+    backend : str
+        Backend name for the details: ``"dimer"``, or ``"artn"`` for pyKMC's
+        ARTn core, which returns the same fields.
 
     Returns
     -------
@@ -226,7 +232,7 @@ def dimer_search_result(
     )
     return add_search_details(
         result,
-        backend="dimer",
+        backend=backend,
         seed=int(raw.seed),
         e_saddle=raw.e_saddle,
         curvature=raw.curvature,

@@ -160,7 +160,8 @@ The `[EventSearch]` section lets you define:
 - if a refinement is successful.
 
 This section requires two mandatory keys:
-- `style` : the algorithm used to perform event searches: `partn`, or `dimer` (see [Dimer](#dimer) below).
+- `style` : the algorithm used to perform event searches: `partn`, `dimer` (see [Dimer](#dimer) below) or `artn`
+  (see [ARTn in pyKMC](#artn-in-pykmc) below).
 - `nsearch` : number of event searches to perform per atomic environment.
 
 A minimal `[EventSearch]` section looks like:
@@ -269,6 +270,22 @@ start_radius = 3.0
 Each dimer search runs on one LAMMPS instance of its own, on the first rank of its session. A session with several
 ranks therefore gets no speed-up on dimer force calls: its other ranks wait while the search runs. Use more
 sessions with fewer ranks each instead.
+
+### ARTn in pyKMC
+
+With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of pARTn v1.1.0 (Poberznik et al.
+2024), and refinement still uses pARTn. It reads its parameters from the `[pARTn]` section, so an existing input
+switches with one word. It runs on the dimer's force path: each search runs on a LAMMPS instance of its own on the
+first rank of its session, with the atoms chosen as for the dimer (those within `rmov` of the central atom with the
+active volume on, every atom otherwise, never those in `[frozen_atoms]`), and it counts every force call.
+
+Each search is seeded from the run-wide stream that `seed` in `[Control]` starts, as for the dimer, so a run with
+the same seed finds the same events whatever the number of LAMMPS instances. `zseed` does not seed these searches;
+pARTn's refinement still reads it.
+
+This first version is a plain ARTn: it does not yet smooth the push into the eigenvector (`nsmooth`), limit the
+perpendicular relaxation out of the basin (`nperp_limitation`), or retry after a lost negative curvature
+(`nnewchance`). A `[pARTn]` setting it does not follow is named once in the log.
 
 ## Rate Constant 
 

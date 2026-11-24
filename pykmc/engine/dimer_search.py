@@ -17,7 +17,7 @@ while the leader searches.
 from __future__ import annotations
 
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 import numpy as np
 from ase.cell import Cell
@@ -119,6 +119,38 @@ class DimerSearchExtension(EngineExtension):
             error from LAMMPS is not caught.
 
         """
+        return self._search(
+            run_dimer,
+            positions,
+            types,
+            cell,
+            pbc,
+            movable,
+            central_atom,
+            seed,
+            {"remove_translation": True, **(options or {})},
+        )
+
+    def _search(
+        self,
+        core: Callable[..., Any],
+        positions: np.ndarray,
+        types: list[str] | np.ndarray,
+        cell: Cell | np.ndarray,
+        pbc: list[bool] | np.ndarray,
+        movable: list[int] | np.ndarray,
+        central_atom: int,
+        seed: int,
+        options: Mapping[str, Any],
+    ) -> Any:
+        """Run one search ``core`` on the serial instance, on the leader rank.
+
+        ``core`` is called as :func:`pykmc.dimer.dimer_search` is, with the
+        force query in place of the callback and ``options`` as keywords,
+        less the worker options ``reuse_neighbor_list`` and
+        ``eam_force_crop``. Other ranks return None at once. Arguments,
+        errors and the frozen atoms are as for :meth:`dimer_search`.
+        """
         comm = self.engine.comm
         if comm is not None and comm.Get_rank() != 0:
             return None
@@ -138,7 +170,7 @@ class DimerSearchExtension(EngineExtension):
         mask[movable] = True
         frozen = np.flatnonzero(~mask)
 
-        search_options = {"remove_translation": True, **(options or {})}
+        search_options = dict(options)
         reuse = search_options.pop("reuse_neighbor_list", False)
         if not isinstance(reuse, (bool, np.bool_)):
             raise ValueError("reuse_neighbor_list must be a boolean")
@@ -169,7 +201,7 @@ class DimerSearchExtension(EngineExtension):
                     crop,
                     resources,
                 )
-                result = run_dimer(
+                result = core(
                     positions,
                     np.array(cell),
                     pbc,
