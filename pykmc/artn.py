@@ -62,10 +62,14 @@ LAMMPS metal units: time step 0.001 ps, masses in amu, ``alpha0`` 0.1,
 for relaxation to a minimum, and the step time cut so that it times the
 largest velocity component before the kick stays within ``dmax``. On a
 restart FIRE reuses the earlier force scaled by (dt0/dt)², as pARTn's fix
-does, instead of evaluating at the half-stepped positions. A displacement move
-(push, eigenvector push, push off the saddle) moves the atoms by the nominal
-vector, scaled by s² where s = min(1, dmax / largest component), as one FIRE
-step from rest does; a Lanczos probe is placed directly.
+does, instead of evaluating at the half-stepped positions. The time step dt0
+is LAMMPS's 0.001 ps after pARTn's round trip through its time unit,
+0.0010000000000000002 ps. A displacement move (push, eigenvector push, push
+off the saddle) moves the atoms by the vector times 0.9999999432296087, scaled
+by s² where s = min(1, dmax / largest component), as one FIRE step from rest
+does; a Lanczos probe is placed directly. The factor is where pARTn's
+displacement lands: pARTn sends it to LAMMPS as a force, through its Ry, bohr
+and atomic-time constants and LAMMPS's metal ``ftm2v``.
 
 This plain core leaves out, on purpose for now:
 
@@ -81,7 +85,8 @@ This plain core leaves out, on purpose for now:
 Other differences from pARTn:
 
 - eV and Å throughout; pARTn's constants, which are in Ry and bohr, are
-  converted once (ruling of 2026-11-23);
+  converted once (ruling of 2026-11-23), and its unit round trip is kept only
+  where it moves the atoms (the displacement factor and dt0 above);
 - ``neigen`` is 1, as pARTn's setup forces it;
 - the random numbers come from NumPy's generator seeded with ``seed``; the
   push draws on the pushed atoms only and the first Lanczos vector on the
@@ -100,9 +105,10 @@ Coordinates: the search keeps its own unwrapped positions and passes them to
 the callback as they are. Distances use the minimum image on the periodic axes
 only, and returned positions are wrapped on the periodic axes only.
 
-Frozen atoms: the movable mask is authoritative. Forces on frozen atoms are
-discarded, every push and mode is zero on them, and their positions never
-change.
+Frozen atoms: forces on frozen atoms are discarded and the random draws are
+zero on them, so their positions never change. A ``first_lanczos_vector``
+passed in with components on them moves them, as pARTn's first Lanczos vector
+moves the active volume's buffer atoms.
 
 Every dot product, norm and largest component over the whole system goes
 through ``vectors`` (:class:`NumpyVectorSpace` on one rank), so a driver over
@@ -131,9 +137,12 @@ from .dimer import DimerResult, _minimum_image, _wrap
 
 __all__ = ["NumpyVectorSpace", "artn_search"]
 
-# pARTn's internal units, Rydberg and bohr (artn:src/h_artn_units.f90:66, :71).
+# pARTn's internal units, Rydberg, bohr and Rydberg atomic time
+# (artn:src/h_artn_units.f90:66, :71, :76, :78).
 _RY2EV = 13.605691930242388
 _B2A = 0.529177210903
+_AMU_RY = 911.44421386718750
+_AU_PS = 4.83776865317143e-5
 _HESSIAN = _RY2EV / _B2A**2  # 1 Ry/bohr² in eV/Å²
 
 # pARTn's hard-coded constants, converted once.
@@ -148,8 +157,15 @@ _LANCZOS_BREAKDOWN = 1.0e-12 * _HESSIAN
 
 # LAMMPS FIRE as pARTn's fix sets it, metal units (fix_artn.cpp:116-130, LAMMPS
 # min.cpp defaults for the keys the fix does not pass).
-_DT0 = 1.0e-3  # ps, LAMMPS's metal time step
 _FTM2V = 1.0 / 1.0364269e-4  # LAMMPS metal force * time / mass to velocity
+# LAMMPS's metal time step, 0.001 ps, after pARTn's move_mode converts it to
+# atomic time and back (convert_units.f90:390, move_mode.f90:72, :179).
+_DT0 = (1.0e-3 * (1.0 / _AU_PS)) * _AU_PS
+# Fraction of a displacement that lands: move_mode writes it as the force
+# displ * Mass / dt0², in bohr and Ry atomic units, the fix multiplies by the
+# atom mass and FIRE moves dt0² * ftm2v * f / m (INVENTORY.md, "Units").
+# Measured on issue 02's recordings: 0.2999999830 Å for a 0.3 Å push.
+_DISPLACEMENT_FACTOR = _AMU_RY * _AU_PS**2 * _RY2EV * _FTM2V / _B2A**2
 _ALPHA0 = 0.1
 _ALPHA_SHRINK = 0.99
 _DT_GROW = 1.1
@@ -160,6 +176,9 @@ _PERP_DELAY = 5  # delaystep in perpendicular relaxation
 _RELAX_DELAY = 0  # delaystep in relaxation to a minimum
 
 EnergyAndForces = Callable[[np.ndarray], tuple[float, np.ndarray]]
+# (move, FIRE state): the move that led to the positions about to be evaluated,
+# and FIRE's (dt, alpha, velocities) after a FIRE step, else None.
+Observer = Callable[[str, Optional[tuple[float, float, np.ndarray]]], None]
 
 
 class NumpyVectorSpace:
@@ -209,10 +228,13 @@ def artn_search(
     nevalf_max: int = 9999,
     dmax: float = 6.0,
     vectors: Optional[NumpyVectorSpace] = None,
+    initial_push: Optional[np.ndarray] = None,
+    first_lanczos_vector: Optional[np.ndarray] = None,
+    observe: Optional[Observer] = None,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
 
-    The keyword parameters other than ``masses`` and ``vectors`` are the
+    The keyword parameters from ``push_mode`` to ``dmax`` are the
     ``[pARTn]`` parameters of the same names, with pyKMC's defaults, in eV and
     Å. A failed search returns a result with ``success`` False and a reason;
     it never raises. An exception raised by the callback is not caught.
@@ -282,6 +304,18 @@ def artn_search(
         does.
     vectors : Optional[NumpyVectorSpace]
         Whole-system reductions; one rank by default.
+    initial_push : Optional[np.ndarray]
+        (N, 3) values that replace the random draw of the initial push, which
+        is then cut to the pushed atoms and scaled to ``push_step_size`` as
+        the draw is. For step replay of a recorded pARTn search.
+    first_lanczos_vector : Optional[np.ndarray]
+        (N, 3) vector that replaces the random draw of the first Lanczos
+        vector, used as given. For step replay.
+    observe : Optional[Callable[[str, Optional[tuple]], None]]
+        Called before each callback call with the move that led to the
+        positions (``"start"``, ``"init"``, ``"perp"``, ``"lanczos"``,
+        ``"eigen"``, ``"over"`` or ``"relax"``) and, after a FIRE step,
+        FIRE's ``(dt, alpha, velocities)``, else None. For step replay.
 
     Returns
     -------
@@ -323,6 +357,9 @@ def artn_search(
     masses = np.ones(n_atoms) if masses is None else np.asarray(masses, dtype=float)
     if masses.shape != (n_atoms,) or np.any(masses <= 0):
         raise ValueError("masses must be (N,) and positive")
+    for given in (initial_push, first_lanczos_vector):
+        if given is not None and np.shape(given) != (n_atoms, 3):
+            raise ValueError("initial_push and first_lanczos_vector must be (N, 3)")
 
     vec = NumpyVectorSpace() if vectors is None else vectors
     weight = mask[:, None].astype(float)
@@ -334,11 +371,17 @@ def artn_search(
     calls = 0
     e_start: Optional[float] = None
 
-    def evaluate(x: np.ndarray) -> tuple[float, np.ndarray]:
+    def evaluate(
+        x: np.ndarray,
+        move: str,
+        state: Optional[tuple[float, float, np.ndarray]] = None,
+    ) -> tuple[float, np.ndarray]:
         nonlocal calls
         if calls >= nevalf_max:
             raise _Failed("max_force_calls")
         calls += 1
+        if observe is not None:
+            observe(move, state)
         energy, forces = energy_and_forces(x.copy())
         forces = np.asarray(forces, dtype=float)
         if forces.shape != (n_atoms, 3):
@@ -357,7 +400,8 @@ def artn_search(
         return d * (vec.dot(a, d) / vec.dot(d, d))
 
     def displace(x: np.ndarray, d: np.ndarray) -> np.ndarray:
-        """Move by ``d`` as one FIRE step from rest: clipped by s², s from dmax."""
+        """Move by ``d`` as pARTn does, one FIRE step from rest: s² from dmax."""
+        d = _DISPLACEMENT_FACTOR * d
         largest = vec.max_abs(d)
         s = min(1.0, dmax / largest) if largest > 0 else 1.0
         return x + s * s * d
@@ -369,6 +413,7 @@ def artn_search(
         direction: Optional[np.ndarray],
         delaystep: int,
         stop: Callable[[np.ndarray, int], bool],
+        move: str,
     ) -> tuple[np.ndarray, float, np.ndarray]:
         """Relax from rest with LAMMPS FIRE until ``stop(forces, steps)``.
 
@@ -401,8 +446,9 @@ def artn_search(
                 x = x - 0.5 * dt * v
                 v = np.zeros_like(x)
                 # pARTn's fix replaces the force at the half-stepped positions
-                # by the earlier one, scaled (fix_artn.cpp:693).
-                kick = f * (_DT0 / dt) ** 2
+                # by the earlier one, scaled (fix_artn.cpp:688, :693).
+                ratio = _DT0 / dt
+                kick = f * ratio * ratio
                 probe = dt * _FTM2V * kick * inv_mass
             largest = vec.max_abs(probe)
             dtv = dmax / largest if dt * largest > dmax else dt
@@ -410,7 +456,7 @@ def artn_search(
             if power > 0:
                 v = mix_v * v + mix_f * f
             x = x + dtv * v
-            energy, forces = evaluate(x)
+            energy, forces = evaluate(x, move, (dt, alpha, v.copy()))
         return x, energy, forces
 
     lowest_previous = 0.0  # pARTn carries the eigenvalue from one run to the next
@@ -426,7 +472,7 @@ def artn_search(
         eigvec = basis[0]
         lowest = lowest_previous
         for k in range(1, nlanc + 1):
-            _, f = evaluate(x0 + lanczos_disp * basis[k - 1])
+            _, f = evaluate(x0 + lanczos_disp * basis[k - 1], "lanczos")
             q = -(f - f0) / lanczos_disp
             alpha = vec.dot(basis[k - 1], q)
             alphas.append(alpha)
@@ -478,7 +524,7 @@ def artn_search(
         return DimerResult(**fields)
 
     try:
-        e_start, f = evaluate(x_start)
+        e_start, f = evaluate(x_start, "start")
     except _Failed as failure:
         return result(str(failure))
 
@@ -499,10 +545,14 @@ def artn_search(
     order = by_offset[pushed[by_offset]]
     push = np.zeros((n_atoms, 3))
     push[order] = 0.5 - rng.random((len(order), 3))
+    if initial_push is not None:
+        push = np.where(pushed[:, None], np.asarray(initial_push, dtype=float), 0.0)
     push *= push_step_size / vec.norm(push)
     order = by_offset[mask[by_offset]]
     eigvec = np.zeros((n_atoms, 3))
     eigvec[order] = rng.random((len(order), 3)) - 0.5
+    if first_lanczos_vector is not None:
+        eigvec = np.array(first_lanczos_vector, dtype=float)
 
     def basin_done(forces: np.ndarray, steps: int) -> bool:
         return basin_perp_steps >= 0 and steps >= basin_perp_steps
@@ -529,9 +579,9 @@ def artn_search(
         while not at_saddle:
             if in_basin and not skip_push:
                 x = displace(x, push)
-                energy, f = evaluate(x)
+                energy, f = evaluate(x, "init")
                 pushes += 1
-                x, energy, f = fire(x, energy, f, push, _PERP_DELAY, basin_done)
+                x, energy, f = fire(x, energy, f, push, _PERP_DELAY, basin_done, "perp")
                 if pushes < ninit:
                     continue
             skip_push = False
@@ -549,8 +599,8 @@ def artn_search(
                 eigen_step_size, abs(f_para) / max(abs(lowest), _CURVATURE_FLOOR)
             )
             x = displace(x, push * step)
-            energy, f = evaluate(x)
-            x, energy, f = fire(x, energy, f, push, _PERP_DELAY, climb_done)
+            energy, f = evaluate(x, "eigen")
+            x, energy, f = fire(x, energy, f, push, _PERP_DELAY, climb_done, "perp")
 
         saddle, e_saddle = x, energy
         offset = _minimum_image(saddle - x_start, cell, pbc)
@@ -567,8 +617,8 @@ def artn_search(
             x = displace(
                 saddle, sign * eigen_step_size * push_over * _PUSH_OVER_FACTOR * eigvec
             )
-            energy, f = evaluate(x)
-            x, energy, f = fire(x, energy, f, None, _RELAX_DELAY, relaxed)
+            energy, f = evaluate(x, "over")
+            x, energy, f = fire(x, energy, f, None, _RELAX_DELAY, relaxed, "relax")
             minima.append((x, energy))
     except _Failed as failure:
         return result(str(failure), **found, force_calls_total=calls)
