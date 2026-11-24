@@ -28,6 +28,7 @@ from .artn_replay import (
     check_climb,
     climb_end,
     holds_climb,
+    holds_search,
     lanczos_blocks,
     load_recording,
     replay,
@@ -43,7 +44,11 @@ RECORDINGS = Path(
 
 def recorded(search: int) -> dict:
     """One recording, from the replay set or ``PYKMC_ARTN_RECORDINGS``."""
-    return load_recording(RECORDINGS / f"search{search}.npz")
+    rec = load_recording(RECORDINGS / f"search{search}.npz")
+    if search == 0:
+        assert rec["search"] == 0 and holds_search(rec), "expected complete search 0"
+        assert rec["partn"]["has_min1"] and rec["partn"]["has_min2"]
+    return rec
 
 
 def first_probe_step(rec: dict) -> int:

@@ -1,22 +1,33 @@
-# pARTn v1.1.0 step recordings, cut to the initial-push window (search 0: the first Lanczos block)
+# pARTn v1.1.0 step replay fixtures
 
-The eight Fig. 2 event searches of the Python ARTn plan, recorded at every force evaluation of pARTn v1.1.0 (commit
-9b753517) under pyKMC 745527c, LAMMPS 22Jul2025, one rank (issue 02). Searches 1–7 are cut to their first 15
-evaluations: the start, two initial pushes with three perpendicular FIRE steps each, and the first Lanczos probe.
-Search 0 is cut to its first 37 evaluations, through its first Lanczos block (11 probes) and the move back, so the
-Lanczos block tests run on it in CI. `tests/test_artn_replay.py` replays them through `pykmc.artn.artn_search`
-with `tests/artn_replay.py`. Nothing here needs LAMMPS or pARTn.
+Search 0 is a complete successful search. The default LAMMPS-free tests replay
+all 453 numbered pARTn steps in its 604 recorded evaluations, from the initial
+push through the saddle and both minima. Searches 1–7 keep their first 15
+evaluations, through the first Lanczos probe. Set `PYKMC_ARTN_RECORDINGS` to the
+directory containing all eight full recordings to run the eight-search gate.
 
-- Cell: the gate's Fe vacancy cell (bcc Fe, `FeP_mm.eam.fs`, `pair_style eam/fs`), active volume on with
-  `rmov = 10.7`, `ract = 14.2`: 994 atoms in tag order, 440 movable, 554 buffer.
-- Settings: the Table I `[pARTn]` block (`push_dist_thr 4.0`, `push_step_size 0.3`, `eigval_thr -0.5`,
-  `nnewchance 3`, the rest pyKMC defaults); every `set` call pyKMC made is in each file's `meta_json`.
-- Arrays per evaluation: `x`, `f`, `v_in`, `scalars_in`, `scalars_out`, `partn_step`, `repeat`, `kind`. Once per
-  search: `draw_initial_push` (bohr), `draw_first_lanczos_vector`, `movable`, `cell`, `pbc`, `meta_json`. Search 0
-  also keeps `eigenvec_index` per evaluation and the 12 `eigenvec` versions it points to. Layout and units as in
-  the full recordings.
-- Made by `make_replay_set.py` from the full recordings (611 MB, kept outside git); home folders in `meta_json`
-  are written as `~`. Total size: 3.9 MB (search 0 1.35 MB, the others 0.38–0.39 MB each).
+Issue 02 recorded the eight Fig. 2 searches with pARTn v1.1.0 (`9b753517`),
+pyKMC `745527c` and LAMMPS 22Jul2025 on one rank. The Fe vacancy cell used
+`FeP_mm.eam.fs` with `pair_style eam/fs`. Its active volume had 994 atoms in
+tag order, 440 movable and 554 in the buffer (`rmov = 10.7`, `ract = 14.2`).
+Each file's `meta_json` records the Table I settings, including every pARTn
+`set` call.
+
+Each file stores `x`, `f`, `v_in`, `scalars_in`, `scalars_out`, `partn_step`,
+`repeat` and `kind` for each evaluation. It also stores the initial push
+(in bohr), first Lanczos vector, movable mask, cell, periodicity and metadata.
+Search 0 includes the eigenvector history and its index, the new-chance draw
+array, the saved starting, saddle and minimum positions, and the saddle mode.
+The NPZ stores the recording's original numeric arrays losslessly. Search 0
+takes 26,931,166 bytes. Searches 1–7 take 0.38–0.39 MB each.
+
+To reproduce the fixtures, give the generator the full recordings directory
+and an existing output directory. Search 0's recorded commands and provenance
+identify local files by basename. The prefixes retain their original metadata.
+
+```sh
+python -I tests/data/artn_step_replay/make_replay_set.py SRC DST
+```
 
 | File | Central atom (full cell) | Seed |
 |---|---:|---:|
@@ -28,5 +39,3 @@ with `tests/artn_replay.py`. Nothing here needs LAMMPS or pARTn.
 | `search5.npz` | 1311 | 1934173456 |
 | `search6.npz` | 1333 | 900186024 |
 | `search7.npz` | 1311 | 2134761458 |
-
-To replay the full searches, set `PYKMC_ARTN_RECORDINGS` to the folder of full recordings.

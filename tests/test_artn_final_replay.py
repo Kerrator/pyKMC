@@ -13,7 +13,7 @@ from .test_artn_replay import recorded, synthetic_recording
 def test_complete_search_matches_partn(search: int) -> None:
     """Check every callback, the end step and reason, and the raw endpoints."""
     rec = recorded(search)
-    if not holds_search(rec) and not os.environ.get(RECORDINGS_ENV):
+    if search != 0 and not holds_search(rec) and not os.environ.get(RECORDINGS_ENV):
         pytest.skip(f"set {RECORDINGS_ENV} to the full recordings")
     check = check_search(rec)
     assert not (problems := check.problems()), problems
@@ -22,9 +22,8 @@ def test_complete_search_matches_partn(search: int) -> None:
 def test_complete_search_refuses_a_truncated_recording() -> None:
     """Even a search missing only its last numbered evaluation is incomplete."""
     rec = recorded(0)
-    if holds_search(rec):
-        last = np.flatnonzero(rec["partn_step"] >= 0)[-1]
-        rec["partn_step"][last] = -1
+    last = np.flatnonzero(rec["partn_step"] >= 0)[-1]
+    rec["partn_step"][last] = -1
     with pytest.raises(ValueError, match="complete search"):
         check_search(rec)
 
@@ -45,8 +44,6 @@ def test_changed_push_block_fails_even_on_the_same_positions(keep_going: bool) -
 def test_endpoint_corruption_fails_the_final_check() -> None:
     """Changing only a saved minimum's energy or geometry, including NaN, fails."""
     rec = recorded(0)
-    if not holds_search(rec) and not os.environ.get(RECORDINGS_ENV):
-        pytest.skip(f"set {RECORDINGS_ENV} to the full recordings")
     check = check_search(rec)
     assert not check.problems()
     energy, positions = rec["partn"]["etot_min1"], rec["tau_min2"]

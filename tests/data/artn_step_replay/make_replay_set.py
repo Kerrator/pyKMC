@@ -1,11 +1,7 @@
-"""Cut issue 02's pARTn step recordings to the replay set in this folder.
+"""Build the LAMMPS-free replay fixtures from issue 02's pARTn recordings.
 
-Keeps only what tests/artn_replay.py's load_recording reads, in the same
-layout, so the cut files load and replay unchanged. Each search is cut at the
-first Lanczos probe (the initial-push window); the searches in
-``TO_FIRST_BLOCK`` are cut at the first Lanczos block's move back instead and
-keep the eigenvector versions in force up to there. Home folders in the
-metadata become ``~``.
+Search 0 keeps all evaluations and the saved endpoints. Searches 1–7
+keep the initial pushes and the first Lanczos probe. Run from any directory:
 
     python -I make_replay_set.py SRC DST
 """
@@ -17,11 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-# Searches cut at the end of the first Lanczos block (Stephen, 2026-11-24).
-TO_FIRST_BLOCK = {"search0.npz"}
 LANC = 5  # pARTn's disp_code for a Lanczos move
-
-src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 PER_EVAL = (
     "x",
     "f",
@@ -32,30 +24,55 @@ PER_EVAL = (
     "repeat",
     "kind",
 )
-ONCE = ("draw_initial_push", "draw_first_lanczos_vector", "movable", "cell", "pbc")
-for path in sorted(src.glob("search*.npz")):
-    z = np.load(path, allow_pickle=False)
-    meta = json.loads(str(z["meta_json"]))
-    cols = meta["scalars"]
-    codes = z["scalars_out"][:, cols.index("partn_disp_code")]
-    steps = np.flatnonzero(z["partn_step"] >= 0)
-    led_lanc = codes[steps[:-1]] == LANC  # step k + 1 was led by a Lanczos move
-    last = int(np.flatnonzero(led_lanc)[0]) + 1  # the first probe
-    whole_block = path.name in TO_FIRST_BLOCK
-    if whole_block:
-        while last + 1 < len(steps) and led_lanc[last]:
-            last += 1  # through the probes to the move back
-    end = int(steps[last])
-    keep = {k: z[k][: end + 1] for k in PER_EVAL}
-    keep.update({k: z[k] for k in ONCE})
-    window = "issue 04 initial-push window"
-    if whole_block:
-        keep["eigenvec_index"] = z["eigenvec_index"][: end + 1]
-        keep["eigenvec"] = z["eigenvec"][: int(keep["eigenvec_index"].max()) + 1]
-        window = "to the first Lanczos block's move back, issue 05"
-    meta["trimmed"] = f"evaluations 0-{end} of {len(z['partn_step'])} ({window})"
-    text = re.sub(r"/(Users|home)/[^/\"]+", "~", json.dumps(meta))
-    keep["meta_json"] = np.array(text)
-    out = dst / path.name
+DRAWS = ("draw_initial_push", "draw_first_lanczos_vector")
+SYSTEM = ("movable", "cell", "pbc")
+ENDPOINTS = (
+    "partn_tau_init",
+    "partn_tau_sad",
+    "partn_tau_min1",
+    "partn_tau_min2",
+    "partn_eigen_sad",
+)
+
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+for search in range(8):
+    name = f"search{search}.npz"
+    with np.load(src / name, allow_pickle=False) as z:
+        meta = json.loads(str(z["meta_json"]))
+        steps = z["partn_step"]
+        if search == 0:
+            end = len(steps) - 1
+            keys = (
+                *PER_EVAL,
+                *DRAWS,
+                "draw_new_chance_push",
+                *SYSTEM,
+                "eigenvec_index",
+                "eigenvec",
+                *ENDPOINTS,
+            )
+            keep = {key: z[key] for key in keys}
+        else:
+            codes = z["scalars_out"][:, meta["scalars"].index("partn_disp_code")]
+            numbered = np.flatnonzero(steps >= 0)
+            # Step k + 1 is led by the move selected on numbered step k.
+            first_probe = int(np.flatnonzero(codes[numbered[:-1]] == LANC)[0]) + 1
+            end = int(numbered[first_probe])
+            keep = {key: z[key][: end + 1] for key in PER_EVAL}
+            keep.update({key: z[key] for key in (*DRAWS, *SYSTEM)})
+            meta["trimmed"] = (
+                f"evaluations 0-{end} of {len(steps)} (issue 04 initial-push window)"
+            )
+        text = json.dumps(meta)
+        if search == 0:
+            # The recording includes local paths in its engine commands and provenance.
+            text = re.sub(
+                r'/(?:Users|home)/[^"\s]+', lambda match: Path(match[0]).name, text
+            )
+        else:
+            # Preserve the original prefix metadata byte for byte.
+            text = re.sub(r'/(Users|home)/[^/"]+', "~", text)
+        keep["meta_json"] = np.array(text)
+    out = dst / name
     np.savez_compressed(out, **keep)
-    print(f"{path.name}: evaluations 0-{end}, {out.stat().st_size / 1e6:.2f} MB")
+    print(f"{name}: evaluations 0-{end}, {out.stat().st_size} bytes")
