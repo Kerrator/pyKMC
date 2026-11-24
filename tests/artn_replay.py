@@ -3,10 +3,12 @@
 Issue 02 of the Python ARTn plan recorded the eight Fig. 2 searches at every
 force evaluation (``searchJ.npz``, NumPy only; layout in that issue's
 ``NOTE.md``). :func:`replay` runs :func:`pykmc.artn.artn_search` from the
-recorded start with the recorded initial push and first Lanczos vector. Its
-force callback returns the recorded forces of pARTn's next step and compares
-the positions the core asked for with the positions pARTn evaluated there.
-The core carries its own state; nothing is reset from the recording.
+recorded start with the recorded initial push, first Lanczos vector and the
+push each new chance built. Its force callback returns the recorded forces of
+pARTn's next step, with the positions LAMMPS held there (pARTn's alignment
+test reads them, wrapped into the cell), and compares the positions the core
+asked for with the positions pARTn evaluated there. The core carries its own
+state; nothing is reset from the recording.
 
 pARTn evaluates more often than it steps: the setup evaluation, each blank
 call A after a FIRE restart (the repeats, whose forces fix artn discards) and
@@ -32,7 +34,14 @@ At each step the replay compares, within ``tolerance``:
 
 It stops at the first step that differs, or after ``last_step``: by default
 the last step of the first Lanczos block, the move back to where the block
-started (or the last step the recording holds before it).
+started (or the last step the recording holds before it). Past the window the
+callback returns a non-finite energy, so the core ends its search and returns
+what it found.
+
+:func:`check_climb` replays to the step where pARTn found its saddle, or
+failed, and compares the end: the core asks for the push over the saddle
+next, with the same saddle, energy and eigenvalue, or ends with pyKMC's reason
+for pARTn's failure.
 
 :func:`replay_block` replays one Lanczos block from its recorded starting
 state: the core starts at the block's first position with ``ninit = 0`` and
@@ -40,8 +49,8 @@ the recorded starting vector. :func:`lanczos_blocks` lists a recording's
 blocks.
 
 Run ``python -m tests.artn_replay DIR`` to print, for every ``searchJ.npz``
-in ``DIR``, the first Lanczos block step by step, how far the whole replay
-matches, and every block replayed alone.
+in ``DIR``, the first Lanczos block step by step, the climb to pARTn's saddle
+or failure, and every block replayed alone.
 """
 
 import json
@@ -49,14 +58,12 @@ import math
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Optional
 
 import numpy as np
 
 import pykmc.artn as artn
-from pykmc.dimer import _minimum_image
-from pykmc.eventsearch.strategies.artn import basin_perp_limit
+from pykmc.dimer import DimerResult, _minimum_image
 
 # Environment variable naming the folder of the full recordings.
 RECORDINGS_ENV = "PYKMC_ARTN_RECORDINGS"
@@ -129,6 +136,10 @@ class ReplayReport:
     # after the last of them: (eigenvalue, scaled eigenvalue, mode, sign).
     lanczos_moves: int = 0
     lanczos_end: Optional[tuple] = None
+    # The move the core asked for past the window (None if it asked for
+    # none), and the result it returned.
+    next_move: Optional[str] = None
+    result: Optional[DimerResult] = None
 
     @property
     def first_mismatch(self) -> Optional[StepDiff]:
@@ -175,6 +186,10 @@ class _Stop(Exception):
     """Ends the core's search from inside the callback."""
 
 
+class _PastWindow(Exception):
+    """The core asked for a step past the window."""
+
+
 def load_recording(path: Path) -> dict:
     """Read the arrays :func:`replay` needs from one ``searchJ.npz``."""
     z = np.load(path, allow_pickle=False)
@@ -196,20 +211,22 @@ def load_recording(path: Path) -> dict:
         lanczos_eval_conv_thr=sets["lanczos_eval_conv_thr"],
         eigval_thr=sets["eigval_thr"],
         eigen_step_size=sets["eigen_step_size"],
-        nperp=basin_perp_limit(
-            SimpleNamespace(
-                nperp=sets.get("nperp"), nperp_limitation=sets.get("nperp_limitation")
-            )
-        ),
+        nsmooth=sets["nsmooth"],
+        alpha_mix_cr=sets["alpha_mix_cr"],
+        nnewchance=sets["nnewchance"],
+        nperp=sets.get("nperp"),
+        nperp_limitation=sets.get("nperp_limitation"),
         forc_thr=sets["forc_thr"],
         push_over=sets["push_over"],
         convergence_property=config["convergence_property"],
+        nevalf_max=config["nevalf_max"],
         dmax=config["dmax"],
     )
     if "push_dist_thr" in sets:
         params["push_dist_thr"] = sets["push_dist_thr"]
     n_atoms = z["movable"].shape[0]
     has_eigenvec = "eigenvec" in z.files
+    chances = z["draw_new_chance_push"] if "draw_new_chance_push" in z.files else []
     return dict(
         search=meta["search"],
         x=z["x"],
@@ -230,6 +247,11 @@ def load_recording(path: Path) -> dict:
         kind=z["kind"],
         initial_push=z["draw_initial_push"] * B2A,
         first_lanczos_vector=z["draw_first_lanczos_vector"],
+        new_chance_pushes=[push * B2A for push in chances],
+        # pARTn's own result (pyKMC's extract): saddle energy (eV), eigenvalue
+        # (eV/Å²), the step it was found at, and the error code and message.
+        partn=meta["result"]["partn"],
+        tau_sad=z["partn_tau_sad"] if "partn_tau_sad" in z.files else None,
         movable=z["movable"],
         cell=z["cell"],
         pbc=z["pbc"],
@@ -370,12 +392,16 @@ def replay(
     last_step: Optional[int] = None,
     first_step: int = 0,
     first_lanczos_vector: Optional[np.ndarray] = None,
+    keep_going: bool = False,
 ) -> ReplayReport:
     """Run the core on a recording's forces and compare it step by step.
 
     From ``first_step`` > 0 the core starts at that step's positions with
     ``ninit = 0``, so its first move is Lanczos from ``first_lanczos_vector``;
-    use :func:`replay_block`.
+    use :func:`replay_block`. With ``keep_going`` the replay goes on past a
+    step that differs only in its numbers, still feeding pARTn's forces, and
+    stops at the first step the core reaches by another block; the report
+    still fails at the first step that differs.
     """
     steps, led_by = _steps_and_blocks(rec)
     if last_step is None:
@@ -398,10 +424,13 @@ def replay(
                 seen["lanczos"] = _lanczos_differences(state, rec, int(steps[i - 1]))
                 report.lanczos_end = seen["lanczos"]
 
-    def forces(x: np.ndarray) -> tuple[float, np.ndarray]:
+    def forces(x: np.ndarray) -> tuple:
         k = first_step + len(report.steps)
         if k > last_step:
-            raise _Stop("window")
+            # Past the window: a non-finite energy ends the core's search, which
+            # then returns what it found (the saddle, if it had found one).
+            report.next_move = seen.get("move")
+            raise _Stop("window") if k >= len(steps) else _PastWindow()
         e = int(steps[k])
         diff = _minimum_image(x - rec["x"][e], rec["cell"], rec["pbc"])
         block = "start" if k == first_step else led_by[k]
@@ -435,15 +464,25 @@ def replay(
                 problems += lanczos_problems(seen["lanczos"], rec, tolerance)
         step.problem = "; ".join(problems) or None
         report.steps.append(step)
-        if step.problem:
+        if step.problem and not (
+            keep_going and step.block in CORE_BLOCKS.get(step.move, ())
+        ):
             raise _Stop("mismatch")
-        return float(rec["energy"][e]), rec["f"][e]
+        # The positions as LAMMPS held them, for the alignment test.
+        return float(rec["energy"][e]), rec["f"][e], rec["x"][e]
 
     p = dict(rec["params"])
     vector = rec["first_lanczos_vector"]
     if first_step > 0:
         p["ninit"] = 0
         vector = first_lanczos_vector
+
+    def callback(x: np.ndarray) -> tuple:
+        try:
+            return forces(x)
+        except _PastWindow:
+            return math.nan, np.zeros_like(x)
+
     try:
         result = artn.artn_search(
             rec["x"][steps[first_step]],
@@ -452,14 +491,17 @@ def replay(
             rec["movable"],
             rec["central_atom"],
             0,
-            forces,
+            callback,
             masses=rec["masses"],
             initial_push=rec["initial_push"],
             first_lanczos_vector=vector,
+            new_chance_pushes=rec.get("new_chance_pushes"),
             observe=observe,
             **p,
         )
-        report.end = result.reason or "search finished"
+        report.result = result
+        past = report.next_move is not None and result.reason == "non_finite_force"
+        report.end = "window" if past else (result.reason or "search finished")
     except _Stop as stop:
         report.end = str(stop)
     reached = int(steps[first_step + len(report.steps) - 1]) if report.steps else -1
@@ -537,6 +579,119 @@ def check_blocks(rec: dict, tolerance: float = TOLERANCE) -> list:
     ]
 
 
+# pARTn's failure messages (err_set) and pyKMC's failure reasons for them.
+FAILURE_REASONS = {
+    "EIGENVALUE LOST": "eigenvalue_lost",
+    "NUMBER OF STEPS EXCEEDS THE LIMIT": "max_force_calls",
+    "ENERGY EXCEEDS THE LIMIT": "energy_limit",
+}
+
+
+def climb_end(rec: dict) -> int:
+    """Return the step pARTn found the saddle at, or the step it failed at.
+
+    A recording cut before that step does not hold it (see :func:`holds_climb`).
+    """
+    if rec["partn"]["has_sad"]:
+        return int(rec["partn"]["nevalf_sad"])
+    return int(rec["partn"]["nevalf"])
+
+
+def holds_climb(rec: dict) -> bool:
+    """Return True if the recording runs to pARTn's saddle or failure."""
+    steps, _ = _steps_and_blocks(rec)
+    return climb_end(rec) < len(steps)
+
+
+def partn_failure_reason(rec: dict) -> Optional[str]:
+    """Return pyKMC's reason for pARTn's failure, None if pARTn found a saddle."""
+    if rec["partn"]["has_sad"]:
+        return None
+    message = rec["partn"]["error"][1]
+    return next(
+        (reason for text, reason in FAILURE_REASONS.items() if text in message),
+        f"unmapped: {message}",
+    )
+
+
+@dataclass
+class ClimbCheck:
+    """A whole replay to pARTn's saddle or failure, and the end against pARTn's."""
+
+    rec: dict = field(repr=False)
+    report: ReplayReport
+
+    @property
+    def saddle(self) -> bool:
+        """Return True if pARTn found a saddle."""
+        return bool(self.rec["partn"]["has_sad"])
+
+    @property
+    def energy(self) -> Optional[float]:
+        """|core saddle energy - pARTn's|, eV."""
+        r = self.report.result
+        if not self.saddle or r is None or r.e_saddle is None:
+            return None
+        return abs(r.e_saddle - self.rec["partn"]["etot_sad"])
+
+    @property
+    def eigval(self) -> Optional[float]:
+        """|core curvature - pARTn's saddle eigenvalue|, eV/Å²."""
+        r = self.report.result
+        if not self.saddle or r is None or r.curvature is None:
+            return None
+        return abs(r.curvature - self.rec["partn"]["eigval_sad"])
+
+    @property
+    def saddle_position(self) -> Optional[float]:
+        """Largest minimum-image component of core saddle - pARTn's tau_sad, Å."""
+        r = self.report.result
+        if not self.saddle or r is None or r.saddle_positions is None:
+            return None
+        if self.rec["tau_sad"] is None:
+            return None
+        d = _minimum_image(
+            r.saddle_positions - self.rec["tau_sad"], self.rec["cell"], self.rec["pbc"]
+        )
+        return float(np.max(np.abs(d)))
+
+    def problems(self, tolerance: float = TOLERANCE) -> list:
+        """Why the climb does not match pARTn's; empty if it does."""
+        found = [] if self.report.passed else [self.report.describe()]
+        r = self.report.result
+        if self.saddle:
+            if self.report.next_move != "over":
+                found.append(
+                    f"after the saddle step the core asked for {self.report.next_move}"
+                )
+            if r is None or r.force_calls_saddle != self.report.last_step + 1:
+                calls = None if r is None else r.force_calls_saddle
+                found.append(
+                    f"saddle after {calls} calls, pARTn's at step {self.report.last_step}"
+                )
+            position = self.saddle_position
+            if position is not None and position > tolerance:
+                found.append(f"saddle positions differ by {position:.3e} A")
+        else:
+            reason = None if r is None else r.reason
+            if self.report.next_move is not None:
+                found.append(f"the core went on to {self.report.next_move}")
+            if reason != partn_failure_reason(self.rec):
+                found.append(
+                    f"core ends with {reason}, pARTn with {partn_failure_reason(self.rec)}"
+                )
+        return found
+
+
+def check_climb(
+    rec: dict, tolerance: float = TOLERANCE, keep_going: bool = False
+) -> ClimbCheck:
+    """Replay a recording to pARTn's saddle or failure, and compare the end."""
+    return ClimbCheck(
+        rec, replay(rec, tolerance, last_step=climb_end(rec), keep_going=keep_going)
+    )
+
+
 def _main(folder: str) -> None:
     for path in sorted(Path(folder).glob("search*.npz")):
         rec = load_recording(path)
@@ -556,8 +711,16 @@ def _main(folder: str) -> None:
         print(
             f"  repeats skipped {report.repeats_skipped} (in the recording {report.repeats_total})"
         )
-        steps, _ = _steps_and_blocks(rec)
-        print("  whole search: " + replay(rec, last_step=len(steps) - 1).describe())
+        if holds_climb(rec):
+            check = check_climb(rec)
+            print("  climb: " + check.report.describe())
+            for problem in check.problems()[1 if not check.report.passed else 0 :]:
+                print(f"    {problem}")
+            if check.saddle and check.energy is not None:
+                print(
+                    f"    saddle energy {check.energy:.2e} eV, eigenvalue {check.eigval:.2e} eV/A^2, "
+                    f"positions {check.saddle_position:.2e} A"
+                )
         checks = check_blocks(rec)
         bad = [c for c in checks if c.problems()]
         every = [s for c in checks for s in c.report.steps if s.block == "LANC"]

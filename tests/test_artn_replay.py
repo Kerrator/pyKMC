@@ -24,6 +24,9 @@ from .artn_replay import (
     RECORDINGS_ENV,
     TOLERANCE,
     check_blocks,
+    check_climb,
+    climb_end,
+    holds_climb,
     lanczos_blocks,
     load_recording,
     replay,
@@ -96,6 +99,83 @@ def test_every_lanczos_block_matches_partn(search: int) -> None:
     checks = check_blocks(full_recording(search))
     problems = {c.block.start: c.problems() for c in checks if c.problems()}
     assert not problems, problems
+
+
+# Searches whose replay passes 1e-10 Å before pARTn's end: Lanczos blocks
+# in which a low mode enters late amplify the core's eV/Å force differences
+# (issue 06's run note). Waits for Stephen's ruling.
+ROUND_OFF_GROWTH = {1, 3, 4}
+
+
+def whole_search(search: int) -> dict:
+    """Load a recording that runs to pARTn's saddle or failure, else skip."""
+    rec = recorded(search)
+    if not holds_climb(rec):
+        pytest.skip(f"set {RECORDINGS_ENV} to the full recordings for the climb")
+    return rec
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        pytest.param(
+            s,
+            marks=pytest.mark.xfail(
+                strict=True, reason="round-off growth past 1e-10 A, ruling pending"
+            ),
+        )
+        if s in ROUND_OFF_GROWTH
+        else s
+        for s in range(8)
+    ],
+)
+def test_climb_matches_partn_to_its_saddle_or_failure(search: int) -> None:
+    """Every step to pARTn's saddle, then the push over; or to its failure, mapped."""
+    check = check_climb(whole_search(search))
+    assert not check.problems(), check.problems()
+    result = check.report.result
+    if check.saddle:
+        # Saddle energy: the recorded energy at the same step; pARTn's goes
+        # through Ry and back, one ulp. Eigenvalue: the last block's.
+        assert check.energy <= 1e-9
+        assert check.eigval <= 5e-10 * max(abs(result.curvature), artn._CURVATURE_FLOOR)
+        assert result.force_calls_saddle == climb_end(check.rec) + 1
+    else:
+        assert result.reason == "eigenvalue_lost"
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        1,
+        3,
+        pytest.param(
+            4,
+            marks=pytest.mark.xfail(
+                strict=True, reason="takes another block at step 790"
+            ),
+        ),
+    ],
+)
+def test_climb_keeps_partns_path_past_the_round_off(search: int) -> None:
+    """Fed pARTn's forces past the first difference: the same blocks and end."""
+    check = check_climb(whole_search(search), keep_going=True)
+    report = check.report
+    assert len(report.steps) == report.last_step + 1
+    assert all(s.block in CORE_BLOCKS.get(s.move, ()) for s in report.steps)
+    assert max(s.position for s in report.steps) < 1e-7
+    later = [p for p in check.problems() if "first differing step" not in p]
+    assert not [p for p in later if "saddle positions" not in p], later
+
+
+def test_the_call_at_nevalf_max_fails_where_partn_would() -> None:
+    """With nevalf_max 15, pARTn fails at its step 14 (max_eval - 1): so does the core."""
+    rec = recorded(0)
+    capped = dict(rec, params=dict(rec["params"], nevalf_max=15))
+    report = replay(capped, last_step=14)
+    assert report.passed, report.describe()
+    assert report.result.reason == "max_force_calls"
+    assert report.result.force_calls_total == 15 and report.next_move is None
 
 
 def synthetic_recording(
