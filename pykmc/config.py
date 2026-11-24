@@ -539,24 +539,115 @@ class PartnConfig(BaseModel):
         return v
 
 
+# [RateConstant] keys of earlier HTST branches, refused by name (unknown keys are
+# otherwise ignored).
+_REMOVED_RATECONSTANT_KEYS = {
+    "premin": "HTST: [RateConstant] premin is no longer supported: "
+    "pre-minimisation was removed and Hessians use the geometries the search "
+    "returns; delete the key.",
+    "nu0_zone_radius": "HTST: [RateConstant] nu0_zone_radius is no longer supported: "
+    "the frozen shell around rmov is two force cutoffs read from LAMMPS "
+    "(rbuff overrides it); delete the key.",
+    "require_one_negative_mode": "HTST: [RateConstant] require_one_negative_mode is "
+    "no longer supported: exactly one negative saddle mode is always required; "
+    "delete the key.",
+    "nu0_min_THz": "HTST: [RateConstant] nu0_min_THz is no longer supported: "
+    "there is no nu0 acceptance window; a nu0 outside 0.1-1000 THz is used and "
+    "logged; delete the key.",
+    "nu0_max_THz": "HTST: [RateConstant] nu0_max_THz is no longer supported: "
+    "there is no nu0 acceptance window; a nu0 outside 0.1-1000 THz is used and "
+    "logged; delete the key.",
+    "free_radius": "HTST: [RateConstant] free_radius is now rmov; rename the key.",
+    "shell_width": "HTST: [RateConstant] shell_width is now rbuff; rename the key.",
+}
+
+
 class RateConstantConfig(BaseModel):
     """Rate constant computation parameters."""
 
-    style: Literal["constant"] = Field(
+    style: Literal["constant", "htst"] = Field(
         default=...,
-        description="Method used to compute the prefactor of the rate constant. ",
+        description="Method used to compute the prefactor of the rate constant. "
+        "'constant': k = k0 exp(-dE/(kb T)). "
+        "'htst': k = nu0 exp(-dE/(kb T)) with a harmonic (Vineyard) nu0 per "
+        "reference event from LAMMPS dynamical_matrix (needs the PHONON package); "
+        "a reference event without a nu0 uses k0. See the HTST prefactors page.",
     )
     k0: float = Field(
         default=1.0,
         description="When `style` is set to **'constant'**, this value is used directly as the pre-exponential factor ($k_0$) "
         "\n"
         "$$ k = k_{0} \\exp\\left(-\\frac{\\Delta E}{k_{b}T}\\right) $$"
-        "\n",
+        "\n"
+        "Under 'htst', k0 (ps^-1) is the prefactor of every reference event whose "
+        "nu0 could not be computed; values above 1000 ps^-1 are refused.",
     )
     T: float = Field(
         default=300,
         description="Temperature (in Kelvin) used for computing rate constants.",
     )
+    rmov: float = Field(
+        default=8.0,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="'htst': radius (Angstrom) of the sphere of displaced atoms around "
+        "the moving atom's saddle position. It is separate from [EventSearch] rmov: "
+        "the Hessian region is the same with or without the active volume. "
+        "Converge it on the events of your system before a long run.",
+    )
+    rbuff: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="'htst': thickness (Angstrom) of the frozen shell kept around "
+        "the displaced sphere (separate from [EventSearch] rbuff); atoms beyond are "
+        "left out. Default: two force cutoffs read from LAMMPS at startup.",
+    )
+    hessian_dir: Optional[str] = Field(
+        default=None,
+        description="'htst': directory for the Hessian scratch files (pykmc_htst_*, "
+        "each deleted after its event). Default: the system temp directory (honours "
+        "$TMPDIR). A relative path is taken from the run directory. Created if missing.",
+    )
+    fd_step: float = Field(
+        default=0.01,
+        gt=0.0,
+        allow_inf_nan=False,
+        description="'htst': finite-difference displacement (Angstrom) for "
+        "dynamical_matrix. Do not go below 0.01 with tabulated EAM potentials.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_keys(cls, data: Any) -> Any:
+        """Refuse the keys and the style removed with the earlier HTST branches."""
+        if not isinstance(data, dict):
+            return data
+        for key, text in _REMOVED_RATECONSTANT_KEYS.items():
+            if key in data:
+                raise ValueError(text)
+        if str(data.get("style", "")).strip() == "rpa":
+            raise ValueError(
+                "HTST: [RateConstant] style = rpa is no longer supported: use "
+                "style = htst (rpa computed the same Vineyard prefactor)."
+            )
+        return data
+
+    @model_validator(mode="after")
+    def check_htst_k0(self) -> "RateConstantConfig":
+        """Refuse a k0 that is not positive, or given in Hz, under 'htst'."""
+        if self.style == "htst" and not self.k0 > 0.0:
+            raise ValueError(
+                f"HTST: k0 = {self.k0:g} ps^-1 must be positive: under style = htst "
+                "it is the prefactor of every event without a nu0."
+            )
+        if self.style == "htst" and self.k0 > 1000.0:
+            raise ValueError(
+                f"HTST: k0 = {self.k0:g} ps^-1 is above 1000 ps^-1. Under style = "
+                "htst, k0 is in ps^-1 (not Hz) and is the prefactor of every event "
+                "without a nu0; a typical value is 10 ps^-1 (1e13 Hz)."
+            )
+        return self
 
 
 class PSRConfig(BaseModel):
