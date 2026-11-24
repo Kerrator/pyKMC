@@ -340,6 +340,28 @@ def test_replay_checks_fire_state_and_blocks() -> None:
     assert bad.step == 5 and "block LANC against core move init" in bad.problem
 
 
+@pytest.mark.parametrize(
+    ("draw", "value", "step"),
+    [("initial_push", np.nan, 1), ("first_lanczos_vector", 0.0, 9)],
+)
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_core_nan_positions_fail_replay(
+    draw: str, value: float, step: int, keep_going: bool
+) -> None:
+    """The core asks for a NaN position against a finite ten-step reference."""
+    rec = synthetic_recording()
+    assert np.isfinite(rec["x"]).all()
+    rec[draw].fill(value)
+    # Normalizing the zero Lanczos vector makes NaN inside the core.
+    with np.errstate(invalid="ignore"):
+        report = replay(rec, last_step=9, keep_going=keep_going)
+
+    assert not report.passed and report.end == "mismatch", report.describe()
+    bad = report.first_mismatch
+    assert bad is not None and bad.step == step and math.isnan(bad.position)
+    assert report.steps[-1] is bad
+
+
 @pytest.mark.parametrize("field", ["x", "v_in", "fire_dt", "fire_alpha"])
 @pytest.mark.parametrize("keep_going", [False, True])
 def test_nan_in_a_compared_step_fails(field: str, keep_going: bool) -> None:
