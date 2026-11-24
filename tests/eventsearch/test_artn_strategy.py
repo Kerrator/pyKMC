@@ -410,3 +410,23 @@ def test_ignored_settings_are_logged_once() -> None:
 
     assert len(recorder.lines) == 1
     assert "neigen" in recorder.lines[0] and "zseed" in recorder.lines[0]
+
+
+def test_default_perp_limit_sentinel_reaches_lanczos() -> None:
+    """With both defaults requested, four basin PERP steps lead to Lanczos."""
+    options = artn_options(
+        PartnConfig(nperp=-1, nperp_limitation=[-2], ninit=1, nevalf_max=7)
+    )
+    moves = []
+    artn_search(
+        np.zeros((1, 3)),
+        CELL,
+        PBC,
+        np.ones(1, bool),
+        0,
+        4,
+        lambda x: (0.5 * float(np.sum(x * x)), -x),
+        observe=lambda move, state: moves.append(move),
+        **options,
+    )
+    assert moves == ["start", "init", *(["perp"] * 4), "lanczos"]

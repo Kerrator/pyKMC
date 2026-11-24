@@ -365,7 +365,9 @@ def _lanczos_differences(state: tuple, rec: dict, e: int) -> tuple:
     lowest, eigvec = state
     recorded = rec["eigval"][e]
     eigval = scaled = None
-    if lowest != sys.float_info.max and math.isfinite(recorded):
+    if math.isnan(lowest) or math.isnan(recorded):
+        eigval = scaled = math.nan
+    elif lowest != sys.float_info.max and math.isfinite(recorded):
         eigval = abs(lowest - recorded)
         scaled = eigval / max(abs(recorded), artn._CURVATURE_FLOOR)
     if rec["eigenvec"] is None:
@@ -382,9 +384,9 @@ def lanczos_problems(differences: Optional[tuple], rec: dict, tolerance: float) 
     _, scaled, mode, _ = differences
     bound = tolerance / rec["params"]["eigen_step_size"]
     problems = []
-    if scaled is None or scaled > bound:
+    if scaled is None or not scaled <= bound:
         problems.append(f"eigenvalue differs by {scaled} of max(|eigenvalue|, floor)")
-    if mode is None or mode > bound:
+    if mode is None or not mode <= bound:
         problems.append(f"eigenvector differs by {mode} (up to sign)")
     return problems
 
@@ -453,7 +455,7 @@ def replay(
             step.velocity = float(np.max(np.abs(v - rec["v_in"][e])))
             if step.dt > 1e-12 * rec["fire_dt"][e]:
                 problems.append(f"FIRE dt {dt!r} against {rec['fire_dt'][e]!r}")
-            if step.alpha > 1e-12 * max(abs(rec["fire_alpha"][e]), 1.0):
+            if step.alpha > 1e-12 * abs(rec["fire_alpha"][e]):
                 problems.append(
                     f"FIRE alpha {alpha!r} against {rec['fire_alpha'][e]!r}"
                 )
@@ -466,10 +468,24 @@ def replay(
             pushed = rec["block_out"][e] in CORE_BLOCKS["eigen"]  # pARTn's next move
             if step.block_end and pushed:
                 problems += lanczos_problems(seen["lanczos"], rec, tolerance)
+        differences = (
+            step.position,
+            step.dt,
+            step.alpha,
+            step.velocity,
+            step.eigval,
+            step.eigval_scaled,
+            step.mode,
+        )
+        nonfinite = any(d is not None and not math.isfinite(d) for d in differences)
+        if nonfinite:
+            problems.append("non-finite replay comparison")
         step.problem = "; ".join(problems) or None
         report.steps.append(step)
-        if step.problem and not (
-            keep_going and step.block in CORE_BLOCKS.get(step.move, ())
+        if step.problem and (
+            nonfinite
+            or not keep_going
+            or step.block not in CORE_BLOCKS.get(step.move, ())
         ):
             raise _Stop("mismatch")
         # The positions as LAMMPS held them, for the alignment test.
@@ -674,8 +690,15 @@ class ClimbCheck:
                     f"saddle after {calls} calls, pARTn's at step {self.report.last_step}"
                 )
             position = self.saddle_position
-            if position is not None and position > tolerance:
-                found.append(f"saddle positions differ by {position:.3e} A")
+            if position is None or not position <= tolerance:
+                found.append(f"saddle positions differ by {position} A")
+            if self.energy is None or not self.energy <= 1e-9:
+                found.append(f"saddle energies differ by {self.energy} eV")
+            bound = 5e-10 * max(
+                abs(self.rec["partn"]["eigval_sad"]), artn._CURVATURE_FLOOR
+            )
+            if self.eigval is None or not self.eigval <= bound:
+                found.append(f"saddle eigenvalues differ by {self.eigval} eV/A^2")
         else:
             reason = None if r is None else r.reason
             if self.report.next_move is not None:
