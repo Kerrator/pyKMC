@@ -1,9 +1,11 @@
 """Step replay of pARTn v1.1.0 recordings through the ARTn core (no LAMMPS).
 
-The recorded tests read issue 02's eight recordings (611 MB, outside git) from
-the folder named by ``PYKMC_ARTN_RECORDINGS`` and skip when it is unset. The
-synthetic tests check the harness itself on a recording the core makes on an
-analytic surface, with repeat evaluations added as pARTn's FIRE makes them.
+The recorded tests replay issue 02's eight recordings, cut to the
+initial-push window, from ``tests/data/artn_step_replay`` (see its README).
+``PYKMC_ARTN_RECORDINGS`` names a folder of full recordings to read instead
+(611 MB, outside git). The synthetic tests check the harness itself on a
+recording the core makes on an analytic surface, with repeat evaluations added
+as pARTn's FIRE makes them.
 """
 
 import os
@@ -17,17 +19,16 @@ import pykmc.artn as artn
 from .artn_replay import CORE_BLOCKS, RECORDINGS_ENV, TOLERANCE, load_recording, replay
 from .test_dimer import NO_PBC, OPEN_CELL, curved_valley, valley_start
 
-RECORDINGS = os.environ.get(RECORDINGS_ENV)
+RECORDINGS = Path(
+    os.environ.get(RECORDINGS_ENV)
+    or Path(__file__).parent / "data" / "artn_step_replay"
+)
 
 
-@pytest.mark.skipif(not RECORDINGS, reason=f"{RECORDINGS_ENV} is not set")
 @pytest.mark.parametrize("search", range(8))
 def test_initial_push_phase_matches_partn(search: int) -> None:
     """Start, pushes and basin perpendicular steps to the first Lanczos probe."""
-    path = Path(RECORDINGS) / f"search{search}.npz"
-    if not path.exists():
-        pytest.skip(f"{path} not found")
-    report = replay(load_recording(path))
+    report = replay(load_recording(RECORDINGS / f"search{search}.npz"))
     assert report.passed, report.describe()
     blocks = [s.block for s in report.steps]
     assert blocks[:2] == ["start", "INIT"] and blocks[-1] == "LANC"
