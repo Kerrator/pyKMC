@@ -12,13 +12,18 @@ import logging
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Protocol
 
+import numpy as np
+
+from ...dimer import _minimum_image
 from ...engine.artn_search import ArtnSearchExtension
 from .base import EventSearchStrategy
 from .dimer import DimerStrategy, _then, dimer_search_result
 
 if TYPE_CHECKING:
+    from ...dimer import DimerResult
     from ...engine import EngineExtension
     from ...manager import Manager
+    from ...result import ErrorInfo, EventSearchOutput, Result
     from ..eventsearch import SearchRequest
 
 __all__ = [
@@ -76,9 +81,9 @@ def ignored_partn_parameters(partn: Any) -> dict[str, str]:
     """Return the `[pARTn]` settings the ARTn search does not follow, with why.
 
     Only settings that would change pARTn's search are listed: ``neigen``
-    other than 1 and a set ``zseed``. ``verbosity`` and ``delr_thr`` only
-    shape pARTn's report and are not listed. Refinement is pARTn's and reads
-    the section as before.
+    other than 1 and a set ``zseed``. At positive pARTn verbosity the debug
+    log reports the saddle and minimum displacements and the number of atoms
+    that moved farther than ``[pARTn] delr_thr``.
 
     Parameters
     ----------
@@ -167,6 +172,39 @@ class ArtnStrategy(EventSearchStrategy):
                     + "; ".join(f"{name} = {why}" for name, why in ignored.items())
                 )
         delr_threshold = self.config.eventsearch.delr_thr
+        moved_threshold = self.config.partn.delr_thr
+        logger = logging.getLogger("log")
+        report_endpoints = self.config.partn.verbosity > 0 and logger.isEnabledFor(
+            logging.DEBUG
+        )
+
+        def finish(
+            raw: DimerResult, request: SearchRequest
+        ) -> Result[EventSearchOutput, ErrorInfo]:
+            if report_endpoints:
+                for name, positions in (
+                    ("saddle", raw.saddle_positions),
+                    ("min1", raw.min1_positions),
+                    ("min2", raw.min2_positions),
+                ):
+                    if positions is None:
+                        continue
+                    delta = _minimum_image(
+                        positions - request.positions, request.cell, request.pbc
+                    )
+                    npart = np.count_nonzero(
+                        np.linalg.norm(delta, axis=1) > moved_threshold
+                    )
+                    logger.debug(
+                        "ARTn atom %d seed %d %s: delr=%.12g Å, npart=%d",
+                        request.central_atom,
+                        raw.seed,
+                        name,
+                        np.linalg.norm(delta),
+                        npart,
+                    )
+            return dimer_search_result(raw, request, delr_threshold, backend="artn")
+
         futures = []
         for request in requests:
             future = manager.submit(
@@ -181,11 +219,6 @@ class ArtnStrategy(EventSearchStrategy):
                 options=self.options,
             )
             futures.append(
-                _then(
-                    future,
-                    lambda raw, request=request: dimer_search_result(
-                        raw, request, delr_threshold, backend="artn"
-                    ),
-                )
+                _then(future, lambda raw, request=request: finish(raw, request))
             )
         return futures

@@ -61,8 +61,10 @@ callback call:
   pushes from the start's push, mixed with a random part (``alpha_mix_cr``),
   back in the basin; after that the search fails;
 - a push off the saddle along +eigenvector, of ``eigen_step_size * push_over
-  * 0.8``, and FIRE relaxation to a minimum on the full force; then the same
-  along -eigenvector.
+  * 0.8``, and FIRE relaxation to the first minimum on the full force.
+  Returning to the saddle clears the velocity but carries FIRE's time step.
+  One step using the first minimum's force precedes the opposite push and
+  relaxation to the second minimum.
 
 FIRE is LAMMPS's (euler implicit) with the settings pARTn's fix gives it, in
 LAMMPS metal units: time step 0.001 ps, masses in amu, ``alpha0`` 0.1,
@@ -100,8 +102,6 @@ Other differences from pARTn:
   Lanczos vector on the movable atoms, each in order of the atom's
   minimum-image offset from the central atom (x, then y, then z), so the draws
   do not depend on the atom order;
-- the evaluation pARTn makes at the saddle before the second push off it is
-  skipped;
 - each FIRE restart costs no evaluation, where pARTn's costs one it discards;
 - the force-call counts are every callback call; as in pARTn, call number
   ``nevalf_max`` fails the search;
@@ -204,7 +204,7 @@ _RELAX_DELAY = 0  # delaystep in relaxation to a minimum
 EnergyAndForces = Callable[[np.ndarray], tuple]
 # (move, state): the move that led to the positions about to be evaluated, and
 # FIRE's (dt, alpha, velocities) after a FIRE step, Lanczos's (eigenvalue,
-# eigenvector) after a Lanczos move, else None.
+# eigenvector) after a Lanczos move, or ("SMTH",) / ("EIGN",) after a climb push.
 Observer = Callable[[str, Optional[tuple]], None]
 
 
@@ -388,8 +388,9 @@ def artn_search(
         ``"eigen"``, ``"over"`` or ``"relax"``) and, after a FIRE step,
         FIRE's ``(dt, alpha, velocities)``; after a Lanczos move (a probe or
         the move back), the lowest eigenvalue and the eigenvector as pARTn
-        holds them after the call that made the move; else None. For step
-        replay.
+        holds them after the call that made the move; after an eigenvector
+        push, ("SMTH",) during blending or ("EIGN",) otherwise. Other moves
+        carry None. For step replay.
 
     Returns
     -------
@@ -453,6 +454,8 @@ def artn_search(
         x: np.ndarray,
         move: str,
         state: Optional[tuple] = None,
+        *,
+        restored_energy: Optional[float] = None,
     ) -> tuple[float, np.ndarray]:
         nonlocal calls, held
         calls += 1
@@ -465,6 +468,8 @@ def artn_search(
         held = np.asarray(engine[0], dtype=float) if engine else x
         if not (np.isfinite(energy) and np.all(np.isfinite(forces))):
             raise _Failed("non_finite_force")
+        if restored_energy is not None:
+            energy = restored_energy  # block_pushover restores etot_sad on the return
         if e_start is not None and energy - e_start > _ENERGY_LIMIT:
             raise _Failed("energy_limit")
         # pARTn's step guard: its call number nevalf_max fails, whatever the
@@ -487,6 +492,24 @@ def artn_search(
         s = min(1.0, dmax / largest) if largest > 0 else 1.0
         return x + s * s * d
 
+    def bounded_dt(dt: float, velocity: np.ndarray) -> float:
+        largest = vec.max_abs(velocity)
+        return dmax / largest if dt * largest > dmax else dt
+
+    def restart_fire(
+        x: np.ndarray, v: np.ndarray, f: np.ndarray, dt: float, shrink: bool
+    ) -> tuple[np.ndarray, np.ndarray, float]:
+        """Take FIRE's half-step back, then kick from rest using the saved force."""
+        if shrink and _DT_SHRINK * dt >= _DT_MIN:
+            dt *= _DT_SHRINK
+        x = x - 0.5 * dt * v
+        # The force at the half-step is discarded (fix_artn.cpp:688-693).
+        ratio = _DT0 / dt
+        kick = f * ratio * ratio
+        dtv = bounded_dt(dt, dt * _FTM2V * kick * inv_mass)
+        v = dtv * _FTM2V * kick * inv_mass
+        return x + dtv * v, v, dt
+
     def fire(
         x: np.ndarray,
         energy: float,
@@ -496,7 +519,7 @@ def artn_search(
         stop: Callable[[np.ndarray, int], bool],
         move: str,
         velocity_direction: Optional[np.ndarray] = None,
-    ) -> tuple[np.ndarray, float, np.ndarray]:
+    ) -> tuple[np.ndarray, float, np.ndarray, float]:
         """Relax from rest with LAMMPS FIRE until ``stop(forces, steps)``.
 
         With ``direction`` the force is kept perpendicular to it, and the
@@ -521,28 +544,16 @@ def artn_search(
                 if steps - last_negative > delaystep:
                     dt = min(_DT_GROW * dt, _DT_MAX)
                     alpha *= _ALPHA_SHRINK
-                kick, probe = f, v
+                dtv = bounded_dt(dt, v)
+                v = mix_v * (v + dtv * _FTM2V * f * inv_mass) + mix_f * f
+                x = x + dtv * v
             else:
                 last_negative = steps
                 if steps >= delaystep:
                     alpha = _ALPHA0
-                    if _DT_SHRINK * dt >= _DT_MIN:
-                        dt *= _DT_SHRINK
-                x = x - 0.5 * dt * v
-                v = np.zeros_like(x)
-                # pARTn's fix replaces the force at the half-stepped positions
-                # by the earlier one, scaled (fix_artn.cpp:688, :693).
-                ratio = _DT0 / dt
-                kick = f * ratio * ratio
-                probe = dt * _FTM2V * kick * inv_mass
-            largest = vec.max_abs(probe)
-            dtv = dmax / largest if dt * largest > dmax else dt
-            v = v + dtv * _FTM2V * kick * inv_mass
-            if power > 0:
-                v = mix_v * v + mix_f * f
-            x = x + dtv * v
+                x, v, dt = restart_fire(x, v, f, dt, shrink=steps >= delaystep)
             energy, forces = evaluate(x, move, (dt, alpha, v.copy()))
-        return x, energy, forces
+        return x, energy, forces, dt
 
     # pARTn carries the eigenvalue from one Lanczos block into the next block's
     # first convergence test. A search starts with pARTn's "unset" value,
@@ -744,7 +755,9 @@ def artn_search(
                 x = displace(x, push)
                 energy, f = evaluate(x, "init")
                 pushes += 1
-                x, energy, f = fire(x, energy, f, push, _PERP_DELAY, basin_done, "perp")
+                x, energy, f, _ = fire(
+                    x, energy, f, push, _PERP_DELAY, basin_done, "perp"
+                )
                 if inewchance == 0:
                     nperp_now = limits[0]
                 if pushes < ninit:
@@ -796,6 +809,7 @@ def artn_search(
             # pARTn holds them, the push in bohr.
             ismooth += 1
             if nsmooth > 0 and ismooth <= nsmooth:
+                block = "SMTH"
                 if ismooth == 1 or blend_from is None:
                     blend_from, blend_to = push / _B2A, eigvec
                 s = ismooth / (nsmooth + 1)
@@ -805,6 +819,7 @@ def artn_search(
                 if ismooth == nsmooth:
                     blend_from = blend_to = None
             else:
+                block = "EIGN"
                 climb = eigvec
             f_para = vec.dot(f, climb)
             step = -math.copysign(1.0, f_para) * min(
@@ -812,8 +827,8 @@ def artn_search(
             )
             x = displace(x, climb * step)
             push = climb * _B2A
-            energy, f = evaluate(x, "eigen")
-            x, energy, f = fire(
+            energy, f = evaluate(x, "eigen", (block,))
+            x, energy, f, _ = fire(
                 x, energy, f, push, _PERP_DELAY, climb_done, "perp", eigvec
             )
             if not at_saddle:
@@ -829,26 +844,37 @@ def artn_search(
             mode=-mode if vec.dot(mode, offset) < 0 else mode,
             force_calls_saddle=calls,
         )
-        minima = []
-        for sign in (1.0, -1.0):
-            x = displace(
-                saddle, sign * eigen_step_size * push_over * _PUSH_OVER_FACTOR * eigvec
-            )
+        push = eigen_step_size * push_over * _PUSH_OVER_FACTOR * eigvec
+
+        def downhill(
+            base: np.ndarray, step: np.ndarray
+        ) -> tuple[np.ndarray, float, np.ndarray, float]:
+            x = displace(base, step)
             energy, f = evaluate(x, "over")
-            x, energy, f = fire(x, energy, f, None, _RELAX_DELAY, relaxed, "relax")
-            minima.append((x, energy))
+            return fire(x, energy, f, None, _RELAX_DELAY, relaxed, "relax")
+
+        x_min1, e_min1, f_min1, dt = downhill(saddle, push)
+        found.update(
+            min1_positions=_wrap(x_min1, cell, pbc),
+            e_min1=e_min1,
+            delr1=vec.norm(_minimum_image(x_min1 - x_start, cell, pbc)),
+        )
+        # ARTn restores tau_sad and zeroes v at min1 (artn.f90:661-680,
+        # move_mode.f90:148-156). The fix keeps FIRE's dt at irelax == 0.
+        # Its next step therefore starts at the saddle using min1's force.
+        back, v, dt = restart_fire(
+            saddle, np.zeros_like(saddle), f_min1, dt, shrink=True
+        )
+        evaluate(back, "relax", (dt, _ALPHA0, v), restored_energy=e_saddle)
+        x_min2, e_min2, _, _ = downhill(back, -push)
     except _Failed as failure:
         return result(str(failure), **found, force_calls_total=calls)
 
-    (x_min1, e_min1), (x_min2, e_min2) = minima
     return result(
         None,
         **found,
-        min1_positions=_wrap(x_min1, cell, pbc),
         min2_positions=_wrap(x_min2, cell, pbc),
-        e_min1=e_min1,
         e_min2=e_min2,
-        delr1=vec.norm(_minimum_image(x_min1 - x_start, cell, pbc)),
         delr2=vec.norm(_minimum_image(x_min2 - x_start, cell, pbc)),
         force_calls_total=calls,
     )

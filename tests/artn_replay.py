@@ -44,7 +44,8 @@ what it found.
 :func:`check_climb` replays to the step where pARTn found its saddle, or
 failed, and compares the end: the core asks for the push over the saddle
 next, with the same saddle, energy and eigenvalue, or ends with pyKMC's reason
-for pARTn's failure.
+for pARTn's failure. :func:`check_search` continues through both relaxations
+and checks the raw saddle and minima before pyKMC's event acceptance.
 
 :func:`replay_block` replays one Lanczos block from its recorded starting
 state: the core starts at the block's first position with ``ninit = 0`` and
@@ -72,6 +73,8 @@ from pykmc.dimer import DimerResult, _minimum_image
 RECORDINGS_ENV = "PYKMC_ARTN_RECORDINGS"
 # Largest position difference accepted at a step, Å (open question 2).
 TOLERANCE = 1.0e-10
+# Search 4 keeps pARTn's blocks and failure step despite Lanczos round-off.
+ROUND_OFF_GROWTH = {4}
 # Fe mass of the recordings' potential, FeP_mm.eam.fs (element line), amu.
 FE_MASS = 55.85
 # pARTn's bohr in Å (artn:src/h_artn_units.f90:71); the pushes are recorded in bohr.
@@ -94,7 +97,8 @@ CORE_BLOCKS = {
     "init": ("INIT",),
     "perp": ("PERP",),
     "lanczos": ("LANC",),
-    "eigen": ("EIGN", "SMTH"),
+    "eigen": ("EIGN",),
+    "smooth": ("SMTH",),
     "over": ("OVER",),
     "relax": ("RELX",),
 }
@@ -254,7 +258,9 @@ def load_recording(path: Path) -> dict:
         # pARTn's own result (pyKMC's extract): saddle energy (eV), eigenvalue
         # (eV/Å²), the step it was found at, and the error code and message.
         partn=meta["result"]["partn"],
-        tau_sad=z["partn_tau_sad"] if "partn_tau_sad" in z.files else None,
+        tau_sad=z.get("partn_tau_sad"),
+        tau_min1=z.get("partn_tau_min1"),
+        tau_min2=z.get("partn_tau_min2"),
         movable=z["movable"],
         cell=z["cell"],
         pbc=z["pbc"],
@@ -421,11 +427,17 @@ def replay(
     seen: dict = {}
 
     def observe(move: str, state: Optional[tuple]) -> None:
+        if move == "eigen":
+            # An unsmoothed push and the blend with the previous direction
+            # are distinct pARTn blocks, even if they land at the same point.
+            move = {("EIGN",): "eigen", ("SMTH",): "smooth"}.get(
+                state, "unknown eigen push"
+            )
         seen["move"], seen["state"], seen["lanczos"] = move, state, None
         if move == "lanczos":
             report.lanczos_moves += 1
             i = first_step + len(report.steps)  # the step this move leads to
-            if 0 < i <= len(steps):
+            if state is not None and 0 < i <= len(steps):
                 seen["lanczos"] = _lanczos_differences(state, rec, int(steps[i - 1]))
                 report.lanczos_end = seen["lanczos"]
 
@@ -448,7 +460,16 @@ def replay(
                 f"positions differ by {step.position:.3e} A (tolerance {tolerance:.1e} A)"
             )
         state = seen.get("state")
-        if step.block in FIRE_BLOCKS and state is not None:
+        missing_state = state is None and (
+            step.block in FIRE_BLOCKS or step.block == "LANC"
+        )
+        if missing_state:
+            problems.append(f"missing observer state for {step.block}")
+        if (
+            step.block in FIRE_BLOCKS
+            and step.move in ("perp", "relax")
+            and state is not None
+        ):
             dt, alpha, v = state
             step.dt = abs(dt - rec["fire_dt"][e])
             step.alpha = abs(alpha - rec["fire_alpha"][e])
@@ -465,7 +486,7 @@ def replay(
             step.eigval, step.eigval_scaled, step.mode, step.mode_sign = seen["lanczos"]
             # The move back: pARTn's call before it ended the block.
             step.block_end = not rec["in_lanczos"][steps[k - 1]]
-            pushed = rec["block_out"][e] in CORE_BLOCKS["eigen"]  # pARTn's next move
+            pushed = rec["block_out"][e] in ("EIGN", "SMTH")  # pARTn's next move
             if step.block_end and pushed:
                 problems += lanczos_problems(seen["lanczos"], rec, tolerance)
         differences = (
@@ -484,6 +505,7 @@ def replay(
         report.steps.append(step)
         if step.problem and (
             nonfinite
+            or missing_state
             or not keep_going
             or step.block not in CORE_BLOCKS.get(step.move, ())
         ):
@@ -719,6 +741,139 @@ def check_climb(
     )
 
 
+def holds_search(rec: dict) -> bool:
+    """Whether every numbered evaluation, including the stop, is present."""
+    return np.count_nonzero(rec["partn_step"] >= 0) == rec["partn"]["nevalf"] + 1
+
+
+@dataclass
+class EndpointDiff:
+    """Absolute differences from pARTn's saved endpoint, in Å and eV."""
+
+    position: float
+    energy: float
+    displacement: float
+    distance_from_geometry: float
+
+
+@dataclass
+class SearchCheck:
+    """A full search compared with the numbered steps and pARTn's raw result."""
+
+    rec: dict = field(repr=False)
+    report: ReplayReport
+
+    def endpoints(self) -> dict[str, EndpointDiff]:
+        """Compare the saved geometries and energies in pARTn's original leg order."""
+        r = self.report.result
+        if r is None:
+            return {}
+        rec = self.rec
+        start = rec["x"][self.report.steps[0].evaluation]
+        errors = {}
+        for key, x, energy, distance in (
+            ("sad", r.saddle_positions, r.e_saddle, None),
+            ("min1", r.min1_positions, r.e_min1, r.delr1),
+            ("min2", r.min2_positions, r.e_min2, r.delr2),
+        ):
+            if not rec["partn"]["has_" + key]:
+                continue
+            ref = rec["tau_" + key]
+            if x is None or ref is None or energy is None:
+                continue
+            geometry = float(
+                np.linalg.norm(_minimum_image(x - start, rec["cell"], rec["pbc"]))
+            )
+            if key == "sad":
+                # The public result exposes only the two minimum displacements.
+                distance = geometry
+            if distance is None:
+                continue
+            delta = _minimum_image(x - ref, rec["cell"], rec["pbc"])
+            errors[key] = EndpointDiff(
+                float(np.max(np.abs(delta))),
+                abs(energy - rec["partn"]["etot_" + key]),
+                abs(distance - rec["partn"]["delr_" + key]),
+                abs(distance - geometry),
+            )
+        return errors
+
+    def problems(self) -> list[str]:
+        """Check step coverage, stop reason, callback counts and endpoint values."""
+        report, partn = self.report, self.rec["partn"]
+        calls = int(np.count_nonzero(self.rec["partn_step"] >= 0))
+        found = []
+        if report.search not in ROUND_OFF_GROWTH and not report.passed:
+            found.append(report.describe())
+        if len(report.steps) != calls or report.next_move is not None:
+            found.append(
+                f"replayed {len(report.steps)} of {calls} calls; next move {report.next_move}"
+            )
+        if any(s.block not in CORE_BLOCKS.get(s.move, ()) for s in report.steps):
+            found.append("the core took a different block")
+        if any(s.mode is None for s in report.steps if s.block == "LANC"):
+            found.append("missing Lanczos eigenvector")
+        r = report.result
+        if r is None:
+            return found + [f"the core did not return a result ({report.end})"]
+        if (
+            r.force_calls_total != calls
+            or r.force_calls_saddle != climb_end(self.rec) + 1
+        ):
+            found.append(
+                f"force calls: total {r.force_calls_total}, to saddle or failure {r.force_calls_saddle}"
+            )
+        if r.success != (not partn["has_error"]) or r.reason != partn_failure_reason(
+            self.rec
+        ):
+            found.append(f"unexpected end: success {r.success}, reason {r.reason}")
+        if r.e_start is None or not abs(r.e_start - partn["etot_init"]) <= 1e-9:
+            found.append("the initial energy differs")
+        if partn["has_sad"]:
+            limit = 5e-10 * max(abs(partn["eigval_sad"]), artn._CURVATURE_FLOOR)
+            if (
+                r.curvature is None
+                or not abs(r.curvature - partn["eigval_sad"]) <= limit
+            ):
+                found.append("the saddle eigenvalue differs")
+        errors = self.endpoints()
+        for key, x, energy in (
+            ("sad", r.saddle_positions, r.e_saddle),
+            ("min1", r.min1_positions, r.e_min1),
+            ("min2", r.min2_positions, r.e_min2),
+        ):
+            if not partn["has_" + key]:
+                if x is not None or energy is not None:
+                    found.append(f"unexpected {key}")
+                continue
+            if key not in errors:
+                found.append(f"missing {key} endpoint data")
+                continue
+            d = errors[key]
+            # A 3N norm can differ by at most sqrt(3N) times the component bound.
+            if not (
+                d.position <= report.tolerance
+                and d.energy <= 1e-9
+                and d.displacement <= math.sqrt(x.size) * report.tolerance
+                and d.distance_from_geometry <= report.tolerance
+            ):
+                found.append(f"{key}: {d}")
+        return found
+
+
+def check_search(rec: dict, tolerance: float = TOLERANCE) -> SearchCheck:
+    """Replay all pARTn steps; apply the path-and-end ruling only to search 4."""
+    if not holds_search(rec):
+        raise ValueError("the recording does not hold the complete search")
+    report = replay(
+        rec,
+        tolerance,
+        last_step=rec["partn"]["nevalf"],
+        keep_going=rec["search"] in ROUND_OFF_GROWTH,
+    )
+    return SearchCheck(rec, report)
+
+
 def _main(folder: str) -> None:
     for path in sorted(Path(folder).glob("search*.npz")):
         rec = load_recording(path)
@@ -748,6 +903,14 @@ def _main(folder: str) -> None:
                     f"    saddle energy {check.energy:.2e} eV, eigenvalue {check.eigval:.2e} eV/A^2, "
                     f"positions {check.saddle_position:.2e} A"
                 )
+        if holds_search(rec):
+            final = check_search(rec)
+            problems = final.problems()
+            print(
+                f"  complete search: {len(final.report.steps)} steps; {problems or 'matches'}"
+            )
+            for key, difference in final.endpoints().items():
+                print(f"    {key}: {difference}")
         checks = check_blocks(rec)
         bad = [c for c in checks if c.problems()]
         every = [s for c in checks for s in c.report.steps if s.block == "LANC"]

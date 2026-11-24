@@ -22,6 +22,7 @@ import pykmc.artn as artn
 from .artn_replay import (
     CORE_BLOCKS,
     RECORDINGS_ENV,
+    ROUND_OFF_GROWTH,
     TOLERANCE,
     check_blocks,
     check_climb,
@@ -101,13 +102,6 @@ def test_every_lanczos_block_matches_partn(search: int) -> None:
     assert not problems, problems
 
 
-# Searches whose replay passes the tolerance before pARTn's end: Lanczos
-# blocks in which a low mode enters late amplify last-bit differences, even
-# with pARTn's Ry/bohr subtraction. Judged on path and end (issue 06's run
-# note, ruling of 2026-11-24).
-ROUND_OFF_GROWTH = {4}
-
-
 def whole_search(search: int) -> dict:
     """Load a recording that runs to pARTn's saddle or failure, else skip."""
     rec = recorded(search)
@@ -181,6 +175,8 @@ def synthetic_recording(
     rows = []
 
     def observe(move: str, state: object) -> None:
+        if move == "eigen" and state == ("SMTH",):
+            move = "smooth"
         seen.update(move=move, state=state)
 
     def surface(x: np.ndarray) -> tuple[float, np.ndarray]:

@@ -285,6 +285,43 @@ def test_results_go_through_the_shared_rules_as_artn() -> None:
     assert event.force_calls == 100 and event.force_calls_endpoints == 50
 
 
+@pytest.mark.parametrize(
+    ("moved_threshold", "accepted_threshold", "npart", "accepted"),
+    [(0.25, 0.6, 1, True), (0.5, 0.6, 0, True), (0.25, 0.5, 1, False)],
+)
+def test_participant_report_and_event_acceptance_use_separate_thresholds(
+    moved_threshold: float,
+    accepted_threshold: float,
+    npart: int,
+    accepted: bool,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report counts strictly larger atomic displacements; acceptance uses the 3N distance."""
+    start = np.array([[9.75, 1.0, 1.0], [1.0, 2.0, 3.0]])
+    min1 = np.array([[0.25, 1.0, 1.0], [1.0, 2.0, 3.0]])
+    raw = _raw(start, delr1=0.5, delr2=2.0, min1=min1)
+    future = Future()
+    future.set_result(raw)
+    manager = OrderedManager(1, [0])
+    monkeypatch.setattr(manager, "submit", lambda *args, **kwargs: future)
+    config = _av_config(rmov=None)
+    config.partn = PartnConfig(delr_thr=moved_threshold)
+    config.eventsearch.delr_thr = accepted_threshold
+    request = SearchRequest(0, start, CELL, np.array(["Ni", "Ni"]), PBC, raw.seed)
+    monkeypatch.setattr(logging.getLogger("log"), "propagate", True)
+    with caplog.at_level(logging.DEBUG, logger="log"):
+        result = ArtnStrategy(config).submit([request], manager)[0].result()
+
+    assert result.is_ok() == accepted
+    if not accepted:
+        assert result.err_value().type == ErrorType.EVENT_MINIMA_NOT_MATCH_POSITIONS
+    assert (
+        f"ARTn atom 0 seed {raw.seed} min1: delr=0.5 Å, npart={npart}"
+        in caplog.messages
+    )
+
+
 def test_a_failed_search_maps_to_event_not_found_with_its_reason() -> None:
     class FailingManager:
         def submit(self, op_name: str, **kw: object) -> Future:
