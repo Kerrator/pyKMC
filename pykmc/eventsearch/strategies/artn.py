@@ -21,7 +21,12 @@ if TYPE_CHECKING:
     from ...manager import Manager
     from ..eventsearch import SearchRequest
 
-__all__ = ["ArtnStrategy", "artn_options", "ignored_partn_parameters"]
+__all__ = [
+    "ArtnStrategy",
+    "artn_options",
+    "basin_perp_limit",
+    "ignored_partn_parameters",
+]
 
 # `[pARTn]` parameters the ARTn core takes, under the same names.
 _CORE_PARAMETERS = (
@@ -55,9 +60,28 @@ class ArtnSearchConfig(Protocol):
     frozen_atoms: Any
 
 
+def basin_perp_limit(partn: Any) -> int:
+    """Return pARTn's limit on perpendicular steps in the basin, -1 for none.
+
+    pARTn builds it from ``nperp`` and ``nperp_limitation``
+    (``nperp_limitation_init``): ``nperp`` when it is set and not -1, else the
+    first value of ``nperp_limitation``, else no limit.
+    """
+    if partn.nperp is not None and partn.nperp != -1:
+        return partn.nperp
+    if partn.nperp_limitation:
+        return partn.nperp_limitation[0]
+    return -1
+
+
 def artn_options(partn: Any) -> dict[str, Any]:
-    """Return the ARTn core's keyword options from a `[pARTn]` section."""
-    return {name: getattr(partn, name) for name in _CORE_PARAMETERS}
+    """Return the ARTn core's keyword options from a `[pARTn]` section.
+
+    ``nperp`` is pARTn's basin limit (:func:`basin_perp_limit`).
+    """
+    options = {name: getattr(partn, name) for name in _CORE_PARAMETERS}
+    options["nperp"] = basin_perp_limit(partn)
+    return options
 
 
 def ignored_partn_parameters(partn: Any) -> dict[str, str]:
@@ -87,8 +111,9 @@ def ignored_partn_parameters(partn: Any) -> dict[str, str]:
     limits += list(partn.nperp_limitation or [])
     if any(limit != -1 for limit in limits):
         ignored["nperp_limitation"] = (
-            f"{partn.nperp_limitation} (no perpendicular step limit out of the "
-            "basin yet; nperp still limits the basin's)"
+            f"{partn.nperp_limitation} with nperp = {partn.nperp} (no "
+            "perpendicular step limit out of the basin yet; the basin keeps "
+            f"pARTn's limit of {basin_perp_limit(partn)})"
         )
     if partn.nnewchance != 0:
         ignored["nnewchance"] = (

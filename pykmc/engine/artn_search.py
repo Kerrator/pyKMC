@@ -13,7 +13,6 @@ from typing import Any, Mapping, Optional
 
 import numpy as np
 from ase.cell import Cell
-from ase.data import atomic_masses, atomic_numbers
 
 from ..artn import artn_search as run_artn
 from ..dimer import DimerResult
@@ -43,8 +42,9 @@ class ArtnSearchExtension(DimerSearchExtension):
         with the ARTn core in place of the dimer's. ``options`` are keyword
         options of :func:`pykmc.artn.artn_search` (the `[pARTn]` parameters it
         takes) plus the worker options ``reuse_neighbor_list`` and
-        ``eam_force_crop`` (default False). FIRE gets the masses LAMMPS has,
-        which pyKMC sets from ASE's table.
+        ``eam_force_crop`` (default False). FIRE gets the masses the serial
+        instance uses: pyKMC sets them from ASE's table, and an EAM file read
+        by ``pair_coeff`` replaces them with its own.
 
         Returns
         -------
@@ -52,9 +52,13 @@ class ArtnSearchExtension(DimerSearchExtension):
             The ARTn core's result on the leader rank, None on the other ranks.
 
         """
-        masses = np.array([atomic_masses[atomic_numbers[str(t)]] for t in types])
+
+        def core(*args: Any, **kwargs: Any) -> DimerResult:
+            # The instance exists and holds this system once the core is called.
+            return run_artn(*args, masses=self._instance_masses(), **kwargs)
+
         return self._search(
-            run_artn,
+            core,
             positions,
             types,
             cell,
@@ -62,5 +66,12 @@ class ArtnSearchExtension(DimerSearchExtension):
             movable,
             central_atom,
             seed,
-            {**(options or {}), "masses": masses},
+            dict(options or {}),
         )
+
+    def _instance_masses(self) -> np.ndarray:
+        """Return each atom's mass on the serial instance, amu, in pyKMC order."""
+        lmp = self._force_engine.lmp
+        types = np.array(lmp.gather_atoms("type", 0, 1), dtype=int)
+        per_type = lmp.numpy.extract_atom("mass")
+        return np.asarray(per_type, dtype=float)[types]

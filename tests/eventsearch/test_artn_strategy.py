@@ -24,6 +24,7 @@ from pykmc.eventsearch import EventSearch, SearchRequest
 from pykmc.eventsearch.strategies.artn import (
     ArtnStrategy,
     artn_options,
+    basin_perp_limit,
     ignored_partn_parameters,
 )
 from pykmc.eventsearch.strategies.dimer import DimerStrategy
@@ -337,6 +338,51 @@ def test_settings_the_core_follows_are_not_listed() -> None:
     assert ignored_partn_parameters(plain) == {}
     unlimited = PartnConfig(nsmooth=0, nperp=-1, nperp_limitation=[-1])
     assert ignored_partn_parameters(unlimited) == {}
+
+
+@pytest.mark.parametrize(
+    ("nperp", "limitation", "expected"),
+    [
+        (3, [4, 8, 12, 16, -1], 3),  # pyKMC's defaults
+        (None, [4, 8, 12, 16, -1], 4),  # pARTn then takes the list's first value
+        (-1, [4, 8, 12, 16, -1], 4),
+        (5, None, 5),
+        (None, None, -1),
+        (-1, None, -1),
+    ],
+)
+def test_the_core_gets_partns_basin_limit(
+    nperp: int | None, limitation: list[int] | None, expected: int
+) -> None:
+    partn = PartnConfig(nperp=nperp, nperp_limitation=limitation)
+
+    assert basin_perp_limit(partn) == expected
+    assert artn_options(partn)["nperp"] == expected
+    if expected != -1:
+        assert (
+            f"the basin keeps pARTn's limit of {expected}"
+            in (ignored_partn_parameters(partn)["nperp_limitation"])
+        )
+
+
+def test_an_unset_nperp_with_a_list_still_ends_the_basin() -> None:
+    """With nperp unset, the basin stops after the list's first value, as in pARTn."""
+    from ..test_dimer import NO_PBC, OPEN_CELL, curved_valley, valley_start
+
+    options = artn_options(PartnConfig(nperp=None))
+    options.update(push_mode="list", push_step_size=0.3, nevalf_max=400)
+    result = artn_search(
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        5,
+        curved_valley,
+        **options,
+    )
+
+    assert result.success
 
 
 def test_a_set_zseed_and_neigen_are_listed() -> None:

@@ -226,12 +226,25 @@ def test_frozen_atoms_never_move_or_steer() -> None:
     assert a.force_calls_total == b.force_calls_total
 
 
-def test_shuffled_atom_order_gives_the_same_event() -> None:
+# Push on the central atom only, or rad over two atoms (atoms 0 and 3, 2.5 Å apart);
+# the second order swaps atoms 0 and 3, so their draws would swap if handed out
+# in atom order.
+@pytest.mark.parametrize(
+    ("push", "order"),
+    [
+        (PUSH, [4, 0, 3, 5, 1, 2]),
+        (
+            dict(push_mode="rad", push_dist_thr=2.6, push_step_size=0.3),
+            [4, 3, 5, 0, 1, 2],
+        ),
+    ],
+)
+def test_shuffled_atom_order_gives_the_same_event(push: dict, order: list) -> None:
     """Reordering the atoms reorders the event and changes nothing else.
 
-    The push draws on the pushed atom only, so it is the same; the first
-    Lanczos vector is drawn in atom order, so only Lanczos's tolerance can
-    differ, and the event is the same to well within the force threshold.
+    The push and the first Lanczos vector draw on their atoms in order of the
+    atoms' offsets from the central atom, so both are the same; only the order
+    of summation differs, which is far below the force threshold.
     """
     sites = [(2, 1, 1), (0, 0, 0), (1, 3, 2), (2, 1, 2), (3, 2, 0), (0, 2, 3)]
     x = np.array([[SHIFT + GRID * i, SHIFT + GRID * j, GRID * k] for i, j, k in sites])
@@ -239,10 +252,18 @@ def test_shuffled_atom_order_gives_the_same_event() -> None:
     cell = np.diag([10.0, 10.0, 10.0])
     pbc = np.array([True, True, True])
     movable = np.ones(len(x), bool)
-    result = artn_search(x, cell, pbc, movable, central, 5, periodic_wells, **PUSH)
-    assert result.success
+    seen = []
 
-    order = np.array([4, 0, 3, 5, 1, 2])
+    def surface(positions: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(positions.copy())
+        return periodic_wells(positions)
+
+    result = artn_search(x, cell, pbc, movable, central, 5, surface, **push)
+    assert result.success
+    first_push = seen[1] - seen[0]
+
+    order = np.array(order)
+    seen.clear()
     shuffled = artn_search(
         x[order],
         cell,
@@ -250,10 +271,11 @@ def test_shuffled_atom_order_gives_the_same_event() -> None:
         movable[order],
         int(np.flatnonzero(order == central)[0]),
         5,
-        periodic_wells,
-        **PUSH,
+        surface,
+        **push,
     )
     assert shuffled.success
+    np.testing.assert_array_equal(seen[1] - seen[0], first_push[order])
     for name in ("saddle_positions", "min1_positions", "min2_positions"):
         difference = _minimum_image(
             getattr(shuffled, name) - getattr(result, name)[order], cell, pbc
@@ -263,11 +285,20 @@ def test_shuffled_atom_order_gives_the_same_event() -> None:
         assert getattr(shuffled, name) == pytest.approx(getattr(result, name), abs=1e-9)
     assert shuffled.curvature == pytest.approx(result.curvature, abs=1e-6)
 
-    # The saddle is the analytic one: the central atom half a grid step back in x.
-    expected = x[central] + [-GRID / 2, 0.0, 0.0]
-    np.testing.assert_allclose(result.saddle_positions[central], expected, atol=2e-3)
-    assert result.e_saddle == pytest.approx(WELL_BARRIER, abs=1e-5)
-    assert result.curvature == pytest.approx(WELL_CURVATURE, abs=0.05)
+    # The saddle is an analytic one: one atom half a grid step from its well.
+    moved = np.linalg.norm(
+        _minimum_image(result.saddle_positions - x, cell, pbc), axis=1
+    )
+    assert np.sum(moved > 0.5) == 1
+    assert moved.max() == pytest.approx(GRID / 2, abs=2e-3)
+    # Barrier 2 a along the axis crossed (0.5 eV in x, 1.2 eV in y or z),
+    # curvature -a k² there.
+    assert result.e_saddle == pytest.approx(
+        WELL_BARRIER if result.e_saddle < 1.0 else 1.2, abs=1e-5
+    )
+    assert result.curvature == pytest.approx(
+        -0.5 * result.e_saddle * (2 * math.pi / GRID) ** 2, abs=0.05
+    )
 
 
 def test_hop_across_the_periodic_boundary() -> None:

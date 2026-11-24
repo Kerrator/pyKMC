@@ -39,8 +39,10 @@ callback call:
   applied ``ninit`` times, each followed by ``nperp`` FIRE steps
   perpendicular to it;
 - Lanczos at the current point, from the last eigenvector (a random vector on
-  every movable atom the first time), ``lanczos_min_size`` to
-  ``lanczos_max_size`` force calls of ``lanczos_disp`` each;
+  every movable atom the first time), one force call per probe at
+  ``lanczos_disp``, until the lowest eigenvalue settles (at least
+  ``lanczos_min_size - 1`` calls, as in pARTn, and at most
+  ``lanczos_max_size``);
 - in the basin, another push and perpendicular relaxation until the lowest
   eigenvalue is below ``eigval_thr``; out of the basin, a push along the
   eigenvector, uphill, of ``min(eigen_step_size, |F.e| / max(|lambda|,
@@ -57,18 +59,20 @@ FIRE is LAMMPS's (euler implicit) with the settings pARTn's fix gives it, in
 LAMMPS metal units: time step 0.001 ps, masses in amu, ``alpha0`` 0.1,
 ``alphashrink`` 0.99, ``dtgrow`` 1.1, ``dtshrink`` 0.5, ``tmax`` 10, ``tmin``
 0.02, half step back on, ``delaystep`` 5 for perpendicular relaxation and 0
-for relaxation to a minimum, each Cartesian step component capped by
-``dmax``. On a restart FIRE reuses the earlier force scaled by (dt0/dt)², as
-pARTn's fix does, instead of evaluating at the half-stepped positions. A
-displacement move (push, eigenvector push, Lanczos probe, push off the saddle)
-moves the atoms by the nominal vector, scaled by s² where s = min(1, dmax /
-largest component), as one FIRE step from rest does.
+for relaxation to a minimum, and the step time cut so that it times the
+largest velocity component before the kick stays within ``dmax``. On a
+restart FIRE reuses the earlier force scaled by (dt0/dt)², as pARTn's fix
+does, instead of evaluating at the half-stepped positions. A displacement move
+(push, eigenvector push, push off the saddle) moves the atoms by the nominal
+vector, scaled by s² where s = min(1, dmax / largest component), as one FIRE
+step from rest does; a Lanczos probe is placed directly.
 
 This plain core leaves out, on purpose for now:
 
 - smoothing from the push to the eigenvector (``nsmooth``);
-- perpendicular step limits out of the basin (``nperp_limitation``, and
-  ``nperp`` there; ``nperp`` still limits the basin's perpendicular steps);
+- perpendicular step limits out of the basin (pARTn's list built from
+  ``nperp`` and ``nperp_limitation``); ``nperp`` here is the basin's limit
+  only, which the strategy sets to pARTn's;
 - new chances in a convex region (``nnewchance``, ``alpha_mix_cr``): a lost
   negative curvature ends the search;
 - the alignment test that stops a perpendicular relaxation when the
@@ -80,8 +84,10 @@ Other differences from pARTn:
   converted once (ruling of 2026-11-23);
 - ``neigen`` is 1, as pARTn's setup forces it;
 - the random numbers come from NumPy's generator seeded with ``seed``; the
-  push draws on the pushed atoms only, so its draws do not depend on where
-  those atoms sit in the atom order;
+  push draws on the pushed atoms only and the first Lanczos vector on the
+  movable atoms, each in order of the atom's minimum-image offset from the
+  central atom (x, then y, then z), so the draws do not depend on the atom
+  order;
 - a Lanczos probe sits at the base point plus ``lanczos_disp`` times the
   basis vector, and the force at the base point is reused after Lanczos
   instead of being evaluated again; the evaluation pARTn makes at the saddle
@@ -240,10 +246,10 @@ def artn_search(
     ninit : int
         Pushes before the first Lanczos; 0 starts with Lanczos.
     lanczos_min_size, lanczos_max_size : int
-        Fewest and most Lanczos force calls per Lanczos run (pARTn's two
-        convergence floors: the first call converges only from
-        ``lanczos_min_size``, later calls from ``lanczos_min_size - 1``).
-        The most is capped at three times the movable atoms.
+        Lanczos convergence floor and most force calls per Lanczos run. As in
+        pARTn, the first call can converge only from ``lanczos_min_size``
+        calls and later calls from ``lanczos_min_size - 1``. The most is
+        capped at three times the movable atoms.
     lanczos_disp : float
         Lanczos finite-difference step, Å.
     lanczos_eval_conv_thr : float
@@ -256,7 +262,9 @@ def artn_search(
         saddle.
     nperp : Optional[int]
         FIRE steps after each push in the basin; None or -1 for no limit (the
-        basin then never ends before ``nevalf_max``).
+        basin then never ends before ``nevalf_max``). The `artn` strategy
+        passes pARTn's basin limit, which is ``nperp_limitation[0]`` when
+        ``[pARTn] nperp`` is unset or -1.
     forc_thr : float
         The saddle and both minima are converged when the force measure is
         below this, eV/Å.
@@ -268,8 +276,10 @@ def artn_search(
     nevalf_max : int
         Most callback calls; one more fails the search.
     dmax : float
-        Largest Cartesian component of one FIRE step, Å; raised to
-        ``push_step_size`` if smaller, as pARTn's fix does.
+        FIRE's ``dmax``, Å: the step time times the largest velocity
+        component, and the largest component of a displacement move, stay
+        within it. Raised to ``push_step_size`` if smaller, as pARTn's fix
+        does.
     vectors : Optional[NumpyVectorSpace]
         Whole-system reductions; one rank by default.
 
@@ -473,20 +483,26 @@ def artn_search(
         return result(str(failure))
 
     rng = np.random.default_rng(seed)
+    offsets = _minimum_image(x_start - x_start[central_atom], cell, pbc)
     if push_mode == "list":
         pushed = np.zeros(n_atoms, dtype=bool)
         pushed[central_atom] = True
     else:
-        offsets = _minimum_image(x_start - x_start[central_atom], cell, pbc)
         pushed = np.linalg.norm(offsets, axis=1) <= push_dist_thr
     pushed &= mask
     if not pushed.any():
         return result("empty_push")
+    # Draws go to the atoms in order of their offset from the central atom
+    # (x, then y, then z, to 1e-6 Å), not in atom order.
+    key = np.round(offsets, 6)
+    by_offset = np.lexsort((key[:, 2], key[:, 1], key[:, 0]))
+    order = by_offset[pushed[by_offset]]
     push = np.zeros((n_atoms, 3))
-    push[pushed] = 0.5 - rng.random((int(pushed.sum()), 3))
+    push[order] = 0.5 - rng.random((len(order), 3))
     push *= push_step_size / vec.norm(push)
+    order = by_offset[mask[by_offset]]
     eigvec = np.zeros((n_atoms, 3))
-    eigvec[mask] = rng.random((int(mask.sum()), 3)) - 0.5
+    eigvec[order] = rng.random((len(order), 3)) - 0.5
 
     def basin_done(forces: np.ndarray, steps: int) -> bool:
         return basin_perp_steps >= 0 and steps >= basin_perp_steps
