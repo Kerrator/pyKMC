@@ -383,8 +383,11 @@ def test_block_order_push_then_perp_then_lanczos() -> None:
     assert np.array_equal(push[1:], np.zeros((3, 3)))  # list push: atom 0 only
     for step in (seen[2] - seen[1], seen[3] - seen[2]):
         assert abs(np.vdot(step, push)) < 1e-12 * np.linalg.norm(step)
+    # Probes are displacements, landed at pARTn's fraction of lanczos_disp.
     for probe in seen[4:]:
-        assert np.linalg.norm(probe - seen[3]) == pytest.approx(0.0005)
+        assert np.linalg.norm(probe - seen[3]) == pytest.approx(
+            artn._DISPLACEMENT_FACTOR * 0.0005, rel=1e-9
+        )
 
     # ninit = 0: Lanczos at the start.
     seen.clear()
@@ -392,6 +395,82 @@ def test_block_order_push_then_perp_then_lanczos() -> None:
         x, OPEN_CELL, NO_PBC, np.ones(4, bool), 0, 1, surface, ninit=0, nevalf_max=3
     )
     assert np.linalg.norm(seen[1] - seen[0]) == pytest.approx(0.0005)
+
+
+def quadratic_lanczos(**kwargs: object) -> tuple[list, list, np.ndarray]:
+    """One Lanczos block at the start of a quadratic surface (ninit = 0).
+
+    Returns the positions of every call, the move and state the core showed
+    before each call, and the Hessian. The callback stops the search at the
+    first call after the block.
+    """
+    rng = np.random.default_rng(3)
+    a = rng.random((12, 12)) - 0.5
+    hessian = a + a.T + np.diag(np.linspace(-1.0, 4.0, 12))
+    x0 = valley_start()
+    seen, moves = [], []
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        if moves[-1][0] not in ("start", "lanczos"):
+            raise StopIteration
+        seen.append(x.copy())
+        d = (x - x0).ravel()
+        return 0.5 * d @ hessian @ d, -(hessian @ d).reshape(-1, 3)
+
+    def observe(move: str, state: object) -> None:
+        moves.append((move, state))
+
+    options = dict(
+        ninit=0,
+        lanczos_max_size=12,
+        first_lanczos_vector=rng.random((4, 3)) - 0.5,
+        observe=observe,
+    )
+    with pytest.raises(StopIteration):
+        artn_search(
+            x0,
+            OPEN_CELL,
+            NO_PBC,
+            np.ones(4, bool),
+            0,
+            0,
+            surface,
+            **{**options, **kwargs},
+        )
+    return seen, moves, hessian
+
+
+def test_lanczos_block_on_a_quadratic_surface() -> None:
+    """The lowest eigenpair, as pARTn's probes give it, then back to the start."""
+    seen, moves, hessian = quadratic_lanczos(lanczos_eval_conv_thr=0.0)
+    # The start, 12 probes (3N, the most) and the move back.
+    assert [m for m, _ in moves] == ["start"] + ["lanczos"] * 13 + ["eigen"]
+    assert len(seen) == 14
+    assert np.max(np.abs(seen[-1] - seen[0])) < 1e-14
+    for probe in seen[1:-1]:
+        assert np.linalg.norm(probe - seen[0]) == pytest.approx(
+            artn._DISPLACEMENT_FACTOR * 0.0005, rel=1e-9
+        )
+    values, vectors = np.linalg.eigh(hessian)
+    lowest, eigvec = moves[-2][1]
+    # The probe lands at kappa * lanczos_disp, but pARTn divides by
+    # lanczos_disp, so its eigenvalue is kappa times the true one.
+    assert lowest == pytest.approx(artn._DISPLACEMENT_FACTOR * values[0], rel=1e-9)
+    assert lowest != pytest.approx(values[0], rel=1e-8)
+    assert abs(np.vdot(eigvec.ravel(), vectors[:, 0])) == pytest.approx(1.0, abs=1e-9)
+    # Pointed against the force at the last probe.
+    d = (seen[-2] - seen[0]).ravel()
+    assert np.vdot(-(hessian @ d), eigvec.ravel()) < 0
+
+
+def test_first_lanczos_block_starts_from_partns_unset_eigenvalue() -> None:
+    """HUGE(1.0_DP) before the first block: |(a - HUGE)/HUGE| is 1 at probe 1."""
+    # One probe and the move back, then the block's outcome.
+    _, moves, _ = quadratic_lanczos(lanczos_min_size=1, lanczos_eval_conv_thr=1.0)
+    assert [m for m, _ in moves][:3] == ["start", "lanczos", "lanczos"]
+    assert moves[3][0] != "lanczos"
+    _, moves, _ = quadratic_lanczos(lanczos_min_size=1, lanczos_eval_conv_thr=0.99)
+    assert [m for m, _ in moves][:4] == ["start"] + ["lanczos"] * 3
 
 
 def test_rad_push_covers_the_movable_atoms_in_its_radius() -> None:

@@ -42,7 +42,7 @@ callback call:
   every movable atom the first time), one force call per probe at
   ``lanczos_disp``, until the lowest eigenvalue settles (at least
   ``lanczos_min_size - 1`` calls, as in pARTn, and at most
-  ``lanczos_max_size``);
+  ``lanczos_max_size``), then one call back at the point it started from;
 - in the basin, another push and perpendicular relaxation until the lowest
   eigenvalue is below ``eigval_thr``; out of the basin, a push along the
   eigenvector, uphill, of ``min(eigen_step_size, |F.e| / max(|lambda|,
@@ -64,10 +64,10 @@ largest velocity component before the kick stays within ``dmax``. On a
 restart FIRE reuses the earlier force scaled by (dt0/dt)², as pARTn's fix
 does, instead of evaluating at the half-stepped positions. The time step dt0
 is LAMMPS's 0.001 ps after pARTn's round trip through its time unit,
-0.0010000000000000002 ps. A displacement move (push, eigenvector push, push
-off the saddle) moves the atoms by the vector times 0.9999999432296087, scaled
-by s² where s = min(1, dmax / largest component), as one FIRE step from rest
-does; a Lanczos probe is placed directly. The factor is where pARTn's
+0.0010000000000000002 ps. A displacement move (push, Lanczos probe and the
+move back, eigenvector push, push off the saddle) moves the atoms by the vector
+times 0.9999999432296087, scaled by s² where s = min(1, dmax / largest
+component), as one FIRE step from rest does. The factor is where pARTn's
 displacement lands: pARTn sends it to LAMMPS as a force, through its Ry, bohr
 and atomic-time constants and LAMMPS's metal ``ftm2v``.
 
@@ -93,10 +93,8 @@ Other differences from pARTn:
   movable atoms, each in order of the atom's minimum-image offset from the
   central atom (x, then y, then z), so the draws do not depend on the atom
   order;
-- a Lanczos probe sits at the base point plus ``lanczos_disp`` times the
-  basis vector, and the force at the base point is reused after Lanczos
-  instead of being evaluated again; the evaluation pARTn makes at the saddle
-  before the second push off it is skipped as well;
+- the evaluation pARTn makes at the saddle before the second push off it is
+  skipped;
 - each FIRE restart costs no evaluation, where pARTn's costs one it discards;
 - ``nevalf_max`` caps the callback calls, and the force-call counts are
   every callback call.
@@ -176,9 +174,10 @@ _PERP_DELAY = 5  # delaystep in perpendicular relaxation
 _RELAX_DELAY = 0  # delaystep in relaxation to a minimum
 
 EnergyAndForces = Callable[[np.ndarray], tuple[float, np.ndarray]]
-# (move, FIRE state): the move that led to the positions about to be evaluated,
-# and FIRE's (dt, alpha, velocities) after a FIRE step, else None.
-Observer = Callable[[str, Optional[tuple[float, float, np.ndarray]]], None]
+# (move, state): the move that led to the positions about to be evaluated, and
+# FIRE's (dt, alpha, velocities) after a FIRE step, Lanczos's (eigenvalue,
+# eigenvector) after a Lanczos move, else None.
+Observer = Callable[[str, Optional[tuple]], None]
 
 
 class NumpyVectorSpace:
@@ -268,10 +267,11 @@ def artn_search(
     ninit : int
         Pushes before the first Lanczos; 0 starts with Lanczos.
     lanczos_min_size, lanczos_max_size : int
-        Lanczos convergence floor and most force calls per Lanczos run. As in
-        pARTn, the first call can converge only from ``lanczos_min_size``
-        calls and later calls from ``lanczos_min_size - 1``. The most is
-        capped at three times the movable atoms.
+        Lanczos convergence floor and most probes per Lanczos run; one more
+        call goes back to where the run started. As in pARTn, a run can stop
+        at its first probe only if ``lanczos_min_size`` is 1, and at probe
+        k > 1 once k >= ``lanczos_min_size - 1``. The most is capped at three
+        times the movable atoms.
     lanczos_disp : float
         Lanczos finite-difference step, Å.
     lanczos_eval_conv_thr : float
@@ -315,7 +315,10 @@ def artn_search(
         Called before each callback call with the move that led to the
         positions (``"start"``, ``"init"``, ``"perp"``, ``"lanczos"``,
         ``"eigen"``, ``"over"`` or ``"relax"``) and, after a FIRE step,
-        FIRE's ``(dt, alpha, velocities)``, else None. For step replay.
+        FIRE's ``(dt, alpha, velocities)``; after a Lanczos move (a probe or
+        the move back), the lowest eigenvalue and the eigenvector as pARTn
+        holds them after the call that made the move; else None. For step
+        replay.
 
     Returns
     -------
@@ -374,7 +377,7 @@ def artn_search(
     def evaluate(
         x: np.ndarray,
         move: str,
-        state: Optional[tuple[float, float, np.ndarray]] = None,
+        state: Optional[tuple] = None,
     ) -> tuple[float, np.ndarray]:
         nonlocal calls
         if calls >= nevalf_max:
@@ -459,25 +462,45 @@ def artn_search(
             energy, forces = evaluate(x, move, (dt, alpha, v.copy()))
         return x, energy, forces
 
-    lowest_previous = 0.0  # pARTn carries the eigenvalue from one run to the next
+    # pARTn carries the eigenvalue from one Lanczos block into the next block's
+    # first convergence test. A search starts with pARTn's "unset" value,
+    # HUGE(1.0_DP) (m_block_lanczos.f90:29, :116; h_artn_units.f90:48).
+    lowest_previous = float(np.finfo(float).max)
+
+    def against(e: np.ndarray, f: np.ndarray) -> np.ndarray:
+        """Point ``e`` against the force ``f`` (block_lanczos.f90:79)."""
+        return -math.copysign(1.0, vec.dot(f, e)) * e
 
     def lanczos(
         x0: np.ndarray, f0: np.ndarray, v_in: np.ndarray, push_dir: np.ndarray
-    ) -> tuple[float, np.ndarray]:
-        """Return the lowest eigenvalue at ``x0`` and its eigenvector."""
+    ) -> tuple[float, np.ndarray, np.ndarray]:
+        """Run one Lanczos block at ``x0`` as pARTn does (lanczos.f90:35).
+
+        One probe per callback call, each reached by a displacement move from
+        the last, the first ``lanczos_disp`` along ``v_in``. Return the lowest
+        eigenvalue, its eigenvector as last pointed against the force, and the
+        position the last move returns to (``x0`` up to round-off), which is
+        not evaluated here. The observer sees, at each probe, the eigenvalue
+        and eigenvector as pARTn holds them after the call that moved there.
+        """
         nonlocal lowest_previous
+        lowest = lowest_previous
+        size = nlanc
         basis = [v_in / vec.norm(v_in)]
         alphas: list[float] = []
         betas: list[float] = []
-        eigvec = basis[0]
-        lowest = lowest_previous
-        for k in range(1, nlanc + 1):
-            _, f = evaluate(x0 + lanczos_disp * basis[k - 1], "lanczos")
+        eigvec = against(v_in, f0)
+        x = displace(x0, lanczos_disp * basis[0])
+        k = 0
+        while True:
+            k += 1
+            _, f = evaluate(x, "lanczos", (lowest, eigvec.copy()))
             q = -(f - f0) / lanczos_disp
             alpha = vec.dot(basis[k - 1], q)
             alphas.append(alpha)
             lowest_old = lowest
             if k == 1:
+                # One eigenvalue, and the eigenvector is left as it was.
                 lowest = alpha
                 floor = nlanc_min
             else:
@@ -488,27 +511,37 @@ def artn_search(
                 if vec.dot(eigvec, push_dir) < 0:
                     eigvec = -eigvec
                 floor = nlanc_min - 1
-            converged = (
+            if (
                 k >= floor
                 and lowest_old != 0.0
                 and abs((lowest - lowest_old) / lowest_old) <= lanczos_eval_conv_thr
-            )
-            # Point it against the force at this probe (block_lanczos.f90:79).
-            eigvec = -math.copysign(1.0, vec.dot(f, eigvec)) * eigvec
-            if converged or k == nlanc:
-                break
-            v = q - alpha * basis[k - 1]
-            if k > 1:
-                v = v - betas[-1] * basis[k - 2]
-                for b in basis[: k - 1]:
-                    v = v - vec.dot(v, b) * b
-            v_norm = vec.norm(v)
-            if v_norm < _LANCZOS_BREAKDOWN:
-                break
-            basis.append(v / v_norm)
-            betas.append(v_norm if k == 1 else vec.dot(q, basis[k]))
-        lowest_previous = lowest
-        return lowest, eigvec
+            ):
+                size = k
+            # pARTn's v1: the next basis vector, or zero to go back to x0.
+            target = np.zeros_like(x0)
+            if k < size:
+                v = q - alpha * basis[k - 1]
+                if k > 1:
+                    v = v - betas[-1] * basis[k - 2]
+                    for b in basis[: k - 1]:
+                        v = v - vec.dot(v, b) * b
+                v_norm = vec.norm(v)
+                if v_norm >= _LANCZOS_BREAKDOWN or (k == 1 and v_norm > 0):
+                    target = v / v_norm
+                    basis.append(target)
+                    betas.append(v_norm if k == 1 else vec.dot(q, target))
+                else:
+                    # pARTn moves along the small vector but stores a zero basis
+                    # vector and a zero beta (lanczos.f90:257); at its first
+                    # probe it has no test and divides by zero.
+                    target = v
+                    basis.append(np.zeros_like(x0))
+                    betas.append(0.0)
+            eigvec = against(eigvec, f)
+            x = displace(x, lanczos_disp * (target - basis[k - 1]))
+            if k >= size:
+                lowest_previous = lowest
+                return lowest, eigvec, x
 
     def result(reason: Optional[str], **found: object) -> DimerResult:
         fields: dict = dict.fromkeys(DimerResult._fields)
@@ -585,13 +618,17 @@ def artn_search(
                 if pushes < ninit:
                     continue
             skip_push = False
-            lowest, eigvec = lanczos(x, f, eigvec, push)
+            lowest, eigvec, x = lanczos(x, f, eigvec, push)
+            # pARTn decides at the last probe, before the move back is
+            # evaluated (block_lanczos.f90:121); a lost eigenvalue stops there.
             if lowest < eigval_thr or (not in_basin and lowest < 0):
                 in_basin = False
             elif not in_basin and lowest > 0:
                 raise _Failed("eigenvalue_lost")
             else:
                 in_basin = True
+            energy, f = evaluate(x, "lanczos", (lowest, eigvec.copy()))
+            if in_basin:
                 continue
             push = eigvec
             f_para = vec.dot(f, push)
