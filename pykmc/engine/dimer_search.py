@@ -39,6 +39,27 @@ _FROZEN_GROUP = "g_dimer_frozen"
 _FROZEN_FIX = "f_dimer_frozen"
 
 
+def _movable_mask(movable: list[int] | np.ndarray, n_atoms: int) -> np.ndarray:
+    """Return the (N,) mask of the atoms indexed by ``movable``.
+
+    Raises
+    ------
+    ValueError
+        If ``movable`` is not a set of integer indices within the system.
+
+    """
+    movable = np.asarray(movable).ravel()
+    if movable.size == 0:
+        movable = movable.astype(int)
+    if not np.issubdtype(movable.dtype, np.integer):
+        raise ValueError("movable must hold integer atom indices, not a mask")
+    if movable.size and (movable.min() < 0 or movable.max() >= n_atoms):
+        raise ValueError("movable holds an index outside the system")
+    mask = np.zeros(n_atoms, dtype=bool)
+    mask[movable] = True
+    return mask
+
+
 class DimerSearchExtension(EngineExtension):
     """Run one dimer search per call on a dedicated serial LAMMPS instance.
 
@@ -156,18 +177,9 @@ class DimerSearchExtension(EngineExtension):
             return None
 
         positions = np.array(positions, dtype=float)
-        n_atoms = len(positions)
         cell = Cell(np.array(cell, dtype=float))
         pbc = np.array(pbc, dtype=bool)
-        movable = np.asarray(movable).ravel()
-        if movable.size == 0:
-            movable = movable.astype(int)
-        if not np.issubdtype(movable.dtype, np.integer):
-            raise ValueError("movable must hold integer atom indices, not a mask")
-        if movable.size and (movable.min() < 0 or movable.max() >= n_atoms):
-            raise ValueError("movable holds an index outside the system")
-        mask = np.zeros(n_atoms, dtype=bool)
-        mask[movable] = True
+        mask = _movable_mask(movable, len(positions))
         frozen = np.flatnonzero(~mask)
 
         search_options = dict(options)

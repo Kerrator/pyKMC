@@ -15,10 +15,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 import pykmc.run as run
 from pykmc.artn import artn_search, perp_limits
-from pykmc.config import Config, PartnConfig
+from pykmc.config import ActiveVolume, Config, PartnConfig
 from pykmc.engine.artn_search import ArtnSearchExtension
 from pykmc.eventsearch import EventSearch, SearchRequest
 from pykmc.eventsearch.strategies.artn import (
@@ -112,6 +113,31 @@ def test_options_are_the_core_keywords_from_the_partn_section(tmp_path: Path) ->
     assert "zseed" not in options and "neigen" not in options
     assert options["nsmooth"] == config.partn.nsmooth
     assert options["nperp_limitation"] == config.partn.nperp_limitation
+
+
+@pytest.mark.parametrize(
+    ("active_volume", "artn_forces", "radii"),
+    [(True, "crop", (3.0, 12.0)), (True, "full", None), (False, "crop", None)],
+)
+def test_the_crop_switch_sends_the_active_volume_radii(
+    active_volume: bool, artn_forces: str, radii: tuple | None
+) -> None:
+    config = _av_config(rmov=3.0 if active_volume else None)
+    config.partn = PartnConfig()
+    config.activevolume.artn_forces = artn_forces
+    options = ArtnStrategy(config).options
+
+    assert options.get("crop_radii") == radii
+    assert {k: v for k, v in options.items() if k != "crop_radii"} == artn_options(
+        config.partn
+    )
+
+
+def test_artn_forces_is_full_unless_set_to_crop() -> None:
+    assert ActiveVolume().artn_forces == "full"
+    assert ActiveVolume(artn_forces="crop").artn_forces == "crop"
+    with pytest.raises(ValidationError):
+        ActiveVolume(artn_forces="mask")
 
 
 # ---------------------------------------------------------------- wiring
