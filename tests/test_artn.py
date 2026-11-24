@@ -182,6 +182,59 @@ def test_both_convergence_properties(convergence_property: str) -> None:
             assert np.linalg.norm(forces) < 1e-3
 
 
+def test_return_to_saddle_uses_minimum_force_and_counts_the_callback() -> None:
+    """The backward push begins after one restart from min1's force and FIRE clock."""
+    moves = []
+    states = []
+
+    def observe(move: str, state: tuple | None) -> None:
+        moves.append(move)
+        states.append(state)
+
+    x0 = valley_start()
+    full = valley_search(x0, observe=observe)
+    assert full.success
+    first_over, second_over = (i for i, move in enumerate(moves) if move == "over")
+    i_return = second_over - 1
+    assert first_over < i_return and moves[i_return] == "relax"
+
+    # On this unbounded analytic surface the restart is below dmax.
+    _, force = curved_valley(full.min1_positions)
+    dx = artn._DT0**2 * artn._FTM2V * force  # unit masses
+    assert np.max(np.abs(dx)) > 1e-10
+    dt = states[i_return - 1][0] * 0.5
+    assert states[i_return][0:2] == pytest.approx((dt, 0.1))
+    np.testing.assert_allclose(states[i_return][2], dx / dt, rtol=1e-12, atol=1e-13)
+
+    calls = 0
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        nonlocal calls
+        i = calls
+        calls += 1
+        if i == i_return:
+            np.testing.assert_allclose(
+                x, full.saddle_positions + dx, rtol=0, atol=1e-13
+            )
+            # block_pushover restores the saddle energy and ignores this force.
+            return artn._ENERGY_LIMIT * 2, np.full_like(x, 50.0)
+        return curved_valley(x)
+
+    result = artn_search(
+        x0, OPEN_CELL, NO_PBC, np.ones(len(x0), bool), 0, VALLEY_SEED, surface, **PUSH
+    )
+    assert (
+        result.success and result.force_calls_total == calls == full.force_calls_total
+    )
+    np.testing.assert_array_equal(result.min2_positions, full.min2_positions)
+    capped = valley_search(x0, nevalf_max=i_return + 1)
+    assert (
+        capped.reason == "max_force_calls" and capped.force_calls_total == i_return + 1
+    )
+    assert capped.min2_positions is None
+    np.testing.assert_array_equal(capped.min1_positions, full.min1_positions)
+
+
 def test_same_seed_same_result() -> None:
     """A repeated seed repeats the search exactly; another seed pushes elsewhere."""
     first = valley_search(valley_start(), seed=VALLEY_SEED)
