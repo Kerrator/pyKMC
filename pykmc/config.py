@@ -206,10 +206,13 @@ class AtomicEnvironmentConfig(BaseModel):
 class EventSearchConfig(BaseModel):
     """Event search parameters."""
 
-    style: Literal["partn", "dimer"] = Field(
+    style: Literal["partn", "dimer", "artn"] = Field(
         ...,
-        description="Method used to find events: 'partn', or 'dimer' (the dimer finds "
-        "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section).",
+        description="Method used to find events: 'partn', 'dimer' (the dimer finds "
+        "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section), "
+        "or 'artn' (pyKMC's own ARTn finds the events with the [pARTn] parameters and "
+        "pARTn refines them; seeded from [Control] seed, not zseed; settings it does not "
+        "follow yet, such as nsmooth and nnewchance, are logged once).",
     )
     nsearch: int = Field(
         ...,
@@ -1155,6 +1158,7 @@ class Config(BaseModel):
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
             ("eventsearch.style", "dimer"): ["dimer", "partn"],
+            ("eventsearch.style", "artn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True): ["basin"],
             ("control.active_volume", True): ["activevolume"],
