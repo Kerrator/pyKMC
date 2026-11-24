@@ -44,13 +44,22 @@ callback call:
   ``lanczos_min_size - 1`` calls, as in pARTn, and at most
   ``lanczos_max_size``), then one call back at the point it started from;
 - in the basin, another push and perpendicular relaxation until the lowest
-  eigenvalue is below ``eigval_thr``; out of the basin, a push along the
-  eigenvector, uphill, of ``min(eigen_step_size, |F.e| / max(|lambda|,
-  0.48587 eV/Å²))``;
-- FIRE relaxation perpendicular to the eigenvector, until the largest force
-  component (or the force's 3N norm, ``convergence_property = "norm"``) is
-  below ``forc_thr``, which is the saddle, or the perpendicular force is
-  smaller than the parallel force, which calls Lanczos again;
+  eigenvalue is below ``eigval_thr``; out of the basin, a push of
+  ``min(eigen_step_size, |F.p| / max(|lambda|, 0.48587 eV/Å²))`` along p,
+  uphill, where p is the eigenvector, or for the first ``nsmooth`` pushes of
+  the search a blend that turns from the last basin push to the eigenvector
+  of the first push out of the basin;
+- FIRE relaxation perpendicular to p, with the velocity kept perpendicular to
+  the eigenvector, until the largest force component (or the force's 3N norm,
+  ``convergence_property = "norm"``) is below ``forc_thr``, which is the
+  saddle; Lanczos runs again after the out-of-basin step limit (pARTn's list
+  from ``nperp`` and ``nperp_limitation``, one entry per relaxation), once
+  the perpendicular force is smaller than the parallel force (not while the
+  pushes are blended), or when the eigenvector has turned (``|e.e_prev| <
+  0.8``) and the path from the start is nearly perpendicular to p;
+- a positive eigenvalue out of the basin gives up to ``nnewchance`` new
+  pushes from the start's push, mixed with a random part (``alpha_mix_cr``),
+  back in the basin; after that the search fails;
 - a push off the saddle along +eigenvector, of ``eigen_step_size * push_over
   * 0.8``, and FIRE relaxation to a minimum on the full force; then the same
   along -eigenvector.
@@ -71,16 +80,12 @@ component), as one FIRE step from rest does. The factor is where pARTn's
 displacement lands: pARTn sends it to LAMMPS as a force, through its Ry, bohr
 and atomic-time constants and LAMMPS's metal ``ftm2v``.
 
-This plain core leaves out, on purpose for now:
+pARTn holds the push in bohr. The blend mixes that bohr vector, of norm
+``push_step_size`` / 0.529177 Å, with the unit eigenvector, and the alignment
+test compares the bohr components of the blend; the core does both on the push
+in bohr, so its path does not depend on the unit (finding of issue 06).
 
-- smoothing from the push to the eigenvector (``nsmooth``);
-- perpendicular step limits out of the basin (pARTn's list built from
-  ``nperp`` and ``nperp_limitation``); ``nperp`` here is the basin's limit
-  only, which the strategy sets to pARTn's;
-- new chances in a convex region (``nnewchance``, ``alpha_mix_cr``): a lost
-  negative curvature ends the search;
-- the alignment test that stops a perpendicular relaxation when the
-  eigenvector jumps, and the box-explosion guard.
+This core leaves out, on purpose for now, the box-explosion guard.
 
 Other differences from pARTn:
 
@@ -89,15 +94,19 @@ Other differences from pARTn:
   where it moves the atoms (the displacement factor and dt0 above);
 - ``neigen`` is 1, as pARTn's setup forces it;
 - the random numbers come from NumPy's generator seeded with ``seed``; the
-  push draws on the pushed atoms only and the first Lanczos vector on the
-  movable atoms, each in order of the atom's minimum-image offset from the
-  central atom (x, then y, then z), so the draws do not depend on the atom
-  order;
+  push and each new chance draw on the pushed atoms only and the first
+  Lanczos vector on the movable atoms, each in order of the atom's
+  minimum-image offset from the central atom (x, then y, then z), so the draws
+  do not depend on the atom order;
 - the evaluation pARTn makes at the saddle before the second push off it is
   skipped;
 - each FIRE restart costs no evaluation, where pARTn's costs one it discards;
-- ``nevalf_max`` caps the callback calls, and the force-call counts are
-  every callback call.
+- the force-call counts are every callback call; as in pARTn, call number
+  ``nevalf_max`` fails the search;
+- the alignment test takes the path from the start in the positions the
+  callback reports, by default the core's own, which are never wrapped;
+  pARTn's are LAMMPS's, which wrap an atom that crosses the cell when LAMMPS
+  next rebuilds its neighbour list (finding of issue 06).
 
 Coordinates: the search keeps its own unwrapped positions and passes them to
 the callback as they are. Distances use the minimum image on the periodic axes
@@ -127,13 +136,13 @@ transition pathways on potential energy surfaces", J. Chem. Phys. 130, 114711
 """
 
 import math
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Optional, Sequence
 
 import numpy as np
 
 from .dimer import DimerResult, _minimum_image, _wrap
 
-__all__ = ["NumpyVectorSpace", "artn_search"]
+__all__ = ["NumpyVectorSpace", "artn_search", "perp_limits"]
 
 # pARTn's internal units, Rydberg, bohr and Rydberg atomic time
 # (artn:src/h_artn_units.f90:66, :71, :76, :78).
@@ -152,6 +161,13 @@ _ENERGY_LIMIT = 80.0 * _RY2EV
 _PUSH_OVER_FACTOR = 0.8
 # Lanczos stops growing its basis below this new-vector norm (lanczos.f90:257).
 _LANCZOS_BREAKDOWN = 1.0e-12 * _HESSIAN
+# Alignment test of an out-of-basin perpendicular relaxation
+# (check_force_convergence.f90:127): the eigenvector has turned, |e.e_prev| <
+# 0.8, and the path from the start is nearly perpendicular to the push.
+_ALIGNMENT_TURNED = 0.8
+_ALIGNMENT_PERPENDICULAR = 0.1
+# pARTn's default perpendicular step limits (d_artn_params.f90:92).
+_DEFAULT_PERP_LIMITS = (4, 8, 12, 16, -1)
 
 # LAMMPS FIRE as pARTn's fix sets it, metal units (fix_artn.cpp:116-130, LAMMPS
 # min.cpp defaults for the keys the fix does not pass).
@@ -173,7 +189,9 @@ _DT_MIN = 0.02 * _DT0
 _PERP_DELAY = 5  # delaystep in perpendicular relaxation
 _RELAX_DELAY = 0  # delaystep in relaxation to a minimum
 
-EnergyAndForces = Callable[[np.ndarray], tuple[float, np.ndarray]]
+# Positions in, energy and forces out, and optionally the positions as the
+# engine holds them (for the alignment test).
+EnergyAndForces = Callable[[np.ndarray], tuple]
 # (move, state): the move that led to the positions about to be evaluated, and
 # FIRE's (dt, alpha, velocities) after a FIRE step, Lanczos's (eigenvalue,
 # eigenvector) after a Lanczos move, else None.
@@ -200,6 +218,30 @@ class _Failed(Exception):
     """The search stops with the reason given."""
 
 
+def perp_limits(
+    nperp: Optional[int], nperp_limitation: Optional[Sequence[int]]
+) -> list[int]:
+    """Return pARTn's list of perpendicular step limits, -1 for none.
+
+    The first entry is the basin's limit; out of the basin the n-th
+    relaxation takes entry n, the last entry repeating. Built as pyKMC's
+    ``partn_search`` has pARTn build it, ``nperp`` set before
+    ``nperp_limitation`` (``nperp_limitation_init``, nperp_limitation.f90:96),
+    and with ``nperp_limitation`` None, as ``lnperp_limitation = False``.
+    """
+    nperp = -1 if nperp is None else nperp
+    if nperp_limitation is None:
+        return [nperp if nperp > -1 else -1, -1]
+    given = list(nperp_limitation)
+    if not given or all(value == -2 for value in given):
+        limits = list(_DEFAULT_PERP_LIMITS)
+        if nperp > -1:
+            limits[0] = nperp
+        return limits
+    n = sum(value > -2 for value in given)
+    return ([nperp] if nperp != -1 else []) + given[:n] + [given[n - 1]]
+
+
 def artn_search(
     positions: np.ndarray,
     cell: np.ndarray,
@@ -220,7 +262,11 @@ def artn_search(
     lanczos_eval_conv_thr: float = 0.001,
     eigval_thr: float = -0.01,
     eigen_step_size: float = 0.2,
+    nsmooth: int = 3,
+    alpha_mix_cr: float = 0.2,
+    nnewchance: int = 0,
     nperp: Optional[int] = 3,
+    nperp_limitation: Optional[Sequence[int]] = (4, 8, 12, 16, -1),
     forc_thr: float = 0.001,
     convergence_property: Literal["maxval", "norm"] = "maxval",
     push_over: float = 1.0,
@@ -229,6 +275,7 @@ def artn_search(
     vectors: Optional[NumpyVectorSpace] = None,
     initial_push: Optional[np.ndarray] = None,
     first_lanczos_vector: Optional[np.ndarray] = None,
+    new_chance_pushes: Optional[Sequence[np.ndarray]] = None,
     observe: Optional[Observer] = None,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
@@ -251,10 +298,12 @@ def artn_search(
     central_atom : int
         Atom the initial push is centred on (pARTn's ``push_ids``).
     seed : int
-        Seed of the initial push and of the first Lanczos vector.
-    energy_and_forces : Callable[[np.ndarray], tuple[float, np.ndarray]]
+        Seed of the initial push, the first Lanczos vector and the new chances.
+    energy_and_forces : Callable[[np.ndarray], tuple]
         Takes (N, 3) positions in Å and returns the energy in eV and the
-        (N, 3) forces in eV/Å.
+        (N, 3) forces in eV/Å, and optionally, third, the (N, 3) positions as
+        the engine holds them, which the alignment test then uses in place of
+        the core's (as pARTn uses LAMMPS's).
     masses : Optional[np.ndarray]
         Atom masses, (N,), amu, for FIRE. Default 1 amu each.
     push_mode : {"rad", "list"}
@@ -282,11 +331,20 @@ def artn_search(
     eigen_step_size : float
         Largest push along the eigenvector, Å; it also sizes the push off the
         saddle.
-    nperp : Optional[int]
-        FIRE steps after each push in the basin; None or -1 for no limit (the
-        basin then never ends before ``nevalf_max``). The `artn` strategy
-        passes pARTn's basin limit, which is ``nperp_limitation[0]`` when
-        ``[pARTn] nperp`` is unset or -1.
+    nsmooth : int
+        Pushes out of the basin, from the search's first, that blend the last
+        basin push into the eigenvector, weight k / (nsmooth + 1) on the
+        eigenvector at the k-th; 0 for none.
+    alpha_mix_cr : float
+        Weight of the random part of a new chance's push.
+    nnewchance : int
+        New chances after a positive eigenvalue out of the basin; 0 for none.
+    nperp, nperp_limitation : Optional[int], Optional[Sequence[int]]
+        FIRE step limits, as pARTn builds them (:func:`perp_limits`): the
+        basin's limit, ``nperp`` or else the first of ``nperp_limitation``,
+        then out of the basin one per relaxation, the last repeating. -1 is no
+        limit; with none in the basin, the basin never ends before
+        ``nevalf_max``.
     forc_thr : float
         The saddle and both minima are converged when the force measure is
         below this, eV/Å.
@@ -296,7 +354,7 @@ def artn_search(
     push_over : float
         Factor on the push off the saddle.
     nevalf_max : int
-        Most callback calls; one more fails the search.
+        Most callback calls; as in pARTn, the last fails the search.
     dmax : float
         FIRE's ``dmax``, Å: the step time times the largest velocity
         component, and the largest component of a displacement move, stay
@@ -311,6 +369,9 @@ def artn_search(
     first_lanczos_vector : Optional[np.ndarray]
         (N, 3) vector that replaces the random draw of the first Lanczos
         vector, used as given. For step replay.
+    new_chance_pushes : Optional[Sequence[np.ndarray]]
+        (N, 3) pushes, Å, that replace the pushes the new chances build, in
+        order, used as given. For step replay.
     observe : Optional[Callable[[str, Optional[tuple]], None]]
         Called before each callback call with the move that led to the
         positions (``"start"``, ``"init"``, ``"perp"``, ``"lanczos"``,
@@ -325,7 +386,8 @@ def artn_search(
     DimerResult
         The saddle, the two minima and the search's counters, or a failure
         with its reason: ``"empty_push"`` (no movable atom to push),
-        ``"eigenvalue_lost"`` (positive lowest eigenvalue out of the basin),
+        ``"eigenvalue_lost"`` (positive lowest eigenvalue out of the basin,
+        no new chance left),
         ``"max_force_calls"``, ``"energy_limit"`` (1088.455 eV above the
         start, pARTn's default) or ``"non_finite_force"``. As in pARTn,
         minimum 1 is reached by pushing off the saddle along the last Lanczos
@@ -360,39 +422,45 @@ def artn_search(
     masses = np.ones(n_atoms) if masses is None else np.asarray(masses, dtype=float)
     if masses.shape != (n_atoms,) or np.any(masses <= 0):
         raise ValueError("masses must be (N,) and positive")
-    for given in (initial_push, first_lanczos_vector):
+    for given in (initial_push, first_lanczos_vector, *(new_chance_pushes or ())):
         if given is not None and np.shape(given) != (n_atoms, 3):
-            raise ValueError("initial_push and first_lanczos_vector must be (N, 3)")
+            raise ValueError(
+                "initial_push, first_lanczos_vector and new_chance_pushes must be (N, 3)"
+            )
 
     vec = NumpyVectorSpace() if vectors is None else vectors
     weight = mask[:, None].astype(float)
     inv_mass = 1.0 / masses[:, None]
     dmax = max(dmax, push_step_size)
-    basin_perp_steps = -1 if nperp is None else nperp
+    limits = perp_limits(nperp, nperp_limitation)
     nlanc = min(lanczos_max_size, 3 * int(mask.sum()))
     nlanc_min = min(lanczos_min_size, nlanc - 1)
     calls = 0
     e_start: Optional[float] = None
+    held = x_start  # the positions as the engine holds them, last call
 
     def evaluate(
         x: np.ndarray,
         move: str,
         state: Optional[tuple] = None,
     ) -> tuple[float, np.ndarray]:
-        nonlocal calls
-        if calls >= nevalf_max:
-            raise _Failed("max_force_calls")
+        nonlocal calls, held
         calls += 1
         if observe is not None:
             observe(move, state)
-        energy, forces = energy_and_forces(x.copy())
+        energy, forces, *engine = energy_and_forces(x.copy())
         forces = np.asarray(forces, dtype=float)
         if forces.shape != (n_atoms, 3):
             raise ValueError("energy_and_forces must return (N, 3) forces")
+        held = np.asarray(engine[0], dtype=float) if engine else x
         if not (np.isfinite(energy) and np.all(np.isfinite(forces))):
             raise _Failed("non_finite_force")
         if e_start is not None and energy - e_start > _ENERGY_LIMIT:
             raise _Failed("energy_limit")
+        # pARTn's step guard: its call number nevalf_max fails, whatever the
+        # call found (artn.f90:729, with fix_artn.cpp:536's max_eval - 1).
+        if calls >= nevalf_max:
+            raise _Failed("max_force_calls")
         return float(energy), forces * weight
 
     def measure(f: np.ndarray) -> float:
@@ -417,19 +485,23 @@ def artn_search(
         delaystep: int,
         stop: Callable[[np.ndarray, int], bool],
         move: str,
+        velocity_direction: Optional[np.ndarray] = None,
     ) -> tuple[np.ndarray, float, np.ndarray]:
         """Relax from rest with LAMMPS FIRE until ``stop(forces, steps)``.
 
-        With ``direction`` the force and the velocity are kept perpendicular
-        to it. ``stop`` is asked before each step, with the full force and the
-        steps taken.
+        With ``direction`` the force is kept perpendicular to it, and the
+        velocity perpendicular to ``velocity_direction`` (default
+        ``direction``), as pARTn's split_field and move_mode do. ``stop`` is
+        asked before each step, with the full force and the steps taken.
         """
+        if velocity_direction is None:
+            velocity_direction = direction
         v = np.zeros_like(x)
         alpha, dt, last_negative, steps = _ALPHA0, _DT0, 0, 0
         while not stop(forces, steps):
             f = forces if direction is None else forces - along(forces, direction)
-            if direction is not None and steps > 0:
-                v = v - along(v, direction)
+            if velocity_direction is not None and steps > 0:
+                v = v - along(v, velocity_direction)
             steps += 1
             power = vec.dot(v, f)
             if power > 0:
@@ -473,15 +545,16 @@ def artn_search(
 
     def lanczos(
         x0: np.ndarray, f0: np.ndarray, v_in: np.ndarray, push_dir: np.ndarray
-    ) -> tuple[float, np.ndarray, np.ndarray]:
+    ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
         """Run one Lanczos block at ``x0`` as pARTn does (lanczos.f90:35).
 
         One probe per callback call, each reached by a displacement move from
         the last, the first ``lanczos_disp`` along ``v_in``. Return the lowest
-        eigenvalue, its eigenvector as last pointed against the force, and the
+        eigenvalue, its eigenvector as last pointed against the force, the
         position the last move returns to (``x0`` up to round-off), which is
-        not evaluated here. The observer sees, at each probe, the eigenvalue
-        and eigenvector as pARTn holds them after the call that moved there.
+        not evaluated here, and the force at the last probe. The observer
+        sees, at each probe, the eigenvalue and eigenvector as pARTn holds
+        them after the call that moved there.
         """
         nonlocal lowest_previous
         lowest = lowest_previous
@@ -541,7 +614,7 @@ def artn_search(
             x = displace(x, lanczos_disp * (target - basis[k - 1]))
             if k >= size:
                 lowest_previous = lowest
-                return lowest, eigvec, x
+                return lowest, eigvec, x, f
 
     def result(reason: Optional[str], **found: object) -> DimerResult:
         fields: dict = dict.fromkeys(DimerResult._fields)
@@ -587,18 +660,60 @@ def artn_search(
     if first_lanczos_vector is not None:
         eigvec = np.array(first_lanczos_vector, dtype=float)
 
+    # pARTn's search state (d_artn_params, m_block_lanczos): the perpendicular
+    # step limit in force and its place in the list, the blend counter and
+    # ends, the new chances taken, and the last block's eigenvector with its
+    # overlap with the one before (a1).
+    nperp_now, nperp_step = limits[0], 1
+    ismooth, inewchance = 0, 0
+    blend_from: Optional[np.ndarray] = None
+    blend_to: Optional[np.ndarray] = None
+    turned = 0.0
+    old_lanczos_vec = eigvec / vec.norm(eigvec)
+    push_initial = push.copy()
+    chance_pushes = iter(new_chance_pushes or ())
+    held_start = held
+
+    def next_perp_limit() -> None:
+        """Go to the next out-of-basin limit (nperp_limitation_step(1))."""
+        nonlocal nperp_now, nperp_step
+        if nperp_step == 1:
+            limits[0] = nperp_now
+        nperp_step += 1
+        nperp_now = limits[min(nperp_step, len(limits)) - 1]
+
     def basin_done(forces: np.ndarray, steps: int) -> bool:
-        return basin_perp_steps >= 0 and steps >= basin_perp_steps
+        return nperp_now > -1 and steps >= nperp_now
 
     at_saddle = False
 
     def climb_done(forces: np.ndarray, steps: int) -> bool:
+        """Return True when pARTn ends an out-of-basin perpendicular relaxation.
+
+        The saddle (C0), else the step limit (C2), the perpendicular force
+        below the parallel one (C3, off while the pushes are blended) or the
+        alignment test (C4) (check_force_convergence.f90:104-131).
+        """
         nonlocal at_saddle
         if measure(forces) < forc_thr:
             at_saddle = True
             return True
+        if nperp_now >= 0 and steps >= nperp_now:
+            return True
         parallel = along(forces, push)
-        return measure(forces - parallel) < measure(parallel)
+        if not (nsmooth > 0 and ismooth <= nsmooth) and measure(
+            forces - parallel
+        ) < measure(parallel):
+            return True
+        # C4: the path from the start in the engine's positions, no minimum
+        # image, against pARTn's push in bohr.
+        path = held - held_start
+        length = vec.norm(path)
+        return (
+            turned < _ALIGNMENT_TURNED
+            and length > 0
+            and abs(vec.dot(path, push) / (length * _B2A)) < _ALIGNMENT_PERPENDICULAR
+        )
 
     def relaxed(forces: np.ndarray, steps: int) -> bool:
         return steps > 0 and measure(forces) < forc_thr
@@ -615,29 +730,79 @@ def artn_search(
                 energy, f = evaluate(x, "init")
                 pushes += 1
                 x, energy, f = fire(x, energy, f, push, _PERP_DELAY, basin_done, "perp")
+                if inewchance == 0:
+                    nperp_now = limits[0]
                 if pushes < ninit:
                     continue
             skip_push = False
-            lowest, eigvec, x = lanczos(x, f, eigvec, push)
+            lowest, eigvec, x, f_probe = lanczos(x, f, eigvec, push)
+            turned = abs(vec.dot(eigvec, old_lanczos_vec))
+            old_lanczos_vec = eigvec
             # pARTn decides at the last probe, before the move back is
             # evaluated (block_lanczos.f90:121); a lost eigenvalue stops there.
             if lowest < eigval_thr or (not in_basin and lowest < 0):
                 in_basin = False
-            elif not in_basin and lowest > 0:
-                raise _Failed("eigenvalue_lost")
             else:
+                if not in_basin and lowest > 0:
+                    if inewchance >= nnewchance:
+                        raise _Failed("eigenvalue_lost")
+                    # A new chance: the start's push with a random part,
+                    # pointed against the force at the last probe, back in
+                    # the basin (block_lanczos.f90:144-161).
+                    nperp_step, nperp_now = 1, limits[0]
+                    inewchance += 1
+                    ismooth = 0
+                    push = next(chance_pushes, None)
+                    if push is None:
+                        draw = np.zeros((n_atoms, 3))
+                        drawn = by_offset[pushed[by_offset]]
+                        draw[drawn] = 0.5 - rng.random((len(drawn), 3))
+                        draw *= push_initial
+                        draw /= vec.norm(draw)
+                        push = (
+                            1.0 - alpha_mix_cr
+                        ) * push_initial + alpha_mix_cr * push_step_size * draw
+                        push = (
+                            -math.copysign(1.0, vec.dot(f_probe, push))
+                            * push
+                            / vec.norm(push)
+                            * push_step_size
+                        )
+                    else:
+                        push = np.array(push, dtype=float)
                 in_basin = True
+                nperp_step = 1
             energy, f = evaluate(x, "lanczos", (lowest, eigvec.copy()))
             if in_basin:
                 continue
-            push = eigvec
-            f_para = vec.dot(f, push)
+            # The push out of the basin (block_pusheigen.f90:41-73): for the
+            # first nsmooth of the search, the last push blended into the
+            # eigenvector of the first (smooth_interpol.f90:57-70), both as
+            # pARTn holds them, the push in bohr.
+            ismooth += 1
+            if nsmooth > 0 and ismooth <= nsmooth:
+                if ismooth == 1 or blend_from is None:
+                    blend_from, blend_to = push / _B2A, eigvec
+                s = ismooth / (nsmooth + 1)
+                climb = (1.0 - s) * blend_from - math.copysign(
+                    1.0, vec.dot(f, blend_to)
+                ) * s * blend_to
+                if ismooth == nsmooth:
+                    blend_from = blend_to = None
+            else:
+                climb = eigvec
+            f_para = vec.dot(f, climb)
             step = -math.copysign(1.0, f_para) * min(
                 eigen_step_size, abs(f_para) / max(abs(lowest), _CURVATURE_FLOOR)
             )
-            x = displace(x, push * step)
+            x = displace(x, climb * step)
+            push = climb * _B2A
             energy, f = evaluate(x, "eigen")
-            x, energy, f = fire(x, energy, f, push, _PERP_DELAY, climb_done, "perp")
+            x, energy, f = fire(
+                x, energy, f, push, _PERP_DELAY, climb_done, "perp", eigvec
+            )
+            if not at_saddle:
+                next_perp_limit()
 
         saddle, e_saddle = x, energy
         offset = _minimum_image(saddle - x_start, cell, pbc)
