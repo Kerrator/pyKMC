@@ -97,7 +97,9 @@ class TestArtnSearchSerial:
                 seen["calls"] += 1
                 return query(x)
 
-            return core(positions, cell, pbc, mask, central, seed, query_counted, **options)
+            return core(
+                positions, cell, pbc, mask, central, seed, query_counted, **options
+            )
 
         monkeypatch.setattr("pykmc.engine.artn_search.run_artn", counted)
         result = _search(engine, vacancy)
@@ -110,8 +112,12 @@ class TestArtnSearchSerial:
         assert min(result.delr1, result.delr2) < DELR_THR
         assert 0 < result.force_calls_saddle < result.force_calls_total
         assert result.force_calls_total == seen["calls"]
-        # FIRE gets LAMMPS's masses (ASE's table).
-        np.testing.assert_allclose(seen["masses"], 58.6934, atol=1e-3)
+        # FIRE gets the instance's masses: the EAM file's 58.710, not ASE's 58.6934.
+        instance = engine._extensions["ArtnSearchExtension"]._force_engine
+        expected = np.asarray(instance.lmp.numpy.extract_atom("mass"))[1]
+        assert expected == pytest.approx(58.710)
+        np.testing.assert_array_equal(seen["masses"], expected)
+        assert seen["masses"].shape == (len(vacancy.positions),)
 
     def test_shares_the_dimer_instance_and_repeats_exactly(  # noqa: D102
         self,
