@@ -86,7 +86,11 @@ class ControlConfig(BaseModel):
         default=-1,
         description=(
             "Number of MPI worker ranks in the group communicator (replaces old global mode). "
-            "-1 means all worker ranks."
+            "-1 means all worker ranks. The group runs the whole-system minimizations: the start, "
+            "each step's reconstruction and basin moves. LAMMPS sums forces in an order set by the "
+            "rank count, so with -1 results change in the last bits with the number of workers, and "
+            "saddle searches can amplify that. For runs that must repeat across worker counts, use a "
+            "fixed value (1 with one rank per worker)."
         ),
     )
 

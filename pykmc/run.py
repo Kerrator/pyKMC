@@ -42,6 +42,7 @@ def main() -> None:
     if manager is not None:  # On rank 0
         kmc = KMC(config)
         kmc.manager = manager
+        kmc.group_size = group_size
         try:
             kmc._initialize()
             kmc.run()

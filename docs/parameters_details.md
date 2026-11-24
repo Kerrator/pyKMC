@@ -49,6 +49,10 @@
   <details><summary>Description</summary>
   Number of Sessions
   </details>
+- **`group_size`** : `int`, default = `-1`
+  <details><summary>Description</summary>
+  Number of MPI worker ranks in the group communicator (replaces old global mode). -1 means all worker ranks. The group runs the whole-system minimizations: the start, each step's reconstruction and basin moves. LAMMPS sums forces in an order set by the rank count, so with -1 results change in the last bits with the number of workers, and saddle searches can amplify that. For runs that must repeat across worker counts, use a fixed value (1 with one rank per worker).
+  </details>
 - **`engine_use_rank_0`** : `bool`, default = `False`
   <details><summary>Description</summary>
   Deprecated : If use mpi rank 0 or not.

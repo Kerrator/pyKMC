@@ -93,6 +93,9 @@ class KMC:
         self.loggers = None
         self.system = None
         self.manager = None
+        # Ranks of the group engine, set by run.py; it changes the last bits of
+        # every whole-system minimization (see `group_size` in config.py).
+        self.group_size: int | None = None
         self.engine = None
         self.neighbors_list = None
         self.atomic_environment = None
@@ -899,10 +902,17 @@ class KMC:
 
     def minimize_system(self, positions=None) -> None:
         """Minimize the system and update its positions."""
+        on_group = (
+            ""
+            if self.group_size is None
+            else " (group engine, {} MPI rank{})".format(
+                self.group_size, "" if self.group_size == 1 else "s"
+            )
+        )
         if self.config.control.restart_file is None:
-            self.loggers.info("log", ":=> Minimizing the system")
+            self.loggers.info("log", ":=> Minimizing the system" + on_group)
         else:
-            self.loggers.info("log", ":=> Computing energies")
+            self.loggers.info("log", ":=> Computing energies" + on_group)
         new_positions, total_energy = self.manager.group_minimize_with_results(
             config=self.config, positions=positions, types=self.system.types
         )

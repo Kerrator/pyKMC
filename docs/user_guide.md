@@ -361,6 +361,26 @@ mpirun -n 8 python -m pykmc -in <your_input_file>
 The available cores will be automatically split according to your configuration.
 In this example, the LAMMPS instances will run on ranks 1–2, 3–4, 5–6, and 7, while the main KMC loop runs on rank 0.
 
+### Results and the number of instances
+
+Whole-system minimizations (the start, each step's reconstruction and basin moves) run on a separate group
+instance whose size is `group_size` in `[Control]`. The default, `-1`, spans every worker rank, so the group's
+rank count follows the number of cores. LAMMPS sums forces in an order set by the rank count, so the minimized
+positions change in the last bits, and saddle searches can amplify that into different results. The log names
+the group's rank count.
+
+For runs that must repeat across worker counts, keep one rank per instance (`n_sessions` = ranks − 1) and set:
+
+```INI
+[Control]
+...
+group_size = 1
+...
+```
+
+pARTn refinement with `zseed = 0` seeds from the clock, so a run that refines also needs a fixed `zseed` to
+repeat from one step to the next.
+
 
 
 
