@@ -296,6 +296,46 @@ def test_frozen_atoms_never_move_or_steer() -> None:
     assert a.force_calls_total == b.force_calls_total
 
 
+def test_injected_first_lanczos_vector_documents_mask_exception() -> None:
+    """Both parameter entries identify the replay exception to the movable mask."""
+    doc = inspect.getdoc(artn_search)
+    movable = doc.split("movable : ", 1)[1].split("central_atom : ", 1)[0]
+    vector = doc.split("first_lanczos_vector : ", 1)[1].split(
+        "new_chance_pushes : ", 1
+    )[0]
+    assert "first_lanczos_vector" in movable
+    assert all(term in vector.lower() for term in ("mask", "frozen", "probe", "replay"))
+
+
+def test_injected_first_lanczos_vector_moves_a_frozen_atom() -> None:
+    """Replay retains the buffer component of the first probe."""
+    start = valley_start()
+    movable = np.array([True, False, True, True])
+    direction = np.zeros_like(start)
+    direction[1, 0] = 1.0
+    positions = []
+
+    def surface(x: np.ndarray) -> tuple[float, np.ndarray]:
+        positions.append(x.copy())
+        return curved_valley(x)
+
+    artn_search(
+        start,
+        OPEN_CELL,
+        NO_PBC,
+        movable,
+        0,
+        VALLEY_SEED,
+        surface,
+        ninit=0,
+        nevalf_max=2,
+        first_lanczos_vector=direction,
+    )
+    np.testing.assert_allclose(
+        positions[1] - positions[0], direction * artn._DISPLACEMENT_FACTOR * 0.0005
+    )
+
+
 # Push on the central atom only, or rad over two atoms (atoms 0 and 3, 2.5 Å apart);
 # the second order swaps atoms 0 and 3, so their draws would swap if handed out
 # in atom order.
@@ -681,6 +721,18 @@ def test_a_new_chance_pushes_again_from_the_basin() -> None:
     np.testing.assert_allclose(
         seen[k + 1] - seen[k], artn._DISPLACEMENT_FACTOR * given, rtol=0, atol=1e-15
     )
+
+
+@pytest.mark.parametrize("limits", [[-2, 4], [4, -2, 8], [4, -2], [-1, -2]])
+def test_mixed_default_perp_limits_raise(limits: list[int]) -> None:
+    """A mixed list is a configuration error even when -2 is the last entry."""
+    with pytest.raises(ValueError, match=r"nperp_limitation.*-2"):
+        valley_search(valley_start(), nperp=3, nperp_limitation=limits, nevalf_max=2)
+
+
+def test_all_default_perp_limits_keep_partn_defaults() -> None:
+    """A list consisting entirely of -2 selects the defaults with a basin override."""
+    assert artn.perp_limits(3, [-2, -2]) == [3, 8, 12, 16, -1]
 
 
 def test_out_of_basin_perpendicular_limits_follow_partns_list() -> None:

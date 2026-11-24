@@ -238,6 +238,8 @@ def perp_limits(
     ``partn_search`` has pARTn build it, ``nperp`` set before
     ``nperp_limitation`` (``nperp_limitation_init``, nperp_limitation.f90:96),
     and with ``nperp_limitation`` None, as ``lnperp_limitation = False``.
+    An empty or all -2 list selects pARTn's defaults. Mixing -2 with explicit
+    limits raises ValueError.
     """
     nperp = -1 if nperp is None else nperp
     if nperp_limitation is None:
@@ -248,6 +250,8 @@ def perp_limits(
         if nperp > -1:
             limits[0] = nperp
         return limits
+    if -2 in given:
+        raise ValueError("nperp_limitation cannot mix -2 with other values")
     n = sum(value > -2 for value in given)
     return ([nperp] if nperp != -1 else []) + given[:n] + [given[n - 1]]
 
@@ -304,7 +308,8 @@ def artn_search(
     pbc : np.ndarray
         Periodicity of each cell axis, (3,) booleans.
     movable : np.ndarray
-        Movable atoms, (N,) booleans. Other atoms never move.
+        Movable atoms, (N,) booleans. Forces and random draws are zero on
+        frozen atoms. An injected ``first_lanczos_vector`` can move them.
     central_atom : int
         Atom the initial push is centred on (pARTn's ``push_ids``).
     seed : int
@@ -378,7 +383,9 @@ def artn_search(
         the draw is. For step replay of a recorded pARTn search.
     first_lanczos_vector : Optional[np.ndarray]
         (N, 3) vector that replaces the random draw of the first Lanczos
-        vector, used as given. For step replay.
+        direction. Its direction is used without applying the movable mask.
+        Components on frozen atoms move them during probes, reproducing
+        pARTn's buffer motion in step replay.
     new_chance_pushes : Optional[Sequence[np.ndarray]]
         (N, 3) pushes, Å, that replace the pushes the new chances build, in
         order, used as given. For step replay.
