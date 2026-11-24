@@ -212,7 +212,7 @@ class EventSearchConfig(BaseModel):
         "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section), "
         "or 'artn' (pyKMC's own ARTn finds the events with the [pARTn] parameters and "
         "pARTn refines them; seeded from [Control] seed, not zseed; settings it does not "
-        "follow yet, such as nsmooth and nnewchance, are logged once).",
+        "follow, neigen other than 1 and a set zseed, are logged once).",
     )
     nsearch: int = Field(
         ...,

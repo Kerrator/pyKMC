@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ArtnStrategy",
     "artn_options",
-    "basin_perp_limit",
     "ignored_partn_parameters",
 ]
 
@@ -40,7 +39,11 @@ _CORE_PARAMETERS = (
     "lanczos_eval_conv_thr",
     "eigval_thr",
     "eigen_step_size",
+    "nsmooth",
+    "alpha_mix_cr",
+    "nnewchance",
     "nperp",
+    "nperp_limitation",
     "forc_thr",
     "convergence_property",
     "push_over",
@@ -60,38 +63,22 @@ class ArtnSearchConfig(Protocol):
     frozen_atoms: Any
 
 
-def basin_perp_limit(partn: Any) -> int:
-    """Return pARTn's limit on perpendicular steps in the basin, -1 for none.
-
-    pARTn builds it from ``nperp`` and ``nperp_limitation``
-    (``nperp_limitation_init``): ``nperp`` when it is set and not -1, else the
-    first value of ``nperp_limitation``, else no limit.
-    """
-    if partn.nperp is not None and partn.nperp != -1:
-        return partn.nperp
-    if partn.nperp_limitation:
-        return partn.nperp_limitation[0]
-    return -1
-
-
 def artn_options(partn: Any) -> dict[str, Any]:
     """Return the ARTn core's keyword options from a `[pARTn]` section.
 
-    ``nperp`` is pARTn's basin limit (:func:`basin_perp_limit`).
+    The core builds pARTn's perpendicular step limits from ``nperp`` and
+    ``nperp_limitation`` as pARTn does (:func:`pykmc.artn.perp_limits`).
     """
-    options = {name: getattr(partn, name) for name in _CORE_PARAMETERS}
-    options["nperp"] = basin_perp_limit(partn)
-    return options
+    return {name: getattr(partn, name) for name in _CORE_PARAMETERS}
 
 
 def ignored_partn_parameters(partn: Any) -> dict[str, str]:
     """Return the `[pARTn]` settings the ARTn search does not follow, with why.
 
-    Only settings that would change pARTn's search are listed: smoothing, the
-    perpendicular step limits out of the basin, new chances, ``neigen`` other
-    than 1 and a set ``zseed``. ``verbosity`` and ``delr_thr`` only shape
-    pARTn's report and are not listed. Refinement is pARTn's and reads the
-    section as before.
+    Only settings that would change pARTn's search are listed: ``neigen``
+    other than 1 and a set ``zseed``. ``verbosity`` and ``delr_thr`` only
+    shape pARTn's report and are not listed. Refinement is pARTn's and reads
+    the section as before.
 
     Parameters
     ----------
@@ -105,20 +92,6 @@ def ignored_partn_parameters(partn: Any) -> dict[str, str]:
 
     """
     ignored = {}
-    if partn.nsmooth != 0:
-        ignored["nsmooth"] = f"{partn.nsmooth} (no smoothing yet)"
-    limits = [partn.nperp] if partn.nperp is not None else []
-    limits += list(partn.nperp_limitation or [])
-    if any(limit != -1 for limit in limits):
-        ignored["nperp_limitation"] = (
-            f"{partn.nperp_limitation} with nperp = {partn.nperp} (no "
-            "perpendicular step limit out of the basin yet; the basin keeps "
-            f"pARTn's limit of {basin_perp_limit(partn)})"
-        )
-    if partn.nnewchance != 0:
-        ignored["nnewchance"] = (
-            f"{partn.nnewchance} (no new chance yet; alpha_mix_cr unused)"
-        )
     if partn.neigen != 1:
         ignored["neigen"] = f"{partn.neigen} (fixed at 1, as pARTn's setup does)"
     if partn.zseed != 0:

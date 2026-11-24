@@ -17,14 +17,13 @@ import numpy as np
 import pytest
 
 import pykmc.run as run
-from pykmc.artn import artn_search
+from pykmc.artn import artn_search, perp_limits
 from pykmc.config import Config, PartnConfig
 from pykmc.engine.artn_search import ArtnSearchExtension
 from pykmc.eventsearch import EventSearch, SearchRequest
 from pykmc.eventsearch.strategies.artn import (
     ArtnStrategy,
     artn_options,
-    basin_perp_limit,
     ignored_partn_parameters,
 )
 from pykmc.eventsearch.strategies.dimer import DimerStrategy
@@ -88,7 +87,9 @@ def test_options_are_the_core_keywords_from_the_partn_section(tmp_path: Path) ->
     assert options == artn_options(config.partn)
     assert options["push_step_size"] == 0.3
     assert set(options) <= set(params)
-    assert "zseed" not in options and "nsmooth" not in options
+    assert "zseed" not in options and "neigen" not in options
+    assert options["nsmooth"] == config.partn.nsmooth
+    assert options["nperp_limitation"] == config.partn.nperp_limitation
 
 
 # ---------------------------------------------------------------- wiring
@@ -314,23 +315,13 @@ def test_a_failed_search_maps_to_event_not_found_with_its_reason() -> None:
 # ---------------------------------------------------------------- ignored settings
 
 
-def test_pykmc_defaults_ignore_smoothing_and_the_out_of_basin_limits() -> None:
-    assert set(ignored_partn_parameters(PartnConfig())) == {
-        "nsmooth",
-        "nperp_limitation",
-    }
-
-
-def test_the_gate_fe_block_also_ignores_new_chances() -> None:
+def test_pykmc_defaults_and_the_gate_fe_block_ignore_nothing() -> None:
+    """Smoothing, the out-of-basin limits and new chances are followed (issue 06)."""
+    assert ignored_partn_parameters(PartnConfig()) == {}
     fe = PartnConfig(
         push_dist_thr=4.0, push_step_size=0.3, eigval_thr=-0.5, nnewchance=3, zseed=0
     )
-
-    assert set(ignored_partn_parameters(fe)) == {
-        "nsmooth",
-        "nperp_limitation",
-        "nnewchance",
-    }
+    assert ignored_partn_parameters(fe) == {}
 
 
 def test_settings_the_core_follows_are_not_listed() -> None:
@@ -343,26 +334,26 @@ def test_settings_the_core_follows_are_not_listed() -> None:
 @pytest.mark.parametrize(
     ("nperp", "limitation", "expected"),
     [
-        (3, [4, 8, 12, 16, -1], 3),  # pyKMC's defaults
-        (None, [4, 8, 12, 16, -1], 4),  # pARTn then takes the list's first value
-        (-1, [4, 8, 12, 16, -1], 4),
-        (5, None, 5),
-        (None, None, -1),
-        (-1, None, -1),
+        # pyKMC's defaults: the basin's 3, then 3, 4, 8, 12, 16 and none out of it
+        (3, [4, 8, 12, 16, -1], [3, 4, 8, 12, 16, -1, -1]),
+        # pARTn then starts the list with its first value
+        (None, [4, 8, 12, 16, -1], [4, 8, 12, 16, -1, -1]),
+        (-1, [4, 8, 12, 16, -1], [4, 8, 12, 16, -1, -1]),
+        (5, None, [5, -1]),
+        (None, None, [-1, -1]),
+        (-1, None, [-1, -1]),
+        (3, [], [3, 8, 12, 16, -1]),  # an empty list takes pARTn's default
     ],
 )
-def test_the_core_gets_partns_basin_limit(
-    nperp: int | None, limitation: list[int] | None, expected: int
+def test_the_core_gets_partns_perp_limits(
+    nperp: int | None, limitation: list[int] | None, expected: list[int]
 ) -> None:
     partn = PartnConfig(nperp=nperp, nperp_limitation=limitation)
+    options = artn_options(partn)
 
-    assert basin_perp_limit(partn) == expected
-    assert artn_options(partn)["nperp"] == expected
-    if expected != -1:
-        assert (
-            f"the basin keeps pARTn's limit of {expected}"
-            in (ignored_partn_parameters(partn)["nperp_limitation"])
-        )
+    assert options["nperp"] == nperp
+    assert options["nperp_limitation"] == limitation
+    assert perp_limits(options["nperp"], options["nperp_limitation"]) == expected
 
 
 def test_an_unset_nperp_with_a_list_still_ends_the_basin() -> None:
@@ -394,7 +385,7 @@ def test_a_set_zseed_and_neigen_are_listed() -> None:
 
 def test_ignored_settings_are_logged_once() -> None:
     config = _av_config(rmov=None)
-    config.partn = PartnConfig(nnewchance=3)
+    config.partn = PartnConfig(neigen=2, zseed=7)
     strategy = ArtnStrategy(config)
     request = SearchRequest(
         1, POSITIONS, CELL, np.array(["Ni"] * 5), PBC, 9, np.arange(5)
@@ -418,5 +409,4 @@ def test_ignored_settings_are_logged_once() -> None:
         logger.removeHandler(recorder)
 
     assert len(recorder.lines) == 1
-    assert "nsmooth" in recorder.lines[0] and "nnewchance" in recorder.lines[0]
-    assert "nperp_limitation" in recorder.lines[0]
+    assert "neigen" in recorder.lines[0] and "zseed" in recorder.lines[0]
