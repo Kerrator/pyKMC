@@ -79,19 +79,53 @@ def _interaction_bound(engine: LammpsEngine, reuse: bool) -> float | None:
     largest active pair cutoff plus the neighbor skin. Only subtract a skin
     explicitly set by this worker. Native EAM exposes no cutoff via extract_pair.
     """
+    comm = engine.comm
+    if comm is not None and comm.Get_size() == 1:
+        comm = None
+    leader = comm is None or comm.Get_rank() == 0
+    directory = None
+    path = None
+    bound = None
     try:
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "communication"
-            engine.command(f'info communication out overwrite "{path}"')
-            for line in path.read_text().splitlines():
-                if line.startswith("Communication cutoff = "):
-                    limit = float(line.split("=")[1])
-                    if reuse:
-                        limit -= _NEIGHBOR_SKIN
-                    if np.isfinite(limit) and limit > 0:
-                        # Older LAMMPS reports can round to six significant
-                        # digits. Round outwards before deriving the two shells.
-                        return limit + 1e-5 * (limit + _NEIGHBOR_SKIN)
+        if leader:
+            try:
+                directory = TemporaryDirectory()
+                path = str(Path(directory.name) / "communication")
+            except OSError:
+                pass
+        if comm is not None:
+            path = comm.bcast(path, root=0)
+        if path is not None:
+            # All ranks enter the same command; LAMMPS writes only on rank zero.
+            success = True
+            try:
+                engine.command(f'info communication out overwrite "{path}"')
+            except OSError:
+                success = False
+            if comm is not None:
+                success = all(comm.allgather(success))
+            if leader and success:
+                bound = _read_interaction_bound(Path(path), reuse)
+    finally:
+        if directory is not None:
+            try:
+                directory.cleanup()
+            except OSError:
+                bound = None
+    return comm.bcast(bound, root=0) if comm is not None else bound
+
+
+def _read_interaction_bound(path: Path, reuse: bool) -> float | None:
+    """Parse the initialized engine's communication report on its leader."""
+    try:
+        for line in path.read_text().splitlines():
+            if line.startswith("Communication cutoff = "):
+                limit = float(line.split("=")[1])
+                if reuse:
+                    limit -= _NEIGHBOR_SKIN
+                if np.isfinite(limit) and limit > 0:
+                    # Older LAMMPS reports can round to six significant digits.
+                    return limit + 1e-5 * (limit + _NEIGHBOR_SKIN)
     except (OSError, ValueError):
         pass
     return None

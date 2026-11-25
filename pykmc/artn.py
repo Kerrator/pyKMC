@@ -138,7 +138,7 @@ transition pathways on potential energy surfaces", J. Chem. Phys. 130, 114711
 """
 
 import math
-from typing import Callable, Literal, Optional, Sequence
+from typing import Callable, Literal, Optional, Sequence, cast
 
 import numpy as np
 
@@ -208,8 +208,89 @@ EnergyAndForces = Callable[[np.ndarray], tuple]
 Observer = Callable[[str, Optional[tuple]], None]
 
 
+class DrawOrder:
+    """Map stable global draw ordinals to this rank's rows."""
+
+    def __init__(self, rows: np.ndarray, ordinals: np.ndarray, total: int) -> None:
+        self.rows = rows
+        self.ordinals = ordinals
+        self.total = total
+
+    def draw(self, rng: np.random.Generator, size: int, *, push: bool) -> np.ndarray:
+        """Consume the same PCG64 draws in the same order on every rank."""
+        out = np.zeros((size, 3))
+        stream = cast(np.random.PCG64, rng.bit_generator)
+        # Skip draws owned by other ranks; contiguous runs retain NumPy's
+        # exact serial sequence and do not allocate their random vectors.
+        cursor = 0
+        for group in np.split(
+            np.arange(len(self.rows)), np.flatnonzero(np.diff(self.ordinals) != 1) + 1
+        ):
+            if not len(group):
+                continue
+            start = int(self.ordinals[group[0]])
+            if start != cursor:
+                stream.advance(3 * (start - cursor))
+            values = rng.random((len(group), 3))
+            out[self.rows[group]] = 0.5 - values if push else values - 0.5
+            cursor = start + len(group)
+        if cursor != self.total:
+            stream.advance(3 * (self.total - cursor))
+        return out
+
+
+def _draw_rows(
+    x: np.ndarray,
+    central: int,
+    cell: np.ndarray,
+    pbc: np.ndarray,
+    mask: np.ndarray,
+    push_mode: str,
+    radius: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return serial row order for the initial push and Lanczos draws."""
+    offsets = _minimum_image(x - x[central], cell, pbc)
+    pushed = (
+        np.arange(len(x)) == central
+        if push_mode == "list"
+        else np.linalg.norm(offsets, axis=1) <= radius
+    )
+    key = np.round(offsets, 6)
+    order = np.lexsort((key[:, 2], key[:, 1], key[:, 0]))
+    return order[(pushed & mask)[order]], order[mask[order]]
+
+
 class NumpyVectorSpace:
     """Reductions over whole-system (N, 3) arrays held on one rank."""
+
+    def atom_count(self, local: int) -> int:
+        """Return the full input system size."""
+        return local
+
+    def count(self, local: int) -> int:
+        """Sum a count across the search."""
+        return local
+
+    def all_true(self, local: bool) -> bool:
+        """Require a condition on every partition."""
+        return local
+
+    def draw_orders(
+        self,
+        x: np.ndarray,
+        central: int,
+        cell: np.ndarray,
+        pbc: np.ndarray,
+        mask: np.ndarray,
+        push_mode: str,
+        radius: float,
+    ) -> tuple[DrawOrder, DrawOrder]:
+        """Return the two draw plans in serial geometric order."""
+        pushed, movable = _draw_rows(x, central, cell, pbc, mask, push_mode, radius)
+        return (
+            DrawOrder(pushed, np.arange(len(pushed)), len(pushed)),
+            DrawOrder(movable, np.arange(len(movable)), len(movable)),
+        )
 
     def dot(self, a: np.ndarray, b: np.ndarray) -> float:
         """Return the 3N dot product of ``a`` and ``b``."""
@@ -226,6 +307,25 @@ class NumpyVectorSpace:
 
 class _Failed(Exception):
     """The search stops with the reason given."""
+
+
+def _wrap_result_positions(
+    positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray
+) -> np.ndarray:
+    """Return ARTn endpoint coordinates in the periodic catalogue box."""
+    result = _wrap(positions, cell, pbc)
+    lengths = np.diag(cell)
+    if np.array_equal(cell, np.diag(lengths)) and np.all(lengths > 0):
+        for axis in np.flatnonzero(pbc):
+            length = lengths[axis]
+            invalid = (result[:, axis] < 0) | (result[:, axis] >= length)
+            if invalid.any():
+                # Adding L to a tiny negative coordinate can round to L itself.
+                # Recover the image from the original input: an interior point
+                # just below L must survive even if the reciprocal rounded up.
+                image = np.remainder(positions[invalid, axis], length)
+                result[invalid, axis] = np.where(image == length, 0.0, image)
+    return result
 
 
 def perp_limits(
@@ -414,15 +514,17 @@ def artn_search(
 
     """
     x_start = np.array(positions, dtype=float)
+    vec = NumpyVectorSpace() if vectors is None else vectors
     n_atoms = len(x_start)
+    full_size = vec.atom_count(n_atoms)
     cell = np.asarray(cell, dtype=float)
     pbc = np.asarray(pbc, dtype=bool)
     mask = np.asarray(movable, dtype=bool)
-    if x_start.shape != (n_atoms, 3) or n_atoms == 0:
+    if x_start.shape != (n_atoms, 3) or full_size == 0:
         raise ValueError("positions must be a non-empty (N, 3) array")
     if cell.shape != (3, 3) or pbc.shape != (3,) or mask.shape != (n_atoms,):
         raise ValueError("cell must be (3, 3), pbc (3,) and movable (N,)")
-    if not 0 <= central_atom < n_atoms:
+    if not 0 <= central_atom < full_size:
         raise ValueError("central_atom is not an atom index")
     if push_mode not in ("list", "rad"):
         raise ValueError(f"unknown push_mode {push_mode!r}")
@@ -431,7 +533,7 @@ def artn_search(
     if push_step_size <= 0 or lanczos_disp <= 0 or eigen_step_size <= 0:
         raise ValueError("push_step_size, lanczos_disp and eigen_step_size must be > 0")
     masses = np.ones(n_atoms) if masses is None else np.asarray(masses, dtype=float)
-    if masses.shape != (n_atoms,) or np.any(masses <= 0):
+    if not vec.all_true(masses.shape == (n_atoms,) and not np.any(masses <= 0)):
         raise ValueError("masses must be (N,) and positive")
     for given in (initial_push, first_lanczos_vector, *(new_chance_pushes or ())):
         if given is not None and np.shape(given) != (n_atoms, 3):
@@ -439,12 +541,11 @@ def artn_search(
                 "initial_push, first_lanczos_vector and new_chance_pushes must be (N, 3)"
             )
 
-    vec = NumpyVectorSpace() if vectors is None else vectors
     weight = mask[:, None].astype(float)
     inv_mass = 1.0 / masses[:, None]
     dmax = max(dmax, push_step_size)
     limits = perp_limits(nperp, nperp_limitation)
-    nlanc = min(lanczos_max_size, 3 * int(mask.sum()))
+    nlanc = min(lanczos_max_size, 3 * vec.count(int(mask.sum())))
     nlanc_min = min(lanczos_min_size, nlanc - 1)
     calls = 0
     e_start: Optional[float] = None
@@ -463,10 +564,10 @@ def artn_search(
             observe(move, state)
         energy, forces, *engine = energy_and_forces(x.copy())
         forces = np.asarray(forces, dtype=float)
-        if forces.shape != (n_atoms, 3):
+        if not vec.all_true(forces.shape == (n_atoms, 3)):
             raise ValueError("energy_and_forces must return (N, 3) forces")
         held = np.asarray(engine[0], dtype=float) if engine else x
-        if not (np.isfinite(energy) and np.all(np.isfinite(forces))):
+        if not vec.all_true(bool(np.isfinite(energy) and np.all(np.isfinite(forces)))):
             raise _Failed("non_finite_force")
         if restored_energy is not None:
             energy = restored_energy  # block_pushover restores etot_sad on the return
@@ -660,29 +761,18 @@ def artn_search(
     except _Failed as failure:
         return result(str(failure))
 
-    rng = np.random.default_rng(seed)
-    offsets = _minimum_image(x_start - x_start[central_atom], cell, pbc)
-    if push_mode == "list":
-        pushed = np.zeros(n_atoms, dtype=bool)
-        pushed[central_atom] = True
-    else:
-        pushed = np.linalg.norm(offsets, axis=1) <= push_dist_thr
-    pushed &= mask
-    if not pushed.any():
+    rng = np.random.Generator(np.random.PCG64(seed))
+    pushed, mobile = vec.draw_orders(
+        x_start, central_atom, cell, pbc, mask, push_mode, push_dist_thr
+    )
+    if not pushed.total:
         return result("empty_push")
-    # Draws go to the atoms in order of their offset from the central atom
-    # (x, then y, then z, to 1e-6 Å), not in atom order.
-    key = np.round(offsets, 6)
-    by_offset = np.lexsort((key[:, 2], key[:, 1], key[:, 0]))
-    order = by_offset[pushed[by_offset]]
-    push = np.zeros((n_atoms, 3))
-    push[order] = 0.5 - rng.random((len(order), 3))
+    push = pushed.draw(rng, n_atoms, push=True)
     if initial_push is not None:
-        push = np.where(pushed[:, None], np.asarray(initial_push, dtype=float), 0.0)
+        push.fill(0)
+        push[pushed.rows] = np.asarray(initial_push, dtype=float)[pushed.rows]
     push *= push_step_size / vec.norm(push)
-    order = by_offset[mask[by_offset]]
-    eigvec = np.zeros((n_atoms, 3))
-    eigvec[order] = rng.random((len(order), 3)) - 0.5
+    eigvec = mobile.draw(rng, n_atoms, push=False)
     if first_lanczos_vector is not None:
         eigvec = np.array(first_lanczos_vector, dtype=float)
 
@@ -782,9 +872,7 @@ def artn_search(
                     ismooth = 0
                     push = next(chance_pushes, None)
                     if push is None:
-                        draw = np.zeros((n_atoms, 3))
-                        drawn = by_offset[pushed[by_offset]]
-                        draw[drawn] = 0.5 - rng.random((len(drawn), 3))
+                        draw = pushed.draw(rng, n_atoms, push=True)
                         draw *= push_initial
                         draw /= vec.norm(draw)
                         push = (
@@ -838,7 +926,7 @@ def artn_search(
         offset = _minimum_image(saddle - x_start, cell, pbc)
         mode = eigvec / vec.norm(eigvec)
         found = dict(
-            saddle_positions=_wrap(saddle, cell, pbc),
+            saddle_positions=_wrap_result_positions(saddle, cell, pbc),
             e_saddle=e_saddle,
             curvature=lowest,
             mode=-mode if vec.dot(mode, offset) < 0 else mode,
@@ -855,7 +943,7 @@ def artn_search(
 
         x_min1, e_min1, f_min1, dt = downhill(saddle, push)
         found.update(
-            min1_positions=_wrap(x_min1, cell, pbc),
+            min1_positions=_wrap_result_positions(x_min1, cell, pbc),
             e_min1=e_min1,
             delr1=vec.norm(_minimum_image(x_min1 - x_start, cell, pbc)),
         )
@@ -873,7 +961,7 @@ def artn_search(
     return result(
         None,
         **found,
-        min2_positions=_wrap(x_min2, cell, pbc),
+        min2_positions=_wrap_result_positions(x_min2, cell, pbc),
         e_min2=e_min2,
         delr2=vec.norm(_minimum_image(x_min2 - x_start, cell, pbc)),
         force_calls_total=calls,
