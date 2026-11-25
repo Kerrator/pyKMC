@@ -79,6 +79,46 @@ pair_coeff 1 1 zbl 28.0 28.0
 ```
 A value without brackets is one `pair_coeff` command, sent as written.
 
+#### Another LAMMPS library, and searches on a GPU
+
+Four optional keys choose how LAMMPS is opened. With all of them unset pyKMC opens the default library as before.
+
+- `library` : the LAMMPS shared library to open. `library = mtpkk` opens `liblammps_mtpkk.so`, which must be on
+  the library path (`LD_LIBRARY_PATH`).
+- `cmdargs` : extra LAMMPS command-line arguments for every LAMMPS instance of the run.
+- `search_cmdargs` : arguments added only for the instance a `dimer` or `artn` search makes for its force calls.
+- `search_pair_style` : the `pair_style` of that instance, when it must differ from `pair_style`.
+
+With a KOKKOS build of LAMMPS, this sends the force calls of the `artn` and `dimer` searches to one GPU:
+```INI
+[Lammps]
+pair_style = mtp ./Zr.mtp chunksize 32768
+pair_coeff = * *
+library = mtpkk
+search_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
+search_pair_style = mtp/small ./Zr.mtp chunksize 32768
+```
+- The KOKKOS arguments must go in `search_cmdargs`, not `cmdargs`. Event refinement and the `partn` search run
+  pARTn, which minimizes with `min_style fire`, and LAMMPS refuses that minimizer with KOKKOS on. So
+  minimizations, refinements and event execution stay on the CPU and only the searches' force calls use the GPU.
+- `-sf kk` turns the search instance's pair style into its `/kk` variant. Without `search_pair_style` that is
+  `pair_style`, so one line must be valid for both: `mtp/kk` needs the `chunksize` argument and the CPU `mtp`
+  accepts it. `mtp/small/kk`, the style for a few hundred to a few thousand atoms, has no CPU version, which is
+  what `search_pair_style` is for. `pair_coeff` is shared.
+- LAMMPS has no type labels with KOKKOS on, so pyKMC does not send its `labelmap` command to such an instance
+  and `pair_coeff` cannot use type labels there.
+- When the GPU pays. The card serves one process at a time, so every worker opens the same GPU and a force call
+  takes about N times longer with N workers searching at once: the GPU gives a fixed number of calls per second
+  however many workers share it. Measured with a level-28 Zr MTP on an RTX 3090 against one Zen 2 core, per call:
+
+  | atoms | CPU `mtp` | `mtp/kk` | `mtp/small/kk` | `mtp/kk`, 6 workers | `mtp/small/kk`, 6 workers |
+  |---:|---:|---:|---:|---:|---:|
+  | 448 | 136 ms | 76 ms | 8 ms | 437 ms | 45 ms |
+  | 1,440 | 432 ms | 79 ms | 17 ms | 449 ms | 96 ms |
+
+  `mtp/kk` costs about 75 ms per chunk of atoms whatever the chunk holds, so on an active volume of a few hundred
+  atoms it is slower than the CPU as soon as three workers share the card; use `mtp/small/kk` there.
+
 ## Atomic Environment 
 
 During the simulation, at each step, pyKMC assigns an atomic environment ID to every atom in the system.
