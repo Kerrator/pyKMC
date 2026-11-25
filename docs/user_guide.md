@@ -117,7 +117,7 @@ search_pair_style = mtp/small ./Zr.mtp chunksize 32768
   | 1,440 | 432 ms | 79 ms | 17 ms | 449 ms | 96 ms |
 
   `mtp/kk` costs about 75 ms per chunk of atoms whatever the chunk holds, so on an active volume of a few hundred
-  atoms it is slower than the CPU as soon as three workers share the card; use `mtp/small/kk` there.
+  atoms it is slower than the CPU as soon as two workers share the card; use `mtp/small/kk` there.
 
 ## Atomic Environment 
 
