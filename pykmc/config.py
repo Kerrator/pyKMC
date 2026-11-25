@@ -709,10 +709,15 @@ class LammpsConfig(BaseModel):
     )
     cmdargs: Optional[list[str]] = Field(
         default=None,
-        description="Extra LAMMPS command-line arguments, written as on a command line and added after pyKMC's own `-screen none -log <file>`; e.g. `-k on g 1 -sf kk -pk kokkos newton on neigh half` runs a KOKKOS build on one GPU. Every LAMMPS instance of the run gets them.",
+        description="Extra LAMMPS command-line arguments, written as on a command line and added after pyKMC's own `-screen none -log <file>`; e.g. `-k on g 1 -sf kk -pk kokkos newton on neigh half` runs a KOKKOS build on one GPU. Every LAMMPS instance of the run gets them (see `search_cmdargs` for the searches' own instance).",
     )
 
-    @field_validator("cmdargs", mode="before")
+    search_cmdargs: Optional[list[str]] = Field(
+        default=None,
+        description="LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.",
+    )
+
+    @field_validator("cmdargs", "search_cmdargs", mode="before")
     @classmethod
     def parse_cmdargs(cls, v):
         return shlex.split(v) if isinstance(v, str) else v

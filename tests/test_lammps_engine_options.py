@@ -47,6 +47,12 @@ def test_keys_parse(tmp_path: Path) -> None:
     assert config.lammps.cmdargs == _KOKKOS.split()
 
 
+def test_search_cmdargs_parses(tmp_path: Path) -> None:
+    assert Config.from_ini_file(str(_INPUT)).lammps.search_cmdargs is None
+    path = _ini_with_lammps_lines(tmp_path, f"search_cmdargs = {_KOKKOS}")
+    assert Config.from_ini_file(str(path)).lammps.search_cmdargs == _KOKKOS.split()
+
+
 def test_cmdargs_keeps_a_quoted_argument_whole() -> None:
     cfg = LammpsConfig(
         pair_style="lj/cut 6.0", pair_coeff="* * 1 1", cmdargs='-var name "a b"'
@@ -84,7 +90,7 @@ class _FakeLammps:
         return int(self.kokkos)
 
 
-def _started_engine(monkeypatch, cfg, engine_id=0, kokkos=False):
+def _started_engine(monkeypatch, cfg, engine_id=0, kokkos=False, **engine_kwargs):
     """Start a ``LammpsEngine`` with ``lammps(...)`` replaced; return it and the keyword arguments it passed."""
     pytest.importorskip("lammps")
     import pykmc.engine.lammps as engine_module
@@ -97,7 +103,9 @@ def _started_engine(monkeypatch, cfg, engine_id=0, kokkos=False):
         return _FakeLammps(kokkos)
 
     monkeypatch.setattr(engine_module, "lammps", fake_lammps)
-    engine = engine_module.LammpsEngine(config=cfg, engine_id=engine_id)
+    engine = engine_module.LammpsEngine(
+        config=cfg, engine_id=engine_id, **engine_kwargs
+    )
     engine.start()
     return engine, seen
 
@@ -132,6 +140,22 @@ def test_start_passes_library_and_cmdargs(monkeypatch) -> None:
         "comm": None,
         "cmdargs": ["-screen", "none", "-log", "lammps.log.dimer.3", *_KOKKOS.split()],
     }
+
+
+@pytest.mark.parametrize("search_instance", [False, True])
+def test_search_cmdargs_go_to_a_search_instance_only(
+    monkeypatch, search_instance
+) -> None:
+    cfg = LammpsConfig(
+        pair_style="mtp pot.mtp chunksize 32768",
+        pair_coeff="* *",
+        verbosity=0,
+        cmdargs="-echo none",
+        search_cmdargs=_KOKKOS,
+    )
+    _, seen = _started_engine(monkeypatch, cfg, search_instance=search_instance)
+    expected = ["-screen", "none", "-log", "none", "-echo", "none"]
+    assert seen["cmdargs"] == expected + (_KOKKOS.split() if search_instance else [])
 
 
 @pytest.mark.parametrize("kokkos", [False, True])

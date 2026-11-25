@@ -394,7 +394,10 @@ def distributed_search(
 
         def instance(ids: np.ndarray, name: str) -> LammpsEngine:
             engine = LammpsEngine(
-                worker.config, worker.comm, engine_id=f"artn.{name}.{worker.engine_id}"
+                worker.config,
+                worker.comm,
+                engine_id=f"artn.{name}.{worker.engine_id}",
+                search_instance=True,
             )
             resources.callback(engine.close)
             engine.start()

@@ -379,7 +379,14 @@ def test_worker_dispatch_with_frozen_atoms(
     cropped_trace = [[] for _ in range(4)]
 
     class Engine:
-        def __init__(self, config: Any, comm: ThreadComm, engine_id: str) -> None:
+        def __init__(
+            self,
+            config: Any,
+            comm: ThreadComm,
+            engine_id: str,
+            search_instance: bool = False,
+        ) -> None:
+            assert search_instance
             self.comm = comm
             self.lmp = self
             self.numpy = self

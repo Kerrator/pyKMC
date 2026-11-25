@@ -183,6 +183,7 @@ class ArtnSearchExtension(DimerSearchExtension):
                 config=self.engine.config,
                 comm=MPI.COMM_SELF,
                 engine_id=f"dimer.{self.engine.engine_id}",
+                search_instance=True,
             )
             self._force_engine = force_engine
             force_engine.start()

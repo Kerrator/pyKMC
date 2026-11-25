@@ -162,11 +162,14 @@ class LammpsEngine(Engine):
         config: LammpsConfigProtocol,
         comm: MPI.Intracomm | None = None,
         engine_id: int | str = 0,
+        search_instance: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
         self.comm = comm
         self.engine_id = engine_id
+        # A search's own instance for force calls: it also gets [Lammps] search_cmdargs.
+        self.search_instance = search_instance
         self._is_orthorhombic = None
         self.lmp: lammps | None = None
         self.kokkos = False  # set by start(): this instance runs with KOKKOS on
@@ -202,9 +205,11 @@ class LammpsEngine(Engine):
         engine_log = (
             "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
         )
-        # [Lammps] library and cmdargs; a config object without them opens LAMMPS as before.
+        # [Lammps] library, cmdargs and search_cmdargs; a config object without them opens LAMMPS as before.
         library = getattr(self.config, "library", None)
-        extra = getattr(self.config, "cmdargs", None) or []
+        extra = list(getattr(self.config, "cmdargs", None) or [])
+        if self.search_instance:
+            extra += getattr(self.config, "search_cmdargs", None) or []
         self.lmp = lammps(
             **({"name": library} if library else {}),
             comm=self.comm,

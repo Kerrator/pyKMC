@@ -270,6 +270,44 @@ class TestArtnSearchAVSerial:
         assert np.array_equal(result.mode[outside], np.zeros((len(outside), 3)))
         assert np.linalg.norm(result.mode) == pytest.approx(1.0)
 
+    def test_only_the_search_instance_gets_search_cmdargs(  # noqa: D102
+        self,
+        eam_config,  # noqa: ANN001, F811
+        vacancy,  # noqa: ANN001, F811
+        monkeypatch,  # noqa: ANN001
+    ) -> None:
+        import dataclasses
+
+        import pykmc.engine.lammps as engine_module
+
+        opened = []
+        real = engine_module.lammps
+
+        def recording(**kwargs):  # noqa: ANN003, ANN202
+            opened.append(kwargs["cmdargs"])
+            return real(**kwargs)
+
+        monkeypatch.setattr(engine_module, "lammps", recording)
+        config = dataclasses.replace(eam_config)
+        config.search_cmdargs = ["-echo", "none"]
+        # The full path and the active-volume path each build the instance.
+        for seed, options in ((HOP_SEED, OPTIONS), (AV_HOP_SEED, AV_OPTIONS)):
+            opened.clear()
+            engine = _make_engine(
+                config,
+                None,
+                vacancy.positions,
+                vacancy.types,
+                vacancy.cell,
+                vacancy.pbc,
+                ArtnSearchExtension,
+            )
+            try:
+                _search(engine, vacancy, seed=seed, options=options)
+            finally:
+                _close(engine)
+            assert [args[4:] for args in opened] == [[], ["-echo", "none"]]
+
     def test_neighbor_list_reuse_leaves_the_av_search_unchanged(  # noqa: D102
         self,
         engine,  # noqa: ANN001

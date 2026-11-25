@@ -187,7 +187,10 @@ def _cropped_query(
         return full
     kept, within_reach = selection
     local = LammpsEngine(
-        engine.config, engine.comm, engine_id=f"crop.{engine.engine_id}"
+        engine.config,
+        engine.comm,
+        engine_id=f"crop.{engine.engine_id}",
+        search_instance=True,
     )
     resources.callback(local.close)
     local.start()
