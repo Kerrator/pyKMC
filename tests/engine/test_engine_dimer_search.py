@@ -542,6 +542,57 @@ class TestDimerSearchSerial:
         assert result.saddle_positions is None
         assert result.force_calls_saddle == result.force_calls_total > 0
 
+    def test_search_leaves_a_symmetric_interstitial_site(self) -> None:
+        """From an exact equilibrium site the search still finds the hop.
+
+        A four-cell periodic Lennard-Jones host, frozen, with one interstitial
+        on its symmetric site: the force there is zero and every curvature the
+        same, so the first translation stalls without the step off the start.
+        """
+        from itertools import product
+
+        lattice = 2.6
+        host = np.array(list(product(range(4), repeat=3))) * lattice
+        positions = np.vstack([host, np.full(3, 1.5 * lattice)])
+        types = ["Ni"] * len(positions)
+        cell = Cell(np.eye(3) * 4 * lattice)
+        pbc = np.ones(3, dtype=bool)
+        config = _LammpsConfig(pair_style="lj/cut 3.0", pair_coeff=["* * 0.1 2.0"])
+        engine = _make_engine(
+            config, None, positions, types, cell, pbc, DimerSearchExtension
+        )
+        try:
+            _, forces = engine.get_energy_and_forces()
+            assert np.linalg.norm(forces[-1]) < 1e-10
+            system = _Cell(positions, types, cell, pbc, len(positions) - 1)
+            results = [
+                _search(
+                    engine,
+                    system,
+                    seed=seed,
+                    movable=[system.central],
+                    options={"start": "region"},
+                )
+                for seed in (1, 2)
+            ]
+            again = _search(
+                engine,
+                system,
+                seed=1,
+                movable=[system.central],
+                options={"start": "region"},
+            )
+        finally:
+            _close(engine)
+        for result in results:
+            assert result.success, result.reason
+            assert result.e_saddle - result.e_start == pytest.approx(2.5431, abs=1e-4)
+            assert result.delr1 < 1e-3  # back at the start, to the force tolerance
+            for name in ("saddle_positions", "min1_positions", "min2_positions"):
+                frozen = getattr(result, name)[:-1]
+                np.testing.assert_array_equal(frozen, host, err_msg=name)
+        _assert_same(results[0], again, atol=0.0)
+
     def test_bad_requests_raise(self, engine, vacancy):
         """A malformed request is a programming error, not a failed search."""
         with pytest.raises(ValueError, match="movable"):

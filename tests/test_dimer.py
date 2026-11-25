@@ -404,35 +404,102 @@ def test_minimum_image_in_a_skew_cell(
     np.testing.assert_allclose(mic[0], expected)
 
 
-def test_zero_force_start_fails_with_a_reason() -> None:
-    """At an exact minimum the effective force gives no direction: no NaN."""
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_exact_minimum_start_steps_off_and_finds_the_saddle(seed: int) -> None:
+    """At an exact minimum the dimer steps along its mode, then climbs.
+
+    The start stays the reference: its energy, and the distances to the minima.
+    """
     x = np.array([[SHIFT, SHIFT, 0.0], [SHIFT + GRID, SHIFT, GRID]])
+    cell = np.diag([10.0, 10.0, 10.0])
+    pbc = np.array([True, True, True])
+    # Stationary to rounding: the effective force is below the zero-force floor.
+    assert np.abs(periodic_wells(x)[1]).max() < 1e-12
     result = dimer_search(
-        x,
-        np.diag([10.0, 10.0, 10.0]),
-        np.array([True, True, True]),
-        np.ones(2, bool),
-        0,
-        1,
-        periodic_wells,
-        start_radius=1.0,
+        x, cell, pbc, np.ones(2, bool), 0, seed, periodic_wells, start_radius=1.0
     )
-    assert not result.success
-    assert result.reason == "zero_force"
-    assert result.e_start == pytest.approx(0.0, abs=1e-12)
+    assert result.success
+    assert result.e_start == 0.0
+    assert result.e_saddle - result.e_start == pytest.approx(WELL_BARRIER, abs=1e-5)
+    assert result.curvature == pytest.approx(WELL_CURVATURE, abs=5e-3)
+    assert result.delr1 < 2e-3
+    assert result.delr2 == pytest.approx(GRID, abs=5e-3)
+    # Only atom 0 hops.
+    np.testing.assert_allclose(result.saddle_positions[1], x[1], atol=1e-9)
     assert_no_nan(result)
 
+    again = dimer_search(
+        x, cell, pbc, np.ones(2, bool), 0, seed, periodic_wells, start_radius=1.0
+    )
+    for name, value in result._asdict().items():
+        if isinstance(value, np.ndarray):
+            assert np.array_equal(value, getattr(again, name)), name
+        else:
+            assert value == getattr(again, name), name
 
-def test_flat_surface_fails_with_a_reason() -> None:
-    """With no force and no curvature anywhere the search cannot move."""
 
-    def flat(x: np.ndarray) -> tuple[float, np.ndarray]:
-        return 0.0, np.zeros_like(x)
+def test_exact_minimum_start_keeps_frozen_atoms_and_translation_out() -> None:
+    """The step off a stationary start moves no frozen atom and no centroid."""
+    x = np.array([[SHIFT, SHIFT, 0.0], [SHIFT + GRID, SHIFT, GRID], [8.0, 8.0, 5.0]])
+    cell = np.diag([10.0, 10.0, 10.0])
+    pbc = np.array([True, True, True])
+    seen = []
+
+    def surface(positions: np.ndarray) -> tuple[float, np.ndarray]:
+        seen.append(positions.copy())
+        return periodic_wells(positions)
+
+    movable = np.array([True, True, False])
+    result = dimer_search(x, cell, pbc, movable, 0, 1, surface, start="region")
+    assert result.success
+    assert all(np.array_equal(p[2], x[2]) for p in seen)
+
+    # The pair surface at its exact minimum, translation removed: every
+    # evaluation, the step off the start included, keeps the centroid. (Seed 1
+    # steps outwards here and climbs the valley's outer wall, which has no
+    # saddle; seed 2 steps towards the saddle.)
+    pair = np.array([[1.0, 0.5, 0.0], [0.0, 0.0, 3.0]])
+    assert np.abs(valley_pair(pair)[1]).max() == 0.0
+    centroids = []
+
+    def pair_surface(positions: np.ndarray) -> tuple[float, np.ndarray]:
+        centroids.append(positions.mean(axis=0))
+        return valley_pair(positions)
 
     result = dimer_search(
-        valley_start(), OPEN_CELL, NO_PBC, np.ones(4, bool), 0, 1, flat, start="region"
+        pair,
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(2, bool),
+        0,
+        2,
+        pair_surface,
+        start_radius=1.5,
+        remove_translation=True,
+    )
+    assert result.success
+    assert result.e_saddle - result.e_start == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    np.testing.assert_allclose(
+        centroids, [pair.mean(axis=0)] * len(centroids), atol=1e-12
+    )
+
+
+def test_flat_surface_fails_within_the_step_budget() -> None:
+    """With no force and no curvature anywhere the steps off the start run out."""
+    surface = counting(lambda x: (0.0, np.zeros_like(x)))
+    result = dimer_search(
+        valley_start(),
+        OPEN_CELL,
+        NO_PBC,
+        np.ones(4, bool),
+        0,
+        1,
+        surface,
+        start="region",
     )
     assert result.reason == "zero_force"
+    # The start and its rotation, then each step off it and its rotation.
+    assert surface.count == result.force_calls_total == 2 + 2 * dimer._MAX_KICKS
     assert_no_nan(result)
 
 

@@ -61,6 +61,9 @@ Changes from SEAKMC:
   SEAKMC, on request), then the mode is re-rotated and the curvature
   recomputed at the centre, and the saddle is valid only with negative
   curvature;
+- a start with no effective force, such as an atom on a symmetric site, is
+  stepped ``trial_step`` along the mode up to three times before the first
+  translation; the start stays the reference for energies and distances;
 - the saddle is the dimer centre, not an image;
 - the starting direction is drawn from a seeded generator, either on the
   movable atoms within a radius of the central atom (``local``) or on all
@@ -132,6 +135,8 @@ _ROTATION_THRESHOLD = 0.1
 _MAX_ROTATIONS = 3
 # An effective force with a smaller 3N norm gives no direction to move, eV/Å.
 _ZERO_FORCE = 1e-10
+# Displacements along the mode tried when the start is stationary.
+_MAX_KICKS = 3
 
 # Dynamic active volume, SEAKMC's HandleVN defaults.
 # DAV acts once more than this many translation steps are done (IgnoreSteps).
@@ -167,7 +172,8 @@ class DimerResult(NamedTuple):
         effective force gives no direction to move), ``"max_iterations"``,
         ``"positive_curvature"`` (the force converged where the lowest
         curvature is not negative), ``"minimisation_not_converged"`` or
-        ``"non_finite_force"``.
+        ``"non_finite_force"``. A start with no effective force is stepped
+        along the mode before ``"zero_force"`` is given.
     saddle_positions : Optional[np.ndarray]
         Positions of the saddle (the dimer centre).
     min1_positions : Optional[np.ndarray]
@@ -475,6 +481,7 @@ def dimer_search(
         search_dir = np.zeros_like(x0)  # conjugate direction
         line_curvature = 0.0  # from the last line search (SEAKMC's TRCURV)
         in_basin = True  # no step has used a negative curvature yet
+        kicks = 0  # displacements off a stationary start
         saddle = None
         for step in range(max_translations):
             if step > 0:
@@ -507,7 +514,16 @@ def dimer_search(
             search_dir = f_eff + gamma * search_dir
             dir_norm = float(np.linalg.norm(search_dir))
             if dir_norm < _ZERO_FORCE:
-                return result("zero_force")
+                # A stationary start, such as an atom on a symmetric site,
+                # gives no effective force. Before any translation, step off
+                # it along the mode (zero on frozen atoms, free of translation
+                # when that is removed) and search from there; the start stays
+                # the reference for energies and distances.
+                if step != kicks or kicks == _MAX_KICKS:
+                    return result("zero_force")
+                kicks += 1
+                x0 = x0 + trial_step * mode
+                continue
             unit_dir = search_dir / dir_norm
             f_last = f_eff
             x_trial = x0 + trial_step * unit_dir
