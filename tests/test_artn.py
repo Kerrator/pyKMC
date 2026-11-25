@@ -183,7 +183,7 @@ def test_both_convergence_properties(convergence_property: str) -> None:
 
 
 def test_return_to_saddle_uses_minimum_force_and_counts_the_callback() -> None:
-    """The backward push begins after one restart from min1's force and FIRE clock."""
+    """The opposite push follows one restart with min1's force and FIRE's time step."""
     moves = []
     states = []
 
@@ -308,7 +308,7 @@ def test_injected_first_lanczos_vector_documents_mask_exception() -> None:
 
 
 def test_injected_first_lanczos_vector_moves_a_frozen_atom() -> None:
-    """Replay retains the buffer component of the first probe."""
+    """Replay keeps the buffer component of the first probe."""
     start = valley_start()
     movable = np.array([True, False, True, True])
     direction = np.zeros_like(start)
@@ -731,7 +731,7 @@ def test_mixed_default_perp_limits_raise(limits: list[int]) -> None:
 
 
 def test_all_default_perp_limits_keep_partn_defaults() -> None:
-    """A list consisting entirely of -2 selects the defaults with a basin override."""
+    """A list of only -2 entries selects the defaults with a basin override."""
     assert artn.perp_limits(3, [-2, -2]) == [3, 8, 12, 16, -1]
 
 

@@ -429,7 +429,7 @@ def replay(
     def observe(move: str, state: Optional[tuple]) -> None:
         if move == "eigen":
             # An unsmoothed push and the blend with the previous direction
-            # are distinct pARTn blocks, even if they land at the same point.
+            # are distinct pARTn blocks, even when they reach the same point.
             move = {("EIGN",): "eigen", ("SMTH",): "smooth"}.get(
                 state, "unknown eigen push"
             )

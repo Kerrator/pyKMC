@@ -82,7 +82,7 @@ def test_artn_without_a_partn_section_fails(tmp_path: Path) -> None:
 
 
 def test_strategy_rejects_mixed_nperp_limitation(tmp_path: Path) -> None:
-    """A mixed sentinel and explicit limit fails at strategy construction."""
+    """Mixing -2 with an explicit limit fails when the strategy is built."""
     config = Config.from_ini_file(_input(tmp_path, partn="nperp_limitation = 4, -2\n"))
 
     with pytest.raises(ValueError, match="nperp_limitation"):
@@ -91,7 +91,7 @@ def test_strategy_rejects_mixed_nperp_limitation(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("limits", [None, [-2, -2]], ids=["unset", "all-default"])
 def test_strategy_accepts_default_nperp_limitation(limits: list[int] | None) -> None:
-    """An unset list and an all-sentinel list reach the core as supplied."""
+    """An unset list and an all -2 list reach the core unchanged."""
     config = _av_config(rmov=None)
     config.partn = PartnConfig(nperp_limitation=limits)
 
@@ -205,7 +205,7 @@ CENTRAL = [3, 0, 7, 3, 11, 5, 0, 9]
 def test_one_control_seed_gives_the_same_seeds_for_any_worker_count(
     tmp_path: Path,
 ) -> None:
-    """Worker count and completion order preserve the run-wide seed sequence."""
+    """The run-wide seed sequence holds for any worker count and completion order."""
     path = _input(tmp_path, extra_control="seed = 20261116\n")
 
     per_count = {}
@@ -297,7 +297,7 @@ def test_same_control_seed_and_other_worker_counts_give_the_same_events(
 
 
 def test_results_go_through_the_shared_rules_as_artn() -> None:
-    """Accepted ARTn events retain their seed, barrier and force-call counts."""
+    """Accepted ARTn events keep their seed, barrier and force-call counts."""
     manager = OrderedManager(2, [1, 0])
     config = _av_config(rmov=None)
     config.partn = PartnConfig()
@@ -456,7 +456,7 @@ def test_a_set_zseed_and_neigen_are_listed() -> None:
 
 
 def test_ignored_settings_are_logged_once() -> None:
-    """Repeated submissions through one strategy emit a single settings warning."""
+    """Several submits through one strategy log the settings warning once."""
     config = _av_config(rmov=None)
     config.partn = PartnConfig(neigen=2, zseed=7)
     strategy = ArtnStrategy(config)
