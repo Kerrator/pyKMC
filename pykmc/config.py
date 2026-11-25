@@ -220,9 +220,8 @@ class EventSearchConfig(BaseModel):
         description="Method used to refine events, for any `style`: 'partn' (pARTn, as "
         "before) or 'artn' (pyKMC's own ARTn, stopping at the saddle, with the [pARTn] "
         "r_* parameters; each attempt has its own seed from a child of the [Control] seed "
-        "stream, not zseed; r_neigen other than 1 is logged as ignored). 'artn' runs on "
-        "the full system only: with the active volume on it needs "
-        "[ActiveVolume] artn_forces = full.",
+        "stream, not zseed; r_neigen other than 1 is logged as ignored). With the active "
+        "volume on, 'artn' refines on [ActiveVolume] artn_forces's force path.",
     )
     nsearch: int = Field(
         ...,
@@ -674,7 +673,7 @@ class ActiveVolume(BaseModel):
         "dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or "
         "'crop', pARTn's (only the atoms within `ract`, those beyond `rmov` with zero force), "
         "which gives pARTn's forces for comparing the two searches. Other styles ignore it. "
-        "`[EventSearch] refine_style = artn` refines on 'full' only.",
+        "`[EventSearch] refine_style = artn` refines on the same force path.",
     )
 
 
@@ -1200,16 +1199,6 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
-        if (
-            self.eventsearch.refine_style == "artn"
-            and self.control.active_volume
-            and self.activevolume is not None
-            and self.activevolume.artn_forces == "crop"
-        ):
-            raise ValueError(
-                "[EventSearch] refine_style = artn runs on the full system only; "
-                "set [ActiveVolume] artn_forces = full"
-            )
         if (
             self.eventsearch.style == "dimer"
             and self.dimer is not None

@@ -469,18 +469,6 @@ def test_the_operation_returns_the_barrier_itself(
         np.testing.assert_array_equal(held, [0, 2, 3])  # and the atoms beyond rmov
 
 
-def test_the_operation_refuses_the_crop(
-    operation: tuple[ArtnSearchExtension, dict],
-) -> None:
-    """Refinement runs on the full system only."""
-    extension, _ = operation
-    with pytest.raises(ValueError, match="full system"):
-        extension.artn_refine(
-            MINIMUM, ["Fe"] * 4, OPEN_CELL, NO_PBC, np.arange(4), 0, [0],
-            np.zeros((1, 3)), [5], 0.4, options={"crop_radii": (6.0, 12.0)},
-        )  # fmt: skip
-
-
 class RankInstance:
     """A distributed LAMMPS instance on the curved valley, rows split over ranks."""
 
@@ -607,8 +595,8 @@ def test_refine_style_defaults_to_partn_and_takes_artn() -> None:
         EventSearchConfig(style="partn", nsearch=1, refine_style="dimer")
 
 
-def test_refine_style_artn_runs_on_the_full_system_only(tmp_path: Path) -> None:
-    """refine_style reads from the input; with the AV on, the crop is refused."""
+def test_refine_style_artn_takes_either_force_path(tmp_path: Path) -> None:
+    """refine_style reads from the input; with the AV on, full and crop both load."""
     from pykmc.config import Config
 
     text = (Path(__file__).parent / "data" / "input.in").read_text()
@@ -618,13 +606,10 @@ def test_refine_style_artn_runs_on_the_full_system_only(tmp_path: Path) -> None:
     for forces in ("full", "crop"):
         av = f"\n[ActiveVolume]\nrmov = 6.0\nract = 10.0\nartn_forces = {forces}\n"
         path.write_text(text + av)
-        if forces == "full":
-            config = Config.from_ini_file(str(path))
-            assert config.eventsearch.refine_style == "artn"
-            assert config.eventsearch.style == "partn"
-        else:
-            with pytest.raises(ValueError, match="full system only"):
-                Config.from_ini_file(str(path))
+        config = Config.from_ini_file(str(path))
+        assert config.eventsearch.refine_style == "artn"
+        assert config.eventsearch.style == "partn"
+        assert config.activevolume.artn_forces == forces
 
 
 def test_the_artn_extension_is_loaded_for_any_search_style() -> None:
@@ -730,10 +715,12 @@ NEIGHBORS = np.array([0, 1, 2, 3])
 SADDLE = POSITIONS[NEIGHBORS] + [[0.6, 0.0, 0.0], [-0.1, 0, 0], [0, 0, 0], [0, 0, 0]]
 
 
-def _config(refine_style: str, active_volume: bool) -> SimpleNamespace:
+def _config(
+    refine_style: str, active_volume: bool, artn_forces: str = "full"
+) -> SimpleNamespace:
     return SimpleNamespace(
         control=SimpleNamespace(active_volume=active_volume),
-        activevolume=SimpleNamespace(rmov=3.0, ract=6.0),
+        activevolume=SimpleNamespace(rmov=3.0, ract=6.0, artn_forces=artn_forces),
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
         eventsearch=SimpleNamespace(refined_energy_thr=0.05, refine_style=refine_style),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.1),
@@ -792,12 +779,17 @@ def _system() -> System:
     )
 
 
-def _refinement_call(refine_style: str, active_volume: bool, monkeypatch) -> tuple:  # noqa: ANN001
+def _refinement_call(  # noqa: ANN202
+    refine_style: str,
+    active_volume: bool,
+    monkeypatch,  # noqa: ANN001
+    artn_forces: str = "full",
+):
     monkeypatch.setattr("pykmc.refinement.PointSetRegistration", IdentityPSR)
     manager = RecordingManager()
     neighbors = SimpleNamespace(get_neighbors=lambda kind, atom: NEIGHBORS.copy())
     refinement = Refinement(
-        _config(refine_style, active_volume),
+        _config(refine_style, active_volume, artn_forces),
         SimpleNamespace(info=lambda *a: None, progress_bar=lambda *a: None),
         _system(),
         neighbors,
@@ -811,10 +803,18 @@ def _refinement_call(refine_style: str, active_volume: bool, monkeypatch) -> tup
     return manager.calls, refinement.results
 
 
-@pytest.mark.parametrize("active_volume", [False, True])
-def test_refinement_routes_by_refine_style(monkeypatch, active_volume: bool) -> None:  # noqa: ANN001
+@pytest.mark.parametrize(
+    ("active_volume", "artn_forces"),
+    [(False, "full"), (True, "full"), (True, "crop")],
+    ids=["av-off", "av-full", "av-crop"],
+)
+def test_refinement_routes_by_refine_style(
+    monkeypatch,  # noqa: ANN001
+    active_volume: bool,
+    artn_forces: str,
+) -> None:
     """refine_style = artn sends artn_refine the minimum and the rcut saddle."""
-    calls, results = _refinement_call("artn", active_volume, monkeypatch)
+    calls, results = _refinement_call("artn", active_volume, monkeypatch, artn_forces)
 
     assert [op for op, _ in calls] == ["artn_refine"]
     sent = calls[0][1]
@@ -825,9 +825,15 @@ def test_refinement_routes_by_refine_style(monkeypatch, active_volume: bool) -> 
     assert sent["seeds"] == [
         int(s) for s in refine_seed_stream(9).integers(0, 2**32, size=5)
     ]
-    assert sent["options"] == OPTIONS
+    if artn_forces == "crop":
+        # The AV's own pre-relaxation holds its buffer; no radius is sent.
+        assert sent["options"] == {**OPTIONS, "crop_radii": (3.0, 6.0)}
+        assert sent["relax_radius"] is None
+    else:
+        assert sent["options"] == OPTIONS
     if active_volume:
-        assert sent["relax_radius"] == 3.0
+        if artn_forces == "full":
+            assert sent["relax_radius"] == 3.0
         np.testing.assert_array_equal(sent["movable"], [0, 1, 2, 3])  # within rmov
     else:
         assert sent["relax_radius"] is None

@@ -321,8 +321,10 @@ active volume on, only those within `rmov`), then runs ARTn from there, stopping
 afresh with its own seed, drawn from a stream of its own that `seed` in `[Control]` starts, so adding refinement
 changes no search seed and the seeds do not depend on the number of LAMMPS instances. `zseed` is not read, and
 `r_neigen` other than 1 is logged as ignored. The barrier is the saddle's potential energy minus the minimum's,
-with or without the active volume. The ARTn refiner runs on the full system only: with the active volume on, it
-needs `artn_forces = full`.
+with or without the active volume. With the active volume on, `artn_forces` chooses the force path, as for the
+search. With `crop`, the active volume and the start are built as for `refine_style = partn`: the minimum's energy
+is taken on the active volume, then the rcut atoms are set at the saddle and held with the buffer while the
+others relax. As for the search, it runs on the first rank of its session.
 
 ```ini
 [EventSearch]
