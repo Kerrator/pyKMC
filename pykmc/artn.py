@@ -484,8 +484,10 @@ def artn_search(
     first_lanczos_vector : Optional[np.ndarray]
         (N, 3) vector that replaces the random draw of the first Lanczos
         direction. The search uses its direction without the movable mask.
-        Its components on frozen atoms move those atoms during probes. Step
-        replay needs this to reproduce pARTn's buffer motion.
+        Its components on frozen atoms move those atoms during probes. They
+        also enter the eigenvector, so perpendicular relaxation and
+        eigenvector pushes can move frozen atoms too. Step replay needs this
+        to reproduce pARTn's buffer motion.
     new_chance_pushes : Optional[Sequence[np.ndarray]]
         (N, 3) pushes, Å, that replace the pushes the new chances build, in
         order, used as given. For step replay.
