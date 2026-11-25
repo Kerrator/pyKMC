@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
+from ...artn import perp_limits
 from ...dimer import _minimum_image
 from ...engine.artn_search import ArtnSearchExtension
 from .base import EventSearchStrategy
@@ -122,6 +123,7 @@ class ArtnStrategy(EventSearchStrategy):
 
     def __init__(self, config: ArtnSearchConfig) -> None:
         self.config = config
+        perp_limits(config.partn.nperp, config.partn.nperp_limitation)
         self.options = artn_options(config.partn)
         self._ignored_logged = False
 
