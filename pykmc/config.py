@@ -1235,6 +1235,38 @@ class Config(BaseModel):
         return self
 
 
+def check_pypartn(config: Config) -> None:
+    """Raise if the run needs pARTn and its Python module, pypARTn, does not import.
+
+    `[EventSearch] style = partn` and `refine_style = partn` (the default) run
+    pARTn; `style = artn` or `dimer` with `refine_style = artn` need no pARTn.
+    Called once the input is read, before any engine starts. It is not part of
+    `Config`'s validation, so a config still loads where pypARTn is missing.
+
+    Raises
+    ------
+    ValueError
+        If pARTn is needed and ``import pypARTn`` fails.
+
+    """
+    needs = []
+    if config.eventsearch.style == "partn":
+        needs.append("style = partn")
+    if config.eventsearch.refine_style == "partn":
+        default = "refine_style" not in config.eventsearch.model_fields_set
+        needs.append("refine_style = partn" + (" (the default)" if default else ""))
+    if not needs:
+        return
+    try:
+        import pypARTn  # noqa: F401
+    except ImportError as err:
+        raise ValueError(
+            f"[EventSearch] {' and '.join(needs)} runs pARTn, which needs the pypARTn "
+            f"module, and it does not import ({err}). Install pARTn (README), or set "
+            "style = artn (or dimer) and refine_style = artn."
+        ) from None
+
+
 def get_nested_attr(obj: BaseModel, attr_path: str) -> Optional[Any]:
     """Retrieve a nested attribute from a Pydantic BaseModel.
 

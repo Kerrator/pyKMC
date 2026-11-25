@@ -8,7 +8,7 @@ import argparse
 from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
-from .config import Config
+from .config import Config, check_pypartn
 from .eventsearch import EventSearch
 from .engine.artn_search import with_refiner
 
@@ -26,6 +26,7 @@ def main() -> None:
 
     # Config
     config = Config.from_ini_file(args.input)
+    check_pypartn(config)
     comm = MPI.COMM_WORLD
     group_size = (
         (comm.Get_size() - 1)

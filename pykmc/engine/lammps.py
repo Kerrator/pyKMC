@@ -13,11 +13,6 @@ try:
     from mpi4py import MPI
 except ImportError:
     pass
-try:
-    import pypARTn
-except ImportError:
-    pypARTn = None
-
 from ..activevolume.active_volume import (
     partn_search_AV,
     partn_refine_AV,
@@ -570,6 +565,8 @@ class LammpsEngine(Engine):
     def partn_search(
         self, config, central_atom_idx: int, positions=None, cell=None, types=None
     ):
+        import pypARTn  # only pARTn's search and refinement need it
+
         original_stdout_fd = os.dup(1)
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, 1)
@@ -730,6 +727,8 @@ class LammpsEngine(Engine):
         saddle_positions=None,
         minimize_outer_atoms: bool = True,
     ):
+        import pypARTn  # only pARTn's search and refinement need it
+
         if config.control.active_volume:
             E_init, atom_map, central_lammps_id = partn_refine_AV(
                 self,

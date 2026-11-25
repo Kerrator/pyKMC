@@ -28,7 +28,6 @@ from ase.cell import Cell
 from ase.data import atomic_masses, atomic_numbers
 
 pytest.importorskip("lammps")
-pytest.importorskip("pypARTn")
 
 from pykmc.activevolume import active_volume as av  # noqa: E402
 from pykmc.engine.lammps import LammpsEngine  # noqa: E402
