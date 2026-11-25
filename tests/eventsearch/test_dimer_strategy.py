@@ -518,6 +518,8 @@ def test_a_connected_saddle_becomes_an_oriented_event() -> None:
         "positive_curvature",
         "zero_force",
         "minimisation_not_converged",
+        "higher_order_saddle",
+        "saddle_order_unverified",
     ],
 )
 def test_a_failed_search_is_event_not_found_with_its_reason(reason: str) -> None:
@@ -644,3 +646,75 @@ def test_an_error_raised_by_the_op_is_raised_not_turned_into_a_failure() -> None
 
     with pytest.raises(RuntimeError, match="Non-numeric"):
         future.result()
+
+
+# ------------------------------------------------------- saddle order gate
+
+
+def _two_wells(positions: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return the energy and forces of two wells on d = x0 - x1 - (0, 2, 0).
+
+    First-order saddles at 0.9375 eV; an index-two saddle at 1 eV, Hessian
+    eigenvalues -4, -1 and 10 eV/Å².
+    """
+    x, y, z = positions[0] - positions[1] - [0, 2, 0]
+    energy = (x * x - 1) ** 2 + (6 * x * x - 0.5) * y * y + y**4 + 5 * z * z
+    gradient = np.array(
+        [
+            4 * x * (x * x - 1) + 12 * x * y * y,
+            2 * (6 * x * x - 0.5) * y + 4 * y**3,
+            10 * z,
+        ]
+    )
+    forces = np.zeros_like(positions)
+    forces[0], forces[1] = -gradient, gradient
+    return energy, forces
+
+
+@pytest.mark.parametrize(("seed", "rows"), [(4, []), (1, [0.9375])])
+def test_only_first_order_saddles_reach_the_catalogue(
+    tmp_path: Path, seed: int, rows: list
+) -> None:
+    """Seed 4 climbs to the index-two saddle and adds no row; seed 1 adds its hop."""
+    from pykmc.dimer import dimer_search
+    from pykmc.event_table import ReferenceEventTable
+    from pykmc.system import System
+
+    start = np.array(
+        [
+            [5.999, 7.0, 5.0],
+            [5.0, 5.0, 5.0],
+            [6.3, 6.1, 5.9],
+            [4.3, 6.2, 5.1],
+            [5.5, 6.8, 6.3],
+        ]
+    )
+    cell = np.eye(3) * 12
+    pbc = np.zeros(3, bool)
+    types = np.array(["Ni", "Cu", "Ag", "Al", "Fe"])
+    request = SearchRequest(
+        0, start, cell, types, pbc, seed=seed, movable=np.array([0])
+    )
+    raw = dimer_search(
+        start,
+        cell,
+        pbc,
+        np.arange(len(start)) == 0,
+        0,
+        seed,
+        _two_wells,
+        start="region",
+        remove_translation=True,
+    )
+    config = Config.from_ini_file(_input(tmp_path, extra="start = region\n"))
+    search = EventSearch.create("dimer", config=config)
+    search._cell = cell
+    search.system = System(types=types, positions=start, cell=cell, pbc=pbc)
+    search.results = [dimer_search_result(raw, request, delr_threshold=0.5)]
+    table = ReferenceEventTable(config)
+    table.add_events(search.get_successes_results())
+
+    barriers = list(table.table["energy_barrier"]) if not table.table.empty else []
+    assert barriers == pytest.approx(rows, abs=1e-5)
+    if not rows:
+        assert raw.reason == "higher_order_saddle"

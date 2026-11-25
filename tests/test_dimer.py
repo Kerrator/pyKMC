@@ -503,6 +503,129 @@ def test_flat_surface_fails_within_the_step_budget() -> None:
     assert_no_nan(result)
 
 
+# Saddle order. A two-well surface on d = x0 - x1 - (0, 2, 0), atom 0 movable:
+# minima at d = (+-1, 0, 0); first-order saddles at d = (0, +-1/2, 0), 0.9375 eV,
+# curvatures -1, 2 and 10 eV/Å²; an index-two saddle at d = 0, 1 eV,
+# curvatures -4, -1 and 10 eV/Å².
+ORDER_START = np.array(
+    [[5.999, 7.0, 5.0], [5.0, 5.0, 5.0], [6.3, 6.1, 5.9], [4.3, 6.2, 5.1]]
+)
+
+
+def two_wells(x: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return the energy and forces of the two-well surface."""
+    dx, dy, dz = x[0] - x[1] - [0.0, 2.0, 0.0]
+    energy = (dx * dx - 1) ** 2 + (6 * dx * dx - 0.5) * dy * dy + dy**4 + 5 * dz * dz
+    gradient = np.array(
+        [
+            4 * dx * (dx * dx - 1) + 12 * dx * dy * dy,
+            2 * (6 * dx * dx - 0.5) * dy + 4 * dy**3,
+            10 * dz,
+        ]
+    )
+    forces = np.zeros_like(x)
+    forces[0], forces[1] = -gradient, gradient
+    return float(energy), forces
+
+
+def order_search(seed: int) -> DimerResult:
+    """Run the dimer on the two-well surface, atom 0 movable, region start."""
+    movable = np.arange(len(ORDER_START)) == 0
+    return dimer_search(
+        ORDER_START, OPEN_CELL, NO_PBC, movable, 0, seed, two_wells, start="region"
+    )
+
+
+def test_index_two_saddle_is_rejected() -> None:
+    """A second unstable direction fails the search; the saddle is kept."""
+    surface = counting(two_wells)
+    result = dimer_search(
+        ORDER_START,
+        OPEN_CELL,
+        NO_PBC,
+        np.arange(len(ORDER_START)) == 0,
+        0,
+        4,
+        surface,
+        start="region",
+    )
+    assert result.reason == "higher_order_saddle"
+    assert result.e_saddle - result.e_start == pytest.approx(1.0, abs=1e-5)
+    assert result.curvature == pytest.approx(-4.0, abs=5e-3)
+    assert result.saddle_positions is not None and result.min1_positions is None
+    assert result.force_calls_saddle == result.force_calls_total == surface.count
+    assert_no_nan(result)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_first_order_saddle_on_the_same_surface_is_kept(seed: int) -> None:
+    """The positive control: a first-order saddle passes the order check."""
+    result = order_search(seed)
+    assert result.success
+    assert result.e_saddle - result.e_start == pytest.approx(0.9375, abs=1e-5)
+    assert result.curvature == pytest.approx(-1.0, abs=5e-3)
+
+
+def _matrix_curvature(eigenvalues: list, rotation_seed: int = 0) -> float:
+    """Run the order check on an explicit Hessian; its first eigenvector is the mode."""
+    n = len(eigenvalues)
+    basis, _ = np.linalg.qr(np.random.default_rng(rotation_seed).normal(size=(n, n)))
+    hessian = basis @ np.diag(eigenvalues) @ basis.T
+    mode = basis[:, 0].reshape(-1, 1)
+    shape = (n, 1)
+
+    def product(v: np.ndarray) -> np.ndarray:
+        return (hessian @ v.ravel()).reshape(shape)
+
+    def project(v: np.ndarray) -> np.ndarray:
+        return v - mode * np.vdot(mode, v)
+
+    start = np.random.default_rng(1).normal(size=shape)
+    return dimer._second_curvature(product, project, mode, eigenvalues[0], start)
+
+
+@pytest.mark.parametrize(
+    ("eigenvalues", "expected"),
+    [
+        # One unstable direction: the second curvature is the soft positive one.
+        ([-1.0, 0.5, 2.0, 3.0, 5.0, 8.0], 0.5),
+        # A zero mode is not unstable.
+        ([-1.0, 0.0, 2.0, 3.0, 5.0, 8.0], 0.0),
+    ],
+)
+def test_second_curvature_on_an_explicit_hessian(
+    eigenvalues: list, expected: float
+) -> None:
+    """With one unstable direction the check converges on the next curvature."""
+    assert _matrix_curvature(eigenvalues) == pytest.approx(expected, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "eigenvalues",
+    [
+        [-2.0, -1.0, 2.0, 3.0, 5.0, 8.0],
+        # As unstable as the mode: the deflated mode keeps its twin.
+        [-1.0, -1.0, 2.0, 3.0, 5.0, 8.0],
+        [-1.0, -0.05, 0.0, 3.0, 5.0, 8.0],
+    ],
+)
+def test_second_unstable_direction_is_found(eigenvalues: list) -> None:
+    """A second Ritz value below the tolerance bounds the true one from above."""
+    second = _matrix_curvature(eigenvalues)
+    assert eigenvalues[1] - 1e-9 <= second < -dimer._ORDER_TOLERANCE
+
+
+def test_unsettled_order_check_fails_with_a_reason(monkeypatch) -> None:  # noqa: ANN001
+    """Out of iterations, the check cannot establish the order: the search fails."""
+    monkeypatch.setattr(dimer, "_ORDER_MAX_ITERATIONS", 1)
+    assert _matrix_curvature([-1.0, 0.5, 2.0, 3.0, 5.0, 8.0]) is None
+    result = valley_search(valley_start())
+    assert result.reason == "saddle_order_unverified"
+    assert result.e_saddle == pytest.approx(VALLEY_BARRIER, abs=1e-5)
+    assert result.min1_positions is None
+    assert_no_nan(result)
+
+
 def test_other_failures_return_a_reason() -> None:
     """Iteration caps, empty starts and non-finite forces fail without raising."""
     assert valley_search(valley_start(), max_translations=3).reason == (

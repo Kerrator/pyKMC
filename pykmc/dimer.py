@@ -61,6 +61,13 @@ Changes from SEAKMC:
   SEAKMC, on request), then the mode is re-rotated and the curvature
   recomputed at the centre, and the saddle is valid only with negative
   curvature;
+- the saddle is then valid only with no second unstable direction: Lanczos on
+  finite-difference Hessian-vector products (step ``separation``), restricted
+  to the allowed directions (movable atoms, translation removed as for the
+  mode) orthogonal to the mode, estimates the second-lowest curvature; below
+  -1e-2 eV/Å² the search fails as a higher-order saddle. It costs one force
+  call per Lanczos iteration, at most 40, about 13 to 25 on a 255-atom Ni
+  vacancy hop;
 - a start with no effective force, such as an atom on a symmetric site, is
   stepped ``trial_step`` along the mode up to three times before the first
   translation; the start stays the reference for energies and distances;
@@ -138,6 +145,15 @@ _ZERO_FORCE = 1e-10
 # Displacements along the mode tried when the start is stationary.
 _MAX_KICKS = 3
 
+# Saddle order check at the converged centre.
+# A second curvature below minus this is a second unstable direction, eV/Å².
+_ORDER_TOLERANCE = 1e-2
+# Hessian-vector products (one force call each) before the check gives up.
+_ORDER_MAX_ITERATIONS = 40
+# The lowest Ritz value counts as converged once successive values agree to
+# this fraction of its size, or to _ORDER_CONVERGED * _ORDER_TOLERANCE.
+_ORDER_CONVERGED = 1e-2
+
 # Dynamic active volume, SEAKMC's HandleVN defaults.
 # DAV acts once more than this many translation steps are done (IgnoreSteps).
 _DAV_IGNORE_STEPS = 4
@@ -164,16 +180,19 @@ class DimerResult(NamedTuple):
     Attributes
     ----------
     success : bool
-        Whether a saddle with negative curvature and both minima were found.
+        Whether a first-order saddle and both minima were found.
     reason : Optional[str]
         Why the search failed, ``None`` on success: ``"empty_start"`` (no
         movable atom to draw the starting direction on, or nothing left of the
         direction once translation is removed), ``"zero_force"`` (the
         effective force gives no direction to move), ``"max_iterations"``,
         ``"positive_curvature"`` (the force converged where the lowest
-        curvature is not negative), ``"minimisation_not_converged"`` or
-        ``"non_finite_force"``. A start with no effective force is stepped
-        along the mode before ``"zero_force"`` is given.
+        curvature is not negative), ``"higher_order_saddle"`` (a second
+        curvature is negative too), ``"saddle_order_unverified"`` (the
+        second curvature did not settle within the check's iterations),
+        ``"minimisation_not_converged"`` or ``"non_finite_force"``. A start
+        with no effective force is stepped along the mode before
+        ``"zero_force"`` is given.
     saddle_positions : Optional[np.ndarray]
         Positions of the saddle (the dimer centre).
     min1_positions : Optional[np.ndarray]
@@ -200,8 +219,8 @@ class DimerResult(NamedTuple):
         Unstable mode at the saddle, an (N, 3) unit vector in 3N space, zero on
         frozen atoms, pointing from the start towards the saddle.
     force_calls_saddle : int
-        Callback calls up to the saddle, or up to the failure if no saddle was
-        found.
+        Callback calls up to the saddle, its order check included, or up to
+        the failure if no saddle was found.
     force_calls_total : int
         Callback calls including the two minimisations.
     seed : int
@@ -538,7 +557,6 @@ def dimer_search(
         if saddle is None:
             return result("max_iterations")
 
-        calls_saddle = calls
         if np.vdot(mode, saddle - x_start) < 0:
             mode = -mode
         found = dict(
@@ -546,8 +564,27 @@ def dimer_search(
             e_saddle=e0,
             curvature=curvature,
             mode=mode,
-            force_calls_saddle=calls_saddle,
         )
+
+        # Saddle order: the dimer shows one negative curvature; a second
+        # unstable direction can survive both relaxations.
+        def project(v: np.ndarray) -> np.ndarray:
+            v = untranslated(v * weight)
+            return v - mode * np.vdot(mode, v)
+
+        def hessian_product(v: np.ndarray) -> np.ndarray:
+            _, f1 = evaluate(saddle + separation * v)
+            return (f0 - f1) / separation
+
+        second = _second_curvature(
+            hessian_product, project, mode, curvature, rng.standard_normal(x0.shape)
+        )
+        found["force_calls_saddle"] = calls
+        if second is None:
+            return result("saddle_order_unverified", **found)
+        if second < -_ORDER_TOLERANCE:
+            return result("higher_order_saddle", **found)
+
         minima = []
         for sign in (-1.0, 1.0):
             x_min, e_min, converged = _fire(
@@ -595,6 +632,66 @@ def _rotational_force(
     f_rot = (df - mode * np.vdot(df, mode)) / (2.0 * separation)
     curvature = float(np.vdot(f2 - f1, mode)) / (2.0 * separation)
     return f_rot, curvature
+
+
+def _second_curvature(
+    hessian_product: Callable[[np.ndarray], np.ndarray],
+    project: Callable[[np.ndarray], np.ndarray],
+    mode: np.ndarray,
+    curvature: float,
+    start: np.ndarray,
+) -> Optional[float]:
+    """Return the second curvature at a saddle, or None if it is not established.
+
+    Lanczos with full reorthogonalisation on the Hessian restricted to the
+    allowed directions orthogonal to the unstable ``mode`` (``project``), one
+    ``hessian_product`` per iteration. Its lowest eigenvalue lies between the
+    Hessian's lowest and second-lowest (Cauchy interlacing), so once the
+    lowest Ritz value has converged at or above ``-_ORDER_TOLERANCE`` there is
+    no second unstable direction; that Ritz value is returned. Ritz values on
+    the space spanned by ``mode`` (curvature ``curvature``) and the Lanczos
+    vectors bound the Hessian's from above, so a second one below
+    ``-_ORDER_TOLERANCE`` proves a second unstable direction; it is returned.
+    """
+    basis: list[np.ndarray] = []
+    products: list[np.ndarray] = []
+    q = project(start)
+    norm = float(np.linalg.norm(q))
+    if norm == 0.0:
+        return math.inf  # no direction is left beside the mode
+    lowest = math.inf
+    for _ in range(_ORDER_MAX_ITERATIONS):
+        basis.append(q / norm)
+        products.append(hessian_product(basis[-1]))
+        q = project(products[-1])
+        for _ in range(2):
+            for b in basis:
+                q = q - b * np.vdot(b, q)
+        norm = float(np.linalg.norm(q))
+
+        # Rayleigh-Ritz on the mode and the Lanczos vectors, symmetrised
+        # since the finite-difference products are not exactly symmetric.
+        vectors = np.array([mode, *basis]).reshape(len(basis) + 1, -1)
+        images = np.array(products).reshape(len(products), -1)
+        ritz = np.empty((len(vectors), len(vectors)))
+        ritz[1:, :] = images @ vectors.T
+        ritz[0, :] = ritz[:, 0]
+        ritz[0, 0] = curvature
+        ritz = 0.5 * (ritz + ritz.T)
+        second = float(np.linalg.eigvalsh(ritz)[1])
+        if second < -_ORDER_TOLERANCE:
+            return second
+        previous, lowest = lowest, float(np.linalg.eigvalsh(ritz[1:, 1:])[0])
+        # An invariant Krylov space makes its values exact.
+        exhausted = norm < 1e-8 * max(1.0, abs(lowest))
+        settled = abs(lowest - previous) <= _ORDER_CONVERGED * max(
+            abs(lowest), _ORDER_TOLERANCE
+        )
+        if lowest >= -_ORDER_TOLERANCE and (settled or exhausted):
+            return lowest
+        if exhausted:
+            return None
+    return None
 
 
 def _dav_weights(mode: np.ndarray, movable: np.ndarray) -> np.ndarray:
