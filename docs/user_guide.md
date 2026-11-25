@@ -255,7 +255,8 @@ start_radius = 3.0
   basin, its direction is weighted atom by atom towards the atoms that move most. The weights come from the movable
   atoms only; DAV never adds or removes atoms and is separate from `active_volume` in `[Control]`.
 - `reuse_neighbor_list` : reuse LAMMPS neighbor lists between dimer force evaluations, on by default
-  with the native `eam/alloy` or `eam/fs` pair style. Each search starts with a fresh list.
+  with the `eam/alloy`, `eam/fs`, `mtp` or `mtp/small` pair style (and their KOKKOS `/kk` variants). Each
+  search starts with a fresh list.
   LAMMPS checks subsequent displacements against its neighbor skin. The option applies only to the
   dimer worker's private LAMMPS instance. With another pair style the default is off, and
   `reuse_neighbor_list = True` is an error.
@@ -277,8 +278,8 @@ With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of 
 2024), and refinement still uses pARTn. It reads its parameters from the `[pARTn]` section, so an existing input
 switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
-volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy` and `eam/fs`,
-every worker reuses neighbor lists between force calls, as the dimer does by default. The ARTn input file cannot
+volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy`, `eam/fs`, `mtp`
+and `mtp/small`, every worker reuses neighbor lists between force calls, as the dimer does by default. The ARTn input file cannot
 change this.
 
 Each search is seeded from the run-wide stream that `seed` in `[Control]` starts, as for the dimer, so a run with
@@ -300,8 +301,8 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
   moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
   this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
-  z, and runs on one rank of each worker. For `eam/alloy` and `eam/fs` it reuses neighbor lists between force
-  calls too, which changes the cost of a force call and not the search.
+  z, and runs on one rank of each worker. For `eam/alloy`, `eam/fs`, `mtp` and `mtp/small` it reuses neighbor
+  lists between force calls too, which changes the cost of a force call and not the search.
 
 ```ini
 [ActiveVolume]

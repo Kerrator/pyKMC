@@ -308,8 +308,9 @@ class DimerConfig(BaseModel):
     reuse_neighbor_list: bool = Field(
         default=True,
         description="Reuse the LAMMPS neighbor list between dimer force evaluations. "
-        "Supported for the native eam/alloy and eam/fs pair styles. With another "
-        "pair style the default is off, and setting `True` is an error.",
+        "Supported for the eam/alloy, eam/fs, mtp and mtp/small pair styles and their "
+        "KOKKOS (/kk) variants. With another pair style the default is off, and "
+        "setting `True` is an error.",
     )
     eam_force_crop: bool = Field(
         default=False,
@@ -674,9 +675,27 @@ def validate_dimer_eam_style(pair_style: str, option: str) -> None:
         raise ValueError(f"{option} requires pair_style eam/alloy or eam/fs")
 
 
+def supports_neighbor_reuse(pair_style: str) -> bool:
+    """Whether a search can keep neighbor lists between force calls with this potential.
+
+    Decided by the first word of ``pair_style``, with a ``/kk`` suffix ignored: a KOKKOS run
+    (``-sf kk``) uses the ``/kk`` variant of the style written in the input.
+    """
+    words = pair_style.split()
+    return bool(words) and words[0].removesuffix("/kk") in {
+        "eam/alloy",
+        "eam/fs",
+        "mtp",
+        "mtp/small",
+    }
+
+
 def validate_dimer_neighbor_reuse(pair_style: str) -> None:
     """Check that the dimer can reuse neighbor lists for this potential."""
-    validate_dimer_eam_style(pair_style, "reuse_neighbor_list")
+    if not supports_neighbor_reuse(pair_style):
+        raise ValueError(
+            "reuse_neighbor_list requires pair_style eam/alloy, eam/fs, mtp or mtp/small"
+        )
 
 
 class LammpsConfig(BaseModel):
@@ -709,9 +728,8 @@ class LammpsConfig(BaseModel):
     )
     cmdargs: Optional[list[str]] = Field(
         default=None,
-        description="Extra LAMMPS command-line arguments, written as on a command line and added after pyKMC's own `-screen none -log <file>`; e.g. `-k on g 1 -sf kk -pk kokkos newton on neigh half` runs a KOKKOS build on one GPU. Every LAMMPS instance of the run gets them (see `search_cmdargs` for the searches' own instance).",
+        description="Extra LAMMPS command-line arguments for every LAMMPS instance of the run, written as on a command line and added after pyKMC's own `-screen none -log <file>`. KOKKOS arguments belong in `search_cmdargs`.",
     )
-
     search_cmdargs: Optional[list[str]] = Field(
         default=None,
         description="LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.",
@@ -1214,10 +1232,9 @@ class Config(BaseModel):
         ):
             if "reuse_neighbor_list" not in self.dimer.model_fields_set:
                 # The default is on only where the option is supported.
-                self.dimer.reuse_neighbor_list = self.lammps.pair_style.strip() in {
-                    "eam/alloy",
-                    "eam/fs",
-                }
+                self.dimer.reuse_neighbor_list = supports_neighbor_reuse(
+                    self.lammps.pair_style
+                )
             elif self.dimer.reuse_neighbor_list:
                 validate_dimer_neighbor_reuse(self.lammps.pair_style)
             if self.dimer.eam_force_crop:

@@ -23,7 +23,11 @@ from ..artn import (
     _wrap_result_positions,
     artn_search,
 )
-from ..config import validate_dimer_eam_style, validate_dimer_neighbor_reuse
+from ..config import (
+    supports_neighbor_reuse,
+    validate_dimer_eam_style,
+    validate_dimer_neighbor_reuse,
+)
 from ..dimer import DimerResult, _wrap
 from .dimer_forces import (
     ForceQuery,
@@ -365,7 +369,7 @@ def distributed_search(
     mask[movable.astype(int)] = True
     options = dict(options)
     style = worker.config.pair_style
-    reuse = options.pop("reuse_neighbor_list", style.strip() in {"eam/alloy", "eam/fs"})
+    reuse = options.pop("reuse_neighbor_list", supports_neighbor_reuse(style))
     crop = options.pop("eam_force_crop", False)
     if not all(isinstance(x, (bool, np.bool_)) for x in (crop, reuse)):
         raise ValueError("eam_force_crop and reuse_neighbor_list must be booleans")

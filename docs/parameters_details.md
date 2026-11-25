@@ -243,6 +243,18 @@
   <details><summary>Description</summary>
   LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.
   </details>
+- **`library`** : `str`, optional
+  <details><summary>Description</summary>
+  Name of the LAMMPS shared library to open, the `name` argument of `lammps(...)`: `mtpkk` opens `liblammps_mtpkk.so`. None opens the default `liblammps.so`.
+  </details>
+- **`cmdargs`** : `list[str]`, optional
+  <details><summary>Description</summary>
+  Extra LAMMPS command-line arguments for every LAMMPS instance of the run, written as on a command line and added after pyKMC's own `-screen none -log <file>`. KOKKOS arguments belong in `search_cmdargs`.
+  </details>
+- **`search_cmdargs`** : `list[str]`, optional
+  <details><summary>Description</summary>
+  LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.
+  </details>
 
 ---
 
@@ -485,7 +497,7 @@
   </details>
 - **`reuse_neighbor_list`** : `bool`, default = `True`
   <details><summary>Description</summary>
-  Reuse the LAMMPS neighbor list between dimer force evaluations. Supported for the native eam/alloy and eam/fs pair styles. With another pair style the default is off, and setting `True` is an error.
+  Reuse the LAMMPS neighbor list between dimer force evaluations. Supported for the eam/alloy, eam/fs, mtp and mtp/small pair styles and their KOKKOS (/kk) variants. With another pair style the default is off, and setting `True` is an error.
   </details>
 - **`eam_force_crop`** : `bool`, default = `False`
   <details><summary>Description</summary>

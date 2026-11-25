@@ -21,6 +21,7 @@ from ase.geometry import find_mic
 from mpi4py import MPI
 
 from ..artn import artn_search as run_artn
+from ..config import supports_neighbor_reuse
 from ..dimer import DimerResult
 from ..search_rules import map_to_full_system
 from .dimer_search import DimerSearchExtension, _movable_mask
@@ -53,9 +54,9 @@ class ArtnSearchExtension(DimerSearchExtension):
         options of :func:`pykmc.artn.artn_search` (the `[pARTn]` parameters it
         takes) plus the worker options ``reuse_neighbor_list`` and
         ``eam_force_crop``, and ``av_radii`` (default None). On any worker,
-        ``reuse_neighbor_list`` is on by default for ``eam/alloy`` and
-        ``eam/fs``, as for the dimer, and ``eam_force_crop`` is off by
-        default. ``av_radii = (rmov, ract)`` runs the search on pARTn's
+        ``reuse_neighbor_list`` is on by default for ``eam/alloy``,
+        ``eam/fs``, ``mtp`` and ``mtp/small``, as for the dimer, and
+        ``eam_force_crop`` is off by default. ``av_radii = (rmov, ract)`` runs the search on pARTn's
         active volume
         (:meth:`_av_search`) instead of the full system, on the leader rank
         whatever the worker's size. FIRE gets the masses the force instance
@@ -71,7 +72,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         search_options = dict(options or {})
         search_options.setdefault(
             "reuse_neighbor_list",
-            self.engine.config.pair_style.strip() in {"eam/alloy", "eam/fs"},
+            supports_neighbor_reuse(self.engine.config.pair_style),
         )
         av_radii = search_options.pop("av_radii", None)
         if av_radii is not None:

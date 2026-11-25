@@ -147,3 +147,30 @@ def test_partn_does_not_need_a_dimer_section_and_ignores_one(tmp_path: Path) -> 
     config = Config.from_ini_file(_write_input(tmp_path, style="partn"))
 
     assert config.eventsearch.style == "partn"
+
+
+@pytest.mark.parametrize(
+    ("pair_style", "supported"),
+    [
+        ("eam/alloy", True),
+        ("eam/fs", True),
+        ("eam/fs/kk", True),
+        ("mtp pot.mtp chunksize 32768", True),
+        ("mtp/small pot.mtp chunksize 32768", True),
+        ("mtp/kk pot.mtp chunksize 32768", True),
+        ("mtp/extrapolation pot.almtp", False),
+        ("hybrid/overlay eam/alloy zbl 1 2", False),
+        ("lj/cut 6.0", False),
+    ],
+)
+def test_neighbor_reuse_goes_by_the_first_word_of_pair_style(
+    pair_style: str, supported: bool
+) -> None:
+    from pykmc.config import supports_neighbor_reuse, validate_dimer_neighbor_reuse
+
+    assert supports_neighbor_reuse(pair_style) is supported
+    if supported:
+        validate_dimer_neighbor_reuse(pair_style)
+    else:
+        with pytest.raises(ValueError, match="reuse_neighbor_list requires pair_style"):
+            validate_dimer_neighbor_reuse(pair_style)
