@@ -82,9 +82,7 @@ def ignored_partn_parameters(partn: Any) -> dict[str, str]:
     """Return the `[pARTn]` settings the ARTn search does not follow, with why.
 
     Only settings that would change pARTn's search are listed: ``neigen``
-    other than 1 and a set ``zseed``. At positive pARTn verbosity the debug
-    log reports the saddle and minimum displacements and the number of atoms
-    that moved farther than ``[pARTn] delr_thr``.
+    other than 1 and a set ``zseed``.
 
     Parameters
     ----------
@@ -137,6 +135,10 @@ class ArtnStrategy(EventSearchStrategy):
 
     def submit(self, requests: list[SearchRequest], manager: Manager) -> list[Future]:
         """Submit one `artn_search` op per request.
+
+        At positive pARTn verbosity the debug log reports the saddle and
+        minimum displacements and the number of atoms that moved farther than
+        ``[pARTn] delr_thr``.
 
         Parameters
         ----------
