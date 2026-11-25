@@ -131,6 +131,35 @@ def _read_interaction_bound(path: Path, reuse: bool) -> float | None:
     return None
 
 
+def _crop_selection(
+    start: np.ndarray,
+    movable: np.ndarray,
+    center: np.ndarray,
+    lattice: np.ndarray,
+    pbc: np.ndarray,
+    cutoff: float,
+) -> tuple[np.ndarray, Callable[[np.ndarray], bool]] | None:
+    """Return the retained atom indices and movable-position guard for a useful crop."""
+
+    def radii(x: np.ndarray) -> np.ndarray:
+        return np.linalg.norm(_minimum_image(x - center, lattice, pbc), axis=1)
+
+    distance = radii(start)
+    # Extra headroom allows small outward motion before switching to full.
+    max_reach = float(distance[movable].max()) + 0.5
+    # The embedding force needs the neighbors of each movable atom's
+    # neighbors. Keep both shells around every permitted moving position.
+    kept = np.flatnonzero(distance <= np.nextafter(max_reach + 2 * cutoff, np.inf))
+    # Nearly-full crops add mapping/checking work without useful savings.
+    if len(kept) > 0.9 * len(start):
+        return None
+
+    def within_reach(positions: np.ndarray) -> bool:
+        return bool(np.all(radii(positions) <= max_reach))
+
+    return kept, within_reach
+
+
 def _cropped_query(
     engine: LammpsEngine,
     full: ForceQuery,
@@ -151,20 +180,12 @@ def _cropped_query(
     if cutoff is None:
         return full
     lattice = np.asarray(cell)
-    center = start[central_atom].copy()
-
-    def radii(x: np.ndarray) -> np.ndarray:
-        return np.linalg.norm(_minimum_image(x - center, lattice, pbc), axis=1)
-
-    distance = radii(start)
-    # Extra headroom allows small outward motion before switching to full.
-    max_reach = float(distance[movable].max()) + 0.5
-    # The embedding force needs the neighbors of each movable atom's
-    # neighbors. Keep both shells around every permitted moving position.
-    kept = np.flatnonzero(distance <= np.nextafter(max_reach + 2 * cutoff, np.inf))
-    # Nearly-full crops add mapping/checking work without useful savings.
-    if len(kept) > 0.9 * len(start):
+    selection = _crop_selection(
+        start, movable, start[central_atom].copy(), lattice, pbc, cutoff
+    )
+    if selection is None:
         return full
+    kept, within_reach = selection
     local = LammpsEngine(
         engine.config, engine.comm, engine_id=f"crop.{engine.engine_id}"
     )
@@ -199,7 +220,7 @@ def _cropped_query(
         if not use_full:
             use_full = not (
                 np.array_equal(positions[frozen], frozen_positions)
-                and np.all(radii(positions[mobile]) <= max_reach)
+                and within_reach(positions[mobile])
             )
         if not use_full:
             energy, local_forces = local_evaluate(positions[kept])
