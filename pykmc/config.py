@@ -403,13 +403,13 @@ class PartnConfig(BaseModel):
         description="Determines how the initial atomic displacement (push) is generated around the central atom "
         "of the currently explored environment:\n"
         "- **'list'**: The push is applied *only* to the central atom.\n"
-        "- **'rad'**: The push is applied to *all atoms* within a specified radial distance (`push_dist_thr`) "
+        "- **'rad'**: The push is applied to *all atoms* within a specified radial distance (`r_push_dist_thr`) "
         "from the central atom.",
     )
 
     r_push_dist_thr: float = Field(
         default=1.0,
-        description="If `push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom "
+        description="If `r_push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom "
         "within which all atoms receive an initial displacement.",
     )
 

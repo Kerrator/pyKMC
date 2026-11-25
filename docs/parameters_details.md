@@ -347,11 +347,11 @@
   <details><summary>Description</summary>
   Determines how the initial atomic displacement (push) is generated around the central atom of the currently explored environment:
   - **'list'**: The push is applied *only* to the central atom.
-  - **'rad'**: The push is applied to *all atoms* within a specified radial distance (`push_dist_thr`) from the central atom.
+  - **'rad'**: The push is applied to *all atoms* within a specified radial distance (`r_push_dist_thr`) from the central atom.
   </details>
 - **`r_push_dist_thr`** : `float`, default = `1.0`
   <details><summary>Description</summary>
-  If `push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom within which all atoms receive an initial displacement.
+  If `r_push_mode` is **'rad'**, this defines the radial cutoff (in Angstrom) from the central atom within which all atoms receive an initial displacement.
   </details>
 - **`r_push_step_size`** : `float`, default = `0.0001`
   <details><summary>Description</summary>
