@@ -1,0 +1,70 @@
+{
+  "default": [
+    "Cu_fcc_2047at_monovacancy",
+    "Fe_bcc_1999at_monovacancy",
+    "Ni_fcc_2047at_monovacancy",
+    "cSi_511at_monovacancy"
+  ],
+  "examples": {
+    "Cu_fcc_2047at_monovacancy": {
+      "steps": 3,
+      "runs": 3,
+      "first_barrier": 0.6751,
+      "searches": 30,
+      "search_successes": 7,
+      "refinements": 324,
+      "refinement_successes": 324,
+      "wall_seconds": 9.6
+    },
+    "Cu_fcc_2049at_sia": {
+      "steps": 3,
+      "runs": 1,
+      "first_barrier": 0.0925,
+      "searches": 50,
+      "search_successes": 11,
+      "refinements": 48,
+      "refinement_successes": 48,
+      "wall_seconds": 50.8
+    },
+    "Fe_bcc_1999at_monovacancy": {
+      "steps": 3,
+      "runs": 4,
+      "first_barrier": 0.6494,
+      "searches": 280,
+      "search_successes": 216,
+      "refinements": 406,
+      "refinement_successes": 406,
+      "wall_seconds": 36.7
+    },
+    "Ni_fcc_2047at_monovacancy": {
+      "steps": 3,
+      "runs": 4,
+      "first_barrier": 1.1881,
+      "searches": 40,
+      "search_successes": 14,
+      "refinements": 144,
+      "refinement_successes": 144,
+      "wall_seconds": 12.8
+    },
+    "Ni_fcc_4001at_sia": {
+      "steps": 3,
+      "runs": 1,
+      "first_barrier": 0.2094,
+      "searches": 80,
+      "search_successes": 15,
+      "refinements": 48,
+      "refinement_successes": 48,
+      "wall_seconds": 103.3
+    },
+    "cSi_511at_monovacancy": {
+      "steps": 3,
+      "runs": 3,
+      "first_barrier": 0.5096,
+      "searches": 60,
+      "search_successes": 10,
+      "refinements": 180,
+      "refinement_successes": 180,
+      "wall_seconds": 1.1
+    }
+  }
+}

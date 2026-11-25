@@ -18,7 +18,7 @@ control
     visited_environments        : None
     restart_file                : None
     reconstruction              : True
-    n_steps                     : 100
+    n_steps                     : 3
     engine                      : lammps
     n_sessions                  : 7
     group_size                  : -1
@@ -67,19 +67,19 @@ partn
     delr_thr                    : 0.1
     zseed                       : 0
     push_mode                   : rad
-    push_dist_thr               : 1.0
-    push_step_size              : 0.4
+    push_dist_thr               : 4.0
+    push_step_size              : 0.3
     ninit                       : 2
     lanczos_min_size            : 10
     lanczos_max_size            : 20
     lanczos_disp                : 0.0005
     lanczos_eval_conv_thr       : 0.001
-    eigval_thr                  : -0.01
+    eigval_thr                  : -0.5
     eigen_step_size             : 0.2
     nsmooth                     : 3
     neigen                      : 1
     alpha_mix_cr                : 0.2
-    nnewchance                  : 0
+    nnewchance                  : 3
     nperp                       : 3
     nperp_limitation            : [4, 8, 12, 16, -1]
     forc_thr                    : 0.001
@@ -132,36 +132,22 @@ bias
 Step : 1
 	 :=> 2 new atomic environments found
 	 :=> Searching 20 reference events
-	 :=> Adding 2 events to the reference table
-	 :=> Refining 14 events
-	 :=> 14 active events after removing duplicates.
+	 :=> Adding 3 events to the reference table
+	 :=> Refining 38 events
+	 :=> 38 active events after removing duplicates.
 	 :=> Event Reconstruction
 Step : 2
 	 :=> 5 new atomic environments found
 	 :=> Searching 50 reference events
 	 :=> Adding 1 events to the reference table
-	 :=> Refining 4 events
-	 :=> 4 active events after removing duplicates.
+	 :=> Refining 10 events
+	 :=> 10 active events after removing duplicates.
 	 :=> Event Reconstruction
 Step : 3
 	 :=> 0 new atomic environments found
-
-...
-
-
-	 :=> Event Reconstruction
-Step : 99
-	 :=> 0 new atomic environments found
 	 :=> Searching 0 reference events
 	 :=> Adding 0 events to the reference table
-	 :=> Refining 14 events
-	 :=> 14 active events after removing duplicates.
-	 :=> Event Reconstruction
-Step : 100
-	 :=> 0 new atomic environments found
-	 :=> Searching 0 reference events
-	 :=> Adding 0 events to the reference table
-	 :=> Refining 4 events
-	 :=> 4 active events after removing duplicates.
+	 :=> Refining 38 events
+	 :=> 38 active events after removing duplicates.
 	 :=> Event Reconstruction
 :=> End of simulation
