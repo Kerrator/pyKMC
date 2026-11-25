@@ -201,8 +201,13 @@ class LammpsEngine(Engine):
         engine_log = (
             "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
         )
+        # [Lammps] library and cmdargs; a config object without them opens LAMMPS as before.
+        library = getattr(self.config, "library", None)
+        extra = getattr(self.config, "cmdargs", None) or []
         self.lmp = lammps(
-            comm=self.comm, cmdargs=["-screen", "none", "-log", engine_log]
+            **({"name": library} if library else {}),
+            comm=self.comm,
+            cmdargs=["-screen", "none", "-log", engine_log, *extra],
         )
 
     def close(self) -> None:

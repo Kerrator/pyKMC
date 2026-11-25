@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator, ValidationError, field_validator
 import configparser
+import shlex
 from typing import Any, Literal
 
 
@@ -702,6 +703,19 @@ class LammpsConfig(BaseModel):
         default=None,
         description="LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.",
     )
+    library: Optional[str] = Field(
+        default=None,
+        description="Name of the LAMMPS shared library to open, the `name` argument of `lammps(...)`: `mtpkk` opens `liblammps_mtpkk.so`. None opens the default `liblammps.so`.",
+    )
+    cmdargs: Optional[list[str]] = Field(
+        default=None,
+        description="Extra LAMMPS command-line arguments, written as on a command line and added after pyKMC's own `-screen none -log <file>`; e.g. `-k on g 1 -sf kk -pk kokkos newton on neigh half` runs a KOKKOS build on one GPU. Every LAMMPS instance of the run gets them.",
+    )
+
+    @field_validator("cmdargs", mode="before")
+    @classmethod
+    def parse_cmdargs(cls, v):
+        return shlex.split(v) if isinstance(v, str) else v
 
     @field_validator("pair_coeff", mode="before")
     @classmethod
