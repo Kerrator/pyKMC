@@ -269,6 +269,31 @@ class TestArtnSearchCropSerial:
         assert np.array_equal(result.mode[outside], np.zeros((len(outside), 3)))
         assert np.linalg.norm(result.mode) == pytest.approx(1.0)
 
+    def test_neighbor_list_reuse_leaves_the_crop_search_unchanged(  # noqa: D102
+        self,
+        engine,  # noqa: ANN001
+        vacancy,  # noqa: ANN001, F811
+    ) -> None:
+        results = [
+            _search(
+                engine,
+                vacancy,
+                seed=CROP_HOP_SEED,
+                options={**CROP_OPTIONS, "reuse_neighbor_list": reuse},
+            )
+            for reuse in (False, True)
+        ]
+
+        assert results[0].success and results[1].success
+        assert results[1].force_calls_total == results[0].force_calls_total
+        for name in ("e_start", "e_saddle", "e_min1", "e_min2"):
+            assert getattr(results[1], name) == pytest.approx(
+                getattr(results[0], name), abs=1e-8
+            )
+        np.testing.assert_allclose(
+            results[1].saddle_positions, results[0].saddle_positions, atol=1e-6
+        )
+
     def test_the_full_path_after_a_crop_search_is_unchanged(  # noqa: D102
         self,
         engine,  # noqa: ANN001

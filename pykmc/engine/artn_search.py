@@ -11,6 +11,7 @@ worker's leader rank.
 
 from __future__ import annotations
 
+import ctypes
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Mapping, Optional, cast
 
@@ -68,6 +69,10 @@ class ArtnSearchExtension(DimerSearchExtension):
 
         """
         search_options = dict(options or {})
+        search_options.setdefault(
+            "reuse_neighbor_list",
+            self.engine.config.pair_style.strip() in {"eam/alloy", "eam/fs"},
+        )
         crop_radii = search_options.pop("crop_radii", None)
         if crop_radii is not None:
             return self._crop_search(
@@ -80,10 +85,6 @@ class ArtnSearchExtension(DimerSearchExtension):
                 seed,
                 search_options,
             )
-        search_options.setdefault(
-            "reuse_neighbor_list",
-            self.engine.config.pair_style.strip() in {"eam/alloy", "eam/fs"},
-        )
         comm = self.engine.comm
         if comm is not None and comm.Get_size() > 1:
             from .artn_ranks import distributed_search
@@ -135,7 +136,10 @@ class ArtnSearchExtension(DimerSearchExtension):
         within ``ract`` of the central atom, in a box with every axis periodic
         whose edges are the cell's diagonal, the buffer (beyond ``rmov``) under
         a zero ``setforce``. Each force call places the crop atoms and runs
-        LAMMPS ``run 0``.
+        LAMMPS ``run 0``. With the option ``reuse_neighbor_list`` the crop gets
+        the dimer's 0.5 Å skin and a step that moves no atom further than half
+        of it is made by ``fix nve/noforce`` and ``run 1 pre no``, so LAMMPS
+        rebuilds its neighbor list only when its own check asks.
 
         As under pARTn, the core sees zero force on the buffer but moves it:
         the buffer is movable to the core. Atoms within ``rmov`` that are not
@@ -155,7 +159,14 @@ class ArtnSearchExtension(DimerSearchExtension):
             return None
         # Imported here: the module imports pypARTn and LAMMPS.
         from ..activevolume.active_volume import partn_search_AV, set_positions
+        from ..config import validate_dimer_neighbor_reuse
+        from .dimer_forces import _NEIGHBOR_SKIN, configure_neighbor_reuse
         from .lammps import LammpsEngine
+
+        options = dict(options)
+        reuse = bool(options.pop("reuse_neighbor_list", False))
+        if reuse:
+            validate_dimer_neighbor_reuse(self.engine.config.pair_style)
 
         positions = np.array(positions, dtype=float)
         cell = np.array(cell, dtype=float)
@@ -193,10 +204,30 @@ class ArtnSearchExtension(DimerSearchExtension):
             buffer = np.abs(distance) > rmov
             in_movable = mask[atom_map] & ~buffer
             zero_force = ~in_movable
+            if reuse:
+                configure_neighbor_reuse(force_engine)
+            previous: Optional[np.ndarray] = None
 
             def query(x: np.ndarray) -> tuple[float, np.ndarray]:
-                set_positions(force_engine, x)
-                force_engine.command("run 0 post no")
+                nonlocal previous
+                step = None if previous is None else x - previous
+                if step is not None and np.max(np.abs(step)) <= _NEIGHBOR_SKIN / 2:
+                    # As the dimer's evaluator: nve/noforce moves each atom by
+                    # its step and Verlet checks the list before the forces.
+                    force_engine.lmp.scatter_atoms(
+                        "v",
+                        1,
+                        3,
+                        np.ascontiguousarray(step).ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_double)
+                        ),
+                    )
+                    force_engine.command("run 1 pre no post no")
+                else:
+                    set_positions(force_engine, x)
+                    force_engine.command("run 0 post no")
+                if reuse:
+                    previous = x.copy()
                 energy = force_engine.lmp.get_thermo("pe")
                 forces = np.ctypeslib.as_array(
                     force_engine.lmp.gather_atoms("f", 1, 3)
