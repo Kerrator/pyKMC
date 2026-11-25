@@ -300,7 +300,9 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
   moves those atoms slightly (by about 1e-4 Å), and the energies are the crop's. The forces are then pARTn's, so
   this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
-  z, and runs on one rank of each worker.
+  z. As for the dimer, each crop search runs on the first rank of its session. A session with several ranks
+  therefore gets no speed-up: its other ranks wait while the search runs. Use more sessions with fewer ranks each
+  instead.
 
 ```ini
 [ActiveVolume]
