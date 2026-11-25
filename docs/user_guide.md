@@ -278,20 +278,20 @@ With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of 
 switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
 volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy` and `eam/fs`,
-multi-rank workers enable neighbour-list reuse by default and one-rank workers disable it. The ARTn input file
-cannot override either default.
+multi-rank workers reuse neighbor lists by default and one-rank workers do not. The ARTn input file cannot change
+either default.
 
 Each search is seeded from the run-wide stream that `seed` in `[Control]` starts, as for the dimer, so a run with
 the same seed finds the same events whatever the number of LAMMPS instances. `zseed` does not seed these searches;
 pARTn's refinement still reads it.
 
 On leaving the basin, the first `nsmooth` pushes blend the last basin push into the first uphill eigenvector.
-Setting `nsmooth = 0` uses the eigenvector immediately. The core builds a sequence of perpendicular FIRE step
-limits from `nperp` and `nperp_limitation`. Each successive relaxation out of the basin uses the next limit,
-repeating the last when the sequence runs out. A limit of `-1` leaves the step count uncapped.
+With `nsmooth = 0` the pushes follow the eigenvector from the start. The core builds a sequence of perpendicular
+FIRE step limits from `nperp` and `nperp_limitation`. Each relaxation out of the basin uses the next limit, and
+the last limit repeats once the sequence runs out. A limit of `-1` leaves the step count uncapped.
 If the lowest eigenvalue becomes positive after leaving the basin, `nnewchance` allows that many new attempts
-with the initial push mixed with a random direction. A `[pARTn]` setting the ARTn search ignores is named once
-in the log.
+with the initial push mixed with a random direction. The log names, once, each `[pARTn]` setting that the ARTn
+search ignores.
 
 ## Rate Constant 
 

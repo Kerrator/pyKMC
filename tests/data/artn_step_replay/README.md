@@ -18,14 +18,14 @@ Each file stores `x`, `f`, `v_in`, `scalars_in`, `scalars_out`, `partn_step`,
 (in bohr), first Lanczos vector, movable mask, cell, periodicity and metadata.
 Search 0 includes the eigenvector history and its index, the new-chance draw
 array, the saved starting, saddle and minimum positions, and the saddle mode.
-The NPZ stores the recording's original numeric arrays losslessly. Search 0
+The NPZ keeps the recording's numeric arrays unchanged. Search 0
 takes 26,931,166 bytes. Searches 1–7 take 0.38–0.39 MB each.
 
 Issue 02's full recordings (611 MB) are kept outside git in the
 `2026-11-24-partn-step-recordings` benchmark archive. To reproduce the fixtures,
 use its `recordings` directory for `SRC` and an existing output directory for
-`DST`. Search 0's recorded commands and provenance identify local files by
-basename. The prefixes retain their original metadata.
+`DST`. Search 0's recorded commands and provenance name local files by
+basename only. Searches 1–7 keep their original metadata.
 
 ```sh
 python -I tests/data/artn_step_replay/make_replay_set.py SRC DST
