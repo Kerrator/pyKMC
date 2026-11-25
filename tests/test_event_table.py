@@ -1,14 +1,17 @@
 """Unit tests for full-colour typing in the reference event table."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from pykmc import NeighborsList, System, constants
+from pykmc import Config, NeighborsList, System, constants
+from pykmc.dimer import _minimum_image
 from pykmc.environments.graph_nauty import graph
 from pykmc.event_table import ActiveEventTable, ReferenceEventTable
+from pykmc.psr import PointSetRegistration
 from pykmc.rate_constant import RateConstantError, RateConstantOutput, RateRequest
 from pykmc.result import (
     Err,
@@ -18,9 +21,12 @@ from pykmc.result import (
     EventSearchOutput,
     Ok,
 )
+from pykmc.search_rules import move_atom
 
 
-def _build_trivial_series(config, system):
+def _build_trivial_series(
+    config: Config, system: System
+) -> tuple[pd.Series, pd.Series]:
     """Run ``_build_event_series`` for a trivial (min1==saddle==min2) event.
 
     This exercises the graph/symmetry/type-storage path without going through
@@ -44,8 +50,8 @@ class TestReferenceTableTypes:
     """The ``types`` column is always populated, so the schema is mode-independent."""
 
     def test_types_stored_in_both_modes(
-        self, system_binary_fcc, config_system_single_type
-    ):
+        self, system_binary_fcc: System, config_system_single_type: Config
+    ) -> None:
         """Both grey and full store the real forward/backward neighbour element types."""
         config = config_system_single_type
 
@@ -69,8 +75,8 @@ class TestReferenceTableTypes:
             assert bwd["types"] is not None, mode
 
     def test_event_id_differs_by_mode_same_types(
-        self, system_binary_fcc, config_system_single_type
-    ):
+        self, system_binary_fcc: System, config_system_single_type: Config
+    ) -> None:
         """Full colouring changes the reference hash (event_id), but not the stored types."""
         config = config_system_single_type
 
@@ -86,8 +92,8 @@ class TestReferenceTableTypes:
         assert list(grey_fwd["types"]) == list(full_fwd["types"])
 
     def test_types_aligned_with_positions(
-        self, system_binary_fcc, config_system_single_type
-    ):
+        self, system_binary_fcc: System, config_system_single_type: Config
+    ) -> None:
         """``types`` is element-wise aligned with the position slices (the ordering invariant).
 
         Equal length alone is tautological (everything is sliced by the same index
@@ -267,6 +273,78 @@ class TestGreyDedupSpeciesGating:
         assert table.is_new_event(fwd) is False
 
 
+@pytest.fixture
+def recorded_saddle_row() -> pd.Series:
+    """Extract the moving atom's 6.5 Å neighbourhood from the Fe replay."""
+    path = (
+        Path(__file__).parent / "data/partn_replay/avoff_swapped_boundary_bystander.npz"
+    )
+    with np.load(path, allow_pickle=False) as replay:
+        initial, saddle = replay["res_min1"], replay["res_saddle"]
+        cell = np.diag(replay["box_hi"] - replay["box_lo"])
+        pbc = np.ones(3, dtype=bool)
+        mover = move_atom(initial, saddle, cell, pbc)
+        offsets = _minimum_image(initial - initial[mover], cell, pbc)
+        neighbours = np.flatnonzero(np.linalg.norm(offsets, axis=1) <= 6.5)
+        local_mover = int(np.searchsorted(neighbours, mover))
+        assert (mover, len(neighbours), local_mover) == (922, 112, 85)
+        return pd.Series(
+            dict(
+                event_id="Fe replay",
+                energy_barrier=0.6,
+                saddle_positions=_minimum_image(
+                    saddle[neighbours] - saddle[mover], cell, pbc
+                ),
+                types=list(replay["res_types"][neighbours]),
+                move_atom_idx=local_mover,
+            )
+        )
+
+
+def test_translated_saddle_is_a_duplicate(
+    config_system_single_type: Config, recorded_saddle_row: pd.Series
+) -> None:
+    """Real IRA registers a translated saddle with the same topology and nearby barrier."""
+    pytest.importorskip("ira_mod")
+    config_system_single_type.psr.matching_score_thr = 0.3
+    table = ReferenceEventTable(config_system_single_type)
+    table.table = pd.DataFrame([recorded_saddle_row])
+    candidate = recorded_saddle_row.copy()
+    candidate["saddle_positions"] = candidate.saddle_positions + [3.0, -1.0, 2.0]
+    candidate["energy_barrier"] = 0.601
+    assert table.is_new_event(candidate) is False
+    candidate["event_id"] = "other"
+    assert table.is_new_event(candidate) is True
+
+
+def test_rejected_registration_with_same_topology_is_a_new_event(
+    config_system_single_type: Config,
+    recorded_saddle_row: pd.Series,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed match between the supplied saddles leaves a distinct event."""
+    config_system_single_type.psr.matching_score_thr = 0.3
+    table = ReferenceEventTable(config_system_single_type)
+    table.table = pd.DataFrame([recorded_saddle_row])
+    candidate = recorded_saddle_row.copy()
+    candidate["saddle_positions"] = np.roll(candidate.saddle_positions, 1, axis=0)
+    candidate.saddle_positions[1, 2] += 0.6
+    candidate["move_atom_idx"] += 1
+    match = MagicMock()
+    match.return_value.is_ok.return_value = False
+    monkeypatch.setattr(PointSetRegistration, "match_and_check", match)
+
+    assert table.is_new_event(candidate) is True
+    match.assert_called_once()
+    args, centres = match.call_args
+    np.testing.assert_array_equal(args[2], candidate.saddle_positions)
+    np.testing.assert_array_equal(args[5], recorded_saddle_row.saddle_positions)
+    assert args[6] == 0.3
+    assert centres == dict(
+        candidate1=candidate.move_atom_idx, candidate2=recorded_saddle_row.move_atom_idx
+    )
+
+
 class _SpyRateConstant:
     """Record each ``compute`` call; fail on the barriers listed in ``fail``."""
 
@@ -388,7 +466,7 @@ class TestActiveAddEventsRateConstant:
     def test_reference_prefactor_with_active_barrier(
         self, config_system_single_type: object
     ) -> None:
-        """k = k_pref of the reference event x Boltzmann factor of the active barrier."""
+        """The rate uses the reference prefactor and the active barrier's Boltzmann factor."""
         config = config_system_single_type
         reference_table = ReferenceEventTable(config)
         reference_table.table = pd.DataFrame({"idx_ref": [0, 1], "k_pref": [2.0, 4.0]})

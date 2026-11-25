@@ -114,7 +114,7 @@ class LammpsEngine(Engine):
         pair_style, pair_coeff, min_style, minimize, verbosity.
     comm : MPI.COMM, optional
         MPI communicator for parallel execution. If None, runs in serial.
-    engine_id : int, optional
+    engine_id : int or str, optional
         Unique identifier for this engine instance, used for log file naming.
         Default is 0.
 
@@ -161,14 +161,14 @@ class LammpsEngine(Engine):
         self,
         config: LammpsConfigProtocol,
         comm: MPI.Intracomm | None = None,
-        engine_id: int = 0,
+        engine_id: int | str = 0,
     ) -> None:
         super().__init__()
         self.config = config
         self.comm = comm
         self.engine_id = engine_id
         self._is_orthorhombic = None
-        self.lmp = None
+        self.lmp: lammps | None = None
 
     # Convenience
     @property
