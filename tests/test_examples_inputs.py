@@ -28,6 +28,10 @@ REFERENCE_DIRS = [
 # fails validation with it or ends up with a different value.
 SENTINEL = "__not_a_value__"
 
+# Not compared with the reference run: a few steps are enough for a reference,
+# so it may be shorter than the run the input ships.
+NOT_COMPARED = {("control", "n_steps")}
+
 
 def _input_file(example: Path) -> Path:
     """Return the tracked input of an example: the template, else ``input.in``."""
@@ -179,6 +183,8 @@ def test_reference_run_matches_input(
         if model is None:
             continue
         for key, value in model:
+            if (section, key) in NOT_COMPARED:
+                continue
             if key in logged.get(section, {}):
                 if not _same_as_logged(value, logged[section][key]):
                     stale.append(
