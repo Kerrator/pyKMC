@@ -36,6 +36,29 @@ The inputs follow the recommendations of the [best practices](../docs/best_pract
 the cell is large enough for one. That page also says which settings have been measured on which kind of system;
 several examples (Cu, Si, the alloy slab, the NiSi surface) use settings that have not been benchmarked.
 
+## Checking the examples
+
+Two checks cover the examples. The first runs no simulation:
+
+```bash
+python -m pytest tests/test_examples_inputs.py
+```
+
+It checks that every input loads, that the parser ignores none of its keys, that the files it points to exist, that
+this README lists the example, and that `expected_outputs/` was made with the shipped parameters.
+
+The second runs the shipped inputs for 3 KMC steps on 8 MPI ranks and compares each run with
+`scripts/examples_baseline.json`:
+
+```bash
+python scripts/examples_ratchet.py          # the four single-vacancy examples, about one minute
+python scripts/examples_ratchet.py --all    # adds the two self-interstitial examples, about four minutes
+```
+
+A run fails if it does not finish, if its first selected barrier is not the baseline one, or if its event searches or
+refinements succeed clearly less often than in the baseline. Searches are random, so a failed example is run a second
+time before the failure counts. After an intended change, `--update` rewrites the baseline from three runs.
+
 # Nickel systems : 
 
 Nickel systems are the simplest examples provided. 
