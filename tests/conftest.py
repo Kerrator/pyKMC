@@ -2,16 +2,14 @@ import pytest
 from pykmc import System, Config, AtomicEnvironment, NeighborsList
 import numpy as np
 from pykmc.basins import (
-    StatesConnectivity,
-    BasinStatesConnectivity,
     StateData,
     ReferenceEventTable,
 )
 from copy import deepcopy
-import pandas as pd
 import logging
 from unittest.mock import Mock
-import os, sys
+import os
+import sys
 import pickle
 from functools import wraps
 import subprocess

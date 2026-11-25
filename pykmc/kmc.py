@@ -22,9 +22,6 @@ from .result import (
     ReferenceValidEventsInfo,
     RefinementsInfo,
     EventRefinementOutput,
-    ReconstructionOutput,
-    Err,
-    Ok,
 )
 import numpy as np
 from ase.io import write
@@ -48,7 +45,7 @@ from .eventsearch import EventSearch
 from .refinement import Refinement, refine_seed_stream
 from .log import Colors
 import time
-from .utils import push_towards, compute_delr, per_atom_displacement
+from .utils import per_atom_displacement
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
@@ -368,7 +365,6 @@ class KMC:
                         dE_forward=result_basin.ok_value().energy_barrier,
                         num_reference_event=result_basin.ok_value().num_reference_event,
                     )
-                    neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event, self.reference_table)
                     # reconstruct event
                     result_basin_reconstruction = self._reconstruction_active_event(

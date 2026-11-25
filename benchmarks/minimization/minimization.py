@@ -2,7 +2,7 @@
 Tests and benchmark minimization
 """
 
-from ase.io import read, write
+from ase.io import write
 from pykmc.system import System
 from ase import Atoms
 import cProfile

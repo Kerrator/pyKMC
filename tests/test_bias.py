@@ -4,7 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from unittest.mock import MagicMock
-import importlib.util, sys, pathlib, types
+import importlib.util
+import sys
+import pathlib
+import types
 
 
 def _load(rel):

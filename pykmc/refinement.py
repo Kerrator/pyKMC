@@ -239,7 +239,7 @@ class Refinement:
         future_context = {}  # mapping future -> contexte
 
         # Launch all refine Jobs
-        for idx, dfevent in df_reference_events.iterrows():
+        for _, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["event_id"]
@@ -496,7 +496,7 @@ class Refinement:
                             neighbors.copy(),
                             self.system.positions.copy()[neighbors.copy()],
                         )
-                    elif self.config.control.active_volume == True:
+                    elif self.config.control.active_volume:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
                             config=self.config,

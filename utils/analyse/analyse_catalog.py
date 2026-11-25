@@ -1,7 +1,6 @@
 import pandas as pd
 from ase import Atoms
 from ase.io import write
-import numpy as np
 
 
 def write_event_traj(catalog, index):

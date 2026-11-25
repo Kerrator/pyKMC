@@ -849,6 +849,7 @@ class ActiveEventTable:
             zip(
                 self.table["atom_index"].astype(int).tolist(),
                 self.table["num_reference_event"].astype(int).tolist(),
+                strict=True,
             )
         )
 

@@ -1,7 +1,7 @@
 from mpi4py import MPI
 from typing import Any, Callable
 from pykmc.engine import Engine
-from pykmc.manager import Manager, ManagerFactory
+from pykmc.manager import ManagerFactory
 from pykmc.manager.worker import Worker
 
 

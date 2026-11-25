@@ -1,14 +1,9 @@
-from ase import Atoms, Atom
-from ase.build import bulk
-from lammps import lammps
 import numpy as np
 import ctypes
 from typing import Protocol
 from ase.cell import Cell
 from ase.geometry import find_mic
 from ase.geometry.geometry import naive_find_mic
-from ..system import System
-from ..config import Config
 from ..search_rules import artn_move_atom, map_to_full_system
 
 
@@ -57,7 +52,7 @@ def make_AV(engine, av_indices, buffer_indices):
         engine.command(f"group buffer id {' '.join(map(str, engine_buffer_ids))}")
         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
     else:
-        engine.command(f"group buffer empty")
+        engine.command("group buffer empty")
         engine.command("fix f_buffer buffer setforce 0.0 0.0 0.0")
         print("No buffer atoms defined")
 
@@ -168,7 +163,7 @@ def partn_refine_AV(
     )
     av_positions = positions[atom_map]
 
-    if config.activevolume.AV_debug == True:
+    if config.activevolume.AV_debug:
         E_before = get_potential_energy(engine)
         engine.command("min_style {}".format(config.lammps.min_style))
         engine.command("minimize 1.0e-6 1.0e-8 10 10")

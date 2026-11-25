@@ -87,8 +87,6 @@ class TestLammpsEngineMPI(EngineContractTests):
 
     @property
     def is_rank0(self) -> bool:
-        from mpi4py import MPI
-
         return self.comm.Get_rank() == 0
 
     def make_engine(self) -> Engine:

@@ -1,6 +1,5 @@
 from ase.build import bulk
 from ase.io import write
-from ase.io.lammpsdata import write_lammps_data
 import random
 
 # Parameters :

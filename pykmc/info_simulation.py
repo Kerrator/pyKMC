@@ -310,10 +310,16 @@ def info_active_events(system_types, reference_table, active_table) -> EventsInf
 
     # Needed mapping to access reference table info
     idx_ref = reference_table.table["idx_ref"].values
-    mapping_event_id = dict(zip(idx_ref, reference_table.table["event_id"].values))
-    mapping_dra = dict(zip(idx_ref, reference_table.table["dra"].values))
-    mapping_backward = dict(zip(idx_ref, reference_table.table["idx_backward"].values))
-    mapping_energy = dict(zip(idx_ref, reference_table.table["energy_barrier"].values))
+    mapping_event_id = dict(
+        zip(idx_ref, reference_table.table["event_id"].values, strict=True)
+    )
+    mapping_dra = dict(zip(idx_ref, reference_table.table["dra"].values, strict=True))
+    mapping_backward = dict(
+        zip(idx_ref, reference_table.table["idx_backward"].values, strict=True)
+    )
+    mapping_energy = dict(
+        zip(idx_ref, reference_table.table["energy_barrier"].values, strict=True)
+    )
 
     # get info applying mapping
     # Defensive: KMC.run evicts active rows whose reference event was purged, so
@@ -352,7 +358,7 @@ def info_basin_events(
 
     # Only exit state
     data = connectivity_table.df[
-        connectivity_table.df["transient"] == False
+        connectivity_table.df["transient"] == False  # noqa: E712
     ].reset_index(drop=True)
     idx_selected_event = data.index[data["state_connexion"] == exit_state][0]
 
@@ -366,9 +372,13 @@ def info_basin_events(
 
     # Needed mapping to extract reference table info
     idx_ref = reference_table.table["idx_ref"].values
-    mapping_dra = dict(zip(idx_ref, reference_table.table["dra"].values))
-    mapping_backward = dict(zip(idx_ref, reference_table.table["idx_backward"].values))
-    mapping_energy = dict(zip(idx_ref, reference_table.table["energy_barrier"].values))
+    mapping_dra = dict(zip(idx_ref, reference_table.table["dra"].values, strict=True))
+    mapping_backward = dict(
+        zip(idx_ref, reference_table.table["idx_backward"].values, strict=True)
+    )
+    mapping_energy = dict(
+        zip(idx_ref, reference_table.table["energy_barrier"].values, strict=True)
+    )
 
     # Apply mapping
     dra_i = np.array([mapping_dra[ref] for ref in reference_events])

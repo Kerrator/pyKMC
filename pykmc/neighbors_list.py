@@ -2,7 +2,6 @@
 
 from scipy.spatial import cKDTree
 from .system import System
-from .config import Config
 import numpy as np
 
 

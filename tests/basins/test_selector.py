@@ -1,5 +1,4 @@
 from pykmc.basins import FPTASelector
-import pandas as pd
 
 
 class TestSelector:

@@ -922,8 +922,10 @@ class RegionConfig(BaseModel):
         if isinstance(v, str):
             try:
                 return [int(x.strip()) for x in v.split() if x.strip()]
-            except ValueError:
-                raise ValueError(f"Invalid list of integers for indices: {v!r}")
+            except ValueError as err:
+                raise ValueError(
+                    f"Invalid list of integers for indices: {v!r}"
+                ) from err
         return v
 
     @model_validator(mode="after")
@@ -1054,8 +1056,8 @@ class BiasConfig(BaseModel):
             parts = [p for p in stripped.replace(",", " ").split() if p]
             try:
                 return [float(x) for x in parts]
-            except ValueError:
-                raise ValueError(f"Invalid float list: {v!r}")
+            except ValueError as err:
+                raise ValueError(f"Invalid float list: {v!r}") from err
         return v
 
     @field_validator("atom_indices", mode="before")
@@ -1071,8 +1073,8 @@ class BiasConfig(BaseModel):
             parts = [p for p in stripped.replace(",", " ").split() if p]
             try:
                 return [int(x) for x in parts]
-            except ValueError:
-                raise ValueError(f"Invalid integer list: {v!r}")
+            except ValueError as err:
+                raise ValueError(f"Invalid integer list: {v!r}") from err
         return v
 
 

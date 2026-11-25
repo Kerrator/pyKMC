@@ -110,7 +110,7 @@ class Bias(ABC):
         """
         pass
 
-    def _prepare(
+    def _prepare(  # noqa: B027
         self,
         system: System,
         reference_table: ReferenceEventTable,

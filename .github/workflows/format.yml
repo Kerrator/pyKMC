@@ -10,3 +10,16 @@ jobs:
       - uses: astral-sh/ruff-action@v3
         with:
           args: "format --check"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Bug-class rules: no findings allowed.
+      - uses: astral-sh/ruff-action@v3
+        with:
+          # Keep equal to "ruff_version" in scripts/lint_baseline.json.
+          version: "0.15.4"
+          args: "check --select E4,E7,E9,F,B,Q"
+      # Annotation (ANN) and docstring (D) rules: per-file counts may not grow.
+      - run: python3 scripts/lint_ratchet.py
