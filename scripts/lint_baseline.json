@@ -1,0 +1,303 @@
+{
+  "ruff_version": "0.15.4",
+  "counts": {
+    "__init__.py": {
+      "D104": 1
+    },
+    "pykmc/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/__main__.py": {
+      "D100": 1
+    },
+    "pykmc/_core/discovery.py": {
+      "ANN001": 1,
+      "D413": 1
+    },
+    "pykmc/_core/registrable.py": {
+      "ANN003": 2,
+      "D413": 2
+    },
+    "pykmc/activevolume/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/activevolume/active_volume.py": {
+      "ANN001": 40,
+      "ANN201": 10,
+      "D100": 1,
+      "D103": 11,
+      "D200": 1,
+      "D202": 1,
+      "D205": 2,
+      "D212": 3,
+      "D400": 2,
+      "D401": 1,
+      "D415": 2
+    },
+    "pykmc/atomic_environment.py": {
+      "ANN001": 2,
+      "ANN201": 1,
+      "D102": 1,
+      "D200": 1,
+      "D212": 1,
+      "D400": 1,
+      "D410": 1,
+      "D411": 1,
+      "D413": 1,
+      "D415": 1
+    },
+    "pykmc/basins/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/basins/basin.py": {
+      "ANN001": 24,
+      "ANN201": 11,
+      "ANN202": 1,
+      "D100": 1,
+      "D101": 2,
+      "D102": 6,
+      "D200": 5,
+      "D202": 1,
+      "D212": 5,
+      "D400": 6,
+      "D401": 1,
+      "D403": 4,
+      "D415": 6
+    },
+    "pykmc/basins/connectivity.py": {
+      "ANN001": 11,
+      "ANN201": 4,
+      "D100": 1,
+      "D202": 2,
+      "D212": 6,
+      "D400": 1,
+      "D413": 10,
+      "D415": 1
+    },
+    "pykmc/basins/detection.py": {
+      "ANN201": 1,
+      "D100": 1,
+      "D101": 1,
+      "D202": 1,
+      "D400": 2,
+      "D413": 1,
+      "D415": 2,
+      "D417": 1
+    },
+    "pykmc/basins/exit_time_solver.py": {
+      "ANN001": 1,
+      "D100": 1,
+      "D202": 3,
+      "D212": 4,
+      "D400": 3,
+      "D413": 4,
+      "D415": 3
+    },
+    "pykmc/basins/exploration.py": {
+      "D100": 1,
+      "D202": 1,
+      "D205": 2,
+      "D212": 4,
+      "D413": 4
+    },
+    "pykmc/basins/selection.py": {
+      "D100": 1,
+      "D202": 5,
+      "D212": 6,
+      "D412": 1,
+      "D413": 6
+    },
+    "pykmc/basins/utils.py": {
+      "D100": 1,
+      "D202": 1,
+      "D205": 1,
+      "D212": 2,
+      "D413": 2
+    },
+    "pykmc/bias.py": {
+      "ANN001": 8,
+      "D102": 3,
+      "D413": 7
+    },
+    "pykmc/config.py": {
+      "ANN001": 9,
+      "ANN201": 1,
+      "ANN206": 8,
+      "D102": 8,
+      "D400": 2,
+      "D415": 2
+    },
+    "pykmc/engine/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/engine/base.py": {
+      "ANN204": 1,
+      "D100": 1,
+      "D105": 2,
+      "D202": 1,
+      "D212": 3,
+      "D413": 2
+    },
+    "pykmc/engine/lammps.py": {
+      "ANN001": 19,
+      "ANN002": 1,
+      "ANN003": 1,
+      "ANN201": 3,
+      "ANN202": 1,
+      "D100": 1,
+      "D102": 13,
+      "D212": 2,
+      "D413": 3
+    },
+    "pykmc/environments/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/environments/common_neighbor_analysis.py": {
+      "ANN001": 2,
+      "ANN201": 4,
+      "D103": 4,
+      "D202": 1
+    },
+    "pykmc/environments/graph_nauty.py": {
+      "D417": 2
+    },
+    "pykmc/environments/region.py": {
+      "D413": 1
+    },
+    "pykmc/event_table.py": {
+      "ANN001": 1,
+      "D202": 3,
+      "D400": 3,
+      "D413": 1,
+      "D415": 3,
+      "D417": 1
+    },
+    "pykmc/eventsearch.py": {
+      "ANN001": 1
+    },
+    "pykmc/factory.py": {
+      "D100": 1,
+      "D413": 1
+    },
+    "pykmc/info_simulation.py": {
+      "ANN001": 7,
+      "D202": 2,
+      "D400": 2,
+      "D415": 2
+    },
+    "pykmc/kmc.py": {
+      "ANN001": 4,
+      "ANN201": 1,
+      "ANN202": 2,
+      "D102": 1,
+      "D200": 1,
+      "D212": 1,
+      "D400": 1,
+      "D415": 1
+    },
+    "pykmc/log.py": {
+      "D102": 2,
+      "D400": 2,
+      "D413": 2,
+      "D415": 2,
+      "D417": 1
+    },
+    "pykmc/manager/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/manager/factory.py": {
+      "D100": 1,
+      "D413": 1
+    },
+    "pykmc/manager/manager.py": {
+      "ANN003": 4,
+      "ANN204": 1,
+      "D100": 1,
+      "D101": 1,
+      "D413": 5
+    },
+    "pykmc/manager/session.py": {
+      "ANN003": 1,
+      "D100": 1,
+      "D102": 4
+    },
+    "pykmc/manager/worker.py": {
+      "ANN001": 1,
+      "ANN202": 1,
+      "D100": 1,
+      "D101": 3,
+      "D102": 1,
+      "D105": 1,
+      "D401": 1,
+      "D413": 2,
+      "D417": 1
+    },
+    "pykmc/psr/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/psr/psr.py": {
+      "ANN001": 16,
+      "ANN003": 1
+    },
+    "pykmc/psr/strategies/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/psr/strategies/base.py": {
+      "ANN001": 4
+    },
+    "pykmc/psr/strategies/ira.py": {
+      "ANN001": 4
+    },
+    "pykmc/rate_constant/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/rate_constant/rate_constant.py": {
+      "ANN003": 1
+    },
+    "pykmc/rate_constant/strategies/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/reconstruction.py": {
+      "ANN001": 7,
+      "ANN201": 1,
+      "D101": 1,
+      "D202": 1,
+      "D205": 1,
+      "D400": 1,
+      "D413": 1,
+      "D415": 1,
+      "D417": 1
+    },
+    "pykmc/refinement.py": {
+      "ANN001": 3,
+      "ANN201": 1,
+      "D102": 1,
+      "D202": 1,
+      "D413": 1,
+      "D417": 2
+    },
+    "pykmc/result.py": {
+      "D210": 1,
+      "D400": 3,
+      "D413": 1,
+      "D415": 3
+    },
+    "pykmc/utils/__init__.py": {
+      "D104": 1
+    },
+    "pykmc/utils/apply_generic_events.py": {
+      "ANN001": 6,
+      "ANN202": 3,
+      "D200": 1,
+      "D212": 1,
+      "D400": 1,
+      "D415": 1,
+      "D419": 3
+    },
+    "pykmc/utils/geometry.py": {
+      "ANN001": 7,
+      "ANN201": 2,
+      "D103": 2
+    }
+  }
+}

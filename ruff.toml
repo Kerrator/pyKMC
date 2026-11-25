@@ -55,6 +55,11 @@ mypy-init-return = true
 "__init__.py" = ["F401", "F403", "F405"]
 # Unused template kept for the histogram method; it has no imports of its own.
 "pykmc/utils/apply_generic_events.py" = ["F821"]
+# The annotation and docstring rules apply to the package only.
+"tests/**" = ["ANN", "D"]
+"benchmarks/**" = ["ANN", "D"]
+"scripts/**" = ["ANN", "D"]
+"utils/**" = ["ANN", "D"]
 
 [format]
 # Like Black, use double quotes for strings.
