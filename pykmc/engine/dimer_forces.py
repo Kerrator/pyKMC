@@ -96,7 +96,7 @@ def _interaction_bound(engine: LammpsEngine, reuse: bool) -> float | None:
         if comm is not None:
             path = comm.bcast(path, root=0)
         if path is not None:
-            # All ranks enter the same command; LAMMPS writes only on rank zero.
+            # All ranks run the same command; LAMMPS writes only on rank zero.
             success = True
             try:
                 engine.command(f'info communication out overwrite "{path}"')
@@ -116,7 +116,7 @@ def _interaction_bound(engine: LammpsEngine, reuse: bool) -> float | None:
 
 
 def _read_interaction_bound(path: Path, reuse: bool) -> float | None:
-    """Parse the initialized engine's communication report on its leader."""
+    """Read the interaction bound from the communication report, on rank zero."""
     try:
         for line in path.read_text().splitlines():
             if line.startswith("Communication cutoff = "):
@@ -139,18 +139,18 @@ def _crop_selection(
     pbc: np.ndarray,
     cutoff: float,
 ) -> tuple[np.ndarray, Callable[[np.ndarray], bool]] | None:
-    """Return the retained atom indices and movable-position guard for a useful crop."""
+    """Return kept atom indices and a reach check, or None if a crop saves little."""
 
     def radii(x: np.ndarray) -> np.ndarray:
         return np.linalg.norm(_minimum_image(x - center, lattice, pbc), axis=1)
 
     distance = radii(start)
-    # Extra headroom allows small outward motion before switching to full.
+    # The 0.5 margin lets atoms move a little outward before the full system is used.
     max_reach = float(distance[movable].max()) + 0.5
     # The embedding force needs the neighbors of each movable atom's
-    # neighbors. Keep both shells around every permitted moving position.
+    # neighbors. Keep both shells around every position a movable atom may reach.
     kept = np.flatnonzero(distance <= np.nextafter(max_reach + 2 * cutoff, np.inf))
-    # Nearly-full crops add mapping/checking work without useful savings.
+    # A nearly full crop adds mapping and checking work and saves little.
     if len(kept) > 0.9 * len(start):
         return None
 
