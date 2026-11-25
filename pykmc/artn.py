@@ -64,7 +64,16 @@ callback call:
   * 0.8``, and FIRE relaxation to the first minimum on the full force. The
   search then returns to the saddle with zero velocity and keeps FIRE's time
   step. It takes one step with the first minimum's force before the opposite
-  push and the relaxation to the second minimum.
+  push and the relaxation to the second minimum. With ``stop_at_saddle``, as
+  pARTn's ``lpush_final = .false.`` in refinement, the search ends at the
+  saddle instead.
+
+:func:`artn_refine` refines a known saddle as pyKMC's ``partn_refine`` does
+with pARTn: up to one search per seed from the same start, each stopping at the
+saddle, until one ends within ``delr_sad_thr`` of the start. Each attempt starts
+fresh, with its own seed, a random first Lanczos vector and the ``nperp`` list
+from the start; pARTn's later attempts instead carry the last eigenvector and
+``nperp = -1``, which ``attempt_options`` can inject for step replay.
 
 FIRE is LAMMPS's (euler implicit) with the settings pARTn's fix gives it, in
 LAMMPS metal units: time step 0.001 ps, masses in amu, ``alpha0`` 0.1,
@@ -144,13 +153,20 @@ transition pathways on potential energy surfaces", J. Chem. Phys. 130, 114711
 """
 
 import math
-from typing import Callable, Literal, Optional, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, NamedTuple, Optional, Sequence, cast
 
 import numpy as np
 
 from .dimer import DimerResult, _minimum_image, _wrap
 
-__all__ = ["NumpyVectorSpace", "artn_search", "perp_limits"]
+__all__ = [
+    "NumpyVectorSpace",
+    "RefineAttempt",
+    "RefineResult",
+    "artn_refine",
+    "artn_search",
+    "perp_limits",
+]
 
 # pARTn's internal units, Rydberg, bohr and Rydberg atomic time
 # (artn:src/h_artn_units.f90:66, :71, :76, :78).
@@ -436,6 +452,8 @@ def artn_search(
     new_chance_pushes: Optional[Sequence[np.ndarray]] = None,
     recorded_draws_only: bool = False,
     observe: Optional[Observer] = None,
+    stop_at_saddle: bool = False,
+    nperp_start: Optional[int] = None,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
 
@@ -548,6 +566,17 @@ def artn_search(
         holds them after the call that made the move; after an eigenvector
         push, ("SMTH",) during blending or ("EIGN",) otherwise. Other moves
         carry None. For step replay.
+    stop_at_saddle : bool
+        End at the saddle, as pARTn does with ``lpush_final = .false.``
+        (refinement): no push over and no minima. The result then has the
+        saddle, its energy, the eigenvalue (``curvature``), the mode and
+        ``delr_sad``, and its two counters are equal.
+    nperp_start : Optional[int]
+        Step limit in force when the search starts, in place of the list's
+        first entry; the list itself is built from ``nperp`` and
+        ``nperp_limitation`` as before. None takes the first entry. For step
+        replay of pARTn's refinement attempts after the first, which start
+        with ``nperp = -1`` and the list of the attempt before.
 
     Returns
     -------
@@ -562,7 +591,8 @@ def artn_search(
         eigenvector as it was last oriented, minimum 2 the other way, so
         either may be the start. The mode is that eigenvector, pointed from
         the start to the saddle, and the curvature its eigenvalue; neither is
-        recomputed at the saddle.
+        recomputed at the saddle. ``delr_sad`` is the 3N minimum-image
+        distance from the start to the saddle, pARTn's measure.
 
     Raises
     ------
@@ -846,7 +876,7 @@ def artn_search(
     # step limit in force and its place in the list, the blend counter and
     # ends, the new chances taken, and the last block's eigenvector with its
     # overlap with the one before (a1).
-    nperp_now, nperp_step = limits[0], 1
+    nperp_now, nperp_step = (limits[0] if nperp_start is None else nperp_start), 1
     ismooth, inewchance = 0, 0
     blend_from: Optional[np.ndarray] = None
     blend_to: Optional[np.ndarray] = None
@@ -999,7 +1029,11 @@ def artn_search(
             curvature=lowest,
             mode=-mode if vec.dot(mode, offset) < 0 else mode,
             force_calls_saddle=calls,
+            delr_sad=vec.norm(offset),
         )
+        if stop_at_saddle:
+            # pARTn's saddle end with lpush_final = .false. (artn.f90:576).
+            return result(None, **found, force_calls_total=calls)
         push = eigen_step_size * push_over * _PUSH_OVER_FACTOR * eigvec
 
         def downhill(
@@ -1033,4 +1067,197 @@ def artn_search(
         e_min2=e_min2,
         delr2=vec.norm(_minimum_image(x_min2 - x_start, cell, pbc)),
         force_calls_total=calls,
+    )
+
+
+class RefineAttempt(NamedTuple):
+    """One attempt of :func:`artn_refine`.
+
+    Attributes
+    ----------
+    seed : int
+        The attempt's seed.
+    reason : Optional[str]
+        None if the attempt reached a saddle, else the core's reason.
+    delr_sad : Optional[float]
+        3N minimum-image distance from the start to that saddle, Å.
+    force_calls : int
+        Callback calls of the attempt.
+
+    """
+
+    seed: int
+    reason: Optional[str]
+    delr_sad: Optional[float]
+    force_calls: int
+
+
+class RefineResult(NamedTuple):
+    """Outcome of one refinement.
+
+    Attributes
+    ----------
+    success : bool
+        Whether an attempt reached a saddle within ``delr_sad_thr``.
+    reason : Optional[str]
+        None on success. Otherwise the last attempt's: ``"far_saddle"`` if it
+        reached a saddle at ``delr_sad_thr`` or farther, else the core's
+        reason.
+    saddle_positions : Optional[np.ndarray]
+        The accepted saddle, (N, 3), wrapped on the periodic axes only.
+    e_saddle : Optional[float]
+        Its energy, eV.
+    e_start : Optional[float]
+        The start energy the barrier is taken from, eV: the energy given, or
+        the callback's at ``minimum`` once a saddle is accepted.
+    barrier : Optional[float]
+        ``e_saddle - e_start``, eV.
+    curvature : Optional[float]
+        The saddle's eigenvalue, eV/Å².
+    delr_sad : Optional[float]
+        The accepted attempt's ``delr_sad``, or the last attempt's on a
+        failure (None if it reached no saddle), Å.
+    attempts : tuple[RefineAttempt, ...]
+        Every attempt made, in order.
+    force_calls : int
+        Callback calls of all attempts, plus the one at ``minimum``.
+    prerelax_iterations : Optional[int]
+        Iterations of the pre-relaxation before the attempts, when an engine
+        operation ran one; None otherwise.
+
+    """
+
+    success: bool
+    reason: Optional[str]
+    saddle_positions: Optional[np.ndarray]
+    e_saddle: Optional[float]
+    e_start: Optional[float]
+    barrier: Optional[float]
+    curvature: Optional[float]
+    delr_sad: Optional[float]
+    attempts: tuple[RefineAttempt, ...]
+    force_calls: int
+    prerelax_iterations: Optional[int] = None
+
+
+def artn_refine(
+    positions: np.ndarray,
+    cell: np.ndarray,
+    pbc: np.ndarray,
+    movable: np.ndarray,
+    central_atom: int,
+    seeds: Sequence[int],
+    energy_and_forces: EnergyAndForces,
+    *,
+    delr_sad_thr: float = 0.4,
+    e_start: Optional[float] = None,
+    minimum: Optional[np.ndarray] = None,
+    attempt_options: Optional[Sequence[Mapping[str, Any]]] = None,
+    **options: Any,
+) -> RefineResult:
+    """Refine a saddle from a start near it, one attempt per seed.
+
+    Each attempt is one :func:`artn_search` from ``positions`` that stops at
+    the saddle, with ``options`` (pyKMC passes the ``[pARTn]`` ``r_*``
+    values) and that attempt's seed. It starts fresh: a random first Lanczos
+    vector from its seed and the ``nperp`` list from the start. The first
+    attempt whose saddle lies closer than ``delr_sad_thr`` to ``positions``
+    (strictly, ``delr_sad`` as pARTn measures it) is accepted; the others are
+    retried until the seeds run out, as pyKMC's ``partn_refine`` does with
+    ``r_max_attempts``.
+
+    Parameters
+    ----------
+    positions, cell, pbc, movable, central_atom, energy_and_forces
+        As for :func:`artn_search`; ``positions`` is the start, normally the
+        reference saddle with the other atoms relaxed around it.
+    seeds : Sequence[int]
+        One seed per attempt; their number is the most attempts.
+    delr_sad_thr : float
+        Acceptance distance, Å (``r_delr_sad_thr``).
+    e_start : Optional[float]
+        Start energy of the barrier, eV.
+    minimum : Optional[np.ndarray]
+        Positions of the minimum, (N, 3), in place of ``e_start``: the start
+        energy is then the callback's energy there, taken once a saddle is
+        accepted, so that saddle and start come from the same callback.
+    attempt_options : Optional[Sequence[Mapping[str, Any]]]
+        Keyword options of :func:`artn_search` for each attempt in order,
+        over ``options``, such as ``first_lanczos_vector`` and
+        ``nperp_start`` to replay pARTn's carried state. Fewer entries than
+        seeds leave the later attempts as they are.
+    **options
+        Keyword options of :func:`artn_search`, the same for every attempt.
+
+    Returns
+    -------
+    RefineResult
+        The accepted saddle and its barrier, or the failure of the last
+        attempt. It never raises for a failed search.
+
+    Raises
+    ------
+    ValueError
+        If not exactly one of ``e_start`` and ``minimum`` is given, there is
+        no seed, or ``attempt_options`` has more entries than ``seeds``.
+
+    """
+    if (e_start is None) == (minimum is None):
+        raise ValueError("give exactly one of e_start and minimum")
+    seeds = [int(seed) for seed in seeds]
+    extra = list(attempt_options or ())
+    if not seeds or len(extra) > len(seeds):
+        raise ValueError(
+            "need a seed per attempt and no more attempt options than seeds"
+        )
+    if "stop_at_saddle" in options:
+        raise ValueError("refinement always stops at the saddle")
+    attempts: list[RefineAttempt] = []
+    for k, seed in enumerate(seeds):
+        given = {**options, **(extra[k] if k < len(extra) else {})}
+        raw = artn_search(
+            positions,
+            cell,
+            pbc,
+            movable,
+            central_atom,
+            seed,
+            energy_and_forces,
+            stop_at_saddle=True,
+            **given,
+        )
+        attempts.append(
+            RefineAttempt(seed, raw.reason, raw.delr_sad, raw.force_calls_total)
+        )
+        if raw.success and raw.delr_sad < delr_sad_thr:
+            break
+    calls = sum(attempt.force_calls for attempt in attempts)
+    if not (raw.success and raw.delr_sad < delr_sad_thr):
+        return RefineResult(
+            success=False,
+            reason="far_saddle" if raw.success else raw.reason,
+            saddle_positions=None,
+            e_saddle=None,
+            e_start=e_start,
+            barrier=None,
+            curvature=None,
+            delr_sad=raw.delr_sad,
+            attempts=tuple(attempts),
+            force_calls=calls,
+        )
+    if minimum is not None:
+        e_start = float(energy_and_forces(np.array(minimum, dtype=float))[0])
+        calls += 1
+    assert e_start is not None and raw.e_saddle is not None
+    return RefineResult(
+        success=True,
+        reason=None,
+        saddle_positions=raw.saddle_positions,
+        e_saddle=raw.e_saddle,
+        e_start=e_start,
+        barrier=raw.e_saddle - e_start,
+        curvature=raw.curvature,
+        delr_sad=raw.delr_sad,
+        attempts=tuple(attempts),
+        force_calls=calls,
     )

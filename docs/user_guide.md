@@ -281,7 +281,7 @@ For a detailed explanation of the pARTn algorithm and its parameters, please ref
 ### Dimer
 
 With `style = dimer`, new events are found with the dimer method (ported from SEAKMC, Liang and Xu 2023), and
-refinement still uses pARTn. A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
+refinement uses pARTn unless `refine_style = artn` (see [Refinement with ARTn](#refinement-with-artn)). A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
 section configures the refinement (the `r_` parameters).
 
 Each search starts from a random direction, drawn from a seed. With `seed` set in `[Control]`, the run draws
@@ -331,7 +331,7 @@ sessions with fewer ranks each instead.
 ### ARTn in pyKMC
 
 With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of pARTn v1.1.0 (Poberznik et al.
-2024), and refinement still uses pARTn. It reads its parameters from the `[pARTn]` section, so an existing input
+2024), and refinement uses pARTn unless `refine_style = artn`. It reads its parameters from the `[pARTn]` section, so an existing input
 switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
 volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy`, `eam/fs`, `mtp`
@@ -357,14 +357,36 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
   moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
   this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
-  z, and runs on one rank of each worker. For `eam/alloy`, `eam/fs`, `mtp` and `mtp/small` it reuses neighbor
-  lists between force calls too, which changes the cost of a force call and not the search.
+  z. As for the dimer, each active-volume search runs on the first rank of its session. A session with several
+  ranks therefore gets no speed-up: its other ranks wait while the search runs. Use more sessions with fewer ranks
+  each instead. For `eam/alloy`, `eam/fs`, `mtp` and `mtp/small` it reuses neighbor lists between force calls too,
+  which changes the cost of a force call and not the search.
 
 ```ini
 [ActiveVolume]
 rmov = 10.7
 ract = 14.2
 artn_forces = av
+```
+
+### Refinement with ARTn
+
+`refine_style` in `[EventSearch]` chooses the refiner, for any `style`: `partn` (the default) or `artn`, pyKMC's
+own ARTn. Both read the `r_` parameters of `[pARTn]`. The ARTn refiner does what pyKMC does with pARTn: it sets
+the rcut atoms at the reference saddle, relaxes the other atoms with LAMMPS (`min_style`, `frz_min`; with the
+active volume on, only those within `rmov`), then runs ARTn from there, stopping at the saddle, up to
+`r_max_attempts` times. A saddle closer than `r_delr_sad_thr` to the start is accepted. Each attempt starts
+afresh with its own seed, drawn from a stream of its own that `seed` in `[Control]` starts, so adding refinement
+changes no search seed and the seeds do not depend on the number of LAMMPS instances. `zseed` is not read, and
+`r_neigen` other than 1 is logged as ignored. The barrier is the saddle's potential energy minus the minimum's,
+with or without the active volume. The ARTn refiner runs on the full system only: with the active volume on, it
+needs `artn_forces = full`.
+
+```ini
+[EventSearch]
+style = artn
+nsearch = 50
+refine_style = artn
 ```
 
 ## Rate Constant 

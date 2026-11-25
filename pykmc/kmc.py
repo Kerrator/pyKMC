@@ -45,7 +45,7 @@ from .info_simulation import (
     info_basin_events,
 )
 from .eventsearch import EventSearch
-from .refinement import Refinement
+from .refinement import Refinement, refine_seed_stream
 from .log import Colors
 import time
 from .utils import push_towards, compute_delr, per_atom_displacement
@@ -95,6 +95,9 @@ class KMC:
         if self.config.control.seed is not None:
             random.seed(self.config.control.seed)
             np.random.seed(self.config.control.seed)
+        # The ARTn refiner's seeds: a child of the run seed that draws nothing
+        # from the run-wide stream above.
+        self.refine_seeds = refine_seed_stream(self.config.control.seed)
         self.loggers = None
         self.system = None
         self.manager = None
@@ -339,6 +342,7 @@ class KMC:
                     self.manager,
                     rate_constant=self.rate_constant,
                     loggers=self.loggers,
+                    refine_seeds=self.refine_seeds,
                 )
                 self.system.update_positions(
                     result_reconstruction.ok_value().min1_positions
@@ -760,6 +764,7 @@ class KMC:
             self.neighbors_list,
             self.atomic_environment,
             self.manager,
+            refine_seeds=self.refine_seeds,
         )
         # refinement.execute(df_reference_events, self.potential_energy)
         refinement.execute(

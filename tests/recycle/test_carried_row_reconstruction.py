@@ -117,7 +117,7 @@ def _config() -> SimpleNamespace:
         control=SimpleNamespace(
             recycle=False, active_volume=False, refine_thr=0.5, seed=None
         ),
-        eventsearch=SimpleNamespace(refined_energy_thr=0.1),
+        eventsearch=SimpleNamespace(refined_energy_thr=0.1, refine_style="partn"),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.4),
         ira=SimpleNamespace(),
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),

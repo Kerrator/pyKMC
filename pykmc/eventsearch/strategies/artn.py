@@ -2,9 +2,9 @@
 
 The search runs as one `artn_search` operation on a worker
 (:mod:`pykmc.engine.artn_search`), on the dimer's force path or, with
-`[ActiveVolume] artn_forces = av`, on pARTn's active volume, and pARTn
-still refines the events. Its parameters come from the `[pARTn]` section; its seeds
-from the run-wide stream, as the dimer's.
+`[ActiveVolume] artn_forces = av`, on pARTn's active volume. The refiner
+is `[EventSearch] refine_style`'s, pARTn by default. Its parameters come from the
+`[pARTn]` section; its seeds from the run-wide stream, as the dimer's.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ArtnStrategy",
     "artn_options",
+    "artn_refine_options",
     "ignored_partn_parameters",
 ]
 
@@ -59,6 +60,32 @@ _CORE_PARAMETERS = (
 )
 
 
+# The ARTn core's keyword options in refinement, from the `[pARTn]` r_* fields
+# pyKMC's partn_refine passes to pARTn (INVENTORY.md, "Refinement", "Keys").
+# convergence_property and push_over keep the core's defaults: partn_refine sets
+# neither, so pARTn uses "maxval", and push_over is unread at the saddle end.
+_REFINE_PARAMETERS = {
+    "push_mode": "r_push_mode",
+    "push_dist_thr": "r_push_dist_thr",
+    "push_step_size": "r_push_step_size",
+    "ninit": "r_ninit",
+    "lanczos_min_size": "r_lanczos_min_size",
+    "lanczos_max_size": "r_lanczos_max_size",
+    "lanczos_disp": "r_lanczos_disp",
+    "lanczos_eval_conv_thr": "r_lanczos_eval_conv_thr",
+    "eigval_thr": "r_eigval_thr",
+    "eigen_step_size": "r_eigen_step_size",
+    "nsmooth": "r_nsmooth",
+    "alpha_mix_cr": "r_alpha_mix_cr",
+    "nnewchance": "r_nnewchance",
+    "nperp": "r_nperp",
+    "nperp_limitation": "r_nperp_limitation",
+    "forc_thr": "r_forc_thr",
+    "nevalf_max": "r_nevalf_max",
+    "dmax": "r_dmax",
+}
+
+
 class ArtnSearchConfig(Protocol):
     """Configuration read by `ArtnStrategy`."""
 
@@ -79,16 +106,31 @@ def artn_options(partn: Any) -> dict[str, Any]:
     return {name: getattr(partn, name) for name in _CORE_PARAMETERS}
 
 
-def ignored_partn_parameters(partn: Any) -> dict[str, str]:
-    """Return the `[pARTn]` settings the ARTn search does not follow, with why.
+def artn_refine_options(partn: Any) -> dict[str, Any]:
+    """Return the ARTn core's keyword options in refinement, from `[pARTn]`.
 
-    Only settings that would change pARTn's search are listed: ``neigen``
-    other than 1 and a set ``zseed``.
+    The ``r_*`` fields under the core's names. ``push_dist_thr`` is passed
+    whatever ``r_push_mode`` is; the core reads it only with ``rad``.
+    """
+    return {name: getattr(partn, field) for name, field in _REFINE_PARAMETERS.items()}
+
+
+def ignored_partn_parameters(
+    partn: Any, style: str = "artn", refine_style: str = "partn"
+) -> dict[str, str]:
+    """Return the `[pARTn]` settings pyKMC's ARTn does not follow, with why.
+
+    Only settings that would change pARTn's search or refinement are listed:
+    ``neigen`` other than 1 with ``style = artn``, ``r_neigen`` other than 1
+    with ``refine_style = artn``, and a set ``zseed`` with either. The
+    ``zseed`` entry names what still reads it.
 
     Parameters
     ----------
     partn : PartnConfig
         The `[pARTn]` section.
+    style, refine_style : str
+        `[EventSearch] style` and `refine_style`.
 
     Returns
     -------
@@ -97,12 +139,35 @@ def ignored_partn_parameters(partn: Any) -> dict[str, str]:
 
     """
     ignored = {}
-    if partn.neigen != 1:
+    if style == "artn" and partn.neigen != 1:
         ignored["neigen"] = f"{partn.neigen} (fixed at 1, as pARTn's setup does)"
-    if partn.zseed != 0:
+    if refine_style == "artn" and partn.r_neigen != 1:
+        ignored["r_neigen"] = f"{partn.r_neigen} (fixed at 1, as pARTn's setup does)"
+    seeded = [
+        name
+        for name, artn in (
+            ("searches", style == "artn"),
+            ("refinements", refine_style == "artn"),
+        )
+        if artn
+    ]
+    readers = [
+        name
+        for name, partn_style in (
+            ("pARTn's search", style == "partn"),
+            ("pARTn's refinement", refine_style == "partn"),
+        )
+        if partn_style
+    ]
+    if partn.zseed != 0 and seeded:
+        still = (
+            f"{' and '.join(readers)} still reads zseed"
+            if readers
+            else "nothing reads zseed"
+        )
         ignored["zseed"] = (
-            f"{partn.zseed} (ARTn searches are seeded from [Control] seed; "
-            "pARTn's refinement still reads zseed)"
+            f"{partn.zseed} (ARTn {' and '.join(seeded)} are seeded from [Control] seed; "
+            f"{still})"
         )
     return ignored
 
@@ -175,7 +240,9 @@ class ArtnStrategy(EventSearchStrategy):
                 )
         if not self._ignored_logged:
             self._ignored_logged = True
-            ignored = ignored_partn_parameters(self.config.partn)
+            ignored = ignored_partn_parameters(
+                self.config.partn, "artn", self.config.eventsearch.refine_style
+            )
             if ignored:
                 logging.getLogger("log").warning(
                     "[EventSearch] style = artn ignores these [pARTn] settings: "

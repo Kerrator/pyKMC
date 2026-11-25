@@ -1,12 +1,13 @@
-"""One ARTn saddle search as a worker operation, on either of two force paths.
+"""One ARTn saddle search or refinement as a worker operation.
 
-:class:`ArtnSearchExtension` adds the ``artn_search`` operation to the dimer's
-worker extension. A single-rank worker uses the dimer's serial force path. On a
-multi-rank worker, each rank evaluates the forces on its own rows. Both use
-:func:`pykmc.artn.artn_search` for the search. With the worker option
+:class:`ArtnSearchExtension` adds the ``artn_search`` and ``artn_refine``
+operations to the dimer's worker extension. A single-rank worker uses the
+dimer's serial force path. On a multi-rank worker, each rank evaluates the
+forces on its own rows. The search uses :func:`pykmc.artn.artn_search`, the
+refinement :func:`pykmc.artn.artn_refine`. With the worker option
 ``av_radii`` the search runs instead on pARTn's active volume, built as
 ``partn_search`` builds it, so the forces are pARTn's; it runs on the
-worker's leader rank.
+worker's leader rank. Refinement runs on the full system only.
 """
 
 from __future__ import annotations
@@ -20,16 +21,36 @@ from ase.cell import Cell
 from ase.geometry import find_mic
 from mpi4py import MPI
 
+from ..artn import RefineResult
+from ..artn import artn_refine as run_refine
 from ..artn import artn_search as run_artn
 from ..config import search_pair_style, supports_neighbor_reuse
-from ..dimer import DimerResult
+from ..dimer import DimerResult, _minimum_image
 from ..search_rules import map_to_full_system
+from .base import EngineExtension
 from .dimer_search import DimerSearchExtension, _movable_mask
 
 if TYPE_CHECKING:
     from .lammps import LammpsEngine
 
-__all__ = ["ArtnSearchExtension"]
+__all__ = ["ArtnSearchExtension", "with_refiner"]
+
+
+def with_refiner(
+    extensions: list[type[EngineExtension]], refine_style: str
+) -> list[type[EngineExtension]]:
+    """Return the engine extensions a run needs, the refiner's included.
+
+    With ``refine_style = artn`` the ARTn extension is loaded whatever the
+    search style; it extends the dimer's, so it takes the dimer's place.
+    """
+    extensions = list(extensions)
+    if refine_style != "artn" or any(
+        issubclass(ext, ArtnSearchExtension) for ext in extensions
+    ):
+        return extensions
+    kept = [ext for ext in extensions if not issubclass(ArtnSearchExtension, ext)]
+    return [*kept, ArtnSearchExtension]
 
 
 class ArtnSearchExtension(DimerSearchExtension):
@@ -116,6 +137,165 @@ class ArtnSearchExtension(DimerSearchExtension):
             central_atom,
             seed,
             search_options,
+        )
+
+    def artn_refine(
+        self,
+        positions: np.ndarray,
+        types: list[str] | np.ndarray,
+        cell: Cell | np.ndarray,
+        pbc: list[bool] | np.ndarray,
+        movable: list[int] | np.ndarray,
+        central_atom: int,
+        saddle_idx: list[int] | np.ndarray,
+        saddle_positions: np.ndarray,
+        seeds: list[int],
+        delr_sad_thr: float,
+        relax_radius: Optional[float] = None,
+        options: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[RefineResult]:
+        """Refine one saddle from the minimum ``positions`` and return what it found.
+
+        First every rank of the worker pre-relaxes on the worker's own engine,
+        as pyKMC's ``partn_refine`` does on the full path: the rcut atoms
+        ``saddle_idx`` are moved to ``saddle_positions`` and held while LAMMPS
+        minimizes the others (``[lammps] min_style`` and ``frz_min``,
+        :meth:`~pykmc.engine.lammps.LammpsEngine.minimize_freeze_core`). With
+        ``relax_radius`` (``rmov`` with the active volume on), the atoms
+        farther than it from the central atom are held too. Then
+        :func:`pykmc.artn.artn_refine` runs from the pre-relaxed positions on
+        the search's force path, one attempt per seed, and takes the start
+        energy at ``positions``, the potential energy (``thermo_pe``) on the
+        same instance as the saddle's, so the result's ``barrier`` is the
+        barrier itself.
+
+        Parameters
+        ----------
+        positions : np.ndarray
+            The minimum, full system, (N, 3), Å, pyKMC atom order.
+        types, cell, pbc, movable, central_atom
+            As for :meth:`artn_search`; ``movable`` is the core's movable set.
+        saddle_idx : list[int] | np.ndarray
+            The rcut atoms, which start at the reference saddle.
+        saddle_positions : np.ndarray
+            Their reference saddle positions, (len(saddle_idx), 3), Å.
+        seeds : list[int]
+            One seed per attempt (``r_max_attempts`` of them).
+        delr_sad_thr : float
+            Acceptance distance, Å (``r_delr_sad_thr``).
+        relax_radius : Optional[float]
+            Radius of the pre-relaxation around the central atom, Å; None
+            relaxes every atom but the rcut atoms.
+        options : Optional[Mapping[str, Any]]
+            Keyword options of :func:`pykmc.artn.artn_refine` and the worker
+            options of :meth:`artn_search`, less ``av_radii``.
+
+        Returns
+        -------
+        Optional[RefineResult]
+            The refiner's result on the leader rank, with the pre-relaxation's
+            iterations; None on the other ranks.
+
+        Raises
+        ------
+        ValueError
+            If ``av_radii`` is given (refinement runs on the full system
+            only), ``attempt_options`` on a multi-rank worker, or an argument
+            is malformed.
+
+        """
+        refine_options = dict(options or {})
+        if refine_options.pop("av_radii", None) is not None:
+            raise ValueError("artn_refine runs on the full system only")
+        comm = self.engine.comm
+        multi_rank = comm is not None and comm.Get_size() > 1
+        if multi_rank and refine_options.get("attempt_options"):
+            raise ValueError("attempt_options need a single-rank worker")
+        refine_options.setdefault(
+            "reuse_neighbor_list",
+            supports_neighbor_reuse(search_pair_style(self.engine.config)),
+        )
+        positions = np.array(positions, dtype=float)
+        saddle_idx = np.asarray(saddle_idx, dtype=int).ravel()
+        start = positions.copy()
+        start[saddle_idx] = np.asarray(saddle_positions, dtype=float)
+        held = saddle_idx
+        if relax_radius is not None:
+            offsets = _minimum_image(
+                positions - positions[central_atom],
+                np.asarray(cell, dtype=float),
+                np.asarray(pbc, dtype=bool),
+            )
+            far = np.flatnonzero(np.linalg.norm(offsets, axis=1) > relax_radius)
+            held = np.union1d(held, far)
+
+        # The pre-relaxation, on every rank of the worker's own engine.
+        worker = cast("LammpsEngine", self.engine)
+        worker.set_positions(positions=start)
+        before = int(worker.lmp.extract_global("ntimestep"))
+        worker.minimize_freeze_core(held)
+        iterations = int(worker.lmp.extract_global("ntimestep")) - before
+        start = worker.get_positions()
+        if multi_rank:
+            from .artn_ranks import distributed_search
+
+            start = comm.bcast(start, root=0)
+            result = distributed_search(
+                worker,
+                start,
+                types,
+                cell,
+                pbc,
+                movable,
+                central_atom,
+                0,
+                {
+                    **refine_options,
+                    "seeds": seeds,
+                    "delr_sad_thr": delr_sad_thr,
+                    "minimum": positions,
+                },
+                core=_refine_core,
+            )
+        else:
+
+            def core(
+                x: np.ndarray,
+                cell: np.ndarray,
+                pbc: np.ndarray,
+                mask: np.ndarray,
+                central: int,
+                _seed: int,
+                query: Any,
+                **kwargs: Any,
+            ) -> RefineResult:
+                return run_refine(
+                    x,
+                    cell,
+                    pbc,
+                    mask,
+                    central,
+                    seeds,
+                    query,
+                    delr_sad_thr=delr_sad_thr,
+                    minimum=positions,
+                    masses=self._instance_masses(),
+                    **kwargs,
+                )
+
+            result = self._search(
+                core,
+                start,
+                types,
+                cell,
+                pbc,
+                movable,
+                central_atom,
+                0,
+                refine_options,
+            )
+        return (
+            None if result is None else result._replace(prerelax_iterations=iterations)
         )
 
     def _av_search(
@@ -269,3 +449,21 @@ class ArtnSearchExtension(DimerSearchExtension):
         types = np.array(lmp.gather_atoms("type", 0, 1), dtype=int)
         per_type = lmp.numpy.extract_atom("mass")
         return np.asarray(per_type, dtype=float)[types]
+
+
+def _refine_core(
+    positions: np.ndarray,
+    cell: np.ndarray,
+    pbc: np.ndarray,
+    movable: np.ndarray,
+    central_atom: int,
+    _seed: int,
+    energy_and_forces: Any,
+    *,
+    seeds: list[int],
+    **options: Any,
+) -> RefineResult:
+    """Call :func:`pykmc.artn.artn_refine` as the rank driver calls a search."""
+    return run_refine(
+        positions, cell, pbc, movable, central_atom, seeds, energy_and_forces, **options
+    )

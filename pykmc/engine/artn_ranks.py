@@ -10,7 +10,7 @@ assembled, on rank zero.
 from __future__ import annotations
 
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 from ase.cell import Cell
@@ -29,7 +29,7 @@ from ..config import (
     validate_dimer_eam_style,
     validate_dimer_neighbor_reuse,
 )
-from ..dimer import DimerResult, _wrap
+from ..dimer import _wrap
 from .dimer_forces import (
     ForceQuery,
     _NEIGHBOR_SKIN,
@@ -152,14 +152,16 @@ class DistributedSpace(NumpyVectorSpace):
 
         return distribute(orders[0]), distribute(orders[1])
 
-    def collect_result(
-        self, result: DimerResult, cell: np.ndarray, pbc: np.ndarray
-    ) -> DimerResult | None:
-        """Assemble on rank zero the result geometries that are set, in pyKMC order."""
+    def collect_result(self, result: Any, cell: np.ndarray, pbc: np.ndarray) -> Any:
+        """Assemble on rank zero the result geometries that are set, in pyKMC order.
+
+        ``result`` is a :class:`~pykmc.dimer.DimerResult` or a
+        :class:`~pykmc.artn.RefineResult`; fields it lacks are skipped.
+        """
         names = [
             k
             for k in ("saddle_positions", "min1_positions", "min2_positions", "mode")
-            if getattr(result, k) is not None
+            if getattr(result, k, None) is not None
         ]
         if not names:
             return result if self.comm.Get_rank() == 0 else None
@@ -179,12 +181,7 @@ class DistributedSpace(NumpyVectorSpace):
         for ids, arrays in parts:
             for name, values in zip(names, arrays, strict=True):
                 fields[name][ids] = values
-        return result._replace(
-            saddle_positions=fields.get("saddle_positions"),
-            min1_positions=fields.get("min1_positions"),
-            min2_positions=fields.get("min2_positions"),
-            mode=fields.get("mode"),
-        )
+        return result._replace(**fields)
 
 
 class OwnedRows:
@@ -343,8 +340,15 @@ def distributed_search(
     central: int,
     seed: int,
     options: dict[str, Any],
-) -> DimerResult | None:
-    """Run the ARTn core on each rank's home rows and return the result on rank zero."""
+    core: Callable[..., Any] = artn_search,
+) -> Any:
+    """Run the ARTn core on each rank's home rows and return the result on rank zero.
+
+    ``core`` is called as :func:`pykmc.artn.artn_search` is, on the home rows,
+    with ``options`` as keywords; :func:`pykmc.artn.artn_refine` comes through
+    a wrapper that takes ``seeds`` among them. A full-system ``minimum`` in
+    ``options`` is cut to the home rows.
+    """
     from .lammps import LammpsEngine
 
     comm = worker.comm
@@ -378,6 +382,11 @@ def distributed_search(
         validate_dimer_neighbor_reuse(style)
     if crop:
         validate_dimer_eam_style(style, "eam_force_crop")
+    minimum = options.pop("minimum", None)
+    if minimum is not None:
+        minimum = np.asarray(minimum, dtype=float)
+        if minimum.shape != (n, 3):
+            raise ValueError("minimum must be a full-system (N, 3) array")
     participants = mask.copy()
     injections = {}
     for key in ("initial_push", "first_lanczos_vector", "new_chance_pushes"):
@@ -486,7 +495,9 @@ def distributed_search(
             options[key] = (
                 local_vectors if key == "new_chance_pushes" else local_vectors[0]
             )
-        result = artn_search(
+        if minimum is not None:
+            options["minimum"] = minimum[space.home]
+        result = core(
             positions[space.home],
             lattice,
             pbc,

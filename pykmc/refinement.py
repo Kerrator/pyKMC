@@ -1,4 +1,9 @@
-"""Module implementing the Refinement class that deals with the event refinement procedure."""
+"""Module implementing the Refinement class that deals with the event refinement procedure.
+
+`[EventSearch] refine_style` picks the refiner: pARTn (``partn_refine``) or
+pyKMC's ARTn (``artn_refine``, through :func:`submit_artn_refine`, which the
+basin's refinement uses too).
+"""
 
 from .result import Result, EventRefinementOutput, ErrorInfo, ErrorType, Err, Ok
 from .psr import PointSetRegistration
@@ -9,10 +14,152 @@ from .neighbors_list import NeighborsList
 from .log import LogKMC
 from .atomic_environment import AtomicEnvironment
 from .manager import Manager
+from .artn import RefineResult
+from .eventsearch.strategies.artn import artn_refine_options
+from .eventsearch.strategies.dimer import _then, movable_atom_indices
+from types import SimpleNamespace
+from typing import Any, Optional
 import ase.geometry
+import logging
 import numpy as np
 import pandas as pd
 import concurrent.futures
+
+# Spawn key of the refinement seeds' child of the [Control] seed.
+_REFINE_SPAWN_KEY = 1
+
+
+def refine_seed_stream(seed: Optional[int]) -> np.random.Generator:
+    """Return the stream the ARTn refiner draws its seeds from.
+
+    A child of `[Control] seed` of its own (NumPy ``SeedSequence`` spawn key
+    1), not the run-wide `random` stream, so drawing refinement seeds shifts
+    no search seed. With no `[Control] seed` it is seeded from the OS.
+    """
+    return np.random.default_rng(
+        np.random.SeedSequence(seed, spawn_key=(_REFINE_SPAWN_KEY,))
+    )
+
+
+def submit_artn_refine(
+    manager: Manager,
+    config: Config,
+    seed_stream: np.random.Generator,
+    central_atom_idx: int,
+    positions: np.ndarray,
+    cell: Any,
+    types: Any,
+    pbc: Any,
+    saddle_idx: Any,
+    saddle_positions: np.ndarray,
+) -> concurrent.futures.Future:
+    """Submit one `artn_refine` operation and return its future `Result`.
+
+    The seeds, ``r_max_attempts`` of them, are drawn here from
+    ``seed_stream``, on rank 0 in submit order, so they do not depend on the
+    worker count. The movable atoms are the search's (within `rmov` with the
+    active volume on, none of `[frozen_atoms]`), and with the active volume on
+    the pre-relaxation stays within `rmov` too.
+
+    Parameters
+    ----------
+    manager : Manager
+        Runs the operation on a worker.
+    config : Config
+        The run's configuration; `[pARTn]` gives the ``r_*`` parameters.
+    seed_stream : np.random.Generator
+        The run's refinement seed stream (:func:`refine_seed_stream`).
+    central_atom_idx : int
+        The event's central atom.
+    positions : np.ndarray
+        The minimum the event starts from, full system, (N, 3).
+    cell, types, pbc
+        The system's cell, atom types and periodicity.
+    saddle_idx : Any
+        The rcut atoms.
+    saddle_positions : np.ndarray
+        Their reference saddle positions, after symmetry and PSR.
+
+    Returns
+    -------
+    concurrent.futures.Future
+        Resolves to ``Ok(EventRefinementOutput)`` whose ``E_saddle`` is the
+        barrier itself, or ``Err`` with ``EVENT_NOT_FOUND``.
+
+    """
+    pbc = np.broadcast_to(np.asarray(pbc, dtype=bool), (3,)).copy()
+    system = SimpleNamespace(positions=positions, cell=cell, pbc=pbc, types=types)
+    movable = movable_atom_indices(config, central_atom_idx, system)
+    seeds = [
+        int(seed)
+        for seed in seed_stream.integers(0, 2**32, size=config.partn.r_max_attempts)
+    ]
+    relax_radius = config.activevolume.rmov if config.control.active_volume else None
+    future = manager.artn_refine(
+        positions=positions,
+        types=types,
+        cell=cell,
+        pbc=pbc,
+        movable=movable,
+        central_atom=int(central_atom_idx),
+        saddle_idx=saddle_idx,
+        saddle_positions=saddle_positions,
+        seeds=seeds,
+        delr_sad_thr=config.partn.r_delr_sad_thr,
+        relax_radius=relax_radius,
+        options=artn_refine_options(config.partn),
+    )
+    return _then(
+        future,
+        lambda raw: artn_refine_result(
+            raw, int(central_atom_idx), config.partn.verbosity
+        ),
+    )
+
+
+def artn_refine_result(
+    raw: RefineResult, central_atom_idx: int, verbosity: int = 0
+) -> Result[EventRefinementOutput, ErrorInfo]:
+    """Turn the ARTn refiner's result into a refinement `Result`.
+
+    At positive `[pARTn] verbosity` the debug log has one line per attempt:
+    its seed, its end, ``delr_sad`` and force calls.
+    """
+    logger = logging.getLogger("log")
+    if verbosity > 0 and logger.isEnabledFor(logging.DEBUG):
+        for number, attempt in enumerate(raw.attempts, start=1):
+            logger.debug(
+                "ARTn refinement atom %d attempt %d seed %d: %s, delr_sad=%s A, "
+                "%d force calls",
+                central_atom_idx,
+                number,
+                attempt.seed,
+                attempt.reason or "saddle",
+                attempt.delr_sad,
+                attempt.force_calls,
+            )
+    if raw.success:
+        return Ok(
+            EventRefinementOutput(
+                central_atom_index=central_atom_idx,
+                saddle_positions=raw.saddle_positions,
+                E_saddle=raw.barrier,
+                refined="T",
+            )
+        )
+    return Err(
+        ErrorInfo(
+            type=ErrorType.EVENT_NOT_FOUND,
+            message="no event found",
+            details=(1, raw.reason),
+            variables={
+                "central_atom": central_atom_idx,
+                "delr_sad": raw.delr_sad,
+                "refiner": "artn",
+                "seeds": [attempt.seed for attempt in raw.attempts],
+            },
+        )
+    )
 
 
 class Refinement:
@@ -32,6 +179,9 @@ class Refinement:
         The atomic environment of the system.
     engine : Engine
         The engine to use for the refinement.
+    refine_seeds : Optional[np.random.Generator]
+        The run's refinement seed stream (:func:`refine_seed_stream`), needed
+        with `refine_style = artn`.
 
     """
 
@@ -43,6 +193,7 @@ class Refinement:
         neighbors_list: NeighborsList,
         atomic_environment: AtomicEnvironment,
         manager: Manager,
+        refine_seeds: Optional[np.random.Generator] = None,
     ) -> None:
         self.config = config
         self.loggers = loggers
@@ -50,7 +201,10 @@ class Refinement:
         self.neighbors_list = neighbors_list
         self.atomic_environment = atomic_environment
         self.manager = manager
+        self.refine_seeds = refine_seeds
         self.results = None
+        if config.eventsearch.refine_style == "artn" and refine_seeds is None:
+            raise ValueError("refine_style = artn needs the run's refinement seeds")
 
     def execute(
         self,
@@ -129,7 +283,7 @@ class Refinement:
                 # Now check if energy barrier consistent with generic one
                 # TODO partn should not return different things depending on AV or not. We get the total energy at the saddle point or dE, but not both.
                 # TODO and to be consistent, you should modify res.ok_value().E_saddle.
-                if self.config.control.active_volume == True:
+                if self._barrier_given():
                     res.ok_value().dE_forward = res.ok_value().E_saddle
                 else:
                     res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
@@ -317,7 +471,7 @@ class Refinement:
                                 central_atom_index=at_idx,
                                 saddle_positions=self.system.positions.copy(),
                                 E_saddle=dfevent["energy_barrier"]
-                                if self.config.control.active_volume
+                                if self._barrier_given()
                                 else total_energy + dfevent["energy_barrier"],
                                 refined="F",
                             )
@@ -329,7 +483,20 @@ class Refinement:
                     # TODO : when AV, partn_refine needs the minimum positions to compute the initial energy with AV
                     # TODO : but this is the third parameter here, and without AV, the third parameter is the saddle positions.
                     # TODO : and with AV, you only need to send saddle positions in the rcut, while without we send all saddle positions, this is just too confusing
-                    if self.config.control.active_volume == True:
+                    if self.config.eventsearch.refine_style == "artn":
+                        f = submit_artn_refine(
+                            self.manager,
+                            self.config,
+                            self.refine_seeds,
+                            at_idx,
+                            current_positions.copy(),
+                            self.system.cell,
+                            self.system.types.copy(),
+                            self.system.pbc,
+                            neighbors.copy(),
+                            self.system.positions.copy()[neighbors.copy()],
+                        )
+                    elif self.config.control.active_volume == True:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
                             config=self.config,
@@ -366,6 +533,17 @@ class Refinement:
                 # => Restore the system to its initial state
                 self.system.update_positions(current_positions)
             return futures
+
+    def _barrier_given(self) -> bool:
+        """Return whether the refiner returns the barrier itself as `E_saddle`.
+
+        pARTn does with the active volume on; the ARTn refiner always does.
+        Otherwise `E_saddle` is the saddle's total energy.
+        """
+        return bool(
+            self.config.control.active_volume
+            or self.config.eventsearch.refine_style == "artn"
+        )
 
     def check_refinement_energy(
         self,
