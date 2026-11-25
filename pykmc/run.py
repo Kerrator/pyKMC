@@ -10,6 +10,7 @@ from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
 from .config import Config
 from .eventsearch import EventSearch
+from .engine.artn_search import with_refiner
 
 
 def main() -> None:
@@ -32,7 +33,8 @@ def main() -> None:
         else config.control.group_size
     )
     # Built on every rank: its strategy names the engine extensions the
-    # engines need, and every rank builds its own engines.
+    # engines need, and every rank builds its own engines. The ARTn refiner's
+    # extension is added for refine_style = artn.
     event_search = EventSearch.create(config.eventsearch.style, config=config)
     # KMC
     factory = EngineManagerFactory(
@@ -41,7 +43,9 @@ def main() -> None:
         comm=comm,
         engine_config=config.lammps,
         group_size=group_size,
-        engine_extensions=event_search.engine_extensions,
+        engine_extensions=with_refiner(
+            event_search.engine_extensions, config.eventsearch.refine_style
+        ),
     )
     manager = factory.launch()
     if manager is not None:  # On rank 0

@@ -15,6 +15,7 @@ from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
 from .rate_constant import RateConstant
 from .eventsearch import EventSearch
+from .eventsearch.strategies.artn import ignored_partn_parameters
 from .bias import DirectionBias, PointBias, TopoBias
 import pickle
 
@@ -41,6 +42,7 @@ class Initializer:
         self.initialize_atomic_environments()
         self.initialize_rate_constant()
         self.initialize_event_search()
+        self.log_ignored_refine_settings()
         self.initialize_reference_table()
         self._initialize_visited_environments()
         self.initialize_bias()
@@ -144,6 +146,26 @@ class Initializer:
         self.kmc.event_search = EventSearch.create(
             self.kmc.config.eventsearch.style, config=self.kmc.config
         )
+
+    def log_ignored_refine_settings(self) -> None:
+        """Log once the `[pARTn]` settings the ARTn refiner does not follow.
+
+        Only with `refine_style = artn` and a search style other than `artn`;
+        with `style = artn` the search's warning lists them, at its first
+        submit.
+        """
+        eventsearch = self.kmc.config.eventsearch
+        if eventsearch.refine_style != "artn" or eventsearch.style == "artn":
+            return
+        ignored = ignored_partn_parameters(
+            self.kmc.config.partn, eventsearch.style, "artn"
+        )
+        if ignored:
+            self.kmc.loggers.warning(
+                "log",
+                "[EventSearch] refine_style = artn ignores these [pARTn] settings: "
+                + "; ".join(f"{name} = {why}" for name, why in ignored.items()),
+            )
 
     def initialize_reference_table(self) -> None:
         """Initialize the Reference Event Table."""

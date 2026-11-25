@@ -225,7 +225,7 @@ For a detailed explanation of the pARTn algorithm and its parameters, please ref
 ### Dimer
 
 With `style = dimer`, new events are found with the dimer method (ported from SEAKMC, Liang and Xu 2023), and
-refinement still uses pARTn. A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
+refinement uses pARTn unless `refine_style = artn` (see [Refinement with ARTn](#refinement-with-artn)). A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
 section configures the refinement (the `r_` parameters).
 
 Each search starts from a random direction, drawn from a seed. With `seed` set in `[Control]`, the run draws
@@ -274,7 +274,7 @@ sessions with fewer ranks each instead.
 ### ARTn in pyKMC
 
 With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of pARTn v1.1.0 (Poberznik et al.
-2024), and refinement still uses pARTn. It reads its parameters from the `[pARTn]` section, so an existing input
+2024), and refinement uses pARTn unless `refine_style = artn`. It reads its parameters from the `[pARTn]` section, so an existing input
 switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
 volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy` and `eam/fs`,
@@ -309,6 +309,26 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
 rmov = 10.7
 ract = 14.2
 artn_forces = crop
+```
+
+### Refinement with ARTn
+
+`refine_style` in `[EventSearch]` chooses the refiner, for any `style`: `partn` (the default) or `artn`, pyKMC's
+own ARTn. Both read the `r_` parameters of `[pARTn]`. The ARTn refiner does what pyKMC does with pARTn: it sets
+the rcut atoms at the reference saddle, relaxes the other atoms with LAMMPS (`min_style`, `frz_min`; with the
+active volume on, only those within `rmov`), then runs ARTn from there, stopping at the saddle, up to
+`r_max_attempts` times. A saddle closer than `r_delr_sad_thr` to the start is accepted. Each attempt starts
+afresh with its own seed, drawn from a stream of its own that `seed` in `[Control]` starts, so adding refinement
+changes no search seed and the seeds do not depend on the number of LAMMPS instances. `zseed` is not read, and
+`r_neigen` other than 1 is logged as ignored. The barrier is the saddle's potential energy minus the minimum's,
+with or without the active volume. The ARTn refiner runs on the full system only: with the active volume on, it
+needs `artn_forces = full`.
+
+```ini
+[EventSearch]
+style = artn
+nsearch = 50
+refine_style = artn
 ```
 
 ## Rate Constant 

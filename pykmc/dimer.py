@@ -225,6 +225,10 @@ class DimerResult(NamedTuple):
         Callback calls including the two minimisations.
     seed : int
         Seed of the starting direction.
+    delr_sad : Optional[float]
+        3N minimum-image distance from the start to the saddle, Å, pARTn's
+        ``delr_sad``. Set by the ARTn core once it reaches a saddle; the
+        dimer leaves it None.
 
     """
 
@@ -244,6 +248,7 @@ class DimerResult(NamedTuple):
     force_calls_saddle: int
     force_calls_total: int
     seed: int
+    delr_sad: Optional[float] = None
 
 
 class _NonFiniteForce(Exception):

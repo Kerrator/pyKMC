@@ -32,7 +32,7 @@ def _refinement(outcomes: dict[int, object]) -> tuple[Refinement, StubLoggers]:
     """Build a Refinement whose refinements return ``outcomes[reference event]``."""
     config = SimpleNamespace(
         control=SimpleNamespace(active_volume=False),
-        eventsearch=SimpleNamespace(refined_energy_thr=0.05),
+        eventsearch=SimpleNamespace(refined_energy_thr=0.05, refine_style="partn"),
         partn=SimpleNamespace(r_delr_sad_thr=0.4),
     )
     loggers = StubLoggers()

@@ -212,7 +212,17 @@ class EventSearchConfig(BaseModel):
         "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section), "
         "or 'artn' (pyKMC's own ARTn finds the events with the [pARTn] parameters and "
         "pARTn refines them; seeded from [Control] seed, not zseed; settings it does not "
-        "follow, neigen other than 1 and a set zseed, are logged once).",
+        "follow, neigen other than 1 and a set zseed, are logged once). `refine_style` "
+        "chooses the refiner for every style.",
+    )
+    refine_style: Literal["partn", "artn"] = Field(
+        default="partn",
+        description="Method used to refine events, for any `style`: 'partn' (pARTn, as "
+        "before) or 'artn' (pyKMC's own ARTn, stopping at the saddle, with the [pARTn] "
+        "r_* parameters; each attempt has its own seed from a child of the [Control] seed "
+        "stream, not zseed; r_neigen other than 1 is logged as ignored). 'artn' runs on "
+        "the full system only: with the active volume on it needs "
+        "[ActiveVolume] artn_forces = full.",
     )
     nsearch: int = Field(
         ...,
@@ -663,7 +673,8 @@ class ActiveVolume(BaseModel):
         description="Force region of a `[EventSearch] style = artn` search: 'full', the "
         "dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or "
         "'crop', pARTn's (only the atoms within `ract`, those beyond `rmov` with zero force), "
-        "which gives pARTn's forces for comparing the two searches. Other styles ignore it.",
+        "which gives pARTn's forces for comparing the two searches. Other styles ignore it. "
+        "`[EventSearch] refine_style = artn` refines on 'full' only.",
     )
 
 
@@ -1168,6 +1179,7 @@ class Config(BaseModel):
             ("eventsearch.style", "partn"): ["partn"],
             ("eventsearch.style", "dimer"): ["dimer", "partn"],
             ("eventsearch.style", "artn"): ["partn"],
+            ("eventsearch.refine_style", "artn"): ["partn"],
             ("psr.style", "ira"): ["ira"],
             ("control.basin", True): ["basin"],
             ("control.active_volume", True): ["activevolume"],
@@ -1188,6 +1200,16 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        if (
+            self.eventsearch.refine_style == "artn"
+            and self.control.active_volume
+            and self.activevolume is not None
+            and self.activevolume.artn_forces == "crop"
+        ):
+            raise ValueError(
+                "[EventSearch] refine_style = artn runs on the full system only; "
+                "set [ActiveVolume] artn_forces = full"
+            )
         if (
             self.eventsearch.style == "dimer"
             and self.dimer is not None

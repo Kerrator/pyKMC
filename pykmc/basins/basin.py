@@ -17,6 +17,7 @@ from typing import Optional
 from ..utils import geometry
 from ..log import LogKMC
 from ..rate_constant import RateConstant, RateRequest
+from ..refinement import submit_artn_refine
 import pandas as pd
 import copy
 import numpy as np
@@ -73,8 +74,13 @@ class BasinsGenericEvents:
         manager,
         rate_constant: RateConstant = None,
         loggers: LogKMC = None,
+        refine_seeds: Optional[np.random.Generator] = None,
     ) -> None:
         self.config = config  # Config object with basins parameters
+        # the run's refinement seed stream, needed with refine_style = artn
+        self.refine_seeds = refine_seeds
+        if config.eventsearch.refine_style == "artn" and refine_seeds is None:
+            raise ValueError("refine_style = artn needs the run's refinement seeds")
         self.explorer = None  # object to explore a state in the basin
         self.reference_table = reference_table  # Object with reference generic events
         self.manager = manager  # object to do external task (minimize, refine)
@@ -566,7 +572,20 @@ class BasinsGenericEvents:
                     "rcut", row["central_atom"]
                 )
 
-                if self.config.control.active_volume == True:
+                if self.config.eventsearch.refine_style == "artn":
+                    future2 = submit_artn_refine(
+                        self.manager,
+                        self.config,
+                        self.refine_seeds,
+                        row["central_atom"],
+                        tmp_system.positions.copy(),
+                        tmp_system.cell,
+                        tmp_system.types.copy(),
+                        tmp_system.pbc,
+                        neighbors.copy(),
+                        saddle_positions.copy(),
+                    )
+                elif self.config.control.active_volume == True:
                     # add a job to manager queue
                     future2 = self.manager.partn_refine(
                         config=self.config,
@@ -607,7 +626,11 @@ class BasinsGenericEvents:
             if not result_sad.is_ok():
                 return result_sad
             E_sad = result_sad.ok_value().E_saddle
-            if self.config.control.active_volume == True:
+            # pARTn with the active volume, and the ARTn refiner, give the barrier
+            if (
+                self.config.control.active_volume == True
+                or self.config.eventsearch.refine_style == "artn"
+            ):
                 dE = E_sad
             else:
                 dE = E_sad - E_min

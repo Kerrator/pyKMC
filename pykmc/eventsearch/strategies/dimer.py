@@ -82,24 +82,7 @@ class DimerStrategy(EventSearchStrategy):
             Sorted atom indices.
 
         """
-        positions = np.asarray(system.positions)
-        pbc = np.array(system.pbc, dtype=bool)
-        if self.config.control.active_volume:
-            offsets = _minimum_image(
-                positions - positions[central_atom], system.cell, pbc=pbc
-            )
-            movable = np.linalg.norm(offsets, axis=1) <= self.config.activevolume.rmov
-        else:
-            movable = np.ones(len(positions), dtype=bool)
-        if self.config.frozen_atoms is not None:
-            frozen = AtomicEnvironment(
-                style="region",
-                region=self.config.frozen_atoms,
-                positions=positions,
-                atom_types=system.types,
-            ).get_atoms_with_id("in")
-            movable[list(frozen)] = False
-        return np.flatnonzero(movable)
+        return movable_atom_indices(self.config, central_atom, system)
 
     def submit(self, requests: list[SearchRequest], manager: Manager) -> list[Future]:
         """Submit one `dimer_search` op per request.
@@ -154,6 +137,50 @@ class DimerStrategy(EventSearchStrategy):
                 )
             )
         return futures
+
+
+def movable_atom_indices(config: Any, central_atom: int, system: Any) -> np.ndarray:
+    """Return the atoms a dimer or ARTn search, or an ARTn refinement, may move.
+
+    Those within `rmov` of the central atom (minimum image) with the active
+    volume on, every atom with it off, and in both cases none of
+    `[frozen_atoms]`.
+
+    Parameters
+    ----------
+    config : Config
+        Reads `[Control] active_volume`, `[ActiveVolume] rmov` and
+        `[frozen_atoms]`.
+    central_atom : int
+        Index of the atom the search is centred on.
+    system : System
+        The atomic system, or anything with its ``positions``, ``cell``,
+        ``pbc`` and ``types``.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted atom indices.
+
+    """
+    positions = np.asarray(system.positions)
+    pbc = np.broadcast_to(np.asarray(system.pbc, dtype=bool), (3,))
+    if config.control.active_volume:
+        offsets = _minimum_image(
+            positions - positions[central_atom], system.cell, pbc=pbc
+        )
+        movable = np.linalg.norm(offsets, axis=1) <= config.activevolume.rmov
+    else:
+        movable = np.ones(len(positions), dtype=bool)
+    if config.frozen_atoms is not None:
+        frozen = AtomicEnvironment(
+            style="region",
+            region=config.frozen_atoms,
+            positions=positions,
+            atom_types=system.types,
+        ).get_atoms_with_id("in")
+        movable[list(frozen)] = False
+    return np.flatnonzero(movable)
 
 
 def dimer_search_result(
