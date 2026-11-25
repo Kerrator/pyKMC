@@ -4,11 +4,12 @@ Issue 02 of the Python ARTn plan recorded the eight Fig. 2 searches at every
 force evaluation (``searchJ.npz``, NumPy only; layout in that issue's
 ``NOTE.md``). :func:`replay` runs :func:`pykmc.artn.artn_search` from the
 recorded start with the recorded initial push, first Lanczos vector and the
-push each new chance built. Its force callback returns the recorded forces of
-pARTn's next step, with the positions LAMMPS held there (pARTn's alignment
-test reads them, wrapped into the cell), and compares the positions the core
-asked for with the positions pARTn evaluated there. The core carries its own
-state; nothing is reset from the recording.
+push each new chance built. Its force callback returns the recorded energy and
+forces of pARTn's next step and compares the positions the core asked for with
+the positions pARTn evaluated there. It does not return the positions LAMMPS
+held: the core's alignment test must find them itself, by LAMMPS's rule for
+wrapping atoms into the cell. The core carries its own state; nothing is reset
+from the recording.
 
 pARTn evaluates more often than it steps: the setup evaluation, each blank
 call A after a FIRE restart (the repeats, whose forces fix artn discards) and
@@ -510,8 +511,7 @@ def replay(
             or step.block not in CORE_BLOCKS.get(step.move, ())
         ):
             raise _Stop("mismatch")
-        # The positions as LAMMPS held them, for the alignment test.
-        return float(rec["energy"][e]), rec["f"][e], rec["x"][e]
+        return float(rec["energy"][e]), rec["f"][e]
 
     p = dict(rec["params"])
     vector = rec["first_lanczos_vector"]
