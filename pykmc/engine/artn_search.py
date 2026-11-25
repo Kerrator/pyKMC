@@ -51,10 +51,11 @@ class ArtnSearchExtension(DimerSearchExtension):
         with the ARTn core in place of the dimer's. ``options`` are keyword
         options of :func:`pykmc.artn.artn_search` (the `[pARTn]` parameters it
         takes) plus the worker options ``reuse_neighbor_list`` and
-        ``eam_force_crop``, and ``crop_radii`` (default None). On a multi-rank
-        worker, ``reuse_neighbor_list`` is on by default for ``eam/alloy`` and
-        ``eam/fs``, and ``eam_force_crop`` is off by default. ``crop_radii =
-        (rmov, ract)`` runs the search on pARTn's active-volume crop
+        ``eam_force_crop``, and ``crop_radii`` (default None). On any worker,
+        ``reuse_neighbor_list`` is on by default for ``eam/alloy`` and
+        ``eam/fs``, as for the dimer, and ``eam_force_crop`` is off by
+        default. ``crop_radii = (rmov, ract)`` runs the search on pARTn's
+        active-volume crop
         (:meth:`_crop_search`) instead of the full system, on the leader rank
         whatever the worker's size. FIRE gets the masses the force instance
         uses: pyKMC sets them from ASE's table, and an EAM file read by
@@ -79,6 +80,10 @@ class ArtnSearchExtension(DimerSearchExtension):
                 seed,
                 search_options,
             )
+        search_options.setdefault(
+            "reuse_neighbor_list",
+            self.engine.config.pair_style.strip() in {"eam/alloy", "eam/fs"},
+        )
         comm = self.engine.comm
         if comm is not None and comm.Get_size() > 1:
             from .artn_ranks import distributed_search

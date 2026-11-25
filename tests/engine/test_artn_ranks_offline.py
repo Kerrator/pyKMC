@@ -563,3 +563,34 @@ def test_assembled_periodic_endpoints_reach_the_catalogue(
     ):
         expected = translate(source[[mover]], shift, system.cell)
         np.testing.assert_array_equal(stored[row.move_atom_idx], expected[0])
+
+
+@pytest.mark.parametrize(
+    ("pair_style", "options", "expected"),
+    [
+        ("eam/fs", {}, True),
+        ("eam/alloy ", {}, True),
+        ("lj/cut 2.5", {}, False),
+        ("eam/fs", {"reuse_neighbor_list": False}, False),
+    ],
+)
+def test_one_rank_worker_reuses_neighbor_lists_by_default(
+    monkeypatch: pytest.MonkeyPatch, pair_style: str, options: dict, expected: bool
+) -> None:
+    """A one-rank worker reuses neighbor lists for eam/alloy and eam/fs, as the dimer."""
+    from pykmc.engine.artn_search import ArtnSearchExtension
+
+    engine = Mock()
+    engine.comm = None
+    engine.config.pair_style = pair_style
+    extension = ArtnSearchExtension(engine)
+    seen = {}
+
+    def search(core: Callable, *args: Any) -> None:
+        seen["options"] = args[-1]
+
+    monkeypatch.setattr(extension, "_search", search)
+    extension.artn_search(
+        np.zeros((1, 3)), ["Fe"], np.eye(3), [True] * 3, [0], 0, 1, options
+    )
+    assert seen["options"]["reuse_neighbor_list"] is expected

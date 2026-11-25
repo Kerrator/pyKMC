@@ -278,8 +278,8 @@ With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of 
 switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
 volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy` and `eam/fs`,
-multi-rank workers reuse neighbor lists by default and one-rank workers do not. The ARTn input file cannot change
-either default.
+every worker reuses neighbor lists between force calls, as the dimer does by default. The ARTn input file cannot
+change this.
 
 Each search is seeded from the run-wide stream that `seed` in `[Control]` starts, as for the dimer, so a run with
 the same seed finds the same events whatever the number of LAMMPS instances. `zseed` does not seed these searches;
