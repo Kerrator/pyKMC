@@ -300,7 +300,8 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
   moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
   this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
-  z, and runs on one rank of each worker.
+  z, and runs on one rank of each worker. For `eam/alloy` and `eam/fs` it reuses neighbor lists between force
+  calls too, which changes the cost of a force call and not the search.
 
 ```ini
 [ActiveVolume]
