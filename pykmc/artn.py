@@ -61,10 +61,10 @@ callback call:
   pushes from the start's push, mixed with a random part (``alpha_mix_cr``),
   back in the basin; after that the search fails;
 - a push off the saddle along +eigenvector, of ``eigen_step_size * push_over
-  * 0.8``, and FIRE relaxation to the first minimum on the full force.
-  Returning to the saddle clears the velocity but carries FIRE's time step.
-  One step using the first minimum's force precedes the opposite push and
-  relaxation to the second minimum.
+  * 0.8``, and FIRE relaxation to the first minimum on the full force. The
+  search then returns to the saddle with zero velocity and keeps FIRE's time
+  step. It takes one step with the first minimum's force before the opposite
+  push and the relaxation to the second minimum.
 
 FIRE is LAMMPS's (euler implicit) with the settings pARTn's fix gives it, in
 LAMMPS metal units: time step 0.001 ps, masses in amu, ``alpha0`` 0.1,
@@ -209,7 +209,7 @@ Observer = Callable[[str, Optional[tuple]], None]
 
 
 class DrawOrder:
-    """Map stable global draw ordinals to this rank's rows."""
+    """Map each atom's place in the serial draw order to its row on this rank."""
 
     def __init__(self, rows: np.ndarray, ordinals: np.ndarray, total: int) -> None:
         self.rows = rows
@@ -220,8 +220,8 @@ class DrawOrder:
         """Consume the same PCG64 draws in the same order on every rank."""
         out = np.zeros((size, 3))
         stream = cast(np.random.PCG64, rng.bit_generator)
-        # Skip draws owned by other ranks; contiguous runs retain NumPy's
-        # exact serial sequence and do not allocate their random vectors.
+        # Skip other ranks' draws by advancing the stream, without generating
+        # them. Each run of consecutive ordinals gets NumPy's serial values.
         cursor = 0
         for group in np.split(
             np.arange(len(self.rows)), np.flatnonzero(np.diff(self.ordinals) != 1) + 1
@@ -248,7 +248,7 @@ def _draw_rows(
     push_mode: str,
     radius: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return serial row order for the initial push and Lanczos draws."""
+    """Return the rows of the initial push and Lanczos draws in serial order."""
     offsets = _minimum_image(x - x[central], cell, pbc)
     pushed = (
         np.arange(len(x)) == central
@@ -264,15 +264,15 @@ class NumpyVectorSpace:
     """Reductions over whole-system (N, 3) arrays held on one rank."""
 
     def atom_count(self, local: int) -> int:
-        """Return the full input system size."""
+        """Return the number of atoms in the whole system."""
         return local
 
     def count(self, local: int) -> int:
-        """Sum a count across the search."""
+        """Sum a count over all ranks."""
         return local
 
     def all_true(self, local: bool) -> bool:
-        """Require a condition on every partition."""
+        """Return whether a condition holds on every rank."""
         return local
 
     def draw_orders(
@@ -285,7 +285,7 @@ class NumpyVectorSpace:
         push_mode: str,
         radius: float,
     ) -> tuple[DrawOrder, DrawOrder]:
-        """Return the two draw plans in serial geometric order."""
+        """Return the push and Lanczos draw orders in serial geometric order."""
         pushed, movable = _draw_rows(x, central, cell, pbc, mask, push_mode, radius)
         return (
             DrawOrder(pushed, np.arange(len(pushed)), len(pushed)),
@@ -312,7 +312,7 @@ class _Failed(Exception):
 def _wrap_result_positions(
     positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray
 ) -> np.ndarray:
-    """Return ARTn endpoint coordinates in the periodic catalogue box."""
+    """Return ARTn endpoint coordinates wrapped into the periodic catalogue box."""
     result = _wrap(positions, cell, pbc)
     lengths = np.diag(cell)
     if np.array_equal(cell, np.diag(lengths)) and np.all(lengths > 0):
@@ -321,8 +321,8 @@ def _wrap_result_positions(
             invalid = (result[:, axis] < 0) | (result[:, axis] >= length)
             if invalid.any():
                 # Adding L to a tiny negative coordinate can round to L itself.
-                # Recover the image from the original input: an interior point
-                # just below L must survive even if the reciprocal rounded up.
+                # Take the image from the input coordinate instead, so a point
+                # just below L stays there even if the reciprocal rounded it up.
                 image = np.remainder(positions[invalid, axis], length)
                 result[invalid, axis] = np.where(image == length, 0.0, image)
     return result
@@ -483,9 +483,9 @@ def artn_search(
         the draw is. For step replay of a recorded pARTn search.
     first_lanczos_vector : Optional[np.ndarray]
         (N, 3) vector that replaces the random draw of the first Lanczos
-        direction. Its direction is used without applying the movable mask.
-        Components on frozen atoms move them during probes, reproducing
-        pARTn's buffer motion in step replay.
+        direction. The search uses its direction without the movable mask.
+        Its components on frozen atoms move those atoms during probes. Step
+        replay needs this to reproduce pARTn's buffer motion.
     new_chance_pushes : Optional[Sequence[np.ndarray]]
         (N, 3) pushes, Å, that replace the pushes the new chances build, in
         order, used as given. For step replay.
