@@ -253,7 +253,7 @@
   </details>
 - **`search_cmdargs`** : `list[str]`, optional
   <details><summary>Description</summary>
-  LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.
+  LAMMPS arguments added after `cmdargs` on the private force instance for dimer and ARTn searches. Python ARTn active-volume refinement also uses this instance for pre-relaxation and saddle refinement. For KOKKOS active-volume refinement, set `min_style = cg` and include `-sf kk` in these arguments.
   </details>
 - **`search_pair_style`** : `str`, optional
   <details><summary>Description</summary>

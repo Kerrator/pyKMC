@@ -101,15 +101,17 @@ group_size = 1
 [Lammps]
 pair_style = mtp ./Zr.mtp chunksize 32768
 pair_coeff = * *
+min_style = cg
 library = mtpkk
 search_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
 search_pair_style = mtp/small ./Zr.mtp chunksize 32768
 group_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
 group_pair_style = mtp/small ./Zr.mtp chunksize 32768
 ```
-- The KOKKOS arguments must go in `search_cmdargs` and `group_cmdargs`, not `cmdargs`. Event refinement and the
-  `partn` search run pARTn on the workers' own instances. pARTn minimizes with `min_style fire`, and LAMMPS
-  refuses that minimizer with KOKKOS on, so refinement stays on the CPU.
+- Put KOKKOS arguments in `search_cmdargs` and `group_cmdargs`. Workers that run pARTn searches or refinements
+  use the CPU because pARTn requires the FIRE minimizer. With `refine_style = artn` and `artn_forces = av`,
+  the search instance also pre-relaxes and refines the saddle. For KOKKOS on that instance, use `-sf kk` in
+  `search_cmdargs` and `min_style = cg`, including when the group instance uses the CPU.
 - The group instance never runs pARTn, so `group_cmdargs` also works with `style = partn`. With KOKKOS on it
   needs `-sf kk` and `min_style = cg` (KOKKOS has no other minimizer). Set `group_size = 1` on one GPU: with more
   ranks they share the card, which works but is slower. Give `search_cmdargs` and `group_cmdargs` the same
