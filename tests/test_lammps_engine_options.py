@@ -89,6 +89,9 @@ class _FakeLammps:
         assert name == "kokkos_active"
         return int(self.kokkos)
 
+    def close(self) -> None:
+        pass
+
 
 def _started_engine(monkeypatch, cfg, engine_id=0, kokkos=False, **engine_kwargs):
     """Start a ``LammpsEngine`` with ``lammps(...)`` replaced; return it and the keyword arguments it passed."""
@@ -222,3 +225,108 @@ def test_neighbor_reuse_is_decided_by_the_search_instances_pair_style() -> None:
         search_pair_style="mtp/small pot.mtp chunksize 64",
     )
     assert supports_neighbor_reuse(search_pair_style(mixed))
+
+
+# ---------------------------------------------------------------------------
+# [Lammps] group_cmdargs and group_pair_style: the group instance (lammps.log.0), which does the
+# full-cell minimizations (the first one and event execution) and never runs pARTn.
+# ---------------------------------------------------------------------------
+
+
+def test_group_keys_parse(tmp_path: Path) -> None:
+    config = Config.from_ini_file(str(_INPUT))
+    assert config.lammps.group_cmdargs is None
+    assert config.lammps.group_pair_style is None
+    path = _ini_with_lammps_lines(
+        tmp_path,
+        f"group_cmdargs = {_KOKKOS}",
+        "group_pair_style = mtp/small pot.mtp chunksize 32768",
+    )
+    config = Config.from_ini_file(str(path))
+    assert config.lammps.group_cmdargs == _KOKKOS.split()
+    assert config.lammps.group_pair_style == "mtp/small pot.mtp chunksize 32768"
+
+
+@pytest.mark.parametrize(
+    "engine_kwargs, extra",
+    [
+        ({}, []),
+        ({"group_instance": True}, ["-sf", "kk"]),
+        ({"search_instance": True}, ["-sf", "omp"]),
+    ],
+)
+def test_group_cmdargs_go_to_the_group_instance_only(
+    monkeypatch, engine_kwargs, extra
+) -> None:
+    cfg = LammpsConfig(
+        pair_style="mtp pot.mtp chunksize 32768",
+        pair_coeff="* *",
+        verbosity=0,
+        cmdargs="-echo none",
+        search_cmdargs="-sf omp",
+        group_cmdargs="-sf kk",
+    )
+    _, seen = _started_engine(monkeypatch, cfg, **engine_kwargs)
+    assert (
+        seen["cmdargs"] == ["-screen", "none", "-log", "none", "-echo", "none"] + extra
+    )
+
+
+@pytest.mark.parametrize(
+    "engine_kwargs, style",
+    [
+        ({}, "mtp pot.mtp chunksize 32768"),
+        ({"group_instance": True}, "mtp/small pot.mtp chunksize 32768"),
+        ({"search_instance": True}, "mtp pot.mtp chunksize 64"),
+    ],
+)
+def test_group_pair_style_goes_to_the_group_instance_only(
+    monkeypatch, engine_kwargs, style
+) -> None:
+    cfg = LammpsConfig(
+        pair_style="mtp pot.mtp chunksize 32768",
+        pair_coeff="* *",
+        verbosity=0,
+        search_pair_style="mtp pot.mtp chunksize 64",
+        group_pair_style="mtp/small pot.mtp chunksize 32768",
+    )
+    engine, _ = _started_engine(monkeypatch, cfg, **engine_kwargs)
+    engine.initialize_potential()
+    assert engine.lmp.commands == [f"pair_style {style}", "pair_coeff * *"]
+
+
+def test_the_group_instance_opens_as_before_without_the_keys(monkeypatch) -> None:
+    engine, seen = _started_engine(monkeypatch, _OldConfig(), group_instance=True)
+    assert seen == {"comm": None, "cmdargs": ["-screen", "none", "-log", "none"]}
+    engine.initialize_potential()
+    assert engine.lmp.commands[0] == "pair_style lj/cut 6.0"
+
+
+@pytest.mark.parametrize("mode, group", [("group", True), ("local", False)])
+def test_factory_marks_the_group_engine(mode, group) -> None:
+    pytest.importorskip("lammps")
+    from pykmc.factory import EngineManagerFactory
+
+    factory = EngineManagerFactory.__new__(EngineManagerFactory)
+    factory._engine_style = "lammps"
+    factory._engine_config = _OldConfig()
+    factory._engine_extensions = []
+    engine = factory._make_engine(None, mode, 2)
+    assert engine.group_instance is group
+    assert engine.engine_id == (0 if group else 3)
+
+
+@pytest.mark.parametrize("min_style, accepted", [("cg", True), ("fire", False)])
+def test_group_instance_under_kokkos_needs_min_style_cg(
+    monkeypatch, min_style, accepted
+) -> None:
+    """KOKKOS has `cg` only (cg/kk); LAMMPS would stop at the first minimization, naming `cg/kk`."""
+    cfg = _OldConfig(min_style=min_style)
+    if accepted:
+        _started_engine(monkeypatch, cfg, kokkos=True, group_instance=True)
+    else:
+        with pytest.raises(ValueError, match="min_style"):
+            _started_engine(monkeypatch, cfg, kokkos=True, group_instance=True)
+    # Without KOKKOS, and on the other instances, min_style is not checked.
+    _started_engine(monkeypatch, cfg, kokkos=False, group_instance=True)
+    _started_engine(monkeypatch, cfg, kokkos=True)

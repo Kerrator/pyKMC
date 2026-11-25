@@ -61,6 +61,7 @@ class EngineManagerFactory(ManagerFactory):
             config=self._engine_config,
             comm=engine_comm,
             engine_id=engine_id,
+            group_instance=mode == "group",
         )
         for ext_cls in self._engine_extensions:
             ext_cls(engine)

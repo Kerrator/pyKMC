@@ -164,6 +164,7 @@ class LammpsEngine(Engine):
         comm: MPI.Intracomm | None = None,
         engine_id: int | str = 0,
         search_instance: bool = False,
+        group_instance: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
@@ -171,6 +172,8 @@ class LammpsEngine(Engine):
         self.engine_id = engine_id
         # A search's own instance for force calls: it also gets [Lammps] search_cmdargs.
         self.search_instance = search_instance
+        # The group instance (full-cell minimizations, never pARTn): it also gets [Lammps] group_cmdargs.
+        self.group_instance = group_instance
         self._is_orthorhombic = None
         self.lmp: lammps | None = None
         self.kokkos = False  # set by start(): this instance runs with KOKKOS on
@@ -206,17 +209,27 @@ class LammpsEngine(Engine):
         engine_log = (
             "none" if self.config.verbosity == 0 else f"lammps.log.{self.engine_id}"
         )
-        # [Lammps] library, cmdargs and search_cmdargs; a config object without them opens LAMMPS as before.
+        # [Lammps] library, cmdargs, search_cmdargs and group_cmdargs; a config object without them opens
+        # LAMMPS as before.
         library = getattr(self.config, "library", None)
         extra = list(getattr(self.config, "cmdargs", None) or [])
         if self.search_instance:
             extra += getattr(self.config, "search_cmdargs", None) or []
+        if self.group_instance:
+            extra += getattr(self.config, "group_cmdargs", None) or []
         self.lmp = lammps(
             **({"name": library} if library else {}),
             comm=self.comm,
             cmdargs=["-screen", "none", "-log", engine_log, *extra],
         )
         self.kokkos = self.lmp.extract_setting("kokkos_active") == 1
+        if self.group_instance and self.kokkos and self.config.min_style != "cg":
+            # LAMMPS would stop at the first minimization and suggest cg/kk, which the CPU instances refuse.
+            self.close()
+            raise ValueError(
+                "[Lammps] min_style must be cg when the group instance runs with KOKKOS on "
+                f"(got {self.config.min_style!r}): cg is the only minimizer KOKKOS has"
+            )
 
     def close(self) -> None:
         if self.lmp is not None:
@@ -339,11 +352,11 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
-        pair_style = (
-            search_pair_style(self.config)
-            if self.search_instance
-            else self.config.pair_style
-        )
+        pair_style = self.config.pair_style
+        if self.search_instance:
+            pair_style = search_pair_style(self.config)
+        elif self.group_instance:
+            pair_style = getattr(self.config, "group_pair_style", None) or pair_style
         self.lmp.command("pair_style {}".format(pair_style))
         for pair_coeff in self.config.pair_coeff:
             self.lmp.command("pair_coeff {}".format(pair_coeff))
