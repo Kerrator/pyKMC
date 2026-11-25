@@ -858,9 +858,25 @@ class KMC:
             active_table.table.loc[idx_selected_event].at["final_positions"]
         )
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
+        # Atoms outside rcut that the saddle displaces. They are stored as
+        # displacements from the minimum the event was refined in, so a recycled
+        # event moves them from where they are now.
+        outer_atoms = event.get("outer_atoms")
+        outer_initial_positions = None
+        if isinstance(outer_atoms, np.ndarray) and len(outer_atoms) > 0:
+            outer_initial_positions = self.system.positions[outer_atoms].copy()
+            outer_saddle_positions = (
+                outer_initial_positions + event.at["outer_saddle_displacements"]
+            )
+        else:
+            outer_atoms = None
 
         # Move the system to the saddle point
         self.system.update_positions(new_positions=saddle_positions, atom_idx=neighbors)
+        if outer_atoms is not None:
+            self.system.update_positions(
+                new_positions=outer_saddle_positions, atom_idx=outer_atoms
+            )
 
         # try to reconstruct
         result = Reconstruction(
@@ -872,6 +888,8 @@ class KMC:
             self.system.cell,
             self.config.psr.matching_score_thr,
             neighbors,
+            outer_atoms=outer_atoms,
+            outer_min1_positions=outer_initial_positions,
         )
         # result with min1, saddle, min2 pos
 
@@ -879,6 +897,10 @@ class KMC:
         self.system.update_positions(
             new_positions=supposed_initial_positions, atom_idx=neighbors
         )
+        if outer_atoms is not None:
+            self.system.update_positions(
+                new_positions=outer_initial_positions, atom_idx=outer_atoms
+            )
         return result
 
     def _apply_event(
