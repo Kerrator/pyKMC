@@ -79,32 +79,45 @@ pair_coeff 1 1 zbl 28.0 28.0
 ```
 A value without brackets is one `pair_coeff` command, sent as written.
 
-#### Another LAMMPS library, and searches on a GPU
+#### Another LAMMPS library, and searches and minimizations on a GPU
 
-Four optional keys choose how LAMMPS is opened. With all of them unset pyKMC opens the default library as before.
+Six optional keys choose how LAMMPS is opened. With all of them unset pyKMC opens the default library as before.
 
 - `library` : the LAMMPS shared library to open. `library = mtpkk` opens `liblammps_mtpkk.so`, which must be on
   the library path (`LD_LIBRARY_PATH`).
 - `cmdargs` : extra LAMMPS command-line arguments for every LAMMPS instance of the run.
 - `search_cmdargs` : arguments added only for the instance a `dimer` or `artn` search makes for its force calls.
 - `search_pair_style` : the `pair_style` of that instance, when it must differ from `pair_style`.
+- `group_cmdargs` : arguments added only for the group instance (`lammps.log.0`), which does the full-cell
+  minimizations: the first one and those of event execution.
+- `group_pair_style` : the `pair_style` of that instance, when it must differ from `pair_style`.
 
-With a KOKKOS build of LAMMPS, this sends the force calls of the `artn` and `dimer` searches to one GPU:
+With a KOKKOS build of LAMMPS, this sends the force calls of the `artn` and `dimer` searches and the full-cell
+minimizations to one GPU:
 ```INI
+[Control]
+group_size = 1
+
 [Lammps]
 pair_style = mtp ./Zr.mtp chunksize 32768
 pair_coeff = * *
 library = mtpkk
 search_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
 search_pair_style = mtp/small ./Zr.mtp chunksize 32768
+group_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
+group_pair_style = mtp/small ./Zr.mtp chunksize 32768
 ```
-- The KOKKOS arguments must go in `search_cmdargs`, not `cmdargs`. Event refinement and the `partn` search run
-  pARTn, which minimizes with `min_style fire`, and LAMMPS refuses that minimizer with KOKKOS on. So
-  minimizations, refinements and event execution stay on the CPU and only the searches' force calls use the GPU.
-- `-sf kk` turns the search instance's pair style into its `/kk` variant. Without `search_pair_style` that is
-  `pair_style`, so one line must be valid for both: `mtp/kk` needs the `chunksize` argument and the CPU `mtp`
-  accepts it. `mtp/small/kk`, the style for a few hundred to a few thousand atoms, has no CPU version, which is
-  what `search_pair_style` is for. `pair_coeff` is shared.
+- The KOKKOS arguments must go in `search_cmdargs` and `group_cmdargs`, not `cmdargs`. Event refinement and the
+  `partn` search run pARTn on the workers' own instances. pARTn minimizes with `min_style fire`, and LAMMPS
+  refuses that minimizer with KOKKOS on, so refinement stays on the CPU.
+- The group instance never runs pARTn, so `group_cmdargs` also works with `style = partn`. With KOKKOS on it
+  needs `-sf kk` and `min_style = cg` (KOKKOS has no other minimizer). Set `group_size = 1` on one GPU: with more
+  ranks they share the card, which works but is slower. Give `search_cmdargs` and `group_cmdargs` the same
+  `-k on ...` arguments: KOKKOS starts once per process.
+- `-sf kk` turns an instance's pair style into its `/kk` variant. Without `search_pair_style` or
+  `group_pair_style` that is `pair_style`, so one line must be valid for both: `mtp/kk` needs the `chunksize`
+  argument and the CPU `mtp` accepts it. `mtp/small/kk`, the style for a few hundred to a few thousand atoms, has
+  no CPU version, which is what the two keys are for. `pair_coeff` is shared.
 - LAMMPS has no type labels with KOKKOS on, so pyKMC does not send its `labelmap` command to such an instance
   and `pair_coeff` cannot use type labels there.
 - When the GPU pays. The card serves one process at a time, so every worker opens the same GPU and a force call
@@ -118,6 +131,9 @@ search_pair_style = mtp/small ./Zr.mtp chunksize 32768
 
   `mtp/kk` costs about 75 ms per chunk of atoms whatever the chunk holds, so on an active volume of a few hundred
   atoms it is slower than the CPU as soon as two workers share the card; use `mtp/small/kk` there.
+- The group instance has the card to itself: pyKMC never runs a full-cell minimization while workers search.
+  On the same machine one minimization of a 1,441-atom Zr cell (61 iterations) takes 44 s on a core, 12.5 s with
+  `mtp/kk` and 2.5 s with `mtp/small/kk`, and ends at the same minimum.
 
 ## Atomic Environment 
 

@@ -249,7 +249,7 @@
   </details>
 - **`cmdargs`** : `list[str]`, optional
   <details><summary>Description</summary>
-  Extra LAMMPS command-line arguments for every LAMMPS instance of the run, written as on a command line and added after pyKMC's own `-screen none -log <file>`. KOKKOS arguments belong in `search_cmdargs`.
+  Extra LAMMPS command-line arguments for every LAMMPS instance of the run, written as on a command line and added after pyKMC's own `-screen none -log <file>`. KOKKOS arguments belong in `search_cmdargs` and `group_cmdargs`.
   </details>
 - **`search_cmdargs`** : `list[str]`, optional
   <details><summary>Description</summary>
@@ -258,6 +258,14 @@
 - **`search_pair_style`** : `str`, optional
   <details><summary>Description</summary>
   Lammps pair_style command for the LAMMPS instance a `dimer` or `artn` search makes for its force calls, when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `search_cmdargs`: `mtp/small/kk` is the fast style for a few hundred to a few thousand atoms and has no CPU version. None uses `pair_style`.
+  </details>
+- **`group_cmdargs`** : `list[str]`, optional
+  <details><summary>Description</summary>
+  LAMMPS command-line arguments added, after `cmdargs`, only for the group instance (`lammps.log.0`), which does the full-cell minimizations: the first one and those of event execution. It never runs pARTn, so KOKKOS arguments can go here, e.g. `-k on g 1 -sf kk -pk kokkos newton on neigh half`; they need `-sf kk`, `min_style = cg` (the only minimizer KOKKOS has) and, on one GPU, `[Control] group_size = 1`.
+  </details>
+- **`group_pair_style`** : `str`, optional
+  <details><summary>Description</summary>
+  Lammps pair_style command for the group instance (`lammps.log.0`, the full-cell minimizations), when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `group_cmdargs`. None uses `pair_style`.
   </details>
 
 ---
