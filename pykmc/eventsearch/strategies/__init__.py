@@ -1,3 +1,5 @@
+"""Event search strategies, each registered under its `[EventSearch] style` name."""
+
 from pykmc._core import autodiscover
 
 from .base import EventSearchStrategy

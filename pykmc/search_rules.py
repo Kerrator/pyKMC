@@ -22,7 +22,7 @@ Nothing here needs LAMMPS or pARTn, so the rules can be tested on recorded
 search outputs.
 """
 
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional, Sequence, Union
 
 import numpy as np
 from ase.geometry import find_mic
@@ -182,7 +182,7 @@ def artn_move_atom(
     min1_positions: np.ndarray,
     saddle_positions: np.ndarray,
     cell: np.ndarray,
-    pbc,
+    pbc: Union[bool, Sequence[bool]],
 ) -> np.intp:
     """Pick the atom that moves most from pARTn's first minimum to the saddle.
 

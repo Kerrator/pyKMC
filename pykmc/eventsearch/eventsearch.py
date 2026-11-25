@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 
@@ -144,7 +144,7 @@ class EventSearch:
         return self._strategy.engine_extensions
 
     @classmethod
-    def create(cls, style: str, **kwargs) -> "EventSearch":
+    def create(cls, style: str, **kwargs: Any) -> "EventSearch":
         """Build an EventSearch wired with the requested strategy.
 
         Parameters
