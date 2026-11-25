@@ -64,6 +64,7 @@ def _input(tmp_path: Path, extra_control: str = "", partn: str = "") -> str:
 
 
 def test_artn_with_a_partn_section_parses(tmp_path: Path) -> None:
+    """The ARTn style reads search parameters from the pARTn section."""
     config = Config.from_ini_file(_input(tmp_path))
 
     assert config.eventsearch.style == "artn"
@@ -71,6 +72,7 @@ def test_artn_with_a_partn_section_parses(tmp_path: Path) -> None:
 
 
 def test_artn_without_a_partn_section_fails(tmp_path: Path) -> None:
+    """Configuration parsing requires the pARTn section for ARTn searches."""
     text = INPUT.read_text().replace("style = partn", "style = artn")
     path = tmp_path / "input.in"
     path.write_text(text.replace("[pARTn] \n", ""))
@@ -79,7 +81,27 @@ def test_artn_without_a_partn_section_fails(tmp_path: Path) -> None:
         Config.from_ini_file(str(path))
 
 
+def test_strategy_rejects_mixed_nperp_limitation(tmp_path: Path) -> None:
+    """A mixed sentinel and explicit limit fails at strategy construction."""
+    config = Config.from_ini_file(_input(tmp_path, partn="nperp_limitation = 4, -2\n"))
+
+    with pytest.raises(ValueError, match="nperp_limitation"):
+        ArtnStrategy(config)
+
+
+@pytest.mark.parametrize("limits", [None, [-2, -2]], ids=["unset", "all-default"])
+def test_strategy_accepts_default_nperp_limitation(limits: list[int] | None) -> None:
+    """An unset list and an all-sentinel list reach the core as supplied."""
+    config = _av_config(rmov=None)
+    config.partn = PartnConfig(nperp_limitation=limits)
+
+    strategy = ArtnStrategy(config)
+
+    assert strategy.options["nperp_limitation"] == limits
+
+
 def test_options_are_the_core_keywords_from_the_partn_section(tmp_path: Path) -> None:
+    """The strategy passes supported pARTn settings under their core keyword names."""
     config = Config.from_ini_file(_input(tmp_path, partn="push_step_size = 0.3\n"))
     options = ArtnStrategy(config).options
     params = inspect.signature(artn_search).parameters
@@ -96,6 +118,7 @@ def test_options_are_the_core_keywords_from_the_partn_section(tmp_path: Path) ->
 
 
 def test_artn_supplies_its_engine_extension(tmp_path: Path) -> None:
+    """Selecting ARTn registers the engine operation for its search requests."""
     event_search = EventSearch.create(
         "artn", config=Config.from_ini_file(_input(tmp_path))
     )
@@ -108,6 +131,7 @@ def test_run_passes_the_artn_extension_to_every_rank(
     recorders: pytest.MonkeyPatch,  # noqa: F811
     tmp_path: Path,
 ) -> None:
+    """Run setup includes the ARTn extension when building the manager."""
     recorders.setattr(sys, "argv", ["pykmc", "-in", _input(tmp_path)])
     run.main()
 
@@ -118,6 +142,7 @@ def test_run_passes_the_artn_extension_to_every_rank(
 def test_request_carries_seed_and_movable_and_the_op_its_options(
     tmp_path: Path,
 ) -> None:
+    """Each worker request carries the seed, movable indices and search options."""
     rng = np.random.default_rng(3)
     system = _system(rng.uniform(0.0, 10.0, size=(12, 3)))
     manager = OrderedManager(2, [0, 1])
@@ -146,6 +171,7 @@ def test_request_carries_seed_and_movable_and_the_op_its_options(
 
 @pytest.mark.parametrize("rmov", [3.0, None])
 def test_movable_atoms_are_the_dimers(rmov: float | None) -> None:
+    """ARTn and the dimer choose the same movable atoms with frozen rows."""
     config = _av_config(rmov=rmov, frozen=[1, 5])
     config.partn = PartnConfig()
     positions = np.vstack([POSITIONS, [[1.0, 5.0, 5.0]]])
@@ -157,6 +183,7 @@ def test_movable_atoms_are_the_dimers(rmov: float | None) -> None:
 
 
 def test_active_volume_smaller_than_cutoff_is_rejected_before_any_submit() -> None:
+    """An undersized active volume fails before the manager receives a request."""
     config = _av_config(rmov=3.0)
     config.partn = PartnConfig()
     config.activevolume.ract = 6.0
@@ -178,6 +205,7 @@ CENTRAL = [3, 0, 7, 3, 11, 5, 0, 9]
 def test_one_control_seed_gives_the_same_seeds_for_any_worker_count(
     tmp_path: Path,
 ) -> None:
+    """Worker count and completion order preserve the run-wide seed sequence."""
     path = _input(tmp_path, extra_control="seed = 20261116\n")
 
     per_count = {}
@@ -230,6 +258,7 @@ class CoreManager:
 def test_same_control_seed_and_other_worker_counts_give_the_same_events(
     tmp_path: Path,
 ) -> None:
+    """The seeded analytic batch reproduces events and failures across pool sizes."""
     from pykmc.initializer import Initializer
     from pykmc.kmc import KMC
 
@@ -268,6 +297,7 @@ def test_same_control_seed_and_other_worker_counts_give_the_same_events(
 
 
 def test_results_go_through_the_shared_rules_as_artn() -> None:
+    """Accepted ARTn events retain their seed, barrier and force-call counts."""
     manager = OrderedManager(2, [1, 0])
     config = _av_config(rmov=None)
     config.partn = PartnConfig()
@@ -323,6 +353,8 @@ def test_participant_report_and_event_acceptance_use_separate_thresholds(
 
 
 def test_a_failed_search_maps_to_event_not_found_with_its_reason() -> None:
+    """A failed worker search carries its reason and seed into the event error."""
+
     class FailingManager:
         def submit(self, op_name: str, **kw: object) -> Future:
             future = Future()
@@ -362,6 +394,7 @@ def test_pykmc_defaults_and_the_gate_fe_block_ignore_nothing() -> None:
 
 
 def test_settings_the_core_follows_are_not_listed() -> None:
+    """Supported smoothing and perpendicular limits produce no ignored settings."""
     plain = PartnConfig(nsmooth=0, nperp=None, nperp_limitation=None)
     assert ignored_partn_parameters(plain) == {}
     unlimited = PartnConfig(nsmooth=0, nperp=-1, nperp_limitation=[-1])
@@ -385,6 +418,7 @@ def test_settings_the_core_follows_are_not_listed() -> None:
 def test_the_core_gets_partns_perp_limits(
     nperp: int | None, limitation: list[int] | None, expected: list[int]
 ) -> None:
+    """The forwarded basin and climb limits reproduce the expected pARTn schedule."""
     partn = PartnConfig(nperp=nperp, nperp_limitation=limitation)
     options = artn_options(partn)
 
@@ -414,6 +448,7 @@ def test_an_unset_nperp_with_a_list_still_ends_the_basin() -> None:
 
 
 def test_a_set_zseed_and_neigen_are_listed() -> None:
+    """Unsupported eigenvector counts and a pARTn seed appear in the warning."""
     ignored = ignored_partn_parameters(PartnConfig(nsmooth=0, zseed=12345, neigen=2))
 
     assert "zseed" in ignored and "[Control] seed" in ignored["zseed"]
@@ -421,6 +456,7 @@ def test_a_set_zseed_and_neigen_are_listed() -> None:
 
 
 def test_ignored_settings_are_logged_once() -> None:
+    """Repeated submissions through one strategy emit a single settings warning."""
     config = _av_config(rmov=None)
     config.partn = PartnConfig(neigen=2, zseed=7)
     strategy = ArtnStrategy(config)
