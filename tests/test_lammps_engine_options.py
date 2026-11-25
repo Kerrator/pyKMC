@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+from ase.cell import Cell
 
 from pykmc.config import Config, LammpsConfig
 
@@ -63,8 +66,26 @@ class _OldConfig:
     verbosity: int = 0
 
 
-def _start_and_record(monkeypatch, cfg, engine_id=0) -> dict:
-    """Start a ``LammpsEngine`` with ``lammps(...)`` replaced by a recorder; return its keyword arguments."""
+class _FakeLammps:
+    """Stand-in for the ``lammps`` object: records commands and reports whether KOKKOS is on."""
+
+    def __init__(self, kokkos: bool = False) -> None:
+        self.kokkos = kokkos
+        self.commands: list[str] = []
+
+    def command(self, cmd: str) -> None:
+        self.commands.append(cmd)
+
+    def create_atoms(self, *args) -> None:
+        pass
+
+    def extract_setting(self, name: str) -> int:
+        assert name == "kokkos_active"
+        return int(self.kokkos)
+
+
+def _started_engine(monkeypatch, cfg, engine_id=0, kokkos=False):
+    """Start a ``LammpsEngine`` with ``lammps(...)`` replaced; return it and the keyword arguments it passed."""
     pytest.importorskip("lammps")
     import pykmc.engine.lammps as engine_module
 
@@ -73,11 +94,16 @@ def _start_and_record(monkeypatch, cfg, engine_id=0) -> dict:
     def fake_lammps(*args, **kwargs):
         assert not args
         seen.update(kwargs)
-        return object()
+        return _FakeLammps(kokkos)
 
     monkeypatch.setattr(engine_module, "lammps", fake_lammps)
-    engine_module.LammpsEngine(config=cfg, engine_id=engine_id).start()
-    return seen
+    engine = engine_module.LammpsEngine(config=cfg, engine_id=engine_id)
+    engine.start()
+    return engine, seen
+
+
+def _start_and_record(monkeypatch, cfg, engine_id=0) -> dict:
+    return _started_engine(monkeypatch, cfg, engine_id)[1]
 
 
 @pytest.mark.parametrize(
@@ -106,3 +132,24 @@ def test_start_passes_library_and_cmdargs(monkeypatch) -> None:
         "comm": None,
         "cmdargs": ["-screen", "none", "-log", "lammps.log.dimer.3", *_KOKKOS.split()],
     }
+
+
+@pytest.mark.parametrize("kokkos", [False, True])
+def test_no_labelmap_under_kokkos(monkeypatch, kokkos) -> None:
+    """LAMMPS refuses ``labelmap`` when KOKKOS is on, so the engine leaves it out there."""
+    engine, _ = _started_engine(monkeypatch, _OldConfig(), kokkos=kokkos)
+    cell = np.diag([10.0, 10.0, 10.0])
+    x = np.array([[1.0, 1.0, 1.0], [4.0, 4.0, 4.0]])
+    engine.initialize_system(
+        types=["Zr", "Zr"], positions=x, cell=Cell(cell), pbc=[True] * 3
+    )
+    assert any(c.startswith("labelmap") for c in engine.lmp.commands) != kokkos
+
+    pytest.importorskip("pypARTn")
+    from pykmc.activevolume import active_volume as av
+
+    engine.lmp.commands.clear()
+    av.initialize_system(
+        engine, SimpleNamespace(types=["Zr", "Zr"], cell=cell, positions=x)
+    )
+    assert any(c.startswith("labelmap") for c in engine.lmp.commands) != kokkos

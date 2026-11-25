@@ -260,11 +260,12 @@ def initialize_system(engine, system):
     # Set masses
     for key in map_type.keys():
         engine.command("mass {} {}".format(map_type[key]["ref"], map_type[key]["mass"]))
-    # Label atoms name to type :
-    engine.command(
-        "labelmap atom "
-        + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
-    )
+    # Label atoms name to type (LAMMPS refuses label maps with KOKKOS on):
+    if not engine.kokkos:
+        engine.command(
+            "labelmap atom "
+            + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
+        )
 
 
 def minimize(engine, config, positions=None):

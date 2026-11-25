@@ -169,6 +169,7 @@ class LammpsEngine(Engine):
         self.engine_id = engine_id
         self._is_orthorhombic = None
         self.lmp: lammps | None = None
+        self.kokkos = False  # set by start(): this instance runs with KOKKOS on
 
     # Convenience
     @property
@@ -209,6 +210,7 @@ class LammpsEngine(Engine):
             comm=self.comm,
             cmdargs=["-screen", "none", "-log", engine_log, *extra],
         )
+        self.kokkos = self.lmp.extract_setting("kokkos_active") == 1
 
     def close(self) -> None:
         if self.lmp is not None:
@@ -322,11 +324,12 @@ class LammpsEngine(Engine):
             self.lmp.command(
                 "mass {} {}".format(map_type[key]["ref"], map_type[key]["mass"])
             )
-        # Label atoms name to type :
-        self.lmp.command(
-            "labelmap atom "
-            + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
-        )
+        # Label atoms name to type (LAMMPS refuses label maps with KOKKOS on):
+        if not self.kokkos:
+            self.lmp.command(
+                "labelmap atom "
+                + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
+            )
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
