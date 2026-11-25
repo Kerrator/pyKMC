@@ -1,7 +1,6 @@
 from ase import Atoms, Atom
 from ase.build import bulk
 from lammps import lammps
-import pypARTn
 import numpy as np
 import ctypes
 from typing import Protocol

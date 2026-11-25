@@ -19,6 +19,17 @@ try:
 except ImportError:
     pypARTn = None
 
+
+def _new_partn() -> "pypARTn.artn":
+    """Return a pARTn handle for LAMMPS, or say how to run without pARTn."""
+    if pypARTn is None:
+        raise ImportError(
+            "pypARTn is not installed. [EventSearch] style = partn and refine_style = partn "
+            "need it; style = artn or dimer with refine_style = artn run without it."
+        )
+    return pypARTn.artn(engine="lmp")
+
+
 from ..activevolume.active_volume import (
     partn_search_AV,
     partn_refine_AV,
@@ -617,7 +628,7 @@ class LammpsEngine(Engine):
             if positions is not None:
                 self.set_positions(positions=positions)
 
-        artn = pypARTn.artn(engine="lmp")
+        artn = _new_partn()
 
         self.lmp.command(f"plugin load {artn.lib._name}")
         atoms_frozen = self._make_frozen_group(config, positions, types)
@@ -782,7 +793,7 @@ class LammpsEngine(Engine):
                 if minimize_outer_atoms:
                     self.minimize_freeze_core(saddle_idx)
 
-        artn = pypARTn.artn(engine="lmp")
+        artn = _new_partn()
         self.lmp.command(f"plugin load {artn.lib._name}")
 
         artn.reset_input()
