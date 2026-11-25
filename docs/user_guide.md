@@ -379,8 +379,12 @@ active volume on, only those within `rmov`), then runs ARTn from there, stopping
 afresh with its own seed, drawn from a stream of its own that `seed` in `[Control]` starts, so adding refinement
 changes no search seed and the seeds do not depend on the number of LAMMPS instances. `zseed` is not read, and
 `r_neigen` other than 1 is logged as ignored. The barrier is the saddle's potential energy minus the minimum's,
-with or without the active volume. The ARTn refiner runs on the full system only: with the active volume on, it
-needs `artn_forces = full`.
+with or without the active volume. With `artn_forces = av`, the first rank of each session builds the same
+active volume as pARTn. It measures the minimum energy there, sets the rcut atoms at the reference saddle,
+and holds them and the buffer fixed while the remaining atoms relax. Pre-relaxation and saddle refinement
+both use the search instance and its `search_cmdargs` and `search_pair_style`. The shared pARTn pre-relaxation
+can move an explicitly frozen atom inside `rmov` and outside the rcut group. The ARTn iterations then hold
+that atom at its pre-relaxed position.
 
 ```ini
 [EventSearch]

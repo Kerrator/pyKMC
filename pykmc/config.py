@@ -221,9 +221,8 @@ class EventSearchConfig(BaseModel):
         description="Method used to refine events, for any `style`: 'partn' (pARTn, as "
         "before) or 'artn' (pyKMC's own ARTn, stopping at the saddle, with the [pARTn] "
         "r_* parameters; each attempt has its own seed from a child of the [Control] seed "
-        "stream, not zseed; r_neigen other than 1 is logged as ignored). 'artn' runs on "
-        "the full system only: with the active volume on it needs "
-        "[ActiveVolume] artn_forces = full.",
+        "stream, not zseed; r_neigen other than 1 is logged as ignored). With the active "
+        "volume enabled, [ActiveVolume] artn_forces selects the force region for 'artn'.",
     )
     nsearch: int = Field(
         ...,
@@ -672,11 +671,10 @@ class ActiveVolume(BaseModel):
 
     artn_forces: Literal["full", "av"] = Field(
         default="full",
-        description="Force region of a `[EventSearch] style = artn` search: 'full', the "
-        "dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or "
-        "'av', pARTn's active volume (only the atoms within `ract`, those beyond `rmov` with zero force), "
-        "which gives pARTn's forces for comparing the two searches. Other styles ignore it. "
-        "`[EventSearch] refine_style = artn` refines on 'full' only.",
+        description="Force region for Python ARTn searches and refinements when the "
+        "active volume is enabled. 'full' uses the full system with atoms beyond "
+        "`rmov` held fixed. 'av' uses pARTn's active volume, which contains the "
+        "atoms within `ract` and applies zero force to the buffer beyond `rmov`.",
     )
 
 
@@ -1261,16 +1259,6 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
-        if (
-            self.eventsearch.refine_style == "artn"
-            and self.control.active_volume
-            and self.activevolume is not None
-            and self.activevolume.artn_forces == "av"
-        ):
-            raise ValueError(
-                "[EventSearch] refine_style = artn runs on the full system only; "
-                "set [ActiveVolume] artn_forces = full"
-            )
         if (
             self.eventsearch.style == "dimer"
             and self.dimer is not None

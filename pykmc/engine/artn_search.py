@@ -7,7 +7,8 @@ forces on its own rows. The search uses :func:`pykmc.artn.artn_search`, the
 refinement :func:`pykmc.artn.artn_refine`. With the worker option
 ``av_radii`` the search runs instead on pARTn's active volume, built as
 ``partn_search`` builds it, so the forces are pARTn's; it runs on the
-worker's leader rank. Refinement runs on the full system only.
+worker's leader rank. Refinement uses the same instance and force path when
+``av_radii`` is given and starts from the active-volume pre-relaxation.
 """
 
 from __future__ import annotations
@@ -21,13 +22,18 @@ from ase.cell import Cell
 from ase.geometry import find_mic
 from mpi4py import MPI
 
-from ..artn import RefineResult
+from ..artn import EnergyAndForces, RefineResult
 from ..artn import artn_refine as run_refine
 from ..artn import artn_search as run_artn
-from ..config import search_pair_style, supports_neighbor_reuse
+from ..config import (
+    search_pair_style,
+    supports_neighbor_reuse,
+    validate_dimer_neighbor_reuse,
+)
 from ..dimer import DimerResult, _minimum_image
 from ..search_rules import map_to_full_system
 from .base import EngineExtension
+from .dimer_forces import _NEIGHBOR_SKIN, configure_neighbor_reuse
 from .dimer_search import DimerSearchExtension, _movable_mask
 
 if TYPE_CHECKING:
@@ -156,7 +162,7 @@ class ArtnSearchExtension(DimerSearchExtension):
     ) -> Optional[RefineResult]:
         """Refine one saddle from the minimum ``positions`` and return what it found.
 
-        First every rank of the worker pre-relaxes on the worker's own engine,
+        On the full system, every rank of the worker pre-relaxes on the worker's own engine,
         as pyKMC's ``partn_refine`` does on the full path: the rcut atoms
         ``saddle_idx`` are moved to ``saddle_positions`` and held while LAMMPS
         minimizes the others (``[lammps] min_style`` and ``frz_min``,
@@ -167,7 +173,8 @@ class ArtnSearchExtension(DimerSearchExtension):
         the search's force path, one attempt per seed, and takes the start
         energy at ``positions``, the potential energy (``thermo_pe``) on the
         same instance as the saddle's, so the result's ``barrier`` is the
-        barrier itself.
+        barrier itself. With ``av_radii`` the worker leader pre-relaxes and refines
+        on the private active-volume instance as described in :meth:`_av_refine`.
 
         Parameters
         ----------
@@ -185,10 +192,11 @@ class ArtnSearchExtension(DimerSearchExtension):
             Acceptance distance, Å (``r_delr_sad_thr``).
         relax_radius : Optional[float]
             Radius of the pre-relaxation around the central atom, Å; None
-            relaxes every atom but the rcut atoms.
+            relaxes every atom but the rcut atoms. Unused with ``av_radii``.
         options : Optional[Mapping[str, Any]]
             Keyword options of :func:`pykmc.artn.artn_refine` and the worker
-            options of :meth:`artn_search`, less ``av_radii``.
+            options of :meth:`artn_search`. ``av_radii = (rmov, ract)`` selects
+            pARTn's active volume.
 
         Returns
         -------
@@ -199,22 +207,34 @@ class ArtnSearchExtension(DimerSearchExtension):
         Raises
         ------
         ValueError
-            If ``av_radii`` is given (refinement runs on the full system
-            only), ``attempt_options`` on a multi-rank worker, or an argument
-            is malformed.
+            If ``attempt_options`` are given for full-system refinement on a
+            multi-rank worker, or an argument is malformed.
 
         """
         refine_options = dict(options or {})
-        if refine_options.pop("av_radii", None) is not None:
-            raise ValueError("artn_refine runs on the full system only")
-        comm = self.engine.comm
-        multi_rank = comm is not None and comm.Get_size() > 1
-        if multi_rank and refine_options.get("attempt_options"):
-            raise ValueError("attempt_options need a single-rank worker")
         refine_options.setdefault(
             "reuse_neighbor_list",
             supports_neighbor_reuse(search_pair_style(self.engine.config)),
         )
+        av_radii = refine_options.pop("av_radii", None)
+        if av_radii is not None:
+            return self._av_refine(
+                av_radii,
+                positions,
+                types,
+                cell,
+                movable,
+                central_atom,
+                saddle_idx,
+                saddle_positions,
+                seeds,
+                delr_sad_thr,
+                refine_options,
+            )
+        comm = self.engine.comm
+        multi_rank = comm is not None and comm.Get_size() > 1
+        if multi_rank and refine_options.get("attempt_options"):
+            raise ValueError("attempt_options need a single-rank worker")
         positions = np.array(positions, dtype=float)
         saddle_idx = np.asarray(saddle_idx, dtype=int).ravel()
         start = positions.copy()
@@ -307,7 +327,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         movable: list[int] | np.ndarray,
         central_atom: int,
         seed: int,
-        options: Mapping[str, Any],
+        options: dict[str, Any],
     ) -> Optional[DimerResult]:
         """Run one ARTn search on pARTn's active volume, on the leader rank.
 
@@ -338,39 +358,15 @@ class ArtnSearchExtension(DimerSearchExtension):
         comm = self.engine.comm
         if comm is not None and comm.Get_rank() != 0:
             return None
-        # Imported here: the module imports pypARTn and LAMMPS.
-        from ..activevolume.active_volume import partn_search_AV, set_positions
-        from ..config import validate_dimer_neighbor_reuse
-        from .dimer_forces import _NEIGHBOR_SKIN, configure_neighbor_reuse
-        from .lammps import LammpsEngine
-
-        options = dict(options)
-        reuse = bool(options.pop("reuse_neighbor_list", False))
-        if reuse:
-            validate_dimer_neighbor_reuse(search_pair_style(self.engine.config))
+        from ..activevolume.active_volume import partn_search_AV
 
         positions = np.array(positions, dtype=float)
-        cell = np.array(cell, dtype=float)
-        if not np.allclose(cell, np.diag(np.diag(cell)), rtol=0.0, atol=1e-12):
-            raise ValueError(
-                "the active volume needs an orthogonal cell with its edges "
-                "along x, y and z"
-            )
+        cell = _av_cell(cell)
         mask = _movable_mask(movable, len(positions))
         rmov, ract = av_radii
-        force_engine = self._force_engine
-        if force_engine is None:
-            force_engine = LammpsEngine(
-                config=self.engine.config,
-                comm=MPI.COMM_SELF,
-                engine_id=f"dimer.{self.engine.engine_id}",
-                search_instance=True,
-            )
-            self._force_engine = force_engine
-            force_engine.start()
-        # The active volume replaces whatever system the instance held.
-        self._force_engine_system = None
+        reuse = bool(options.pop("reuse_neighbor_list"))
         try:
+            force_engine = self._av_engine(reuse)
             atom_map, _ = partn_search_AV(
                 force_engine,
                 SimpleNamespace(activevolume=SimpleNamespace(rmov=rmov, ract=ract)),
@@ -379,50 +375,14 @@ class ArtnSearchExtension(DimerSearchExtension):
                 cell,
                 types,
             )
-            # The buffer, by define_AV's rule: beyond rmov, minimum image.
-            _, distance = find_mic(
-                positions[atom_map] - positions[central_atom], cell, pbc=True
+            core_mask, query = _av_force_path(
+                force_engine, positions, cell, atom_map, central_atom, rmov, mask, reuse
             )
-            buffer = np.abs(distance) > rmov
-            in_movable = mask[atom_map] & ~buffer
-            zero_force = ~in_movable
-            if reuse:
-                configure_neighbor_reuse(force_engine)
-            previous: Optional[np.ndarray] = None
-
-            def query(x: np.ndarray) -> tuple[float, np.ndarray]:
-                nonlocal previous
-                step = None if previous is None else x - previous
-                if step is not None and np.max(np.abs(step)) <= _NEIGHBOR_SKIN / 2:
-                    # As the dimer's evaluator: nve/noforce moves each atom by
-                    # its step and Verlet checks the list before the forces.
-                    force_engine.lmp.scatter_atoms(
-                        "v",
-                        1,
-                        3,
-                        np.ascontiguousarray(step).ctypes.data_as(
-                            ctypes.POINTER(ctypes.c_double)
-                        ),
-                    )
-                    force_engine.command("run 1 pre no post no")
-                else:
-                    set_positions(force_engine, x)
-                    force_engine.command("run 0 post no")
-                if reuse:
-                    previous = x.copy()
-                energy = force_engine.lmp.get_thermo("pe")
-                forces = np.ctypeslib.as_array(
-                    force_engine.lmp.gather_atoms("f", 1, 3)
-                ).reshape(-1, 3)
-                forces = forces.copy()
-                forces[zero_force] = 0.0
-                return energy, forces
-
             result = run_artn(
                 positions[atom_map],
                 cell,
                 np.ones(3, dtype=bool),
-                in_movable | buffer,
+                core_mask,
                 int(np.flatnonzero(atom_map == central_atom)[0]),
                 seed,
                 query,
@@ -443,12 +403,205 @@ class ArtnSearchExtension(DimerSearchExtension):
             mode=full(result.mode, np.zeros_like(positions)),
         )
 
+    def _av_refine(
+        self,
+        av_radii: tuple[float, float],
+        positions: np.ndarray,
+        types: list[str] | np.ndarray,
+        cell: Cell | np.ndarray,
+        movable: list[int] | np.ndarray,
+        central_atom: int,
+        saddle_idx: list[int] | np.ndarray,
+        saddle_positions: np.ndarray,
+        seeds: list[int],
+        delr_sad_thr: float,
+        options: dict[str, Any],
+    ) -> Optional[RefineResult]:
+        """Refine one saddle on pARTn's active volume, on the leader rank.
+
+        The active volume and the start are built on the serial instance by
+        pyKMC's own :func:`~pykmc.activevolume.active_volume.partn_refine_AV`,
+        as ``partn_refine`` builds them: the active volume as for
+        :meth:`_av_search`; ``E_init``, its potential energy at the minimum
+        ``positions``; then the rcut atoms at ``saddle_positions``, held with
+        the buffer while ``[lammps] min_style`` and ``frz_min`` relax the
+        others (``AV_debug`` off). The refiner starts from the positions LAMMPS
+        then holds, on the forces :meth:`_av_search` uses, and the barrier
+        is ``E_sad - E_init``. The saddle is mapped back to the full system:
+        atoms beyond ``ract`` keep their positions in ``positions``.
+
+        Raises
+        ------
+        ValueError
+            As :meth:`_av_search`.
+
+        """
+        comm = self.engine.comm
+        if comm is not None and comm.Get_rank() != 0:
+            return None
+        from ..activevolume.active_volume import partn_refine_AV
+
+        positions = np.array(positions, dtype=float)
+        cell = _av_cell(cell)
+        mask = _movable_mask(movable, len(positions))
+        rmov, ract = av_radii
+        reuse = bool(options.pop("reuse_neighbor_list"))
+        try:
+            force_engine = self._av_engine(reuse)
+            e_init, atom_map, _ = partn_refine_AV(
+                force_engine,
+                SimpleNamespace(
+                    activevolume=SimpleNamespace(rmov=rmov, ract=ract, AV_debug=False),
+                    lammps=self.engine.config,
+                ),
+                central_atom,
+                positions,
+                cell,
+                types,
+                np.asarray(saddle_idx, dtype=int).ravel(),
+                np.asarray(saddle_positions, dtype=float),
+            )
+            # The build's clear resets the step count and its run 0s keep it,
+            # so the count is the pre-relaxation's iterations.
+            iterations = int(force_engine.lmp.extract_global("ntimestep"))
+            start = (
+                np.ctypeslib.as_array(force_engine.lmp.gather_atoms("x", 1, 3))
+                .reshape(-1, 3)
+                .copy()
+            )
+            core_mask, query = _av_force_path(
+                force_engine, positions, cell, atom_map, central_atom, rmov, mask, reuse
+            )
+            result = run_refine(
+                start,
+                cell,
+                np.ones(3, dtype=bool),
+                core_mask,
+                int(np.flatnonzero(atom_map == central_atom)[0]),
+                seeds,
+                query,
+                delr_sad_thr=delr_sad_thr,
+                e_start=float(e_init),
+                masses=self._instance_masses(),
+                **options,
+            )
+        except BaseException:
+            self._drop_dedicated_engine()
+            raise
+        saddle = result.saddle_positions
+        return result._replace(
+            saddle_positions=(
+                None
+                if saddle is None
+                else map_to_full_system(saddle, atom_map, positions)
+            ),
+            prerelax_iterations=iterations,
+        )
+
+    def _av_engine(self, reuse: bool) -> LammpsEngine:
+        """Return the started serial instance; an active volume replaces its system."""
+        from .lammps import LammpsEngine
+
+        if reuse:
+            validate_dimer_neighbor_reuse(search_pair_style(self.engine.config))
+        force_engine = self._force_engine
+        if force_engine is None:
+            force_engine = LammpsEngine(
+                config=self.engine.config,
+                comm=MPI.COMM_SELF,
+                engine_id=f"dimer.{self.engine.engine_id}",
+                search_instance=True,
+            )
+            self._force_engine = force_engine
+            force_engine.start()
+        # The active volume replaces whatever system the instance held.
+        self._force_engine_system = None
+        return force_engine
+
     def _instance_masses(self) -> np.ndarray:
         """Return each atom's mass on the serial instance, amu, in pyKMC order."""
         lmp = self._force_engine.lmp
         types = np.array(lmp.gather_atoms("type", 0, 1), dtype=int)
         per_type = lmp.numpy.extract_atom("mass")
         return np.asarray(per_type, dtype=float)[types]
+
+
+def _av_cell(cell: Cell | np.ndarray) -> np.ndarray:
+    """Return ``cell`` as an array; the active-volume box uses only its diagonal.
+
+    Raises
+    ------
+    ValueError
+        If the cell is not orthogonal with its edges along the axes.
+
+    """
+    cell = np.array(cell, dtype=float)
+    if not np.allclose(cell, np.diag(np.diag(cell)), rtol=0.0, atol=1e-12):
+        raise ValueError(
+            "the active volume needs an orthogonal cell with its edges along x, y and z"
+        )
+    return cell
+
+
+def _av_force_path(
+    force_engine: LammpsEngine,
+    positions: np.ndarray,
+    cell: np.ndarray,
+    atom_map: np.ndarray,
+    central_atom: int,
+    rmov: float,
+    mask: np.ndarray,
+    reuse: bool,
+) -> tuple[np.ndarray, EnergyAndForces]:
+    """Return the core's movable mask on the active volume and its force query.
+
+    The buffer is found by ``define_AV``'s rule: beyond ``rmov`` of the
+    central atom, minimum image. It sees zero force, as do atoms outside
+    ``mask``. As under pARTn, the core still moves the buffer. When reuse is
+    enabled, LAMMPS updates its neighbor list on short steps.
+    """
+    from ..activevolume.active_volume import set_positions
+
+    _, distance = find_mic(
+        positions[atom_map] - positions[central_atom], cell, pbc=True
+    )
+    buffer = np.abs(distance) > rmov
+    in_movable = mask[atom_map] & ~buffer
+    zero_force = ~in_movable
+
+    if reuse:
+        configure_neighbor_reuse(force_engine)
+    previous: Optional[np.ndarray] = None
+
+    def query(x: np.ndarray) -> tuple[float, np.ndarray]:
+        nonlocal previous
+        step = None if previous is None else x - previous
+        if step is not None and np.max(np.abs(step)) <= _NEIGHBOR_SKIN / 2:
+            # As the dimer's evaluator: nve/noforce moves each atom by
+            # its step and Verlet checks the list before the forces.
+            force_engine.lmp.scatter_atoms(
+                "v",
+                1,
+                3,
+                np.ascontiguousarray(step).ctypes.data_as(
+                    ctypes.POINTER(ctypes.c_double)
+                ),
+            )
+            force_engine.command("run 1 pre no post no")
+        else:
+            set_positions(force_engine, x)
+            force_engine.command("run 0 post no")
+        if reuse:
+            previous = x.copy()
+        energy = force_engine.lmp.get_thermo("pe")
+        forces = np.ctypeslib.as_array(
+            force_engine.lmp.gather_atoms("f", 1, 3)
+        ).reshape(-1, 3)
+        forces = forces.copy()
+        forces[zero_force] = 0.0
+        return energy, forces
+
+    return in_movable | buffer, query
 
 
 def _refine_core(

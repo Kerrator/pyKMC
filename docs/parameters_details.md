@@ -585,7 +585,7 @@
   </details>
 - **`artn_forces`** : `Literal['full', 'av']`, default = `'full'`
   <details><summary>Description</summary>
-  Force region of a `[EventSearch] style = artn` search: 'full', the dimer's (the full system, every atom beyond `rmov` held fixed with zero force), or 'av', pARTn's active volume (only the atoms within `ract`, those beyond `rmov` with zero force), which gives pARTn's forces for comparing the two searches. Other styles ignore it.
+  Force region for Python ARTn searches and refinements when the active volume is enabled. `full` uses the full system with atoms beyond `rmov` held fixed. `av` uses pARTn's active volume, which contains the atoms within `ract` and applies zero force to the buffer beyond `rmov`.
   </details>
 
 ---
