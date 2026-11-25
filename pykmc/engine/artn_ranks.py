@@ -1,9 +1,10 @@
 """Rank-local forces and vector operations for one faithful ARTn search.
 
-The core owns its initial movable rows for the duration of the search. LAMMPS
-may change their physical owners at any force call. Exchange those rows with
-their current owners; all FIRE/Lanczos vectors, including saved endpoints,
-retain the same local ordering. Only the result is assembled on the leader.
+Each rank keeps the movable rows it owned at the start, its home rows, for the
+whole search. LAMMPS may move an atom to another rank at any force call, so each
+row is exchanged with the atom's current LAMMPS owner. Every FIRE and Lanczos
+vector, saved endpoints included, keeps the home row order. Only the result is
+assembled, on rank zero.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 
 
 class DistributedSpace(NumpyVectorSpace):
-    """Global reductions and stable per-atom rows on the worker communicator."""
+    """Reductions over all ranks of the worker, and each atom's home row."""
 
     def __init__(
         self,
@@ -52,8 +53,8 @@ class DistributedSpace(NumpyVectorSpace):
         self.mask = mask
         self.start = start
         self.participants = mask if participants is None else participants
-        # Shard the ID -> initial-owner directory. Only the original worker
-        # request is replicated. No ownership list or force field is gathered.
+        # Split the directory from atom ID to home rank over the ranks. Every
+        # rank has the worker request, but no rank gathers the owners or forces.
         size = comm.Get_size()
         rank = comm.Get_rank()
         outgoing = [self.home[self.home % size == r] for r in range(size)]
@@ -67,7 +68,7 @@ class DistributedSpace(NumpyVectorSpace):
             self.directory[ids // size] = owner
 
     def owners(self, ids: np.ndarray) -> np.ndarray:
-        """Resolve nonlocal atoms through their sharded ID-directory entries."""
+        """Return each atom's home rank, from the directory for other ranks' atoms."""
         comm = self.comm
         size = comm.Get_size()
         result = np.full(len(ids), comm.Get_rank(), dtype=int)
@@ -83,23 +84,26 @@ class DistributedSpace(NumpyVectorSpace):
         return result
 
     def atom_count(self, local: int) -> int:
-        """Return the full input system size, including frozen atoms."""
+        """Return the number of atoms in the whole system, frozen atoms included."""
         return len(self.mask)
 
     def count(self, local: int) -> int:
-        """Sum a count over the worker."""
+        """Sum a count over all ranks."""
         return self.comm.allreduce(local, op=MPI.SUM)
 
     def all_true(self, local: bool) -> bool:
-        """Agree collectively on a validity check."""
+        """Return whether a condition holds on every rank."""
         return self.comm.allreduce(bool(local), op=MPI.LAND)
 
     def dot(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Reduce one local dot product from each rank."""
+        """Sum the local dot products of all ranks."""
         return self.comm.allreduce(float(np.vdot(a, b)), op=MPI.SUM)
 
     def max_abs(self, a: np.ndarray) -> float:
-        """Reduce the largest component, including empty and non-finite ranks."""
+        """Return the largest component over all ranks.
+
+        A rank with no rows takes part, and a non-finite value counts as infinite.
+        """
         local = super().max_abs(a)
         return self.comm.allreduce(local if np.isfinite(local) else np.inf, op=MPI.MAX)
 
@@ -113,7 +117,7 @@ class DistributedSpace(NumpyVectorSpace):
         push_mode: str,
         radius: float,
     ) -> tuple[DrawOrder, DrawOrder]:
-        """Partition the serial draw order, including offset ties, by initial owner."""
+        """Split the serial draw order, offset ties included, among the home ranks."""
         comm = self.comm
         size = comm.Get_size()
         orders = (
@@ -123,8 +127,8 @@ class DistributedSpace(NumpyVectorSpace):
         )
 
         def distribute(order: np.ndarray | None) -> DrawOrder:
-            # The leader already has the input geometry. Route integer draw
-            # ordinals through directory shards to the owners of the vectors.
+            # Rank zero already has the input geometry. Send the integer draw
+            # ordinals through the directory to the home rank of each atom.
             partitions = None
             if order is not None:
                 ordinals = np.full(len(self.mask), -1, dtype=int)
@@ -146,7 +150,7 @@ class DistributedSpace(NumpyVectorSpace):
     def collect_result(
         self, result: DimerResult, cell: np.ndarray, pbc: np.ndarray
     ) -> DimerResult | None:
-        """Assemble only the available result geometries in pyKMC order on rank zero."""
+        """Assemble on rank zero the result geometries that are set, in pyKMC order."""
         names = [
             k
             for k in ("saddle_positions", "min1_positions", "min2_positions", "mode")
@@ -179,14 +183,14 @@ class DistributedSpace(NumpyVectorSpace):
 
 
 class OwnedRows:
-    """Route only rows whose current LAMMPS owner differs from their search owner."""
+    """Send a row between its LAMMPS owner and its home rank only when they differ."""
 
     def __init__(self, space: DistributedSpace) -> None:
         self.space = space
         self.previous: np.ndarray | None = None
 
     def update(self, ids: np.ndarray) -> None:
-        """Rebuild the route when atom ownership or local atom ordering changes."""
+        """Rebuild the routes when the atoms' owners or local order change."""
         space = self.space
         if space.all_true(
             self.previous is not None and np.array_equal(ids, self.previous)
@@ -212,7 +216,7 @@ class OwnedRows:
         self.home_rows = [np.searchsorted(space.home, req) for req in requests]
 
     def transfer(self, values: np.ndarray, *, to_home: bool) -> np.ndarray:
-        """Copy an atom field between physical owners and stable search rows."""
+        """Copy per-atom values between the LAMMPS owners and the home rows."""
         rank = self.space.comm.Get_rank()
         src, dst = (
             (self.engine_rows, self.home_rows)
@@ -257,7 +261,7 @@ class RankForces:
         self.refresh()
 
     def refresh(self) -> None:
-        """Reacquire local owned rows, excluding ghosts, after each LAMMPS run."""
+        """Read this rank's owned rows again, ghosts excluded, after each LAMMPS run."""
         lmp = self.lmp
         self.nlocal = lmp.extract_global("nlocal")
         ids = (
@@ -289,13 +293,13 @@ class RankForces:
             if len(self.rows)
             else np.empty((0, 3))
         )
-        # The serial force instance applies setforce to the frozen group. A
-        # replay injection can give it velocities but never a physical force.
+        # The serial force instance zeroes the frozen group's force with setforce.
+        # A replay injection can give frozen atoms velocities, never a force.
         local[~self.space.mask[self.routes.previous]] = 0.0
         return energy, self.routes.transfer(local, to_home=True)
 
     def __call__(self, x: np.ndarray) -> tuple[float, np.ndarray]:
-        """Evaluate the new prescribed positions using the current LAMMPS owners."""
+        """Evaluate energy and forces at ``x`` through the current LAMMPS owners."""
         engine = self.engine
         delta = x - self.previous
         small = self.reuse and self.space.max_abs(delta) <= _NEIGHBOR_SKIN / 2
@@ -335,7 +339,7 @@ def distributed_search(
     seed: int,
     options: dict[str, Any],
 ) -> DimerResult | None:
-    """Run the normal faithful core on local rows and return the worker leader's result."""
+    """Run the ARTn core on each rank's home rows and return the result on rank zero."""
     from .lammps import LammpsEngine
 
     comm = worker.comm
