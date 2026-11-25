@@ -690,6 +690,12 @@ def supports_neighbor_reuse(pair_style: str) -> bool:
     }
 
 
+def search_pair_style(lammps_config) -> str:
+    """The pair_style of a search's own LAMMPS instance: ``search_pair_style`` if set, else ``pair_style``."""
+    style = getattr(lammps_config, "search_pair_style", None)
+    return style if isinstance(style, str) and style else lammps_config.pair_style
+
+
 def validate_dimer_neighbor_reuse(pair_style: str) -> None:
     """Check that the dimer can reuse neighbor lists for this potential."""
     if not supports_neighbor_reuse(pair_style):
@@ -733,6 +739,11 @@ class LammpsConfig(BaseModel):
     search_cmdargs: Optional[list[str]] = Field(
         default=None,
         description="LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.",
+    )
+
+    search_pair_style: Optional[str] = Field(
+        default=None,
+        description="Lammps pair_style command for the LAMMPS instance a `dimer` or `artn` search makes for its force calls, when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `search_cmdargs`: `mtp/small/kk` is the fast style for a few hundred to a few thousand atoms and has no CPU version. None uses `pair_style`.",
     )
 
     @field_validator("cmdargs", "search_cmdargs", mode="before")
@@ -1233,12 +1244,14 @@ class Config(BaseModel):
             if "reuse_neighbor_list" not in self.dimer.model_fields_set:
                 # The default is on only where the option is supported.
                 self.dimer.reuse_neighbor_list = supports_neighbor_reuse(
-                    self.lammps.pair_style
+                    search_pair_style(self.lammps)
                 )
             elif self.dimer.reuse_neighbor_list:
-                validate_dimer_neighbor_reuse(self.lammps.pair_style)
+                validate_dimer_neighbor_reuse(search_pair_style(self.lammps))
             if self.dimer.eam_force_crop:
-                validate_dimer_eam_style(self.lammps.pair_style, "eam_force_crop")
+                validate_dimer_eam_style(
+                    search_pair_style(self.lammps), "eam_force_crop"
+                )
         return self
 
     @model_validator(mode="after")

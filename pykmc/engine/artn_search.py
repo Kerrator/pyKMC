@@ -21,7 +21,7 @@ from ase.geometry import find_mic
 from mpi4py import MPI
 
 from ..artn import artn_search as run_artn
-from ..config import supports_neighbor_reuse
+from ..config import search_pair_style, supports_neighbor_reuse
 from ..dimer import DimerResult
 from ..search_rules import map_to_full_system
 from .dimer_search import DimerSearchExtension, _movable_mask
@@ -72,7 +72,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         search_options = dict(options or {})
         search_options.setdefault(
             "reuse_neighbor_list",
-            supports_neighbor_reuse(self.engine.config.pair_style),
+            supports_neighbor_reuse(search_pair_style(self.engine.config)),
         )
         av_radii = search_options.pop("av_radii", None)
         if av_radii is not None:
@@ -167,7 +167,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         options = dict(options)
         reuse = bool(options.pop("reuse_neighbor_list", False))
         if reuse:
-            validate_dimer_neighbor_reuse(self.engine.config.pair_style)
+            validate_dimer_neighbor_reuse(search_pair_style(self.engine.config))
 
         positions = np.array(positions, dtype=float)
         cell = np.array(cell, dtype=float)

@@ -6,6 +6,7 @@ import functools
 import os
 from typing import Protocol
 from .base import Engine
+from ..config import search_pair_style
 from ase.cell import Cell
 from ase.data import atomic_masses, atomic_numbers
 
@@ -338,7 +339,12 @@ class LammpsEngine(Engine):
 
     @lammps_error_handler
     def initialize_potential(self) -> None:
-        self.lmp.command("pair_style {}".format(self.config.pair_style))
+        pair_style = (
+            search_pair_style(self.config)
+            if self.search_instance
+            else self.config.pair_style
+        )
+        self.lmp.command("pair_style {}".format(pair_style))
         for pair_coeff in self.config.pair_coeff:
             self.lmp.command("pair_coeff {}".format(pair_coeff))
 

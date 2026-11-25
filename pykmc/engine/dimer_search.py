@@ -23,7 +23,11 @@ import numpy as np
 from ase.cell import Cell
 from mpi4py import MPI
 
-from ..config import validate_dimer_eam_style, validate_dimer_neighbor_reuse
+from ..config import (
+    search_pair_style,
+    validate_dimer_eam_style,
+    validate_dimer_neighbor_reuse,
+)
 from ..dimer import DimerResult, _wrap
 from ..dimer import dimer_search as run_dimer
 from .base import Engine, EngineExtension
@@ -187,12 +191,14 @@ class DimerSearchExtension(EngineExtension):
         if not isinstance(reuse, (bool, np.bool_)):
             raise ValueError("reuse_neighbor_list must be a boolean")
         if reuse:
-            validate_dimer_neighbor_reuse(self.engine.config.pair_style)
+            validate_dimer_neighbor_reuse(search_pair_style(self.engine.config))
         crop = search_options.pop("eam_force_crop", False)
         if not isinstance(crop, (bool, np.bool_)):
             raise ValueError("eam_force_crop must be a boolean")
         if crop:
-            validate_dimer_eam_style(self.engine.config.pair_style, "eam_force_crop")
+            validate_dimer_eam_style(
+                search_pair_style(self.engine.config), "eam_force_crop"
+            )
         try:
             force_engine = self._dedicated_engine(types, positions, cell, pbc, reuse)
             if frozen.size:

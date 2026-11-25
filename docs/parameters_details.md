@@ -255,6 +255,10 @@
   <details><summary>Description</summary>
   LAMMPS command-line arguments added, after `cmdargs`, only for the LAMMPS instance a `dimer` or `artn` search makes for its force calls. This is where KOKKOS arguments go: pARTn (the `partn` search and every event refinement) minimizes with `min_style fire`, which LAMMPS refuses to run with KOKKOS on, so the other instances must stay without it.
   </details>
+- **`search_pair_style`** : `str`, optional
+  <details><summary>Description</summary>
+  Lammps pair_style command for the LAMMPS instance a `dimer` or `artn` search makes for its force calls, when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `search_cmdargs`: `mtp/small/kk` is the fast style for a few hundred to a few thousand atoms and has no CPU version. None uses `pair_style`.
+  </details>
 
 ---
 

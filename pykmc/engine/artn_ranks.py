@@ -24,6 +24,7 @@ from ..artn import (
     artn_search,
 )
 from ..config import (
+    search_pair_style,
     supports_neighbor_reuse,
     validate_dimer_eam_style,
     validate_dimer_neighbor_reuse,
@@ -368,7 +369,7 @@ def distributed_search(
     mask = np.zeros(n, dtype=bool)
     mask[movable.astype(int)] = True
     options = dict(options)
-    style = worker.config.pair_style
+    style = search_pair_style(worker.config)
     reuse = options.pop("reuse_neighbor_list", supports_neighbor_reuse(style))
     crop = options.pop("eam_force_crop", False)
     if not all(isinstance(x, (bool, np.bool_)) for x in (crop, reuse)):

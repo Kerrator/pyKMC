@@ -177,3 +177,48 @@ def test_no_labelmap_under_kokkos(monkeypatch, kokkos) -> None:
         engine, SimpleNamespace(types=["Zr", "Zr"], cell=cell, positions=x)
     )
     assert any(c.startswith("labelmap") for c in engine.lmp.commands) != kokkos
+
+
+def test_search_pair_style_parses(tmp_path: Path) -> None:
+    assert Config.from_ini_file(str(_INPUT)).lammps.search_pair_style is None
+    path = _ini_with_lammps_lines(
+        tmp_path, "search_pair_style = mtp/small pot.mtp chunksize 32768"
+    )
+    config = Config.from_ini_file(str(path))
+    assert config.lammps.search_pair_style == "mtp/small pot.mtp chunksize 32768"
+
+
+@pytest.mark.parametrize("search_instance", [False, True])
+def test_search_pair_style_goes_to_a_search_instance_only(
+    monkeypatch, search_instance
+) -> None:
+    cfg = LammpsConfig(
+        pair_style="mtp pot.mtp chunksize 32768",
+        pair_coeff="* *",
+        verbosity=0,
+        search_pair_style="mtp/small pot.mtp chunksize 32768",
+    )
+    engine, _ = _started_engine(monkeypatch, cfg, search_instance=search_instance)
+    engine.initialize_potential()
+    style = cfg.search_pair_style if search_instance else cfg.pair_style
+    assert engine.lmp.commands == [f"pair_style {style}", "pair_coeff * *"]
+
+
+def test_a_search_instance_keeps_pair_style_without_the_key(monkeypatch) -> None:
+    engine, _ = _started_engine(monkeypatch, _OldConfig(), search_instance=True)
+    engine.initialize_potential()
+    assert engine.lmp.commands[0] == "pair_style lj/cut 6.0"
+
+
+def test_neighbor_reuse_is_decided_by_the_search_instances_pair_style() -> None:
+    from pykmc.config import search_pair_style, supports_neighbor_reuse
+
+    plain = LammpsConfig(pair_style="lj/cut 6.0", pair_coeff="* * 1 1")
+    assert search_pair_style(plain) == "lj/cut 6.0"
+    assert search_pair_style(_OldConfig()) == "lj/cut 6.0"
+    mixed = LammpsConfig(
+        pair_style="lj/cut 6.0",
+        pair_coeff="* * 1 1",
+        search_pair_style="mtp/small pot.mtp chunksize 64",
+    )
+    assert supports_neighbor_reuse(search_pair_style(mixed))
