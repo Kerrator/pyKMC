@@ -5,6 +5,8 @@ import os
 import numpy as np
 import pytest
 
+import pykmc.artn as artn
+
 from .artn_replay import RECORDINGS_ENV, check_search, holds_search, replay
 from .test_artn_replay import recorded, synthetic_recording
 
@@ -17,6 +19,25 @@ def test_complete_search_matches_partn(search: int) -> None:
         pytest.skip(f"set {RECORDINGS_ENV} to the full recordings")
     check = check_search(rec)
     assert not (problems := check.problems()), problems
+
+
+@pytest.mark.parametrize("search", range(8))
+def test_the_core_wraps_atoms_when_partns_lammps_did(search: int) -> None:
+    """LAMMPS's rebuild rule gives the positions LAMMPS held at every pARTn step,
+    the wrap included (each recording has one, at steps 155 to 325)."""
+    rec = recorded(search)
+    if search != 0 and not holds_search(rec) and not os.environ.get(RECORDINGS_ENV):
+        pytest.skip(f"set {RECORDINGS_ENV} to the full recordings")
+    held_by_lammps = rec["x"][rec["partn_step"] >= 0]
+    lengths = np.diag(rec["cell"])
+    moves = np.diff(held_by_lammps, axis=0)
+    moves -= lengths * np.rint(moves / lengths)
+    path = np.concatenate([held_by_lammps[:1], held_by_lammps[:1] + np.cumsum(moves, 0)])
+    held = artn._lammps_images(rec["cell"], rec["pbc"], artn.NumpyVectorSpace())
+    found = np.array([held(x) for x in path])
+    assert np.any(np.abs(np.diff(held_by_lammps, axis=0)) > lengths / 2)
+    assert not np.any(np.rint((found - held_by_lammps) / lengths))
+    assert np.max(np.abs(found - held_by_lammps)) < 1e-12
 
 
 def test_complete_search_refuses_a_truncated_recording() -> None:

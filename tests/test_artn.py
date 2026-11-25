@@ -834,6 +834,27 @@ def test_the_call_at_nevalf_max_fails_even_at_the_saddle() -> None:
     assert result.saddle_positions is not None
 
 
+def test_atoms_are_wrapped_only_when_lammps_would_rebuild() -> None:
+    """The alignment test's positions: wrapped at the first call, then only once
+    an atom has moved more than half the 2.0 Å skin since the last wrap."""
+    cell = np.diag([10.0, 10.0, 10.0])
+    held = artn._lammps_images(cell, np.array([True, True, False]), NumpyVectorSpace())
+    x = np.array([[9.9, 5.0, 12.0], [5.0, 5.0, 5.0], [-0.5, 5.0, 5.0]])
+    # z is not periodic; the atom below x = 0 is wrapped at the first call.
+    np.testing.assert_array_equal(held(x), [[9.9, 5.0, 12.0], [5.0, 5.0, 5.0], [9.5, 5.0, 5.0]])
+    # Atom 0 crosses x = 10 and atom 1 moves exactly half the skin: no rebuild.
+    x = x + [[0.2, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]
+    np.testing.assert_allclose(held(x)[:2], [[10.1, 5.0, 12.0], [5.0, 6.0, 5.0]])
+    # Atom 1 passes half the skin: every atom is wrapped.
+    x = x + [[0.0, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, 0.0]]
+    np.testing.assert_allclose(
+        held(x), [[0.1, 5.0, 12.0], [5.0, 6.01, 5.0], [9.5, 5.0, 5.0]], atol=1e-12
+    )
+    # Atom 0 moves back across the face and keeps its image, outside the cell.
+    x = x - [[0.15, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    np.testing.assert_allclose(held(x)[0], [-0.05, 5.0, 12.0], atol=1e-12)
+
+
 def test_positions_the_engine_reports_go_to_the_alignment_test_only() -> None:
     """A third value from the callback changes nothing when it equals the positions."""
 

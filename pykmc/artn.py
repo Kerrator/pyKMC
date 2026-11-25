@@ -87,6 +87,16 @@ pARTn holds the push in bohr. The blend mixes that bohr vector, of norm
 test compares the bohr components of the blend; the core does both on the push
 in bohr, so its path does not depend on the unit (finding of issue 06).
 
+The alignment test takes the path from the start in the positions LAMMPS
+holds, with no minimum image, as pARTn does. LAMMPS wraps atoms into the cell
+only when it rebuilds its neighbour list: in pARTn's minimize, when an atom has
+moved more than half the 2.0 Å skin since the last rebuild. After that, a
+wrapped atom adds a cell length to the path (finding of issue 06). The core
+applies the same rule to its own positions at each evaluation, unless the
+callback reports the engine's positions. LAMMPS also checks at the evaluations
+pARTn discards, which the core skips; on the eight recordings of issue 02 this
+changes no step.
+
 This core leaves out, on purpose for now, the box-explosion guard.
 
 Other differences from pARTn:
@@ -105,10 +115,6 @@ Other differences from pARTn:
 - each FIRE restart costs no evaluation, where pARTn's costs one it discards;
 - the force-call counts are every callback call; as in pARTn, call number
   ``nevalf_max`` fails the search;
-- the alignment test takes the path from the start in the positions the
-  callback reports, by default the core's own, which are never wrapped;
-  pARTn's are LAMMPS's, which wrap an atom that crosses the cell when LAMMPS
-  next rebuilds its neighbour list (finding of issue 06).
 
 Coordinates: the search keeps its own unwrapped positions and passes them to
 the callback as they are. Distances use the minimum image on the periodic axes
@@ -176,6 +182,13 @@ _LANCZOS_BREAKDOWN = 1.0e-12
 # 0.8, and the path from the start is nearly perpendicular to the push.
 _ALIGNMENT_TURNED = 0.8
 _ALIGNMENT_PERPENDICULAR = 0.1
+# The test takes the path from the start in the positions LAMMPS holds, with no
+# minimum image. LAMMPS wraps atoms into the cell only when it rebuilds its
+# neighbour list, which pARTn's minimize does when an atom has moved more than
+# half the skin since the last rebuild (neigh_modify every 1 delay 0 check yes;
+# LAMMPS Neighbor::decide, Domain::pbc). pyKMC sets no skin for pARTn, so it is
+# LAMMPS's default for metal units, 2.0 Å.
+_PARTN_SKIN = 2.0
 # pARTn's default perpendicular step limits (d_artn_params.f90:92).
 _DEFAULT_PERP_LIMITS = (4, 8, 12, 16, -1)
 
@@ -309,6 +322,37 @@ class _Failed(Exception):
     """The search stops with the reason given."""
 
 
+def _lammps_images(
+    cell: np.ndarray,
+    pbc: np.ndarray,
+    vec: NumpyVectorSpace,
+    skin: float = _PARTN_SKIN,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Return a function giving the positions as LAMMPS holds them under pARTn.
+
+    Called once per force evaluation, in order. The first call, and any call
+    where an atom has moved more than ``skin / 2`` since the last rebuild,
+    wraps every atom into the cell on the periodic axes; between rebuilds the
+    atoms keep that image, even outside the cell. On several ranks each rank
+    holds its own rows and the rebuild test is taken over all of them.
+    """
+    trigger = (skin / 2) ** 2
+    rebuilt_at: Optional[np.ndarray] = None
+    shift = np.zeros(0)
+
+    def held(x: np.ndarray) -> np.ndarray:
+        nonlocal rebuilt_at, shift
+        if (
+            rebuilt_at is None
+            or vec.max_abs(np.sum((x - rebuilt_at) ** 2, axis=1)) > trigger
+        ):
+            rebuilt_at = x.copy()
+            shift = _wrap(x, cell, pbc) - x
+        return x + shift
+
+    return held
+
+
 def _wrap_result_positions(
     positions: np.ndarray, cell: np.ndarray, pbc: np.ndarray
 ) -> np.ndarray:
@@ -419,7 +463,7 @@ def artn_search(
         Takes (N, 3) positions in Å and returns the energy in eV and the
         (N, 3) forces in eV/Å, and optionally, third, the (N, 3) positions as
         the engine holds them, which the alignment test then uses in place of
-        the core's (as pARTn uses LAMMPS's).
+        the positions LAMMPS would hold under pARTn.
     masses : Optional[np.ndarray]
         Atom masses, (N,), amu, for FIRE. Default 1 amu each.
     push_mode : {"rad", "list"}
@@ -567,6 +611,7 @@ def artn_search(
     calls = 0
     e_start: Optional[float] = None
     held = x_start  # the positions as the engine holds them, last call
+    lammps_holds = _lammps_images(cell, pbc, vec)
 
     def evaluate(
         x: np.ndarray,
@@ -583,7 +628,7 @@ def artn_search(
         forces = np.asarray(forces, dtype=float)
         if not vec.all_true(forces.shape == (n_atoms, 3)):
             raise ValueError("energy_and_forces must return (N, 3) forces")
-        held = np.asarray(engine[0], dtype=float) if engine else x
+        held = np.asarray(engine[0], dtype=float) if engine else lammps_holds(x)
         if not vec.all_true(bool(np.isfinite(energy) and np.all(np.isfinite(forces)))):
             raise _Failed("non_finite_force")
         if restored_energy is not None:
