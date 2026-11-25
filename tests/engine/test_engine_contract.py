@@ -176,7 +176,7 @@ class EngineContractTests:
             def my_op(self):
                 return self.tolerance
 
-        ext = _ExtWithProperty(engine)
+        _ExtWithProperty(engine)
         assert not hasattr(engine, "tolerance")  # property stays on the extension
         assert hasattr(engine, "my_op")
         engine.close()

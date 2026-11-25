@@ -1,15 +1,12 @@
-from .detection import Detector
-from .exploration import Explorer, BasinGenericEventExplorer
+from .exploration import BasinGenericEventExplorer
 from .connectivity import BasinStatesConnectivity
 from .selection import FPTASelector
-from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pykmc import (
     System,
     Config,
     NeighborsList,
     AtomicEnvironment,
-    ReferenceEventTable,
     PointSetRegistration,
     Reconstruction,
 )
@@ -17,8 +14,6 @@ from typing import Optional
 from ..utils import geometry
 from ..log import LogKMC
 from ..rate_constant import RateConstant, RateRequest
-import pandas as pd
-import copy
 import numpy as np
 from scipy.spatial import cKDTree
 from pykmc.result import Ok, BasinOutput
@@ -147,7 +142,8 @@ class BasinsGenericEvents:
                     & (self.connectivity_table.df["state_connexion"] == exit_state)
                 ].iloc[0]["dE_forward"],
                 k_tot=self.connectivity_table.df.loc[
-                    self.connectivity_table.df["transient"] == False, "k_forward"
+                    self.connectivity_table.df["transient"] == False,  # noqa: E712
+                    "k_forward",
                 ].sum(),
                 t_exit=t_exit,
                 exit_state=exit_state,
@@ -469,7 +465,7 @@ class BasinsGenericEvents:
         # for all row in connectivity table where we need to refine
         futures_context = {}  # idx → { "min": f_min, "saddle": f_sad }
         for idx, row in self.connectivity_table.df.iterrows():
-            if row["transient"] == False:  # need to refine
+            if not row["transient"]:  # need to refine
                 # tmp_system = copy.deepcopy(self.states[row["state"]].system)
                 tmp_system = System(
                     positions=self.states[row["state"]].system.positions.copy(),
@@ -566,7 +562,7 @@ class BasinsGenericEvents:
                     "rcut", row["central_atom"]
                 )
 
-                if self.config.control.active_volume == True:
+                if self.config.control.active_volume:
                     # add a job to manager queue
                     future2 = self.manager.partn_refine(
                         config=self.config,
@@ -607,7 +603,7 @@ class BasinsGenericEvents:
             if not result_sad.is_ok():
                 return result_sad
             E_sad = result_sad.ok_value().E_saddle
-            if self.config.control.active_volume == True:
+            if self.config.control.active_volume:
                 dE = E_sad
             else:
                 dE = E_sad - E_min
@@ -704,7 +700,7 @@ class BasinsGenericEvents:
         neighbors_list = []
         atomic_environment = []
 
-        if full == True:
+        if full:
             neighbors_list = NeighborsList(
                 system,
                 self.config.atomicenvironment.rnei,

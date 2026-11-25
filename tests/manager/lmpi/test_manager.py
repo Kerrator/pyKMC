@@ -1,14 +1,7 @@
-from pykmc.enginemanager.lmpi.engines import MpiApiEngine
-from pykmc.enginemanager.lmpi.sessions import MpiApiSession
-from pykmc.enginemanager.lmpi.pool import ManagerFactory, Manager
-from pykmc.enginemanager.messenger import MpiMessenger
+from pykmc.enginemanager.lmpi.pool import ManagerFactory
 from pykmc import System, Config
-from mpi4py import MPI
 import pytest
 from pytest_lazy_fixtures import lf
-import os
-import time
-import numpy as np
 
 
 class TestManager:
@@ -42,6 +35,6 @@ class TestManager:
         manager.global_initialize_system(system)
         manager.global_initialize_potential(config)
         f = manager.minimize(config)
-        re = f.result()
+        f.result()
         manager.global_minimize(config)
         manager.close_all()

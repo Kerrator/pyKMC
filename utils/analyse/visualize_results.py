@@ -1,9 +1,8 @@
 import pandas as pd
 from ase import Atoms
-from ase.io import read
 from ase.visualize import view
 import numpy as np
-from ase.neighborlist import NeighborList
+from ipywidgets import interact
 
 catalog_file_path = "./NiSIAandVacancy/event_searches/catalog.pickle"
 catalog = pd.read_pickle(catalog_file_path)
@@ -39,7 +38,5 @@ def event_result(idx):
     index_move = np.argmax(dist)
     return view(traj_event, viewer="ngl")
 
-
-from ipywidgets import interact
 
 interact(event_result, idx=[i for i in range(len(catalog))])

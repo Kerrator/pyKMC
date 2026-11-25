@@ -2,12 +2,9 @@
 Tests and benchmark event search
 """
 
-from ase.io import read, write
 from pykmc.system import System
-from ase import Atoms
 import cProfile
 from pstats import Stats
-import pandas as pd
 
 # Parameters :
 init_config_file = "../../examples/Ni_fcc_4001at_sia/initial_config.xyz"

@@ -3,7 +3,6 @@ from typing import Callable, Any
 from dataclasses import dataclass
 from enum import Enum
 from mpi4py import MPI
-import inspect
 
 
 def build_registry(obj: object | list[object] | None = None) -> dict[str, Callable]:

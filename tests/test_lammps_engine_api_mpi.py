@@ -1,6 +1,6 @@
 from pykmc.enginemanager.lmpi.engines import MpiApiEngine
 from pykmc.enginemanager.lmpi.sessions import MpiApiSession
-from pykmc.enginemanager.lmpi.pool import ManagerFactory, Manager
+from pykmc.enginemanager.lmpi.pool import ManagerFactory
 from pykmc.enginemanager.messenger import MpiMessenger
 from pykmc import System, Config
 from mpi4py import MPI
@@ -8,7 +8,6 @@ import pytest
 from pytest_lazy_fixtures import lf
 import os
 import time
-import numpy as np
 
 
 class TestLammpsApiMpiEngine:
@@ -418,7 +417,7 @@ class TestLammpsApiMpiEngine:
         manager.initialize_sessions(config, system)
         print("done")
         f = manager.minimize(config)
-        re = f.result()
+        f.result()
         manager.close_all()
 
     @pytest.mark.parametrize(
@@ -437,7 +436,8 @@ class TestLammpsApiMpiEngine:
         manager.initialize_sessions(config, system)
         idx = 20 * [0]
         futures = manager.partn_refine(config, idx)
-        re = [f.result() for f in futures]
+        for f in futures:
+            f.result()
         manager.close_all()
 
     @pytest.mark.parametrize(

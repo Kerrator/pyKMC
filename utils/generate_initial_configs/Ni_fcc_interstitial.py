@@ -1,8 +1,6 @@
 import numpy as np
 from ase import Atoms
-from ase.build import bulk, make_supercell
-import random
-from ase.visualize import view
+from ase.build import bulk
 
 # Generate fcc Ni
 output = "./Ni_sia_octa.xyz"

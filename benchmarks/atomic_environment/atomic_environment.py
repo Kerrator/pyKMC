@@ -2,7 +2,6 @@
 Tests and benchmark minimization
 """
 
-from ase.io import read, write
 from pykmc.system import System
 import cProfile
 from pstats import Stats

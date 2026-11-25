@@ -85,7 +85,7 @@ class Refinement:
         future_context = {}  # mapping future -> contexte
 
         # Launch all refine Jobs
-        for idx, dfevent in df_reference_events.iterrows():
+        for _, dfevent in df_reference_events.iterrows():
             ###=>Find atoms with same atomic environment as the generic event
             atoms_refine_idx = self.atomic_environment.get_atoms_with_id(
                 dfevent["event_id"]
@@ -129,7 +129,7 @@ class Refinement:
                 # Now check if energy barrier consistent with generic one
                 # TODO partn should not return different things depending on AV or not. We get the total energy at the saddle point or dE, but not both.
                 # TODO and to be consistent, you should modify res.ok_value().E_saddle.
-                if self.config.control.active_volume == True:
+                if self.config.control.active_volume:
                     res.ok_value().dE_forward = res.ok_value().E_saddle
                 else:
                     res.ok_value().dE_forward = res.ok_value().E_saddle - total_energy
@@ -303,7 +303,7 @@ class Refinement:
                     # TODO : when AV, partn_refine needs the minimum positions to compute the initial energy with AV
                     # TODO : but this is the third parameter here, and without AV, the third parameter is the saddle positions.
                     # TODO : and with AV, you only need to send saddle positions in the rcut, while without we send all saddle positions, this is just too confusing
-                    if self.config.control.active_volume == True:
+                    if self.config.control.active_volume:
                         # add a job to manager queue
                         f = self.manager.partn_refine(
                             config=self.config,

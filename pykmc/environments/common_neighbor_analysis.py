@@ -21,7 +21,7 @@ def cna_signature(neighbors_list: list[list[int]]) -> list[str]:
 
     all_signatures = []
     # Compute signature
-    for i, neighbors_i in enumerate(neighbors_list):
+    for neighbors_i in neighbors_list:
         signatures = {}  # signature for all i,j pairs
         for j in neighbors_i:
             neighbors_j = neighbors_list[j]

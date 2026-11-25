@@ -1,7 +1,6 @@
 import pytest
 import os
 from pykmc.basins import (
-    BasinStatesConnectivity,
     StateData,
     StatesConnectivity,
     BasinStatesConnectivity,

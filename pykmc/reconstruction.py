@@ -2,7 +2,7 @@
 
 from pykmc.manager import Manager
 from pykmc import Config
-from pykmc.result import Result, Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
+from pykmc.result import Ok, Err, ReconstructionOutput, ErrorInfo, ErrorType
 import numpy as np
 import copy
 from pykmc.utils.geometry import push_towards, compute_delr

@@ -1,7 +1,7 @@
 import importlib.util
 import sys
 import os
-from typing import get_args, get_origin, Union, Optional, Any, Literal
+from typing import get_args, get_origin, Union, Any, Literal
 from pydantic import BaseModel, Field
 import inspect
 

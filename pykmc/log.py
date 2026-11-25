@@ -416,9 +416,9 @@ class LogKMC(LogManager):
         )
 
         max_key_len = 0
-        for section, model in config:
+        for _section, model in config:
             if model is not None:
-                for key, value in model:
+                for key, _value in model:
                     max_key_len = max(max_key_len, len(str(key)))
 
         for section, model in config:
@@ -585,7 +585,7 @@ class LogKMC(LogManager):
         )
         formatted_values = [
             fmt.format(v) if v is not None else " " * width
-            for (_, width, fmt), v in zip(self.OUTPUT_COLUMNS, values)
+            for (_, width, fmt), v in zip(self.OUTPUT_COLUMNS, values, strict=True)
         ]
         self.info(logger_name, " ".join(formatted_values).rstrip())
 

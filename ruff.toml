@@ -50,6 +50,12 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 ignore-fully-untyped = false
 mypy-init-return = true
 
+[lint.per-file-ignores]
+# Package __init__ files re-export their submodules on purpose.
+"__init__.py" = ["F401", "F403", "F405"]
+# Unused template kept for the histogram method; it has no imports of its own.
+"pykmc/utils/apply_generic_events.py" = ["F821"]
+
 [format]
 # Like Black, use double quotes for strings.
 quote-style = "double"

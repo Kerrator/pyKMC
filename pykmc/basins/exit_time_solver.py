@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.sparse.linalg import expm
 from numpy.linalg import eig, inv
 from pykmc.result import (
     Result,
@@ -76,7 +75,7 @@ class BisectionSolver:
         self.t_exit = -1
 
         # Compute only one time eigen values/vector of M when using spectral decomposition
-        if self.spectral_decomposition == True:
+        if self.spectral_decomposition:
             self.Valeig, self.Veceig = eig(self.M)
             self.Veceiginv = inv(self.Veceig)
 
