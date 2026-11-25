@@ -5,7 +5,9 @@ import pypARTn
 import numpy as np
 import ctypes
 from typing import Protocol
+from ase.cell import Cell
 from ase.geometry import find_mic
+from ase.geometry.geometry import naive_find_mic
 from ..system import System
 from ..config import Config
 from ..search_rules import artn_move_atom, map_to_full_system
@@ -20,29 +22,20 @@ def define_AV(config, central_atom_idx: int, positions, cell):
 
     # NEED TO ADD WARNING IF R_A<R_M
 
-    center = positions[central_atom_idx]
+    diff = positions - positions[central_atom_idx]
+    # Called on one vector, find_mic takes the naive minimum image when it is
+    # safe and the general one otherwise. Called on all atoms it would take the
+    # general one for every atom and change distances in the last bit, so
+    # choose per atom as the one-vector calls did.
+    _, distance = naive_find_mic(diff, cell)
+    unsafe = ~(distance < 0.5 * min(Cell(cell).lengths()))
+    if unsafe.any():
+        _, distance[unsafe] = find_mic(diff[unsafe], cell, pbc=True)
 
-    inner_movable_idx = []
-    buffer_idx = []
-    total_active_idx = []
-    non_active_idx = []
-
-    for i, pos in enumerate(positions):
-        diff = pos - center
-        diff_mic, distance = find_mic(diff, cell, pbc=True)
-        if np.abs(distance) <= r_m:
-            inner_movable_idx.append(i)
-            total_active_idx.append(i)  # Inner is also part of total active
-        elif (
-            np.abs(distance) > r_m and np.abs(distance) <= r_a
-        ):  # Can change to make it between r_m and r_a
-            buffer_idx.append(i)
-            total_active_idx.append(i)
-        else:
-            non_active_idx.append(i)
-
-    buffer_idx = np.array(sorted(buffer_idx))
-    av_idx = np.array(sorted(total_active_idx))
+    movable = distance <= r_m
+    buffer = ~movable & (distance <= r_a)
+    buffer_idx = np.flatnonzero(buffer)
+    av_idx = np.flatnonzero(movable | buffer)
 
     av_positions = positions[av_idx]
 
