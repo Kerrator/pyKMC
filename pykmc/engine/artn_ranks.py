@@ -23,10 +23,11 @@ from ..artn import (
     artn_search,
 )
 from ..config import validate_dimer_eam_style, validate_dimer_neighbor_reuse
-from ..dimer import DimerResult, _minimum_image, _wrap
+from ..dimer import DimerResult, _wrap
 from .dimer_forces import (
     ForceQuery,
     _NEIGHBOR_SKIN,
+    _crop_selection,
     _interaction_bound,
     configure_neighbor_reuse,
 )
@@ -434,19 +435,11 @@ def distributed_search(
         ):
             cutoff = _interaction_bound(engine, reuse)
             if cutoff is not None:
-                center = positions[central]
-
-                def radii(x: np.ndarray) -> np.ndarray:
-                    return np.linalg.norm(
-                        _minimum_image(x - center, lattice, pbc), axis=1
-                    )
-
-                distance = radii(positions)
-                reach = float(distance[mask].max()) + 0.5
-                kept = np.flatnonzero(
-                    distance <= np.nextafter(reach + 2 * cutoff, np.inf)
+                selection = _crop_selection(
+                    positions, mask, positions[central], lattice, pbc, cutoff
                 )
-                if len(kept) <= 0.9 * n:
+                if selection is not None:
+                    kept, within_reach = selection
                     cropped = RankForces(
                         instance(kept, "crop"), kept, space, lattice, pbc, reuse
                     )
@@ -455,7 +448,7 @@ def distributed_search(
 
                         def crop_query(x: np.ndarray) -> tuple[float, np.ndarray]:
                             nonlocal query
-                            if space.all_true(bool(np.all(radii(x) <= reach))):
+                            if space.all_true(within_reach(x)):
                                 e, f = cropped(x)
                                 if space.all_true(
                                     bool(np.isfinite(e) and np.isfinite(f).all())

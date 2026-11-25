@@ -13,7 +13,7 @@ from mpi4py import MPI
 
 from pykmc.artn import NumpyVectorSpace, artn_search
 from pykmc.engine.artn_ranks import DistributedSpace, OwnedRows, RankForces
-from pykmc.engine.dimer_forces import _interaction_bound
+from pykmc.engine.dimer_forces import _crop_selection, _interaction_bound
 from tests.test_dimer import NO_PBC, OPEN_CELL, curved_valley, valley_start
 
 
@@ -310,6 +310,27 @@ def test_force_rows_frames_ghosts_and_irregular_jump() -> None:
         ]
 
     parallel(2, run)
+
+
+def test_periodic_crop_selection_at_ninety_percent() -> None:
+    """Keep two shells across a periodic face and reject a crop over 90 percent."""
+    cell = np.diag([16.0, 16.0, 16.0])
+    pbc = np.ones(3, dtype=bool)
+    start = np.zeros((11, 3))
+    start[:, 0] = [0, 15, 1, 2, 3, 3.5, 12.5, 14, 15.5, 8, 1.5]
+    movable = np.arange(len(start)) == 1
+
+    # The movable atom is 1 Å away across the face. The reach is 1.5 Å
+    # and two shells of 1 Å each bring the selection radius to 3.5 Å.
+    selection = _crop_selection(start[:10], movable[:10], start[0], cell, pbc, 1.0)
+    assert selection is not None
+    kept, within_reach = selection
+    np.testing.assert_array_equal(kept, np.arange(9))
+    assert within_reach(start[[1, 10]])
+    assert not within_reach(start[[3]])
+
+    # Adding one more nearby atom takes the retained fraction from 9/10 to 10/11.
+    assert _crop_selection(start, movable, start[0], cell, pbc, 1.0) is None
 
 
 @pytest.mark.parametrize("case", ["injected", "missing", "crop-fallback"])
