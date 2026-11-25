@@ -1,4 +1,4 @@
-"""Owned-row ARTn checks with in-process collectives and synthetic force fields."""
+"""Multi-rank ARTn tests with collectives run on threads and synthetic forces."""
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -25,7 +25,7 @@ from tests.test_dimer import NO_PBC, OPEN_CELL, curved_valley, valley_start
 
 
 class ThreadComm:
-    """Rendezvous by operation name; peers timing out is an immediate failure."""
+    """Synchronize threads by operation name; a peer timeout fails at once."""
 
     def __init__(self, rank: int, values: list, barrier: Barrier) -> None:
         self.rank, self.values, self.barrier = rank, values, barrier
@@ -48,7 +48,7 @@ class ThreadComm:
         return result
 
     def alltoall(self, values: list) -> list:
-        """Deliver one payload per sender to its designated recipient."""
+        """Send value i of each rank to rank i."""
         return self.exchange(
             "alltoall", values, lambda chunks: [p[self.rank] for p in chunks]
         )
@@ -68,22 +68,22 @@ class ThreadComm:
         return self.exchange("land", value, all)
 
     def scatter(self, data: Any, root: int) -> Any:
-        """Scatter one entry of the leader's payload to each peer."""
+        """Send entry i of the root's data to rank i."""
         return self.exchange("scatter", data, lambda values: values[root][self.rank])
 
     def bcast(self, data: Any, root: int) -> Any:
-        """Broadcast the leader's value to each peer."""
+        """Broadcast the root's value to every rank."""
         return self.exchange("bcast", data, lambda values: values[root])
 
     def gather(self, data: Any, root: int) -> Any:
-        """Assemble final results only on the leader."""
+        """Gather every rank's value on the root rank only."""
         return self.exchange(
             "gather", data, lambda values: values if self.rank == root else None
         )
 
 
 def parallel(n: int, task: Callable) -> list:
-    """Run fixed-size fake ranks and surface exceptions without hanging a test."""
+    """Run n fake ranks on threads; raise their errors without hanging the test."""
     barrier = Barrier(n, timeout=5)
     shared = [None] * n
 
@@ -99,7 +99,7 @@ def parallel(n: int, task: Callable) -> list:
 
 
 def test_swapped_rows_empty_owners_and_seed_order() -> None:
-    """Exercise swaps without count changes, empty ranks, reorders and tied offsets."""
+    """Test row swaps that keep counts, empty ranks, reordering and tied offsets."""
     x = np.array([[0.0, 0, 0], [0, 0, 0], [1, 0, 0], [1, 0, 0], [2, 0, 0]])
     mask = np.array([True, True, False, True, True])
     original = [[4, 0], [1], [3], []]
@@ -136,7 +136,7 @@ def test_swapped_rows_empty_owners_and_seed_order() -> None:
 
 @pytest.mark.parametrize("limit", [2, 9999])
 def test_partitioned_core_search(limit: int) -> None:
-    """Run the faithful core and compare partial and complete returns with serial."""
+    """Run the core over ranks and compare partial and complete results with serial."""
     x = valley_start(2)
     mask = np.ones(2, bool)
     options = dict(nevalf_max=limit, push_mode="list", push_step_size=0.3)
@@ -176,7 +176,7 @@ def test_partitioned_core_search(limit: int) -> None:
 
 
 def test_nonfinite_on_one_rank_and_partial_results() -> None:
-    """A singleton NaN ends every rank and carried partial endpoint rows reassemble."""
+    """A NaN on one rank stops all ranks, and partial endpoint rows reassemble."""
     x = valley_start(3)
     mask = np.array([True, False, True])
 
@@ -212,7 +212,7 @@ def test_nonfinite_on_one_rank_and_partial_results() -> None:
 
 @pytest.mark.parametrize("fault", ["none", "malformed", "command", "create", "cleanup"])
 def test_collective_bound(monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
-    """All ranks use one INFO command/filename and receive one bound or fallback."""
+    """All ranks share one info command and file name and get one bound or fallback."""
     from pykmc.engine import dimer_forces
 
     original = dimer_forces.TemporaryDirectory
@@ -261,7 +261,7 @@ def test_collective_bound(monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
 
 
 def test_force_rows_frames_ghosts_and_irregular_jump() -> None:
-    """Prescribe rotated local rows, force a cross-owner swap, and ignore ghosts."""
+    """Set rotated local rows, force a swap between owners, and ignore ghosts."""
     x = np.zeros((2, 3))
     mask = np.ones(2, bool)
     q = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]])
@@ -344,7 +344,7 @@ def test_periodic_crop_selection_at_ninety_percent() -> None:
 def test_worker_dispatch_with_frozen_atoms(
     monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
-    """Reach the public worker with a frozen Lanczos row and reject missing atoms."""
+    """Call the worker operation with a frozen Lanczos row; reject missing atoms."""
     import sys
     from pykmc.engine.artn_search import ArtnSearchExtension
 
@@ -498,8 +498,8 @@ def test_worker_dispatch_with_frozen_atoms(
     assert leader.reason == serial.reason and leader.force_calls_total == len(reference)
     assert all(x is None for x in others)
     if case == "crop-fallback":
-        # Initial full & crop evaluations, one actual cropped move to .4,
-        # then movement beyond .5 causes a collective full fallback for good.
+        # The first full and crop evaluations, one cropped move to .4, then a
+        # move past .5 sends every rank back to the full system for good.
         assert all(len(c) == 2 for c in cropped_trace)
         assert all(len(c) == 3 for c in trace)
         np.testing.assert_allclose(cropped_trace[0][-1], reference[1][[central]])
@@ -516,7 +516,7 @@ def test_worker_dispatch_with_frozen_atoms(
 def test_assembled_periodic_endpoints_reach_the_catalogue(
     system_binary_fcc: System, config_system_single_type: Config
 ) -> None:
-    """Centre a two-shard result with a frozen atom on the periodic face."""
+    """Centre a result split over two ranks, with a frozen atom on the periodic face."""
     system = system_binary_fcc
     start = system.positions
     start[0, 0] = -1e-17
