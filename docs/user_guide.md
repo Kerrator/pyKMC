@@ -274,17 +274,23 @@ sessions with fewer ranks each instead.
 
 With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of pARTn v1.1.0 (Poberznik et al.
 2024), and refinement still uses pARTn. It reads its parameters from the `[pARTn]` section, so an existing input
-switches with one word. It runs on the dimer's force path: each search runs on a LAMMPS instance of its own on the
-first rank of its session, with the atoms chosen as for the dimer (those within `rmov` of the central atom with the
-active volume on, every atom otherwise, never those in `[frozen_atoms]`), and it counts every force call.
+switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
+of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
+volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy` and `eam/fs`,
+multi-rank workers enable neighbour-list reuse by default and one-rank workers disable it. The ARTn input file
+cannot override either default.
 
 Each search is seeded from the run-wide stream that `seed` in `[Control]` starts, as for the dimer, so a run with
 the same seed finds the same events whatever the number of LAMMPS instances. `zseed` does not seed these searches;
 pARTn's refinement still reads it.
 
-This first version is a plain ARTn: it does not yet smooth the push into the eigenvector (`nsmooth`), limit the
-perpendicular relaxation out of the basin (`nperp_limitation`), or retry after a lost negative curvature
-(`nnewchance`). A `[pARTn]` setting it does not follow is named once in the log.
+On leaving the basin, the first `nsmooth` pushes blend the last basin push into the first uphill eigenvector.
+Setting `nsmooth = 0` uses the eigenvector immediately. The core builds a sequence of perpendicular FIRE step
+limits from `nperp` and `nperp_limitation`. Each successive relaxation out of the basin uses the next limit,
+repeating the last when the sequence runs out. A limit of `-1` leaves the step count uncapped.
+If the lowest eigenvalue becomes positive after leaving the basin, `nnewchance` allows that many new attempts
+with the initial push mixed with a random direction. A `[pARTn]` setting the ARTn search ignores is named once
+in the log.
 
 ## Rate Constant 
 
