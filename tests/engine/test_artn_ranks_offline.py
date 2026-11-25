@@ -1,19 +1,26 @@
 """Owned-row ARTn checks with in-process collectives and synthetic force fields."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 import shlex
 from threading import Barrier
 from types import SimpleNamespace
 from typing import Any, Callable
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from mpi4py import MPI
 
+from pykmc import Config, System
 from pykmc.artn import NumpyVectorSpace, artn_search
+from pykmc.dimer import DimerResult
 from pykmc.engine.artn_ranks import DistributedSpace, OwnedRows, RankForces
 from pykmc.engine.dimer_forces import _crop_selection, _interaction_bound
+from pykmc.event_table import ReferenceEventTable
+from pykmc.eventsearch import EventSearch
+from pykmc.utils.geometry import translate
+from tests.eventsearch.test_dimer_strategy import _raw
 from tests.test_dimer import NO_PBC, OPEN_CELL, curved_valley, valley_start
 
 
@@ -504,3 +511,55 @@ def test_worker_dispatch_with_frozen_atoms(
             calls, np.asarray(reference)[:, rank::4], atol=1e-9, rtol=0
         )
     assert np.max(np.abs(np.asarray(trace[1]) - start[1])) > 1e-5
+
+
+def test_assembled_periodic_endpoints_reach_the_catalogue(
+    system_binary_fcc: System, config_system_single_type: Config
+) -> None:
+    """Centre a two-shard result with a frozen atom on the periodic face."""
+    system = system_binary_fcc
+    start = system.positions
+    start[0, 0] = -1e-17
+    mask = np.arange(len(start)) != 0
+    movable = np.flatnonzero(mask)
+    mover = 1
+    saddle = start.copy()
+    saddle[mover, 0] += 0.25
+    final = start.copy()
+    final[mover, 0] += 0.5
+
+    def collect(comm: ThreadComm) -> DimerResult | None:
+        ids = movable[comm.rank :: 2]
+        space = DistributedSpace(comm, ids, mask, start)
+        shard = _raw(start[ids], saddle=saddle[ids], min2=final[ids])
+        return space.collect_result(shard, system.cell, system.pbc)
+
+    result, peer = parallel(2, collect)
+    assert peer is None
+    for endpoint, expected in (
+        (result.min1_positions, start),
+        (result.saddle_positions, saddle),
+        (result.min2_positions, final),
+    ):
+        np.testing.assert_array_equal(endpoint[0], [0.0, 0.0, 0.0])
+        np.testing.assert_array_equal(endpoint[movable], expected[movable])
+
+    config = config_system_single_type
+    future = Future()
+    future.set_result(result)
+    manager = Mock()
+    manager.submit.return_value = future
+    search = EventSearch.create("artn", config=config)
+    search.execute([mover], system, manager, Mock())
+    table = ReferenceEventTable(config)
+    (added,) = table.add_events(search.get_successes_results())
+    assert added.is_ok()
+    row = table.table.iloc[0]
+    shift = np.diag(system.cell) / 2 - start[mover]
+    for stored, source in (
+        (row.initial_positions, start),
+        (row.saddle_positions, saddle),
+        (row.final_positions, final),
+    ):
+        expected = translate(source[[mover]], shift, system.cell)
+        np.testing.assert_array_equal(stored[row.move_atom_idx], expected[0])
