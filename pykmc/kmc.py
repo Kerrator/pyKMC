@@ -28,6 +28,7 @@ from .result import (
 )
 import numpy as np
 from ase.io import write
+from ase.io.trajectory import Trajectory
 from ase import Atoms
 from .algorithms import rejection_free
 import sys
@@ -1013,7 +1014,13 @@ class KMC:
             cell=self.system.cell,
             pbc=self.system.pbc,
         )
-        write(self.config.control.trajectory_output, atoms, append=True)
+        path = self.config.control.trajectory_output
+        if path.endswith(".traj"):
+            # ase.io.write(append=True) leaves a .traj that reads back as 0 frames
+            with Trajectory(path, "a") as traj:
+                traj.write(atoms)
+        else:
+            write(path, atoms, append=True)
 
     def _save(self) -> None:
         """Save the reference event table and the list of visited environments."""
