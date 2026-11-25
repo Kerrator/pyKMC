@@ -14,7 +14,6 @@ import numpy as np
 import pytest
 
 pytest.importorskip("lammps")
-pytest.importorskip("pypARTn")
 
 from pykmc.activevolume import active_volume as av  # noqa: E402
 

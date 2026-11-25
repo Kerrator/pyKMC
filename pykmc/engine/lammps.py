@@ -14,12 +14,6 @@ try:
     from mpi4py import MPI
 except ImportError:
     pass
-try:
-    import pypARTn
-except ImportError:
-    pypARTn = None
-
-
 from ..activevolume.active_volume import (
     partn_search_AV,
     partn_refine_AV,
@@ -49,16 +43,6 @@ try:
     _LAMMPS_EXCEPTIONS = (_LAMMPSException,)
 except ImportError:
     _LAMMPS_EXCEPTIONS = ()  # LAMMPS not compiled with -DLAMMPS_EXCEPTIONS=yes — decorator is a no-op
-
-
-def _new_partn() -> "pypARTn.artn":
-    """Return a pARTn handle for LAMMPS, or say how to run without pARTn."""
-    if pypARTn is None:
-        raise ImportError(
-            "pypARTn is not installed. [EventSearch] style = partn and refine_style = partn "
-            "need it; style = artn or dimer with refine_style = artn run without it."
-        )
-    return pypARTn.artn(engine="lmp")
 
 
 def lammps_error_handler(method):
@@ -613,6 +597,8 @@ class LammpsEngine(Engine):
     def partn_search(
         self, config, central_atom_idx: int, positions=None, cell=None, types=None
     ):
+        import pypARTn  # only pARTn's search and refinement need it
+
         original_stdout_fd = os.dup(1)
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, 1)
@@ -628,7 +614,7 @@ class LammpsEngine(Engine):
             if positions is not None:
                 self.set_positions(positions=positions)
 
-        artn = _new_partn()
+        artn = pypARTn.artn(engine="lmp")
 
         self.lmp.command(f"plugin load {artn.lib._name}")
         atoms_frozen = self._make_frozen_group(config, positions, types)
@@ -773,6 +759,8 @@ class LammpsEngine(Engine):
         saddle_positions=None,
         minimize_outer_atoms: bool = True,
     ):
+        import pypARTn  # only pARTn's search and refinement need it
+
         if config.control.active_volume:
             E_init, atom_map, central_lammps_id = partn_refine_AV(
                 self,
@@ -793,7 +781,7 @@ class LammpsEngine(Engine):
                 if minimize_outer_atoms:
                     self.minimize_freeze_core(saddle_idx)
 
-        artn = _new_partn()
+        artn = pypARTn.artn(engine="lmp")
         self.lmp.command(f"plugin load {artn.lib._name}")
 
         artn.reset_input()

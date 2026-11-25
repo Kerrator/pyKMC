@@ -64,6 +64,7 @@ def recorders(monkeypatch):
     RecordingKMC.instances = []
     monkeypatch.setattr(run, "EngineManagerFactory", RecordingFactory)
     monkeypatch.setattr(run, "KMC", RecordingKMC)
+    monkeypatch.setattr(run, "check_pypartn", lambda config: None)
     return monkeypatch
 
 

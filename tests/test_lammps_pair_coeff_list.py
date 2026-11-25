@@ -195,7 +195,7 @@ def test_engine_initialize_potential(cfg, expected) -> None:
 )
 def test_active_volume_reset_loads_potential_through_engine(cfg, expected) -> None:
     """The active-volume ``reset()`` ends with the engine's own potential commands."""
-    pytest.importorskip("pypARTn")
+    pytest.importorskip("lammps")
     from pykmc.activevolume import active_volume as av
 
     engine = _recording_engine(cfg)
@@ -271,7 +271,6 @@ class _SearchCfg:
 
 def _active_volume_energy(cfg: LammpsConfig) -> float:
     """Energy of the active-volume crop that ``partn_search_AV`` builds in a 256-atom Ni cell."""
-    pytest.importorskip("pypARTn")
     from pykmc.activevolume import active_volume as av
     from pykmc.engine.lammps import LammpsEngine
 
