@@ -117,9 +117,9 @@ def test_options_are_the_core_keywords_from_the_partn_section(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     ("active_volume", "artn_forces", "radii"),
-    [(True, "crop", (3.0, 12.0)), (True, "full", None), (False, "crop", None)],
+    [(True, "av", (3.0, 12.0)), (True, "full", None), (False, "av", None)],
 )
-def test_the_crop_switch_sends_the_active_volume_radii(
+def test_the_av_switch_sends_the_active_volume_radii(
     active_volume: bool, artn_forces: str, radii: tuple | None
 ) -> None:
     config = _av_config(rmov=3.0 if active_volume else None)
@@ -127,15 +127,15 @@ def test_the_crop_switch_sends_the_active_volume_radii(
     config.activevolume.artn_forces = artn_forces
     options = ArtnStrategy(config).options
 
-    assert options.get("crop_radii") == radii
-    assert {k: v for k, v in options.items() if k != "crop_radii"} == artn_options(
+    assert options.get("av_radii") == radii
+    assert {k: v for k, v in options.items() if k != "av_radii"} == artn_options(
         config.partn
     )
 
 
-def test_artn_forces_is_full_unless_set_to_crop() -> None:
+def test_artn_forces_is_full_unless_set_to_av() -> None:
     assert ActiveVolume().artn_forces == "full"
-    assert ActiveVolume(artn_forces="crop").artn_forces == "crop"
+    assert ActiveVolume(artn_forces="av").artn_forces == "av"
     with pytest.raises(ValidationError):
         ActiveVolume(artn_forces="mask")
 

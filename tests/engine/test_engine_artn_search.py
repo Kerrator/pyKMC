@@ -150,20 +150,21 @@ class TestArtnSearchSerial:
         assert np.array_equal(result.mode[frozen], np.zeros((len(frozen), 3)))
 
 
-# pARTn's crop on the Ni cell (edge 14.1 Å): movable within 4.0 Å, buffer to 6.5 Å.
-CROP_RADII = (4.0, 6.5)
-CROP_OPTIONS = {**OPTIONS, "crop_radii": CROP_RADII}
-# A seed whose crop search reaches the hop; the crop's barrier is 1.220 eV.
-CROP_HOP_SEED = 3
+# pARTn's active volume on the Ni cell (edge 14.1 Å): movable within 4.0 Å,
+# buffer to 6.5 Å.
+AV_RADII = (4.0, 6.5)
+AV_OPTIONS = {**OPTIONS, "av_radii": AV_RADII}
+# A seed whose active-volume search reaches the hop; its barrier is 1.220 eV.
+AV_HOP_SEED = 3
 
 
-def _crop_sets(system):  # noqa: ANN001, ANN202
-    """The crop's atoms and buffer, from the builder `partn_search` uses."""
+def _av_sets(system):  # noqa: ANN001, ANN202
+    """The active volume's atoms and buffer, from the builder `partn_search` uses."""
     from types import SimpleNamespace
 
     from pykmc.activevolume.active_volume import define_AV
 
-    rmov, ract = CROP_RADII
+    rmov, ract = AV_RADII
     config = SimpleNamespace(activevolume=SimpleNamespace(rmov=rmov, ract=ract))
     _, av_idx, buffer_idx = define_AV(
         config, system.central, system.positions, np.array(system.cell)
@@ -171,7 +172,7 @@ def _crop_sets(system):  # noqa: ANN001, ANN202
     return av_idx, np.isin(av_idx, buffer_idx)
 
 
-class TestArtnSearchCropSerial:
+class TestArtnSearchAVSerial:
     @pytest.fixture(autouse=True)
     def require_serial(self) -> None:
         if MPI.COMM_WORLD.Get_size() > 1:
@@ -191,14 +192,14 @@ class TestArtnSearchCropSerial:
         yield engine
         _close(engine)
 
-    def test_the_core_gets_partns_crop_and_forces(  # noqa: D102
+    def test_the_core_gets_partns_active_volume_and_forces(  # noqa: D102
         self,
         engine,  # noqa: ANN001
         eam_config,  # noqa: ANN001, F811
         vacancy,  # noqa: ANN001, F811
         monkeypatch,  # noqa: ANN001
     ) -> None:
-        av_idx, buffer = _crop_sets(vacancy)
+        av_idx, buffer = _av_sets(vacancy)
         # The strategy's movable set, the atoms within rmov, less one neighbour
         # of the central atom, as [frozen_atoms] would hold it.
         offsets = _minimum_image(
@@ -221,7 +222,7 @@ class TestArtnSearchCropSerial:
             return DimerResult(**fields)
 
         monkeypatch.setattr("pykmc.engine.artn_search.run_artn", fake)
-        result = _search(engine, vacancy, movable=movable, options=CROP_OPTIONS)
+        result = _search(engine, vacancy, movable=movable, options=AV_OPTIONS)
 
         assert result.reason == "stub" and result.saddle_positions is None
         np.testing.assert_array_equal(seen["positions"], vacancy.positions[av_idx])
@@ -230,7 +231,7 @@ class TestArtnSearchCropSerial:
         # The core moves the buffer, as pARTn does, but not the held atom.
         np.testing.assert_array_equal(seen["mask"], av_idx != held)
         assert 0 < buffer.sum() < len(av_idx) < len(vacancy.positions)
-        # The forces of the crop alone, built independently: zero on the buffer
+        # The forces of the active volume alone, built independently: zero on the buffer
         # and on the held atom.
         reference = _make_engine(
             eam_config,
@@ -250,14 +251,14 @@ class TestArtnSearchCropSerial:
             reference.close()
         assert np.abs(seen["start"][1][~buffer & (av_idx != held)]).max() > 0
 
-    def test_a_crop_search_maps_back_to_the_full_system(  # noqa: D102
+    def test_a_av_search_maps_back_to_the_full_system(  # noqa: D102
         self,
         engine,  # noqa: ANN001
         vacancy,  # noqa: ANN001, F811
     ) -> None:
-        av_idx, _ = _crop_sets(vacancy)
+        av_idx, _ = _av_sets(vacancy)
         outside = np.setdiff1d(np.arange(len(vacancy.positions)), av_idx)
-        result = _search(engine, vacancy, seed=CROP_HOP_SEED, options=CROP_OPTIONS)
+        result = _search(engine, vacancy, seed=AV_HOP_SEED, options=AV_OPTIONS)
 
         assert result.success and result.reason is None
         assert result.e_saddle - result.e_start == pytest.approx(HOP_BARRIER, abs=0.05)
@@ -269,7 +270,7 @@ class TestArtnSearchCropSerial:
         assert np.array_equal(result.mode[outside], np.zeros((len(outside), 3)))
         assert np.linalg.norm(result.mode) == pytest.approx(1.0)
 
-    def test_neighbor_list_reuse_leaves_the_crop_search_unchanged(  # noqa: D102
+    def test_neighbor_list_reuse_leaves_the_av_search_unchanged(  # noqa: D102
         self,
         engine,  # noqa: ANN001
         vacancy,  # noqa: ANN001, F811
@@ -278,8 +279,8 @@ class TestArtnSearchCropSerial:
             _search(
                 engine,
                 vacancy,
-                seed=CROP_HOP_SEED,
-                options={**CROP_OPTIONS, "reuse_neighbor_list": reuse},
+                seed=AV_HOP_SEED,
+                options={**AV_OPTIONS, "reuse_neighbor_list": reuse},
             )
             for reuse in (False, True)
         ]
@@ -294,14 +295,14 @@ class TestArtnSearchCropSerial:
             results[1].saddle_positions, results[0].saddle_positions, atol=1e-6
         )
 
-    def test_the_full_path_after_a_crop_search_is_unchanged(  # noqa: D102
+    def test_the_full_path_after_a_av_search_is_unchanged(  # noqa: D102
         self,
         engine,  # noqa: ANN001
         eam_config,  # noqa: ANN001, F811
         vacancy,  # noqa: ANN001, F811
     ) -> None:
-        _search(engine, vacancy, options=CROP_OPTIONS)
-        after_crop = _search(engine, vacancy)
+        _search(engine, vacancy, options=AV_OPTIONS)
+        after_av = _search(engine, vacancy)
         fresh = _make_engine(
             eam_config,
             None,
@@ -317,12 +318,12 @@ class TestArtnSearchCropSerial:
             _close(fresh)
         for name, value in expected._asdict().items():
             if isinstance(value, np.ndarray):
-                assert np.array_equal(value, getattr(after_crop, name)), name
+                assert np.array_equal(value, getattr(after_av, name)), name
             else:
-                assert value == getattr(after_crop, name), name
+                assert value == getattr(after_av, name), name
 
     def test_a_skewed_cell_is_refused(self, engine, vacancy) -> None:  # noqa: ANN001, D102, F811
         cell = np.array(vacancy.cell)
         cell[1, 0] = 0.5
         with pytest.raises(ValueError, match="orthogonal cell"):
-            _search(engine, vacancy, cell=cell, options=CROP_OPTIONS)
+            _search(engine, vacancy, cell=cell, options=AV_OPTIONS)

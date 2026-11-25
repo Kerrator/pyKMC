@@ -296,9 +296,9 @@ search ignores.
 With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the forces come from:
 
 - `full` (the default): the full system, as for the dimer. Atoms beyond `rmov` stay fixed and see zero force.
-- `crop`: pARTn's active volume, built as for `style = partn`: only the atoms within `ract` of the central atom,
+- `av`: pARTn's active volume, built as for `style = partn`: only the atoms within `ract` of the central atom,
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
-  moves those atoms slightly (by about 1e-4 Å), and the energies are the crop's. The forces are then pARTn's, so
+  moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
   this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
   z, and runs on one rank of each worker.
 
@@ -306,7 +306,7 @@ With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the f
 [ActiveVolume]
 rmov = 10.7
 ract = 14.2
-artn_forces = crop
+artn_forces = av
 ```
 
 ## Rate Constant 

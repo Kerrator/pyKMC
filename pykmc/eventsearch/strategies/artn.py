@@ -2,7 +2,7 @@
 
 The search runs as one `artn_search` operation on a worker
 (:mod:`pykmc.engine.artn_search`), on the dimer's force path or, with
-`[ActiveVolume] artn_forces = crop`, on pARTn's active-volume crop, and pARTn
+`[ActiveVolume] artn_forces = av`, on pARTn's active volume, and pARTn
 still refines the events. Its parameters come from the `[pARTn]` section; its seeds
 from the run-wide stream, as the dimer's.
 """
@@ -114,8 +114,8 @@ class ArtnStrategy(EventSearchStrategy):
     chosen as for the dimer: those within `rmov` of the central atom with the
     active volume on, every atom with it off, and in both cases none of
     `[frozen_atoms]`. With the active volume on and `[ActiveVolume]
-    artn_forces = crop`, the search runs on pARTn's crop instead of the full
-    system (the worker option ``crop_radii``). The `[pARTn]` settings the core
+    artn_forces = av`, the search runs on pARTn's active volume instead of the full
+    system (the worker option ``av_radii``). The `[pARTn]` settings the core
     does not follow are logged once, at the first submit.
     """
 
@@ -126,9 +126,9 @@ class ArtnStrategy(EventSearchStrategy):
         self.config = config
         perp_limits(config.partn.nperp, config.partn.nperp_limitation)
         self.options = artn_options(config.partn)
-        if config.control.active_volume and config.activevolume.artn_forces == "crop":
+        if config.control.active_volume and config.activevolume.artn_forces == "av":
             av = config.activevolume
-            self.options["crop_radii"] = (av.rmov, av.ract)
+            self.options["av_radii"] = (av.rmov, av.ract)
         self._ignored_logged = False
 
     # The same movable set as the dimer's, from the same config sections.
