@@ -32,7 +32,9 @@ def test_the_core_wraps_atoms_when_partns_lammps_did(search: int) -> None:
     lengths = np.diag(rec["cell"])
     moves = np.diff(held_by_lammps, axis=0)
     moves -= lengths * np.rint(moves / lengths)
-    path = np.concatenate([held_by_lammps[:1], held_by_lammps[:1] + np.cumsum(moves, 0)])
+    path = np.concatenate(
+        [held_by_lammps[:1], held_by_lammps[:1] + np.cumsum(moves, 0)]
+    )
     held = artn._lammps_images(rec["cell"], rec["pbc"], artn.NumpyVectorSpace())
     found = np.array([held(x) for x in path])
     assert np.any(np.abs(np.diff(held_by_lammps, axis=0)) > lengths / 2)

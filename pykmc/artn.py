@@ -829,12 +829,16 @@ def artn_search(
     )
     if not pushed.total:
         return result("empty_push")
-    push = np.zeros((n_atoms, 3)) if rng is None else pushed.draw(rng, n_atoms, push=True)
+    push = (
+        np.zeros((n_atoms, 3)) if rng is None else pushed.draw(rng, n_atoms, push=True)
+    )
     if initial_push is not None:
         push.fill(0)
         push[pushed.rows] = np.asarray(initial_push, dtype=float)[pushed.rows]
     push *= push_step_size / vec.norm(push)
-    eigvec = np.zeros((n_atoms, 3)) if rng is None else mobile.draw(rng, n_atoms, push=False)
+    eigvec = (
+        np.zeros((n_atoms, 3)) if rng is None else mobile.draw(rng, n_atoms, push=False)
+    )
     if first_lanczos_vector is not None:
         eigvec = np.array(first_lanczos_vector, dtype=float)
 
