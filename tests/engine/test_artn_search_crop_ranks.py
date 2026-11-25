@@ -49,9 +49,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     seen: dict[str, list] = {"instances": [], "crops": [], "cores": []}
 
     class Instance:
-        def __init__(
-            self, config: Any, comm: Any, engine_id: str, **_: Any
-        ) -> None:
+        def __init__(self, config: Any, comm: Any, engine_id: str, **_: Any) -> None:
             self.comm = comm
             self.lmp = self.numpy = self
             self.natoms = 0

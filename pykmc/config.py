@@ -701,8 +701,8 @@ def supports_neighbor_reuse(pair_style: str) -> bool:
     }
 
 
-def search_pair_style(lammps_config) -> str:
-    """The pair_style of a search's own LAMMPS instance: ``search_pair_style`` if set, else ``pair_style``."""
+def search_pair_style(lammps_config: Any) -> str:
+    """Return a search instance's pair_style: ``search_pair_style`` if set, else ``pair_style``."""
     style = getattr(lammps_config, "search_pair_style", None)
     return style if isinstance(style, str) and style else lammps_config.pair_style
 
@@ -769,7 +769,8 @@ class LammpsConfig(BaseModel):
 
     @field_validator("cmdargs", "search_cmdargs", "group_cmdargs", mode="before")
     @classmethod
-    def parse_cmdargs(cls, v):
+    def parse_cmdargs(cls, v: Any) -> Any:
+        """Split a string of LAMMPS command-line arguments as a shell would."""
         return shlex.split(v) if isinstance(v, str) else v
 
     @field_validator("pair_coeff", mode="before")

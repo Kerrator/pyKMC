@@ -20,16 +20,6 @@ except ImportError:
     pypARTn = None
 
 
-def _new_partn() -> "pypARTn.artn":
-    """Return a pARTn handle for LAMMPS, or say how to run without pARTn."""
-    if pypARTn is None:
-        raise ImportError(
-            "pypARTn is not installed. [EventSearch] style = partn and refine_style = partn "
-            "need it; style = artn or dimer with refine_style = artn run without it."
-        )
-    return pypARTn.artn(engine="lmp")
-
-
 from ..activevolume.active_volume import (
     partn_search_AV,
     partn_refine_AV,
@@ -59,6 +49,16 @@ try:
     _LAMMPS_EXCEPTIONS = (_LAMMPSException,)
 except ImportError:
     _LAMMPS_EXCEPTIONS = ()  # LAMMPS not compiled with -DLAMMPS_EXCEPTIONS=yes — decorator is a no-op
+
+
+def _new_partn() -> "pypARTn.artn":
+    """Return a pARTn handle for LAMMPS, or say how to run without pARTn."""
+    if pypARTn is None:
+        raise ImportError(
+            "pypARTn is not installed. [EventSearch] style = partn and refine_style = partn "
+            "need it; style = artn or dimer with refine_style = artn run without it."
+        )
+    return pypARTn.artn(engine="lmp")
 
 
 def lammps_error_handler(method):

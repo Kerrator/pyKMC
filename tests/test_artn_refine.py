@@ -484,9 +484,7 @@ def test_the_operation_refuses_the_crop(
 class RankInstance:
     """A distributed LAMMPS instance on the curved valley, rows split over ranks."""
 
-    def __init__(
-        self, config: Any, comm: ThreadComm, engine_id: str, **_: Any
-    ) -> None:
+    def __init__(self, config: Any, comm: ThreadComm, engine_id: str, **_: Any) -> None:
         self.comm, self.lmp, self.numpy = comm, self, self
 
     def start(self) -> None:
