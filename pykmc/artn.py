@@ -390,6 +390,7 @@ def artn_search(
     initial_push: Optional[np.ndarray] = None,
     first_lanczos_vector: Optional[np.ndarray] = None,
     new_chance_pushes: Optional[Sequence[np.ndarray]] = None,
+    recorded_draws_only: bool = False,
     observe: Optional[Observer] = None,
 ) -> DimerResult:
     """Find a saddle point and the two minima it connects.
@@ -491,6 +492,9 @@ def artn_search(
     new_chance_pushes : Optional[Sequence[np.ndarray]]
         (N, 3) pushes, Å, that replace the pushes the new chances build, in
         order, used as given. For step replay.
+    recorded_draws_only : bool
+        Require both initial draws and end the search with recorded_draws_exhausted
+        if its path needs a new-chance push absent from the supplied sequence.
     observe : Optional[Callable[[str, Optional[tuple]], None]]
         Called before each callback call with the move that led to the
         positions (``"start"``, ``"init"``, ``"perp"``, ``"lanczos"``,
@@ -549,6 +553,10 @@ def artn_search(
             raise ValueError(
                 "initial_push, first_lanczos_vector and new_chance_pushes must be (N, 3)"
             )
+    if recorded_draws_only and (initial_push is None or first_lanczos_vector is None):
+        raise ValueError(
+            "recorded_draws_only requires the initial push and Lanczos vector"
+        )
 
     weight = mask[:, None].astype(float)
     inv_mass = 1.0 / masses[:, None]
@@ -770,18 +778,18 @@ def artn_search(
     except _Failed as failure:
         return result(str(failure))
 
-    rng = np.random.Generator(np.random.PCG64(seed))
+    rng = None if recorded_draws_only else np.random.Generator(np.random.PCG64(seed))
     pushed, mobile = vec.draw_orders(
         x_start, central_atom, cell, pbc, mask, push_mode, push_dist_thr
     )
     if not pushed.total:
         return result("empty_push")
-    push = pushed.draw(rng, n_atoms, push=True)
+    push = np.zeros((n_atoms, 3)) if rng is None else pushed.draw(rng, n_atoms, push=True)
     if initial_push is not None:
         push.fill(0)
         push[pushed.rows] = np.asarray(initial_push, dtype=float)[pushed.rows]
     push *= push_step_size / vec.norm(push)
-    eigvec = mobile.draw(rng, n_atoms, push=False)
+    eigvec = np.zeros((n_atoms, 3)) if rng is None else mobile.draw(rng, n_atoms, push=False)
     if first_lanczos_vector is not None:
         eigvec = np.array(first_lanczos_vector, dtype=float)
 
@@ -881,6 +889,8 @@ def artn_search(
                     ismooth = 0
                     push = next(chance_pushes, None)
                     if push is None:
+                        if rng is None:
+                            raise _Failed("recorded_draws_exhausted")
                         draw = pushed.draw(rng, n_atoms, push=True)
                         draw *= push_initial
                         draw /= vec.norm(draw)

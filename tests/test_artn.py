@@ -723,6 +723,33 @@ def test_a_new_chance_pushes_again_from_the_basin() -> None:
     )
 
 
+def test_recorded_draws_only_makes_no_generator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With recorded draws only, a new chance with no push given ends the search."""
+    lost, seen, _ = moves_and_positions(LOST_SEED)
+    probe = lost.index("lanczos")
+    recorded = dict(
+        initial_push=(seen[1] - seen[0]) / artn._DISPLACEMENT_FACTOR,
+        first_lanczos_vector=seen[probe] - seen[probe - 1],
+        recorded_draws_only=True,
+        nnewchance=1,
+    )
+    with pytest.raises(ValueError, match="recorded_draws_only"):
+        valley_search(valley_start(), recorded_draws_only=True, nevalf_max=2)
+
+    def no_generator(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a random generator was made")
+
+    monkeypatch.setattr(np.random, "PCG64", no_generator)
+    moves, _, result = moves_and_positions(LOST_SEED, **recorded)
+    assert result.reason == "recorded_draws_exhausted" and moves == lost
+    given = np.zeros((4, 3))
+    given[0] = [0.0, 0.1, -0.2]
+    moves, _, result = moves_and_positions(
+        LOST_SEED, new_chance_pushes=[given], **recorded
+    )
+    assert result.reason != "recorded_draws_exhausted" and len(moves) > len(lost)
+
+
 @pytest.mark.parametrize("limits", [[-2, 4], [4, -2, 8], [4, -2], [-1, -2]])
 def test_mixed_default_perp_limits_raise(limits: list[int]) -> None:
     """A mixed list is a configuration error even when -2 is the last entry."""
