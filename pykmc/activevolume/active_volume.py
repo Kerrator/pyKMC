@@ -78,10 +78,13 @@ class _CommandEngine(Protocol):
         """Run one LAMMPS command string."""
         ...
 
+    def initialize_potential(self) -> None:
+        """Send the engine's pair_style and pair_coeff commands."""
+        ...
+
 
 def reset(
     engine: _CommandEngine,
-    config: object,
     cell: np.ndarray,
     map_type: dict[str, dict],
 ) -> None:
@@ -93,7 +96,8 @@ def reset(
     ``pair_coeff``: a multi-element
     ``pair_coeff`` (``eam/alloy``, ``eam/fs``) needs the full type count to
     exist, and pair styles that do not set masses themselves (``lj/cut``,
-    ``mlip``, ``sw``) need them before the first ``run 0``.
+    ``mlip``, ``sw``) need them before the first ``run 0``. The potential is
+    then loaded by the engine itself, as for the full system.
     """
     engine.command("clear")
     initialize_parameters(engine)
@@ -103,7 +107,7 @@ def reset(
     engine.command("create_box {} box".format(len(map_type)))
     for entry in map_type.values():
         engine.command("mass {} {}".format(entry["ref"], entry["mass"]))
-    initialize_potential(engine, config)
+    engine.initialize_potential()
 
 
 def clear(engine):
@@ -135,7 +139,7 @@ def partn_search_AV(
     engine, config, central_atom_idx: int, positions, cell, type
 ) -> [np.array, int]:
     int_types, map_type = engine.map_types(type)
-    reset(engine, config, cell, map_type=map_type)
+    reset(engine, cell, map_type=map_type)
     av_positions, av_idx, buffer_idx = define_AV(
         config, central_atom_idx, positions, cell
     )
@@ -207,21 +211,16 @@ def partn_refine_AV(
 
 
 def position_results_AV(
-    config, artn, atom_map, positions
+    config, artn, atom_map, positions, cell
 ) -> [np.array, np.array, np.array, int]:
 
     min1positions = artn.extract("tau_min1")
     min2positions = artn.extract("tau_min2")
     saddlepositions = artn.extract("tau_sad")
 
-    # find atom that moves the most
-    dist = (min1positions - saddlepositions) ** 2
-    dist = dist.sum(axis=-1)
-    dist = np.sqrt(dist)
-    dist[dist > config.atomicenvironment.rcut] = (
-        0
-        # if atom moves more that rcutevent, consider that it crosses the cell (happens with lammps), so distance = 0 to not consider it as the one that moves the most
-    )
+    # find atom that moves the most; minimum image, as pARTn returns wrapped
+    # coordinates and the atom that hops may cross the cell boundary
+    _, dist = find_mic(min1positions - saddlepositions, cell, pbc=True)
     index_move = np.argmax(dist)
 
     index_move_mapped = atom_map[index_move]
@@ -285,13 +284,6 @@ def initialize_system(engine, system):
         "labelmap atom "
         + " ".join(f"{int(e['ref'])} {key}" for key, e in map_type.items())
     )
-
-
-def initialize_potential(engine, config):
-    pair_style = config.lammps.pair_style
-    pair_coeff = config.lammps.pair_coeff
-    engine.command("pair_style {}".format(pair_style))
-    engine.command("pair_coeff {}".format(pair_coeff))
 
 
 def minimize(engine, config, positions=None):

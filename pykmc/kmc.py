@@ -96,6 +96,7 @@ class KMC:
         self.engine = None
         self.neighbors_list = None
         self.atomic_environment = None
+        self.rate_constant = None
         self.reference_table = None
         self.visited_environments = None
         self.total_energy = None
@@ -183,7 +184,9 @@ class KMC:
 
         # Build the persistent active event table once, with the recycler
         # plugin (built in __init__) attached.
-        self.active_table = ActiveEventTable(self.config, recycler=self.recycler)
+        self.active_table = ActiveEventTable(
+            self.config, recycler=self.recycler, rate_constant=self.rate_constant
+        )
 
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
@@ -280,12 +283,15 @@ class KMC:
             events_info = info_active_events(
                 self.system.types, self.reference_table, active_table
             )
+            # Refs purged this step; the orphan eviction is deferred until after
+            # the recycling prune below (see the drop_orphans call there).
+            removed_refs: set[int] = set()
             if len(err_reference) != 0:
                 self.loggers.info(
                     "log",
                     "\t :=> Removing reference event from which reconstruction failed.",
                 )
-                self.reference_table.remove(list(set(err_reference)))
+                removed_refs = self.reference_table.remove(list(set(err_reference)))
                 self.loggers.info(
                     "log",
                     "\t :=> Removing topology from known environments from which reconstruction failed.",
@@ -322,6 +328,8 @@ class KMC:
                     self.reference_table,
                     self.visited_environments,
                     self.manager,
+                    rate_constant=self.rate_constant,
+                    loggers=self.loggers,
                 )
                 self.system.update_positions(
                     result_reconstruction.ok_value().min1_positions
@@ -336,7 +344,9 @@ class KMC:
                         result_basin.ok_value().from_state
                     ].neighbors_list
                     # construct new active table with only event : new_actual_state - > exit_state
-                    tmp_active_table = ActiveEventTable(self.config)
+                    tmp_active_table = ActiveEventTable(
+                        self.config, rate_constant=self.rate_constant
+                    )
                     tmp_event = EventRefinementOutput(
                         central_atom_index=result_basin.ok_value().central_atom,
                         saddle_positions=result_basin.ok_value().saddle_positions,
@@ -346,7 +356,7 @@ class KMC:
                         num_reference_event=result_basin.ok_value().num_reference_event,
                     )
                     neighbors = result_basin.ok_value().neighbors
-                    tmp_active_table.add_events(tmp_event)
+                    tmp_active_table.add_events(tmp_event, self.reference_table)
                     # reconstruct event
                     result_basin_reconstruction = self._reconstruction_active_event(
                         0, tmp_active_table
@@ -488,6 +498,22 @@ class KMC:
                             len(self.active_table.table)
                         ),
                     )
+
+            # == Evict active rows orphaned by this step's reference purge ==
+            # Deferred to here on purpose: the step log, detector.detect and the
+            # recycling prune all read the POSITIONAL idx_selected_event, and the
+            # executed row may itself share the purged ref with a sibling that
+            # failed reconstruction. Evicting (and reset_index) in the purge block
+            # would shift or drop that row; after the prune it only removes the
+            # orphans carried into the next step.
+            n_evicted = self.active_table.drop_orphans(removed_refs)
+            if n_evicted:
+                self.loggers.info(
+                    "log",
+                    "\t :=> Evicted {} orphaned active event(s) after reference purge.".format(
+                        n_evicted
+                    ),
+                )
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
@@ -715,7 +741,7 @@ class KMC:
         # Extend the persistent active table (initialised once in `run()`).
         # Any rows surviving from the previous step are already present and
         # are not re-added because Refinement skipped them via existing_pairs.
-        self.active_table.add_events(events)
+        self.active_table.add_events(events, self.reference_table)
         return self.active_table
 
     def _select_event(
@@ -755,6 +781,7 @@ class KMC:
                 self.system,
                 self.reference_table,
                 self.atomic_environment,
+                self.neighbors_list,
             )
         return idx_selected_event, delta_t, ktot
 
@@ -783,11 +810,21 @@ class KMC:
                         num_ref_event, result_reconstruction.err_value().message
                     ),
                 )
-                ae_topo = self.reference_table.table[
+                event_ids = self.reference_table.table[
                     self.reference_table.table["idx_ref"] == num_ref_event
-                ]["event_id"].values[0]
-                err_reference.append(num_ref_event)
-                err_ae.append(ae_topo)
+                ]["event_id"].values
+                if len(event_ids) > 0:
+                    err_reference.append(num_ref_event)
+                    err_ae.append(event_ids[0])
+                else:
+                    # Defensive: the row's reference is already gone (orphans are
+                    # evicted in run), so there is nothing more to purge.
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Reference event {} already purged.".format(
+                            num_ref_event
+                        ),
+                    )
 
                 self.loggers.info("log", "\t :=> Removing active event.")
                 active_table.remove(idx_selected_event)
@@ -806,8 +843,14 @@ class KMC:
     def _reconstruction_active_event(
         self, idx_selected_event: int, active_table: AtomicEnvironment
     ):
-        central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
-        neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
+        event = active_table.table.loc[idx_selected_event]
+        central_atom = event.at["atom_index"]
+        # The stored positions follow the neighbors order of the step the event was
+        # refined in. A recycled event must use that order: the current list holds
+        # the same atoms in another order (or other atoms) once the system has moved.
+        neighbors = event.get("neighbors")
+        if not isinstance(neighbors, np.ndarray):
+            neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
         saddle_positions = copy.deepcopy(
             active_table.table.loc[idx_selected_event].at["saddle_positions"]
         )

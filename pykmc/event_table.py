@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pandas as pd
-from .rate_constant import RateConstant
+from .rate_constant import RateConstant, RateRequest
 from .config import Config
 import numpy as np
 from .environments.graph_nauty import graph
@@ -26,6 +26,47 @@ from .utils.geometry import compute_delr
 
 if TYPE_CHECKING:
     from .event_recycling import Recycling
+    from .log import LogKMC
+
+
+def _set_rate_constants(
+    table: pd.DataFrame,
+    rows: list,
+    rate_requests: list[RateRequest],
+    rate_constant: RateConstant,
+) -> list[tuple[int, ErrorInfo]]:
+    """Compute the rate constants of `rows` in one call and write `k` and `k_pref`.
+
+    A row whose rate fails gets the backup of the error.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        The event table, updated in place.
+    rows : list
+        Index labels of the rows, one per request.
+    rate_requests : list[RateRequest]
+        The data required to compute the rate constant of each row.
+    rate_constant : RateConstant
+        The rate constant of the run.
+
+    Returns
+    -------
+    list[tuple[int, ErrorInfo]]
+        The rows that use the backup, with their error.
+
+    """
+    failures = []
+    results = rate_constant.compute(rate_requests)
+    for row, result in zip(rows, results, strict=True):
+        if isinstance(result, Ok):
+            output = result.ok_value()
+        else:  # the strategy failed: use its backup computed with k0
+            output = result.err_value().variables["backup"]
+            failures.append((row, result.err_value()))
+        table.at[row, "k"] = output.k
+        table.at[row, "k_pref"] = output.prefactor
+    return failures
 
 
 class ReferenceEventTable:
@@ -35,11 +76,27 @@ class ReferenceEventTable:
     ----------
     config : Config
         The atomic simulations configuration.
+    rate_constant : RateConstant, optional
+        Computes the rate constant of new events. Default: built from
+        `[RateConstant]` of the configuration.
+    loggers : LogKMC, optional
+        The simulation loggers. Default: nothing is logged.
 
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        rate_constant: RateConstant = None,
+        loggers: LogKMC = None,
+    ) -> None:
         self.config = config
+        if rate_constant is None:
+            rate_constant = RateConstant.create(
+                config.rateconstant.style, config=config.rateconstant
+            )
+        self.rate_constant = rate_constant
+        self.loggers = loggers
         self._initialize_table()
 
     def add_events(
@@ -59,6 +116,7 @@ class ReferenceEventTable:
 
         """
         results_is_valid_events = []
+        rate_requests, rows = [], []
         # Check if the event is valid based on is_valid_new_event conditions
         for ev in events:
             res = self.is_valid_new_event(
@@ -73,7 +131,45 @@ class ReferenceEventTable:
             )
             results_is_valid_events.append(res)
             if res.is_ok():
+                start = len(self.table)
                 self.add(res.ok_value())
+                added_rows = self.table.index[start:]
+
+                # forward event, always added
+                rate_requests.append(
+                    RateRequest(
+                        dE=ev.dE_forward,
+                        initial_positions=ev.min1_positions,
+                        saddle_positions=ev.saddle_positions,
+                        central_atom=ev.move_atom_index,
+                    )
+                )
+                rows.append(added_rows[0])
+
+                # backward event, only if added too
+                if len(added_rows) == 2:
+                    rate_requests.append(
+                        RateRequest(
+                            dE=ev.dE_backward,
+                            initial_positions=ev.min2_positions,
+                            saddle_positions=ev.saddle_positions,
+                            central_atom=ev.move_atom_index,
+                        )
+                    )
+                    rows.append(added_rows[1])
+
+        # rate constants of all new events in one call
+        failures = _set_rate_constants(
+            self.table, rows, rate_requests, self.rate_constant
+        )
+        if self.loggers is not None:
+            for row, error in failures:
+                self.loggers.warning(
+                    "log",
+                    "Rate constant compute failed on reference event "
+                    f"{int(self.table.at[row, 'idx_ref'])} ({error.message}), "
+                    f"use backup value k0 = {self.table.at[row, 'k_pref']:g} ps^-1",
+                )
         # df_valid_events = self.get_valid_events(results_is_valid_events)
 
         # Check if events in results are not the same :
@@ -536,9 +632,7 @@ class ReferenceEventTable:
             - saddle_positions[neighbor_list_backward][move_atom_idx_backward]
         )
 
-        rate_constant = RateConstant.create(
-            self.config.rateconstant.style, config=self.config.rateconstant
-        )
+        # k and k_pref are computed by add_events, for all new events at once
         dfevent_forward = pd.Series(
             {
                 "idx_ref": -1,  # unknown yet
@@ -548,7 +642,8 @@ class ReferenceEventTable:
                 "final_positions": min2_positions[neighbor_list_forward],
                 "types": local_types_forward,
                 "energy_barrier": dE_forward,
-                "k": rate_constant.compute_rate(dE_forward),
+                "k": np.nan,
+                "k_pref": np.nan,
                 "id_saddle": id_saddle,
                 "id_final": id_min2,
                 "move_atom_idx": np.where(neighbor_list_forward == index_move)[0][0],
@@ -575,7 +670,8 @@ class ReferenceEventTable:
                 "final_positions": min1_positions[neighbor_list_backward],
                 "types": local_types_backward,
                 "energy_barrier": dE_backward,
-                "k": rate_constant.compute_rate(dE_backward),
+                "k": np.nan,
+                "k_pref": np.nan,
                 "id_saddle": id_saddle,
                 "id_final": id_min1,
                 "move_atom_idx": np.where(neighbor_list_backward == index_move)[0][0],
@@ -613,6 +709,7 @@ class ReferenceEventTable:
                     "types": pd.Series(dtype="object"),
                     "energy_barrier": pd.Series(dtype="float64"),
                     "k": pd.Series(dtype="float64"),
+                    "k_pref": pd.Series(dtype="float64"),
                     "id_saddle": pd.Series(dtype="str"),
                     "id_final": pd.Series(dtype="str"),
                     "move_atom_idx": pd.Series(dtype="int64"),
@@ -623,13 +720,21 @@ class ReferenceEventTable:
                 }
             )
 
-    def remove(self, idx_refs: list[int]) -> None:
+    def remove(self, idx_refs: list[int]) -> set[int]:
         """Remove events with ind == idx_ref as well as its backward event
 
         Parameters
         ----------
-        ind : int
-            index of the event to be removed
+        idx_refs : list[int]
+            logical ids (``idx_ref``) of the events to be removed.
+
+        Returns
+        -------
+        set[int]
+            The ``idx_ref`` values actually deleted: the requested ones together
+            with their backward siblings. The caller uses it to evict active rows
+            orphaned by the purge (see :meth:`ActiveEventTable.drop_orphans`).
+
         """
 
         idx_refs = set(idx_refs)  # make a set if there are doublons
@@ -642,9 +747,16 @@ class ReferenceEventTable:
 
         all_refs = idx_refs | backward_refs  # all ref to remove
 
+        # Only refs that were actually present count as removed.
+        removed = set(
+            self.table.loc[self.table["idx_ref"].isin(all_refs), "idx_ref"].astype(int)
+        )
+
         self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
             drop=True
         )  # keep event not (~) in all refs
+
+        return removed
 
     def save(self, outfile: str = "reference_table.pickle") -> None:
         """Save the reference event table to a pickle file.
@@ -667,6 +779,9 @@ class ActiveEventTable:
         The atomic simulations configuration.
     event_dataframe : pd.DataFrame, optional
         An table with active event use to initialize the table. by default 'None'.
+    rate_constant : RateConstant, optional
+        Computes the rate constant of new events. Default: built from
+        `[RateConstant]` of the configuration.
 
     """
 
@@ -675,8 +790,14 @@ class ActiveEventTable:
         config: Config,
         event_dataframe: pd.DataFrame = None,
         recycler: "Recycling | None" = None,
+        rate_constant: RateConstant = None,
     ):
         self.config = config
+        if rate_constant is None:
+            rate_constant = RateConstant.create(
+                config.rateconstant.style, config=config.rateconstant
+            )
+        self.rate_constant = rate_constant
         # Optional recycling plugin. If attached, `prune_for_recycling` keeps
         # the rows the recycler selects between KMC steps. If None, the table
         # is cleared at the end of each step (matching prior behavior).
@@ -691,8 +812,10 @@ class ActiveEventTable:
                 "atom_index": pd.Series(dtype="int64"),
                 "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
+                "neighbors": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
+                "k_pref": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
             }
@@ -718,6 +841,22 @@ class ActiveEventTable:
                 system,
                 positions_pre,
             )
+            # An unrefined row is never carried: whether an event is refined is
+            # decided every step from the events that apply in that step
+            # (`Control.refine_thr`), and a carried pair is skipped by
+            # `Refinement.execute`. Dropping the row lets the next step build it
+            # again and refine it once it matters.
+            if len(self.table) > 0:
+                refined = self.table["refined"].isin(["T", "RT"])
+                self.table = self.table.loc[refined].reset_index(drop=True)
+            # Mark carried-over rows in the events log: a recycled row shows as
+            # 'RT' instead of 'T'. Idempotent for rows recycled over multiple
+            # steps.
+            if len(self.table) > 0:
+                self.table["refined"] = [
+                    "R" + r if isinstance(r, str) and not r.startswith("R") else r
+                    for r in self.table["refined"]
+                ]
 
     def existing_pairs(self) -> set[tuple[int, int]]:
         """Return `(atom_index, num_reference_event)` tuples already in the table.
@@ -735,7 +874,9 @@ class ActiveEventTable:
         )
 
     def add_events(
-        self, events: EventRefinementOutput | list[EventRefinementOutput]
+        self,
+        events: EventRefinementOutput | list[EventRefinementOutput],
+        reference_table: ReferenceEventTable,
     ) -> None:
         """Add active events to the table.
 
@@ -743,6 +884,8 @@ class ActiveEventTable:
         ----------
         events : EventRefinementOutput | list[EventRefinementOutput]
             An EventRefinementOuput dataclass, or a list of it, with active event to be added to the table.
+        reference_table : ReferenceEventTable
+            The reference event table of the simulation.
 
         Raises
         ------
@@ -760,7 +903,26 @@ class ActiveEventTable:
             raise TypeError(
                 "Input 'events' must be an EventRefinementOutput dataclass or a list of it."
             )
+        start = len(self.table)
         self.add(dfactive)
+        rows = self.table.index[start:]
+
+        # prefactor of the reference event, with the barrier of the active event
+        reference_prefactors = reference_table.table.set_index("idx_ref")["k_pref"]
+        rate_requests = [
+            RateRequest(
+                dE=float(self.table.at[row, "energy_barrier"]),
+                prefactor=float(
+                    reference_prefactors.loc[
+                        int(self.table.at[row, "num_reference_event"])
+                    ]
+                ),
+            )
+            for row in rows
+        ]
+
+        # rate constants of all new events in one call
+        _set_rate_constants(self.table, rows, rate_requests, self.rate_constant)
 
     def add(self, dfevents: pd.Series | list[pd.Series]) -> None:
         """Add a pd.Series of the active events.
@@ -806,15 +968,16 @@ class ActiveEventTable:
 
         """
 
+        # k and k_pref are computed by add_events, for all new events at once
         dfactive = pd.Series(
             {
                 "atom_index": event_refinement_output.central_atom_index,
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
+                "neighbors": event_refinement_output.neighbors,
                 "energy_barrier": event_refinement_output.dE_forward,
-                "k": RateConstant.create(
-                    self.config.rateconstant.style, config=self.config.rateconstant
-                ).compute_rate(event_refinement_output.dE_forward),
+                "k": np.nan,
+                "k_pref": np.nan,
                 "num_reference_event": event_refinement_output.num_reference_event,
                 "refined": event_refinement_output.refined,
             }
@@ -831,6 +994,48 @@ class ActiveEventTable:
         """
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
+
+    def drop_orphans(self, removed_refs: set[int]) -> int:
+        """Evict active rows whose reference event was purged.
+
+        The active table persists across KMC steps (recycled rows carry over),
+        so when ``ReferenceEventTable.remove`` deletes a reference event the rows
+        still pointing at it become orphans that crash the next step's lookups.
+
+        Parameters
+        ----------
+        removed_refs : set[int]
+            ``idx_ref`` values just deleted from the reference table (forward and
+            backward), as returned by :meth:`ReferenceEventTable.remove`.
+
+        Returns
+        -------
+        int
+            Number of active rows evicted.
+
+        """
+        if not removed_refs or len(self.table) == 0:
+            return 0
+        orphan_mask = self.table["num_reference_event"].isin(removed_refs)
+        n_orphans = int(orphan_mask.sum())
+        if n_orphans:
+            self.table = self.table[~orphan_mask].reset_index(drop=True)
+        return n_orphans
+
+    def _saddle_atom_ids(self, label: int, neighbors_list: NeighborsList) -> np.ndarray:
+        """Atom ids, in order, that the row's `saddle_positions` follow.
+
+        A row stores the rcut neighbors order of the step it was refined in. A
+        recycled row must be compared in that order: the neighbors list is rebuilt
+        every step, and once the system has moved it holds the same atoms in
+        another order. A row without a stored order uses the current list.
+        """
+        if "neighbors" in self.table.columns:
+            ids = self.table.at[label, "neighbors"]
+            if isinstance(ids, np.ndarray):
+                return ids
+        atom = self.table.at[label, "atom_index"]
+        return np.asarray(neighbors_list.get_neighbors("rcut", atom), dtype=int)
 
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
@@ -855,10 +1060,22 @@ class ActiveEventTable:
 
         for idx, subset in grouped:
             pos_ref = np.array(self.table.loc[idx, "saddle_positions"])
+            ids_ref = (
+                None
+                if neighbors_list is None
+                else self._saddle_atom_ids(idx, neighbors_list)
+            )
             for jdx in subset.index:
                 if jdx <= idx:
                     continue  # dont compute twice
                 pos_comp = np.array(self.table.loc[jdx, "saddle_positions"])
+                if ids_ref is not None:
+                    ids_comp = self._saddle_atom_ids(jdx, neighbors_list)
+                    if not np.array_equal(ids_ref, ids_comp):
+                        # a recycled row: compare atom by atom, not by position
+                        if set(ids_ref.tolist()) != set(ids_comp.tolist()):
+                            continue  # another environment, not a duplicate
+                        pos_comp = pos_comp[pd.Index(ids_comp).get_indexer(ids_ref)]
                 delr = compute_delr(pos_ref, pos_comp, cell)
                 if delr < self.config.psr.matching_score_thr:
                     # print('Removing event with delr',delr)
@@ -879,16 +1096,15 @@ class ActiveEventTable:
 
                 for i, idx in enumerate(indices):  # Loop over indice of subset
                     central_atom1 = subset.loc[idx, "atom_index"]
-                    env1 = neighbors_list.get_neighbors(
-                        "rcut", central_atom1
-                    )  # list of atom in env1
+                    # atoms of env1, in the order of the row's saddle positions
+                    env1 = self._saddle_atom_ids(idx, neighbors_list)
 
                     for jdx in indices[i + 1 :]:  # to not compare two times
                         central_atom2 = subset.loc[jdx, "atom_index"]
                         if (
                             central_atom1 != central_atom2
                         ):  # if yes already done in part 1.
-                            env2 = neighbors_list.get_neighbors("rcut", central_atom2)
+                            env2 = self._saddle_atom_ids(jdx, neighbors_list)
                             # intersection of atoms in atomic environments
                             common = set(env1) & set(env2)
 
