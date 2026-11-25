@@ -685,7 +685,7 @@ class LammpsEngine(Engine):
         artn.set("lmove_nextmin", False)
         artn.set("zseed", config.partn.zseed)
         artn.set("push_mode", config.partn.r_push_mode)
-        if config.partn.push_mode == "rad":
+        if config.partn.r_push_mode == "rad":
             artn.set("push_dist_thr", config.partn.r_push_dist_thr)
         artn.set("push_step_size", config.partn.r_push_step_size)
         artn.set("push_ids", central_lammps_id)
