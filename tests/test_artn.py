@@ -983,3 +983,46 @@ def test_lanczos_continues_after_small_residual(coupled: bool) -> None:
     else:
         np.testing.assert_array_equal(seen[2], expected)
     np.testing.assert_allclose(seen[3], expected, rtol=1e-12, atol=0)
+
+
+def test_result_positions_keep_box_half_open_and_interior_points_exact() -> None:
+    """Repair misrounded periodic faces without changing valid or nonperiodic entries."""
+    from pykmc.dimer import _wrap
+
+    cell = np.diag([28.55312, 0.11, 9.0])
+    pbc = np.array([True, True, False])
+    lx, ly, _ = cell.diagonal()
+    inside_x, inside_y = np.nextafter([lx, ly], 0.0)
+    outside_x = np.nextafter(lx, np.inf)
+    x = np.array(
+        [
+            [-1e-17, inside_y, -1e-17],
+            [lx, ly, 9.0],
+            [inside_x, -ly, -12.0],
+            [outside_x, 0.037, 11.0],
+        ]
+    )
+    original = x.copy()
+    old = _wrap(x, cell, pbc)
+    assert old[0, 0] == lx
+    wrapped = artn._wrap_result_positions(x, cell, pbc)
+    expected = [
+        [0.0, inside_y, -1e-17],
+        [0.0, 0.0, 9.0],
+        [inside_x, 0.0, -12.0],
+        [outside_x - lx, 0.037, 11.0],
+    ]
+    np.testing.assert_array_equal(wrapped, expected)
+    np.testing.assert_array_equal(
+        artn._wrap_result_positions(wrapped, cell, pbc), wrapped
+    )
+    np.testing.assert_array_equal(x, original)
+    ordinary = (old >= 0) & (old < cell.diagonal())
+    np.testing.assert_array_equal(wrapped[ordinary], old[ordinary])
+    np.testing.assert_array_equal(
+        artn._wrap_result_positions(x, cell, ~np.ones(3, bool)), original
+    )
+    skew = np.array([[5.0, 0, 0], [1.5, 5.0, 0], [0.2, 0.3, 9.0]])
+    np.testing.assert_array_equal(
+        artn._wrap_result_positions(x, skew, pbc), _wrap(x, skew, pbc)
+    )
