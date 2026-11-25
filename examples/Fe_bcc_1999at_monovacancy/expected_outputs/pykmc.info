@@ -6,21 +6,21 @@ atomic_environment_info:
   n_new_atomic_environments: 2
 reference_event_searches_info:
   total_event_searches: 20
-  n_successes: 2
+  n_successes: 15
   n_fails:
-    no_event_found: 17
-    minima_not_matching_positions: 1
+    no_event_found: 3
+    minima_not_matching_positions: 2
 valid_event_info:
-  n_valid_events: 2
+  n_valid_events: 3
   invalid_events:
-    dE > emax_event: 0
+    dE > emax_event: 1
     dE < emin_event: 0
     dE inverse < emin_event: 0
     Event asymmetric: 0
-    Event already in reference table: 0
+    Event already in reference table: 11
 refinements_info:
-  n_attempts: 14
-  n_sucesses: 14
+  n_attempts: 38
+  n_sucesses: 38
   n_fails:
     no_match_found:
       n: 0
@@ -41,10 +41,10 @@ atomic_environment_info:
   n_new_atomic_environments: 5
 reference_event_searches_info:
   total_event_searches: 50
-  n_successes: 9
+  n_successes: 44
   n_fails:
-    no_event_found: 39
-    minima_not_matching_positions: 2
+    no_event_found: 1
+    minima_not_matching_positions: 5
 valid_event_info:
   n_valid_events: 1
   invalid_events:
@@ -52,10 +52,10 @@ valid_event_info:
     dE < emin_event: 0
     dE inverse < emin_event: 0
     Event asymmetric: 0
-    Event already in reference table: 8
+    Event already in reference table: 43
 refinements_info:
-  n_attempts: 4
-  n_sucesses: 4
+  n_attempts: 10
+  n_sucesses: 10
   n_fails:
     no_match_found:
       n: 0
@@ -69,14 +69,10 @@ refinements_info:
       n: 0
 
 ---
-
-...
-
----
-step: 100
+step: 3
 atomic_environment_info:
   total_atomic_environments_encounter: 8
-  n_current_atomic_environments: 6
+  n_current_atomic_environments: 3
   n_new_atomic_environments: 0
 reference_event_searches_info:
   total_event_searches: 0
@@ -93,8 +89,8 @@ valid_event_info:
     Event asymmetric: 0
     Event already in reference table: 0
 refinements_info:
-  n_attempts: 4
-  n_sucesses: 4
+  n_attempts: 38
+  n_sucesses: 38
   n_fails:
     no_match_found:
       n: 0
