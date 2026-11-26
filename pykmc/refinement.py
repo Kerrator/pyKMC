@@ -101,7 +101,7 @@ def submit_artn_refine(
     relax_radius = None
     if config.control.active_volume:
         av = config.activevolume
-        if config.artn_refine_forces == "av":
+        if config.artn_force_region == "av":
             options["av_radii"] = (av.rmov, av.ract)
             if config.frozen_atoms is not None:
                 options["av_frozen"] = frozen_atom_indices(

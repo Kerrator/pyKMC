@@ -685,7 +685,7 @@ def test_a_gpu_input_kokkos_cannot_minimize_keeps_pre_change_refiners(
     assert config.eventsearch.refine_style == "partn"
     config = _gpu_refine_input(tmp_path, gpu, min_style="fire", refine_style="artn")
     assert config.eventsearch.refine_style == "artn"
-    assert config.artn_refine_forces == "full"
+    assert config.artn_force_region == "full"
 
 
 @pytest.mark.parametrize(
@@ -716,7 +716,7 @@ def test_the_gpu_default_survives_a_dump_and_reload(tmp_path: Path) -> None:
     for c in (config, reloaded):
         assert c.eventsearch.refine_style == "artn"
         assert c.activevolume.artn_forces is None
-        assert c.artn_refine_forces == "av"
+        assert c.artn_force_region == "av"
 
 
 def test_the_log_says_why_a_gpu_input_keeps_partn(tmp_path: Path) -> None:
@@ -730,9 +730,11 @@ def test_the_log_says_why_a_gpu_input_keeps_partn(tmp_path: Path) -> None:
             loggers=SimpleNamespace(info=lambda name, line: lines.append(line)),
         )
         Initializer(kmc).log_refine_region()
-    assert len(lines) == 2
-    assert "min_style = fire), so pARTn refines" in lines[0]
-    assert lines[1] == "ARTn refinement force region = av"
+    # style = artn: the search's region is logged too.
+    assert len(lines) == 3
+    assert lines[0] == "ARTn force region = full"
+    assert "min_style = fire), so pARTn refines" in lines[1]
+    assert lines[2] == "ARTn force region = av"
 
 
 def test_explicit_partn_refiner_on_gpu(tmp_path: Path) -> None:
@@ -745,8 +747,8 @@ def test_explicit_partn_refiner_on_gpu(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("refine_style", "artn_forces", "search_radii", "refine_radii"),
     [
-        (None, None, None, (6, 10)),
-        ("artn", None, None, (6, 10)),
+        (None, None, (6, 10), (6, 10)),
+        ("artn", None, (6, 10), (6, 10)),
         (None, "av", (6, 10), (6, 10)),
         (None, "full", None, None),
         ("artn", "av", (6, 10), (6, 10)),
@@ -925,7 +927,7 @@ def _config(
     return SimpleNamespace(
         control=SimpleNamespace(active_volume=active_volume),
         activevolume=SimpleNamespace(rmov=3.0, ract=6.0),
-        artn_refine_forces=artn_forces,
+        artn_force_region=artn_forces,
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
         eventsearch=SimpleNamespace(refined_energy_thr=0.05, refine_style=refine_style),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.1),

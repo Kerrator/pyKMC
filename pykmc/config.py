@@ -675,9 +675,10 @@ class ActiveVolume(BaseModel):
         "active volume is enabled. 'full' uses the full system with atoms beyond "
         "`rmov` held fixed. 'av' uses pARTn's active volume, which contains the "
         "atoms within `ract` and applies zero force to the buffer beyond `rmov`. "
-        "When omitted (None), searches use 'full'. Python ARTn refinement uses 'av' "
-        "on a Kokkos GPU search instance that can minimize under KOKKOS "
-        "([Lammps] min_style = cg with -sf kk) and 'full' otherwise.",
+        "When omitted (None), both use 'av' on a Kokkos GPU search instance that "
+        "can minimize under KOKKOS ([Lammps] min_style = cg with -sf kk) and "
+        "'full' otherwise. 'av' needs an orthogonal cell with its edges along "
+        "x, y and z.",
     )
 
 
@@ -1204,8 +1205,11 @@ class Config(BaseModel):
     )
 
     @property
-    def gpu_av_refine_default(self) -> bool:
-        """Whether omitted refinement settings select Python ARTn on the active volume.
+    def gpu_av_default(self) -> bool:
+        """Whether omitted settings select Python ARTn on the active volume.
+
+        Then refinement defaults to Python ARTn, and both its searches and
+        refinements to the active volume.
 
         True with the active volume on and a search instance that requests a
         KOKKOS GPU and can minimize under KOKKOS (`min_style = cg`, `-sf kk`).
@@ -1220,14 +1224,14 @@ class Config(BaseModel):
         )
 
     @property
-    def artn_refine_forces(self) -> Literal["full", "av"]:
-        """Effective force region for the Python ARTn refiner."""
+    def artn_force_region(self) -> Literal["full", "av"]:
+        """Effective force region for Python ARTn searches and refinements."""
         av = self.activevolume
         if not self.control.active_volume or av is None:
             return "full"
         if av.artn_forces is not None:
             return av.artn_forces
-        return "av" if self.gpu_av_refine_default else "full"
+        return "av" if self.gpu_av_default else "full"
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
@@ -1313,7 +1317,7 @@ class Config(BaseModel):
         """
         if (
             "refine_style" not in self.eventsearch.model_fields_set
-            and self.gpu_av_refine_default
+            and self.gpu_av_default
         ):
             self.eventsearch = self.eventsearch.model_copy(
                 update={"refine_style": "artn"}
@@ -1347,7 +1351,7 @@ class Config(BaseModel):
                         )
         if (
             self.eventsearch.refine_style == "artn"
-            and self.artn_refine_forces == "av"
+            and self.artn_force_region == "av"
             and self.lammps is not None
             and self.lammps.search_uses_kokkos
             and not self.lammps.search_minimizes_with_kokkos

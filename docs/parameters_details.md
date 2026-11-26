@@ -593,7 +593,7 @@
   </details>
 - **`artn_forces`** : `Literal['full', 'av']`, optional
   <details><summary>Description</summary>
-  Force region for Python ARTn operations when the active volume is enabled. If omitted, searches use the full system. Python ARTn refinement defaults to the active volume when the search instance requests a KOKKOS GPU and can minimize under KOKKOS (`[Lammps] min_style = cg` with `-sf kk`), and to the full system otherwise. An explicit value selects that region for both. `full` holds atoms beyond `rmov` fixed in the full system. `av` includes atoms within `ract` and applies zero force to the buffer beyond `rmov`.
+  Force region for Python ARTn searches and refinements when the active volume is enabled. If omitted, both use the active volume when the search instance requests a KOKKOS GPU and can minimize under KOKKOS (`[Lammps] min_style = cg` with `-sf kk`), and the full system otherwise. An explicit value selects that region for both. `full` holds atoms beyond `rmov` fixed in the full system. `av` includes atoms within `ract` and applies zero force to the buffer beyond `rmov`; it needs an orthogonal cell with its edges along x, y and z.
   </details>
 
 ---

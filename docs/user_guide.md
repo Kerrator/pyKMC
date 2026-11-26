@@ -363,11 +363,12 @@ search ignores.
 
 With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the ARTn search evaluates forces:
 
-- `full` (the search default) uses the full system, as for the dimer. Atoms beyond `rmov` stay fixed and see zero force.
+- `full` (the default, except on a KOKKOS GPU as below) uses the full system, as for the dimer. Atoms beyond `rmov` stay fixed and see zero force.
 - `av`: pARTn's active volume, built as for `style = partn`: only the atoms within `ract` of the central atom,
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
-  moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
-  this setting is for comparing the search with pARTn's. It needs an orthogonal cell with its edges along x, y and
+  moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's.
+  It is the default when the search instance runs on a KOKKOS GPU (next section): there each session's GPU instance
+  holds only the active volume, which is faster and fits more sessions on one GPU. It needs an orthogonal cell with its edges along x, y and
   z. As for the dimer, each active-volume search runs on the first rank of its session. A session with several
   ranks therefore gets no speed-up: its other ranks wait while the search runs. Use more sessions with fewer ranks
   each instead. For `eam/alloy`, `eam/fs`, `mtp` and `mtp/small` it reuses neighbor lists between force calls too,
@@ -383,15 +384,15 @@ artn_forces = av
 ### Refinement with ARTn
 
 When `[Control] active_volume = True` and the private search instance requests at least one KOKKOS GPU,
-pyKMC defaults to its Python ARTn refiner on the active volume. The search instance receives `cmdargs` followed
+pyKMC defaults to its Python ARTn refiner, and Python ARTn searches and refinements to the active volume. The search instance receives `cmdargs` followed
 by `search_cmdargs`. This refiner pre-relaxes on that instance, so the default needs `[Lammps] min_style = cg`
 and `-sf kk` in those arguments (KOKKOS minimizes only with `cg/kk`); without them pyKMC keeps pARTn and logs
 why. The default elsewhere is pARTn, including runs that request a GPU only in `group_cmdargs`.
 
 For any search style, `[EventSearch] refine_style = partn` or `artn` explicitly selects the refiner.
-Both read the `r_` parameters of `[pARTn]`. With `artn_forces` omitted, a Python ARTn search uses the
-full cell. A Python ARTn refinement uses the active volume under the GPU conditions above and the full
-cell elsewhere. Setting `[ActiveVolume] artn_forces` to `full` or `av` selects that region for both
+Both read the `r_` parameters of `[pARTn]`. With `artn_forces` omitted, Python ARTn searches and refinements
+use the active volume under the GPU conditions above and the full cell elsewhere. On a 12 GiB laptop GPU a
+1,729-atom Si cell with full-cell searches ran out of GPU memory with six sessions. Setting `[ActiveVolume] artn_forces` to `full` or `av` selects that region for both
 Python ARTn operations when the active volume is enabled.
 
 The ARTn refiner sets
