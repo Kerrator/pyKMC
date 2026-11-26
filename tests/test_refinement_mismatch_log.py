@@ -34,10 +34,13 @@ def _refinement(outcomes: dict[int, object]) -> tuple[Refinement, StubLoggers]:
         control=SimpleNamespace(active_volume=False),
         eventsearch=SimpleNamespace(refined_energy_thr=0.05, refine_style="partn"),
         partn=SimpleNamespace(r_delr_sad_thr=0.4),
+        reconstruction=SimpleNamespace(saddle_disp_thr=0.001),
     )
     loggers = StubLoggers()
     atomic_environment = SimpleNamespace(get_atoms_with_id=lambda event_id: [2])
-    refinement = Refinement(config, loggers, None, None, atomic_environment, None)
+    # Every atom is an rcut neighbour, so the saddle keeps no outer atoms.
+    system = SimpleNamespace(positions=np.zeros((N_ATOMS, 3)), cell=np.eye(3) * 10.0)
+    refinement = Refinement(config, loggers, system, None, atomic_environment, None)
     refinement.get_total_refinements_todo = lambda df: (len(df), 1.0)
     refinement.get_energy_thr_refine = lambda df, k: 10.0
 

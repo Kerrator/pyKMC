@@ -838,6 +838,7 @@ def _config(
         ira=None,
         partn=PartnConfig(),
         frozen_atoms=None,
+        reconstruction=SimpleNamespace(saddle_disp_thr=0.001),
     )
 
 

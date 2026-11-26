@@ -115,8 +115,10 @@ class _Manager:
 def _config(saddle_disp_thr: float) -> SimpleNamespace:
     return SimpleNamespace(
         # refine_thr above 1 puts the only reference event under the threshold
-        control=SimpleNamespace(recycle=False, active_volume=False, refine_thr=2.0),
-        eventsearch=SimpleNamespace(refined_energy_thr=0.1),
+        control=SimpleNamespace(
+            recycle=False, active_volume=False, refine_thr=2.0, seed=None
+        ),
+        eventsearch=SimpleNamespace(refined_energy_thr=0.1, refine_style="partn"),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.4),
         ira=SimpleNamespace(),
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
