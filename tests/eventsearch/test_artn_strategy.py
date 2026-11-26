@@ -133,8 +133,10 @@ def test_the_av_switch_sends_the_active_volume_radii(
     )
 
 
-def test_artn_forces_is_full_unless_set_to_av() -> None:
-    assert ActiveVolume().artn_forces == "full"
+def test_artn_forces_is_unset_unless_given() -> None:
+    """Omitted, it is None: searches use the full system, the refiner picks its own."""
+    assert ActiveVolume().artn_forces is None
+    assert ActiveVolume(artn_forces="full").artn_forces == "full"
     assert ActiveVolume(artn_forces="av").artn_forces == "av"
     with pytest.raises(ValidationError):
         ActiveVolume(artn_forces="mask")

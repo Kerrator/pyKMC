@@ -141,7 +141,7 @@
   </details>
 - **`refine_style`** : `Literal['partn', 'artn']`, optional
   <details><summary>Description</summary>
-  Method used to refine events for any search style. The default is Python ARTn when `active_volume = True` and the private search instance requests a KOKKOS GPU, and pARTn otherwise. Setting `partn` or `artn` explicitly selects that refiner. Both use the `r_` parameters of `[pARTn]`.
+  Method used to refine events for any search style. The default is Python ARTn when `active_volume = True` and the private search instance requests a KOKKOS GPU and can minimize under KOKKOS (`[Lammps] min_style = cg` with `-sf kk`), and pARTn otherwise. Setting `partn` or `artn` explicitly selects that refiner. Both use the `r_` parameters of `[pARTn]`.
   </details>
 - **`nsearch`** : `int`, mandatory
   <details><summary>Description</summary>
@@ -257,7 +257,7 @@
   </details>
 - **`search_cmdargs`** : `list[str]`, optional
   <details><summary>Description</summary>
-  LAMMPS arguments added after `cmdargs` on the private force instance for dimer and ARTn searches. Python ARTn active-volume refinement also uses this instance for pre-relaxation and saddle refinement. For KOKKOS active-volume refinement, set `min_style = cg` and include `-sf kk` in these arguments.
+  LAMMPS arguments added after `cmdargs` on the private force instance for dimer and ARTn searches. Python ARTn active-volume refinement also uses this instance for pre-relaxation and saddle refinement. For KOKKOS active-volume refinement, set `min_style = cg` and include `-sf kk` in these arguments: without them a GPU input keeps the pARTn refiner, and an explicit `artn_forces = av` refinement is refused.
   </details>
 - **`search_pair_style`** : `str`, optional
   <details><summary>Description</summary>
@@ -589,7 +589,7 @@
   </details>
 - **`artn_forces`** : `Literal['full', 'av']`, optional
   <details><summary>Description</summary>
-  Force region for Python ARTn operations when the active volume is enabled. If omitted, searches use the full system. Python ARTn refinement defaults to the active volume when the search instance requests a KOKKOS GPU, and to the full system otherwise. An explicit value selects that region for both. `full` holds atoms beyond `rmov` fixed in the full system. `av` includes atoms within `ract` and applies zero force to the buffer beyond `rmov`.
+  Force region for Python ARTn operations when the active volume is enabled. If omitted, searches use the full system. Python ARTn refinement defaults to the active volume when the search instance requests a KOKKOS GPU and can minimize under KOKKOS (`[Lammps] min_style = cg` with `-sf kk`), and to the full system otherwise. An explicit value selects that region for both. `full` holds atoms beyond `rmov` fixed in the full system. `av` includes atoms within `ract` and applies zero force to the buffer beyond `rmov`.
   </details>
 
 ---

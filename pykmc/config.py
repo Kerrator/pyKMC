@@ -218,7 +218,8 @@ class EventSearchConfig(BaseModel):
     refine_style: Literal["partn", "artn"] = Field(
         default="partn",
         description="Event refiner for any search style. Defaults to 'artn' when the "
-        "active volume is enabled and the search instance requests a Kokkos GPU, "
+        "active volume is enabled and the search instance requests a Kokkos GPU "
+        "and can minimize under KOKKOS ([Lammps] min_style = cg with -sf kk), "
         "and to 'partn' otherwise. Both use the [pARTn] r_* parameters. Python ARTn "
         "stops at the saddle and seeds each attempt from a child of the [Control] "
         "seed stream. It ignores r_neigen values other than 1 and logs them.",
@@ -668,14 +669,15 @@ class ActiveVolume(BaseModel):
         description="Debug flag for active volume size checks",
     )
 
-    artn_forces: Literal["full", "av"] = Field(
-        default="full",
+    artn_forces: Optional[Literal["full", "av"]] = Field(
+        default=None,
         description="Force region for Python ARTn searches and refinements when the "
         "active volume is enabled. 'full' uses the full system with atoms beyond "
         "`rmov` held fixed. 'av' uses pARTn's active volume, which contains the "
         "atoms within `ract` and applies zero force to the buffer beyond `rmov`. "
-        "When omitted, searches use 'full'. Python ARTn refinement uses 'av' on a "
-        "Kokkos GPU search instance and 'full' otherwise.",
+        "When omitted (None), searches use 'full'. Python ARTn refinement uses 'av' "
+        "on a Kokkos GPU search instance that can minimize under KOKKOS "
+        "([Lammps] min_style = cg with -sf kk) and 'full' otherwise.",
     )
 
 
@@ -748,7 +750,7 @@ class LammpsConfig(BaseModel):
     )
     search_cmdargs: Optional[list[str]] = Field(
         default=None,
-        description="LAMMPS arguments added after `cmdargs` on the private force instance for dimer and ARTn searches. Python ARTn active-volume refinement also uses this instance for pre-relaxation and saddle refinement. For KOKKOS active-volume refinement, set `min_style = cg` and include `-sf kk` in these arguments.",
+        description="LAMMPS arguments added after `cmdargs` on the private force instance for dimer and ARTn searches. Python ARTn active-volume refinement also uses this instance for pre-relaxation and saddle refinement. For KOKKOS active-volume refinement, set `min_style = cg` and include `-sf kk` in these arguments: without them a GPU input keeps the pARTn refiner, and an explicit `artn_forces = av` refinement is refused.",
     )
 
     search_pair_style: Optional[str] = Field(
@@ -766,22 +768,49 @@ class LammpsConfig(BaseModel):
         description="Lammps pair_style command for the group instance (`lammps.log.0`, the full-cell minimizations), when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `group_cmdargs`. None uses `pair_style`.",
     )
 
-    @property
-    def search_uses_kokkos_gpu(self) -> bool:
-        """Whether the search instance requests one or more GPUs with LAMMPS -k."""
+    def _search_kokkos(self) -> tuple[bool, bool, bool]:
+        """Read the search instance's arguments as LAMMPS does.
+
+        Returns whether KOKKOS is on, whether it requests a GPU and whether the
+        suffix includes ``kk``. The last ``-k`` and ``-sf`` clauses win.
+        """
         args = (self.cmdargs or []) + (self.search_cmdargs or [])
-        in_kokkos_options = False
-        gpu_requested = False
-        for option, value in zip(args, args[1:], strict=False):
+        kokkos = gpu = suffix_kk = in_kokkos_options = False
+        for i, option in enumerate(args):
+            value = args[i + 1] if i + 1 < len(args) else ""
             if option in ("-k", "-kokkos"):
-                # LAMMPS uses the last -k clause and reads it until the next switch.
-                in_kokkos_options = value in ("on", "yes", "true")
-                gpu_requested = False
+                # LAMMPS reads the -k options until the next switch.
+                kokkos = in_kokkos_options = value in ("on", "yes", "true")
+                gpu = False
+            elif option in ("-sf", "-suffix"):
+                in_kokkos_options = False
+                hybrid = value == "hybrid"
+                suffix_kk = "kk" in (args[i + 2 : i + 4] if hybrid else [value])
             elif option.startswith("-"):
                 in_kokkos_options = False
             elif in_kokkos_options and option in ("g", "gpus"):
-                gpu_requested = int(value) > 0
-        return gpu_requested
+                gpu = value.isdigit() and int(value) > 0
+        return kokkos, gpu, suffix_kk
+
+    @property
+    def search_uses_kokkos(self) -> bool:
+        """Whether the search instance runs with KOKKOS on."""
+        return self._search_kokkos()[0]
+
+    @property
+    def search_uses_kokkos_gpu(self) -> bool:
+        """Whether the search instance requests one or more GPUs with LAMMPS -k."""
+        kokkos, gpu, _ = self._search_kokkos()
+        return kokkos and gpu
+
+    @property
+    def search_minimizes_with_kokkos(self) -> bool:
+        """Whether `min_style` runs under KOKKOS on the search instance.
+
+        KOKKOS minimizes only with `cg/kk`, which `min_style = cg` becomes
+        under the `kk` suffix. The CPU instances refuse `cg/kk` itself.
+        """
+        return self.min_style == "cg" and self._search_kokkos()[2]
 
     @field_validator("cmdargs", "search_cmdargs", "group_cmdargs", mode="before")
     @classmethod
@@ -1170,14 +1199,30 @@ class Config(BaseModel):
     )
 
     @property
+    def gpu_av_refine_default(self) -> bool:
+        """Whether omitted refinement settings select Python ARTn on the active volume.
+
+        True with the active volume on and a search instance that requests a
+        KOKKOS GPU and can minimize under KOKKOS (`min_style = cg`, `-sf kk`).
+        """
+        lammps = self.lammps
+        return bool(
+            self.control.active_volume
+            and self.activevolume is not None
+            and lammps is not None
+            and lammps.search_uses_kokkos_gpu
+            and lammps.search_minimizes_with_kokkos
+        )
+
+    @property
     def artn_refine_forces(self) -> Literal["full", "av"]:
         """Effective force region for the Python ARTn refiner."""
         av = self.activevolume
         if not self.control.active_volume or av is None:
             return "full"
-        if "artn_forces" in av.model_fields_set:
+        if av.artn_forces is not None:
             return av.artn_forces
-        return "av" if self.lammps and self.lammps.search_uses_kokkos_gpu else "full"
+        return "av" if self.gpu_av_refine_default else "full"
 
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
@@ -1263,9 +1308,7 @@ class Config(BaseModel):
         """
         if (
             "refine_style" not in self.eventsearch.model_fields_set
-            and self.control.active_volume
-            and self.lammps is not None
-            and self.lammps.search_uses_kokkos_gpu
+            and self.gpu_av_refine_default
         ):
             self.eventsearch = self.eventsearch.model_copy(
                 update={"refine_style": "artn"}
@@ -1297,6 +1340,18 @@ class Config(BaseModel):
                                 field_path, condition_value, missing_fields
                             )
                         )
+        if (
+            self.eventsearch.refine_style == "artn"
+            and self.artn_refine_forces == "av"
+            and self.lammps is not None
+            and self.lammps.search_uses_kokkos
+            and not self.lammps.search_minimizes_with_kokkos
+        ):
+            raise ValueError(
+                "[EventSearch] refine_style = artn on the active volume minimizes on "
+                "the KOKKOS search instance: set [Lammps] min_style = cg with -sf kk "
+                "in search_cmdargs, or [ActiveVolume] artn_forces = full"
+            )
         if (
             self.eventsearch.style == "dimer"
             and self.dimer is not None

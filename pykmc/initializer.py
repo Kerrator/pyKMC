@@ -65,12 +65,8 @@ class Initializer:
             LOGGING_CONFIG, verbosity=self.kmc.config.control.verbosity
         )
         self.kmc.loggers.title("log")
-        config = self.kmc.config
-        self.kmc.loggers.write_parameters("log", config)
-        if config.control.active_volume and config.eventsearch.refine_style == "artn":
-            self.kmc.loggers.info(
-                "log", f"ARTn refinement force region = {config.artn_refine_forces}"
-            )
+        self.kmc.loggers.write_parameters("log", self.kmc.config)
+        self.log_refine_region()
         if self.kmc.config.control.restart_file is None:
             self.kmc.loggers.output_file_header(
                 "output", disp_thr=self.kmc.config.control.disp_thr
@@ -151,6 +147,28 @@ class Initializer:
         self.kmc.event_search = EventSearch.create(
             self.kmc.config.eventsearch.style, config=self.kmc.config
         )
+
+    def log_refine_region(self) -> None:
+        """Log the ARTn refinement force region, or why a GPU input keeps pARTn."""
+        config = self.kmc.config
+        if not config.control.active_volume:
+            return
+        if config.eventsearch.refine_style == "artn":
+            self.kmc.loggers.info(
+                "log", f"ARTn refinement force region = {config.artn_refine_forces}"
+            )
+        elif (
+            "refine_style" not in config.eventsearch.model_fields_set
+            and config.lammps is not None
+            and config.lammps.search_uses_kokkos_gpu
+        ):
+            self.kmc.loggers.info(
+                "log",
+                "The search instance requests a Kokkos GPU but cannot minimize "
+                f"under KOKKOS ([Lammps] min_style = {config.lammps.min_style}), so "
+                "pARTn refines. Python ARTn refines on the active volume with "
+                "min_style = cg and -sf kk in search_cmdargs.",
+            )
 
     def log_ignored_refine_settings(self) -> None:
         """Log once the `[pARTn]` settings the ARTn refiner does not follow.
