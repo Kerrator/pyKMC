@@ -98,6 +98,8 @@ class _RecordingReconstruction:
         cell: np.ndarray,
         delr_thr: float,
         neighbors: Any = None,
+        outer_atoms: Any = None,
+        outer_min1_positions: Any = None,
     ) -> Err[ErrorInfo]:
         """Record the system handed to the group engine and fail."""
         self.calls.append(
@@ -122,6 +124,7 @@ def _config() -> SimpleNamespace:
         ira=SimpleNamespace(),
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
         rateconstant=SimpleNamespace(style="constant", k0=10.0, T=300.0),
+        reconstruction=SimpleNamespace(push_fraction=0.15, saddle_disp_thr=0.01),
     )
 
 

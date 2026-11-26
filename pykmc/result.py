@@ -170,6 +170,12 @@ class EventRefinementOutput:
     neighbors : Optional[np.ndarray]
         Atom indices that `saddle_positions` and `min2_positions` are ordered by
         (the rcut neighbors of the central atom when the event was refined).
+    outer_atoms : Optional[np.ndarray]
+        Atom indices outside `neighbors` that the saddle displaces from the
+        initial minimum by more than `Reconstruction.saddle_disp_thr`.
+    outer_saddle_displacements : Optional[np.ndarray]
+        Minimum-image displacement, initial minimum to saddle, of each atom in
+        `outer_atoms`.
     """
 
     central_atom_index: int
@@ -180,6 +186,8 @@ class EventRefinementOutput:
     num_reference_event: Optional[int] = None
     refined: Optional[str] = None
     neighbors: Optional[np.ndarray] = None
+    outer_atoms: Optional[np.ndarray] = None
+    outer_saddle_displacements: Optional[np.ndarray] = None
 
 
 @dataclass

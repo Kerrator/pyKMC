@@ -282,6 +282,13 @@ class Refinement:
             if res.is_ok():
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
+                # The saddle covers the whole system. Outside rcut, keep the
+                # atoms it displaces, so the executed event moves them as well.
+                outer_atoms, outer_displacements = self._displaced_outer_atoms(
+                    res.ok_value().saddle_positions, ctx["neighbors"]
+                )
+                res.ok_value().outer_atoms = outer_atoms
+                res.ok_value().outer_saddle_displacements = outer_displacements
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[
                     ctx["neighbors"]
                 ]
@@ -334,6 +341,34 @@ class Refinement:
                     )
 
             self.results.append(res)
+
+    def _displaced_outer_atoms(
+        self, saddle_positions: np.ndarray, neighbors: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Find the atoms outside rcut that the saddle displaces.
+
+        Parameters
+        ----------
+        saddle_positions : np.ndarray
+            Shape (N, 3) saddle positions of the whole system.
+        neighbors : np.ndarray
+            Atom indices of the rcut neighbors of the event's central atom.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            Indices of the atoms outside `neighbors` displaced from the current
+            minimum by more than `Reconstruction.saddle_disp_thr`, and their
+            minimum-image displacement vectors, shape (M, 3).
+
+        """
+        displacements, distances = ase.geometry.find_mic(
+            saddle_positions - self.system.positions, self.system.cell, pbc=True
+        )
+        displaced = distances > self.config.reconstruction.saddle_disp_thr
+        displaced[neighbors] = False
+        outer_atoms = np.flatnonzero(displaced)
+        return outer_atoms, displacements[outer_atoms]
 
     def refine_single(
         self,

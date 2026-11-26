@@ -566,6 +566,10 @@
   <details><summary>Description</summary>
   Fraction used to push the system from the saddle point toward each minimum during reconstruction.
   </details>
+- **`saddle_disp_thr`** : `float`, default = `0.001`
+  <details><summary>Description</summary>
+  Angstroms. An atom outside rcut that the refined saddle displaces from the initial minimum by more than this is kept with the event and moved to the saddle when the event is executed.
+  </details>
 
 ---
 

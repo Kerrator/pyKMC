@@ -26,6 +26,8 @@ class Reconstruction:
         cell,
         delr_thr,
         neighbors=None,
+        outer_atoms: np.ndarray | None = None,
+        outer_min1_positions: np.ndarray | None = None,
     ):
         """From a saddle point, try to reconstruct the event to see if it matches the
         supposed min1 and min2 positions, and that the to minima are connected.
@@ -55,6 +57,12 @@ class Reconstruction:
         neighbors : _type_, optional
             _description_, by default None
             typically the neighors list of the in the atomic environment of the atom on which we apply the event
+        outer_atoms : np.ndarray, optional
+            Atom indices outside `neighbors` that sit at the saddle in
+            `saddle_positions`. They are pushed toward the first minimum with the
+            neighbors, and stay at the saddle for the push toward the second.
+        outer_min1_positions : np.ndarray, optional
+            Positions of `outer_atoms` in the first minimum.
         """
 
         if neighbors is None:  # len min1 == len min2 == len saddle pos
@@ -71,6 +79,13 @@ class Reconstruction:
             cell=cell,
         )
         tmp_positions[neighbors] = saddle_toward_min1_pos
+        if outer_atoms is not None:
+            tmp_positions[outer_atoms] = push_towards(
+                saddle_positions[outer_atoms],
+                outer_min1_positions,
+                fraction=self.config.reconstruction.push_fraction,
+                cell=cell,
+            )
         # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
         min1_pos, _ = self.manager.group_minimize_with_results(
             config=self.config, positions=tmp_positions, types=self.types
@@ -101,6 +116,9 @@ class Reconstruction:
                 cell=cell,
             )
             tmp_positions[neighbors] = saddle_toward_min2_pos
+            if outer_atoms is not None:
+                # no second-minimum target outside rcut: back to the saddle
+                tmp_positions[outer_atoms] = saddle_positions[outer_atoms]
             # future = self.manager.minimize_with_results(self.config, positions=tmp_positions)
             min2_pos, min2_etot = self.manager.group_minimize_with_results(
                 config=self.config, positions=tmp_positions, types=self.types

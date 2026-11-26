@@ -792,6 +792,8 @@ class ActiveEventTable:
                 "saddle_positions": pd.Series(dtype="object"),
                 "final_positions": pd.Series(dtype="object"),
                 "neighbors": pd.Series(dtype="object"),
+                "outer_atoms": pd.Series(dtype="object"),
+                "outer_saddle_displacements": pd.Series(dtype="object"),
                 "energy_barrier": pd.Series(dtype="float64"),
                 "k": pd.Series(dtype="float64"),
                 "k_pref": pd.Series(dtype="float64"),
@@ -955,6 +957,10 @@ class ActiveEventTable:
                 "saddle_positions": event_refinement_output.saddle_positions,
                 "final_positions": event_refinement_output.min2_positions,
                 "neighbors": event_refinement_output.neighbors,
+                "outer_atoms": event_refinement_output.outer_atoms,
+                "outer_saddle_displacements": (
+                    event_refinement_output.outer_saddle_displacements
+                ),
                 "energy_barrier": event_refinement_output.dE_forward,
                 "k": np.nan,
                 "k_pref": np.nan,

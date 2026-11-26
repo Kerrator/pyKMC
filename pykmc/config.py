@@ -818,6 +818,11 @@ class ReconstructionConfig(BaseModel):
         default=0.15,
         description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
     )
+    saddle_disp_thr: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="Angstroms. An atom outside rcut that the refined saddle displaces from the initial minimum by more than this is kept with the event and moved to the saddle when the event is executed.",
+    )
 
 
 class BasinConfig(BaseModel):
