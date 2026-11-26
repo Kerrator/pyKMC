@@ -125,6 +125,7 @@ def test_the_av_switch_sends_the_active_volume_radii(
     config = _av_config(rmov=3.0 if active_volume else None)
     config.partn = PartnConfig()
     config.activevolume.artn_forces = artn_forces
+    config.artn_force_region = artn_forces
     options = ArtnStrategy(config).options
 
     assert options.get("av_radii") == radii
@@ -230,6 +231,7 @@ def test_av_searches_carry_the_frozen_atoms(artn_forces: str) -> None:
     config = _av_config(rmov=3.0, frozen=[1, 3])
     config.partn = PartnConfig()
     config.activevolume.artn_forces = artn_forces
+    config.artn_force_region = artn_forces
     strategy = ArtnStrategy(config)
     system = _system(POSITIONS)
     movable = strategy.movable_atoms(0, system)

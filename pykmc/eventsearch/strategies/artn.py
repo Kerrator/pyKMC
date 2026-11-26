@@ -96,6 +96,7 @@ class ArtnSearchConfig(Protocol):
     eventsearch: Any
     partn: Any
     frozen_atoms: Any
+    artn_force_region: str
 
 
 def artn_options(partn: Any) -> dict[str, Any]:
@@ -180,7 +181,8 @@ class ArtnStrategy(EventSearchStrategy):
     chosen as for the dimer: those within `rmov` of the central atom with the
     active volume on, every atom with it off, and in both cases none of
     `[frozen_atoms]`. With the active volume on and `[ActiveVolume]
-    artn_forces = av`, the search runs on pARTn's active volume instead of the full
+    artn_forces = av` (the default on a KOKKOS GPU search instance, see
+    `Config.gpu_av_default`), the search runs on pARTn's active volume instead of the full
     system (the worker option ``av_radii``), and the request's `[frozen_atoms]`
     go with it (``av_frozen``) so the core does not move those in the buffer.
     The `[pARTn]` settings the core does not follow are logged once, at the
@@ -194,7 +196,7 @@ class ArtnStrategy(EventSearchStrategy):
         self.config = config
         perp_limits(config.partn.nperp, config.partn.nperp_limitation)
         self.options = artn_options(config.partn)
-        if config.control.active_volume and config.activevolume.artn_forces == "av":
+        if config.control.active_volume and config.artn_force_region == "av":
             av = config.activevolume
             self.options["av_radii"] = (av.rmov, av.ract)
         self._ignored_logged = False

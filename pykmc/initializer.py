@@ -149,16 +149,17 @@ class Initializer:
         )
 
     def log_refine_region(self) -> None:
-        """Log the ARTn refinement force region, or why a GPU input keeps pARTn."""
+        """Log the ARTn force region, or why a GPU input keeps pARTn."""
         config = self.kmc.config
         if not config.control.active_volume:
             return
-        if config.eventsearch.refine_style == "artn":
+        if "artn" in (config.eventsearch.style, config.eventsearch.refine_style):
             self.kmc.loggers.info(
-                "log", f"ARTn refinement force region = {config.artn_refine_forces}"
+                "log", f"ARTn force region = {config.artn_force_region}"
             )
-        elif (
-            "refine_style" not in config.eventsearch.model_fields_set
+        if (
+            config.eventsearch.refine_style == "partn"
+            and "refine_style" not in config.eventsearch.model_fields_set
             and config.lammps is not None
             and config.lammps.search_uses_kokkos_gpu
         ):

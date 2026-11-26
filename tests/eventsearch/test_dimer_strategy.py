@@ -247,6 +247,7 @@ def _av_config(rmov: float, frozen: list[int] | None = None) -> SimpleNamespace:
         eventsearch=SimpleNamespace(delr_thr=0.5, refine_style="partn"),
         dimer=SimpleNamespace(model_dump=lambda: {"start_radius": 3.0}),
         frozen_atoms=frozen_atoms,
+        artn_force_region="full",
     )
 
 
