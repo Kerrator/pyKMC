@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import numpy as np
 
 from ...artn import perp_limits
+from ...atomic_environment import frozen_atom_indices
 from ...dimer import _minimum_image
 from ...engine.artn_search import ArtnSearchExtension
 from .base import EventSearchStrategy
@@ -180,8 +181,10 @@ class ArtnStrategy(EventSearchStrategy):
     active volume on, every atom with it off, and in both cases none of
     `[frozen_atoms]`. With the active volume on and `[ActiveVolume]
     artn_forces = av`, the search runs on pARTn's active volume instead of the full
-    system (the worker option ``av_radii``). The `[pARTn]` settings the core
-    does not follow are logged once, at the first submit.
+    system (the worker option ``av_radii``), and the request's `[frozen_atoms]`
+    go with it (``av_frozen``) so the core does not move those in the buffer.
+    The `[pARTn]` settings the core does not follow are logged once, at the
+    first submit.
     """
 
     name = "artn"
@@ -282,8 +285,17 @@ class ArtnStrategy(EventSearchStrategy):
                     )
             return dimer_search_result(raw, request, delr_threshold, backend="artn")
 
+        av_frozen = "av_radii" in self.options and self.config.frozen_atoms is not None
         futures = []
         for request in requests:
+            options = self.options
+            if av_frozen:
+                options = {
+                    **options,
+                    "av_frozen": frozen_atom_indices(
+                        self.config.frozen_atoms, request.positions, request.types
+                    ),
+                }
             future = manager.submit(
                 "artn_search",
                 positions=request.positions,
@@ -293,7 +305,7 @@ class ArtnStrategy(EventSearchStrategy):
                 movable=request.movable,
                 central_atom=request.central_atom,
                 seed=request.seed,
-                options=self.options,
+                options=options,
             )
             futures.append(
                 _then(future, lambda raw, request=request: finish(raw, request))

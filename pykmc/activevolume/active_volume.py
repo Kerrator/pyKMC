@@ -149,6 +149,7 @@ def partn_refine_AV(
     type,
     saddle_idx,
     saddle_positions,
+    held_idx: np.ndarray | None = None,
 ) -> [float, np.array, int]:
     """
     Receive the system with the central atom index, define an active volume around this atom, then update the positions
@@ -156,6 +157,10 @@ def partn_refine_AV(
 
     This was added in order to get the activation energy for an event, as the traditional method does not work for
     Active Volumes.
+
+    The pre-relaxation holds the rcut atoms ``saddle_idx``, the buffer, and
+    the atoms of ``held_idx`` (full-system indices, such as `[frozen_atoms]`)
+    that lie in the active volume.
     """
 
     atom_map, central_lammps_id = partn_search_AV(
@@ -182,6 +187,9 @@ def partn_refine_AV(
         av_positions[index] = saddle_positions[i]
         core_idx.append(index)  # Atom id
         core_ids.append(index + 1)
+    if held_idx is not None:
+        held_ids = np.flatnonzero(np.isin(atom_map, held_idx)) + 1
+        core_ids = np.union1d(core_ids, held_ids).astype(int).tolist()
     set_positions(engine, av_positions)
 
     engine.command("fix 1 all setforce 0.0 0.0 0.0")

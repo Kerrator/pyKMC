@@ -21,7 +21,7 @@ from mpi4py import MPI
 import pykmc.artn
 from pykmc.artn import RefineResult, artn_refine, artn_search
 from pykmc.basins.basin import BasinsGenericEvents, StateData
-from pykmc.config import Config, EventSearchConfig, PartnConfig
+from pykmc.config import Config, EventSearchConfig, PartnConfig, RegionConfig
 from pykmc.dimer import DimerResult
 from pykmc.engine.artn_ranks import DistributedSpace
 from pykmc.engine.artn_search import ArtnSearchExtension, with_refiner
@@ -787,6 +787,33 @@ def test_gpu_default_and_explicit_force_regions_reach_the_worker(
     assert op == "artn_refine"
     assert sent["options"].get("av_radii") == refine_radii
     assert sent["relax_radius"] == (None if refine_radii else 6)
+
+
+@pytest.mark.parametrize("artn_forces", ["av", "full"])
+def test_av_refinement_carries_the_frozen_atoms(artn_forces: str) -> None:
+    """[frozen_atoms] leave the movable set, and go with the active volume."""
+    config = _config("artn", active_volume=True, artn_forces=artn_forces)
+    config.frozen_atoms = RegionConfig(indices=[1, 4])
+    manager = RecordingManager()
+    submit_artn_refine(
+        manager,
+        config,
+        refine_seed_stream(9),
+        0,
+        POSITIONS,
+        CELL,
+        np.array(["Ni"] * len(POSITIONS)),
+        [True] * 3,
+        NEIGHBORS,
+        SADDLE,
+    ).result()
+
+    ((_, sent),) = manager.calls
+    np.testing.assert_array_equal(sent["movable"], [0, 2, 3])
+    if artn_forces == "av":
+        np.testing.assert_array_equal(sent["options"]["av_frozen"], [1, 4])
+    else:
+        assert "av_frozen" not in sent["options"]
 
 
 def test_the_artn_extension_is_loaded_for_any_search_style() -> None:

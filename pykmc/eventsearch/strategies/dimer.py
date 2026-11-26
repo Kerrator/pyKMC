@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import numpy as np
 
-from ...atomic_environment import AtomicEnvironment
+from ...atomic_environment import frozen_atom_indices
 from ...dimer import _minimum_image
 from ...engine.dimer_search import DimerSearchExtension
 from ...search_rules import (
@@ -172,14 +172,7 @@ def movable_atom_indices(config: Any, central_atom: int, system: Any) -> np.ndar
         movable = np.linalg.norm(offsets, axis=1) <= config.activevolume.rmov
     else:
         movable = np.ones(len(positions), dtype=bool)
-    if config.frozen_atoms is not None:
-        frozen = AtomicEnvironment(
-            style="region",
-            region=config.frozen_atoms,
-            positions=positions,
-            atom_types=system.types,
-        ).get_atoms_with_id("in")
-        movable[list(frozen)] = False
+    movable[frozen_atom_indices(config.frozen_atoms, positions, system.types)] = False
     return np.flatnonzero(movable)
 
 
