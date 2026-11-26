@@ -12,7 +12,7 @@ from .config import Config
 from .system import System
 from .neighbors_list import NeighborsList
 from .log import LogKMC
-from .atomic_environment import AtomicEnvironment
+from .atomic_environment import AtomicEnvironment, frozen_atom_indices
 from .manager import Manager
 from .artn import RefineResult
 from .eventsearch.strategies.artn import artn_refine_options
@@ -58,8 +58,10 @@ def submit_artn_refine(
     The seeds, ``r_max_attempts`` of them, are drawn here from
     ``seed_stream``, on rank 0 in submit order, so they do not depend on the
     worker count. The movable atoms are the search's (within `rmov` with the
-    active volume on, excluding `[frozen_atoms]`). With AV refinement forces,
-    the worker builds the active volume for both pre-relaxation and refinement.
+    active volume on, excluding `[frozen_atoms]`), and the pre-relaxation
+    holds the others. With AV refinement forces, the worker builds the active
+    volume for both pre-relaxation and refinement, and `[frozen_atoms]` go
+    with it (``av_frozen``) so the refiner does not move those in the buffer.
     With full-system forces and the active volume enabled, it pre-relaxes within `rmov`.
 
     Parameters
@@ -101,6 +103,10 @@ def submit_artn_refine(
         av = config.activevolume
         if config.artn_refine_forces == "av":
             options["av_radii"] = (av.rmov, av.ract)
+            if config.frozen_atoms is not None:
+                options["av_frozen"] = frozen_atom_indices(
+                    config.frozen_atoms, positions, types
+                )
         else:
             relax_radius = av.rmov
     future = manager.artn_refine(

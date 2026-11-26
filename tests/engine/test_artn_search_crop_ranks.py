@@ -116,7 +116,9 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         engine.natoms = len(CROP)
         return CROP, None
 
-    def partn_refine_AV(engine, config, central, positions, cell, types, idx, saddle):  # noqa: ANN001, ANN202, N802
+    def partn_refine_AV(  # noqa: ANN001, ANN202, N802
+        engine, config, central, positions, cell, types, idx, saddle, held_idx
+    ):
         av, lmp = config.activevolume, config.lammps
         seen["crops"].append(
             (
@@ -130,6 +132,8 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         )
         np.testing.assert_array_equal(idx, SADDLE_IDX)
         np.testing.assert_array_equal(saddle, SADDLE_POSITIONS)
+        # Every atom is movable, so the pre-relaxation holds no other atom.
+        np.testing.assert_array_equal(held_idx, [])
         engine.natoms, engine.ntimestep, engine.x = len(CROP), NTIMESTEP, AV_START
         return E_INIT, CROP, None
 

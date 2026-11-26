@@ -86,7 +86,9 @@ class ArtnSearchExtension(DimerSearchExtension):
         ``eam_force_crop`` is off by default. ``av_radii = (rmov, ract)`` runs the search on pARTn's
         active volume
         (:meth:`_av_search`) instead of the full system, on the leader rank
-        whatever the worker's size. FIRE gets the masses the force instance
+        whatever the worker's size; with it, ``av_frozen`` (full-system
+        indices, default none) names the `[frozen_atoms]`, which the core
+        does not move even in the buffer. FIRE gets the masses the force instance
         uses: pyKMC sets them from ASE's table, and an EAM file read by
         ``pair_coeff`` replaces them with its own.
 
@@ -102,6 +104,7 @@ class ArtnSearchExtension(DimerSearchExtension):
             supports_neighbor_reuse(search_pair_style(self.engine.config)),
         )
         av_radii = search_options.pop("av_radii", None)
+        av_frozen = search_options.pop("av_frozen", None)
         if av_radii is not None:
             return self._av_search(
                 av_radii,
@@ -109,6 +112,7 @@ class ArtnSearchExtension(DimerSearchExtension):
                 types,
                 cell,
                 movable,
+                av_frozen,
                 central_atom,
                 seed,
                 search_options,
@@ -166,7 +170,8 @@ class ArtnSearchExtension(DimerSearchExtension):
         as pyKMC's ``partn_refine`` does on the full path: the rcut atoms
         ``saddle_idx`` are moved to ``saddle_positions`` and held while LAMMPS
         minimizes the others (``[lammps] min_style`` and ``frz_min``,
-        :meth:`~pykmc.engine.lammps.LammpsEngine.minimize_freeze_core`). With
+        :meth:`~pykmc.engine.lammps.LammpsEngine.minimize_freeze_core`), and
+        so are the atoms outside ``movable`` (`[frozen_atoms]`). With
         ``relax_radius`` (``rmov`` with the active volume on), the atoms
         farther than it from the central atom are held too. Then
         :func:`pykmc.artn.artn_refine` runs from the pre-relaxed positions on
@@ -196,7 +201,8 @@ class ArtnSearchExtension(DimerSearchExtension):
         options : Optional[Mapping[str, Any]]
             Keyword options of :func:`pykmc.artn.artn_refine` and the worker
             options of :meth:`artn_search`. ``av_radii = (rmov, ract)`` selects
-            pARTn's active volume.
+            pARTn's active volume, and ``av_frozen`` holds the `[frozen_atoms]`
+            in its buffer.
 
         Returns
         -------
@@ -217,6 +223,7 @@ class ArtnSearchExtension(DimerSearchExtension):
             supports_neighbor_reuse(search_pair_style(self.engine.config)),
         )
         av_radii = refine_options.pop("av_radii", None)
+        av_frozen = refine_options.pop("av_frozen", None)
         if av_radii is not None:
             return self._av_refine(
                 av_radii,
@@ -224,6 +231,7 @@ class ArtnSearchExtension(DimerSearchExtension):
                 types,
                 cell,
                 movable,
+                av_frozen,
                 central_atom,
                 saddle_idx,
                 saddle_positions,
@@ -239,7 +247,9 @@ class ArtnSearchExtension(DimerSearchExtension):
         saddle_idx = np.asarray(saddle_idx, dtype=int).ravel()
         start = positions.copy()
         start[saddle_idx] = np.asarray(saddle_positions, dtype=float)
-        held = saddle_idx
+        held = np.union1d(
+            saddle_idx, np.flatnonzero(~_movable_mask(movable, len(positions)))
+        )
         if relax_radius is not None:
             offsets = _minimum_image(
                 positions - positions[central_atom],
@@ -325,6 +335,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         types: list[str] | np.ndarray,
         cell: Cell | np.ndarray,
         movable: list[int] | np.ndarray,
+        frozen: Optional[list[int] | np.ndarray],
         central_atom: int,
         seed: int,
         options: dict[str, Any],
@@ -344,7 +355,8 @@ class ArtnSearchExtension(DimerSearchExtension):
 
         As under pARTn, the core sees zero force on the buffer but moves it:
         the buffer is movable to the core. Atoms within ``rmov`` that are not
-        in ``movable`` (``[frozen_atoms]``) also see zero force and never move.
+        in ``movable`` (``[frozen_atoms]``) also see zero force and never move,
+        nor do the buffer atoms in ``frozen``.
         The result is mapped back to the full system: atoms beyond ``ract``
         keep their positions and get zero mode; energies are the active volume's.
 
@@ -376,7 +388,15 @@ class ArtnSearchExtension(DimerSearchExtension):
                 types,
             )
             core_mask, query = _av_force_path(
-                force_engine, positions, cell, atom_map, central_atom, rmov, mask, reuse
+                force_engine,
+                positions,
+                cell,
+                atom_map,
+                central_atom,
+                rmov,
+                mask,
+                frozen,
+                reuse,
             )
             result = run_artn(
                 positions[atom_map],
@@ -410,6 +430,7 @@ class ArtnSearchExtension(DimerSearchExtension):
         types: list[str] | np.ndarray,
         cell: Cell | np.ndarray,
         movable: list[int] | np.ndarray,
+        frozen: Optional[list[int] | np.ndarray],
         central_atom: int,
         saddle_idx: list[int] | np.ndarray,
         saddle_positions: np.ndarray,
@@ -424,8 +445,9 @@ class ArtnSearchExtension(DimerSearchExtension):
         as ``partn_refine`` builds them: the active volume as for
         :meth:`_av_search`; ``E_init``, its potential energy at the minimum
         ``positions``; then the rcut atoms at ``saddle_positions``, held with
-        the buffer while ``[lammps] min_style`` and ``frz_min`` relax the
-        others (``AV_debug`` off). The refiner starts from the positions LAMMPS
+        the buffer and the atoms outside ``movable`` (`[frozen_atoms]`) while
+        ``[lammps] min_style`` and ``frz_min`` relax the others (``AV_debug``
+        off). The refiner starts from the positions LAMMPS
         then holds, on the forces :meth:`_av_search` uses, and the barrier
         is ``E_sad - E_init``. The saddle is mapped back to the full system:
         atoms beyond ``ract`` keep their positions in ``positions``.
@@ -460,6 +482,7 @@ class ArtnSearchExtension(DimerSearchExtension):
                 types,
                 np.asarray(saddle_idx, dtype=int).ravel(),
                 np.asarray(saddle_positions, dtype=float),
+                held_idx=np.flatnonzero(~mask),
             )
             # The build's clear resets the step count and its run 0s keep it,
             # so the count is the pre-relaxation's iterations.
@@ -470,7 +493,15 @@ class ArtnSearchExtension(DimerSearchExtension):
                 .copy()
             )
             core_mask, query = _av_force_path(
-                force_engine, positions, cell, atom_map, central_atom, rmov, mask, reuse
+                force_engine,
+                positions,
+                cell,
+                atom_map,
+                central_atom,
+                rmov,
+                mask,
+                frozen,
+                reuse,
             )
             result = run_refine(
                 start,
@@ -551,13 +582,15 @@ def _av_force_path(
     central_atom: int,
     rmov: float,
     mask: np.ndarray,
+    frozen: Optional[list[int] | np.ndarray],
     reuse: bool,
 ) -> tuple[np.ndarray, EnergyAndForces]:
     """Return the core's movable mask on the active volume and its force query.
 
     The buffer is found by ``define_AV``'s rule: beyond ``rmov`` of the
     central atom, minimum image. It sees zero force, as do atoms outside
-    ``mask``. As under pARTn, the core still moves the buffer. When reuse is
+    ``mask``. As under pARTn, the core still moves the buffer, but not its
+    atoms in ``frozen`` (full-system indices). When reuse is
     enabled, LAMMPS updates its neighbor list on short steps.
     """
     from ..activevolume.active_volume import set_positions
@@ -601,7 +634,8 @@ def _av_force_path(
         forces[zero_force] = 0.0
         return energy, forces
 
-    return in_movable | buffer, query
+    held = np.isin(atom_map, [] if frozen is None else frozen)
+    return in_movable | (buffer & ~held), query
 
 
 def _refine_core(

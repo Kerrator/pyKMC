@@ -19,7 +19,7 @@ from ..activevolume.active_volume import (
     partn_refine_AV,
     position_results_AV,
 )
-from ..atomic_environment import AtomicEnvironment
+from ..atomic_environment import AtomicEnvironment, frozen_atom_indices
 from ..search_rules import (
     SearchEndpoints,
     add_search_details,
@@ -761,6 +761,12 @@ class LammpsEngine(Engine):
     ):
         import pypARTn  # only pARTn's search and refinement need it
 
+        # The pre-relaxation holds [frozen_atoms] with the rcut atoms.
+        frozen = (
+            frozen_atom_indices(config.frozen_atoms, positions, types)
+            if positions is not None
+            else None
+        )
         if config.control.active_volume:
             E_init, atom_map, central_lammps_id = partn_refine_AV(
                 self,
@@ -771,6 +777,7 @@ class LammpsEngine(Engine):
                 types,
                 saddle_idx,
                 saddle_positions,
+                held_idx=frozen,
             )
         else:
             central_lammps_id = [central_atom_idx + 1]
@@ -779,7 +786,9 @@ class LammpsEngine(Engine):
             if positions is not None:
                 self.set_positions(positions=positions)
                 if minimize_outer_atoms:
-                    self.minimize_freeze_core(saddle_idx)
+                    self.minimize_freeze_core(
+                        None if saddle_idx is None else np.union1d(saddle_idx, frozen)
+                    )
 
         artn = pypARTn.artn(engine="lmp")
         self.lmp.command(f"plugin load {artn.lib._name}")

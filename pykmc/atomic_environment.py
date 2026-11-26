@@ -257,3 +257,33 @@ class AtomicEnvironment:
             list_hash[idx] = list_graphs_hash[i]
 
         return list_hash
+
+
+def frozen_atom_indices(
+    region: RegionConfig | None,
+    positions: np.ndarray,
+    types: list[str] | np.ndarray | None,
+) -> np.ndarray:
+    """Return the sorted indices of the atoms `[frozen_atoms]` selects.
+
+    Parameters
+    ----------
+    region : RegionConfig | None
+        The `[frozen_atoms]` section; None selects no atom.
+    positions : np.ndarray
+        Positions of the whole system, (N, 3).
+    types : list[str] | np.ndarray | None
+        Types of the whole system, needed when the region selects by type.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted atom indices, empty when nothing is frozen.
+
+    """
+    if region is None:
+        return np.array([], dtype=int)
+    selected = AtomicEnvironment(
+        style="region", region=region, positions=positions, atom_types=types
+    ).get_atoms_with_id("in")
+    return np.array(selected, dtype=int)

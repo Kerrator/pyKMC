@@ -222,6 +222,28 @@ def test_active_volume_smaller_than_cutoff_is_rejected_before_any_submit() -> No
     assert manager.calls == []
 
 
+@pytest.mark.parametrize("artn_forces", ["av", "full"])
+def test_av_searches_carry_the_frozen_atoms(artn_forces: str) -> None:
+    """On the active volume each request names [frozen_atoms] for the buffer."""
+    config = _av_config(rmov=3.0, frozen=[1, 3])
+    config.partn = PartnConfig()
+    config.activevolume.artn_forces = artn_forces
+    strategy = ArtnStrategy(config)
+    system = _system(POSITIONS)
+    movable = strategy.movable_atoms(0, system)
+    request = SearchRequest(0, POSITIONS, CELL, system.types, PBC, 1, movable)
+    manager = OrderedManager(1, [0])
+    strategy.submit([request], manager)
+
+    ((_, kwargs),) = manager.calls
+    np.testing.assert_array_equal(kwargs["movable"], [0, 2])
+    if artn_forces == "av":
+        np.testing.assert_array_equal(kwargs["options"]["av_frozen"], [1, 3])
+    else:
+        assert "av_frozen" not in kwargs["options"]
+    assert "av_frozen" not in strategy.options
+
+
 # ---------------------------------------------------------------- seeds
 
 
