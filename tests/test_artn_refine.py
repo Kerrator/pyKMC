@@ -620,10 +620,12 @@ def _gpu_refine_input(
     active: bool = True,
     refine_style: str | None = None,
     artn_forces: str | None = None,
+    min_style: str = "cg",
 ) -> Config:
     """Read an ARTn input with the given LAMMPS instance and refinement settings."""
     text = (Path(__file__).parent / "data" / "input.in").read_text()
     text = text.replace("n_steps = 10", f"n_steps = 10\nactive_volume = {active}")
+    text = text.replace("min_style = cg", f"min_style = {min_style}")
     text = text.replace(
         "pair_style = eam/alloy", f"{lammps_options}\npair_style = eam/alloy"
     )
@@ -644,12 +646,15 @@ def _gpu_refine_input(
     ("lammps_options", "active", "expected"),
     [
         (f"search_cmdargs = {_GPU_ARGS}", True, "artn"),
-        ("cmdargs = -kokkos yes gpus 2", True, "artn"),
+        ("cmdargs = -kokkos yes gpus 2 -suffix kk", True, "artn"),
         ("library = mtpkk", True, "partn"),
         ("search_cmdargs = -k on t 4 -sf kk", True, "partn"),
         (f"group_cmdargs = {_GPU_ARGS}", True, "partn"),
         (f"search_cmdargs = {_GPU_ARGS}", False, "partn"),
         (f"cmdargs = {_GPU_ARGS}\nsearch_cmdargs = -k off", True, "partn"),
+        ("search_cmdargs = -k on g 1 -sf hybrid kk omp", True, "artn"),
+        ("search_cmdargs = -k on g 1 -pk kokkos neigh half", True, "partn"),
+        (f"search_cmdargs = {_GPU_ARGS} -sf omp", True, "partn"),
     ],
     ids=[
         "search-gpu",
@@ -659,6 +664,9 @@ def _gpu_refine_input(
         "group-only",
         "av-off",
         "search-disables-gpu",
+        "hybrid-kk",
+        "no-kk-suffix",
+        "last-suffix-not-kk",
     ],
 )
 def test_refinement_default_uses_the_active_volume_search_gpu(
@@ -666,6 +674,65 @@ def test_refinement_default_uses_the_active_volume_search_gpu(
 ) -> None:
     config = _gpu_refine_input(tmp_path, lammps_options, active=active)
     assert config.eventsearch.refine_style == expected
+
+
+def test_a_gpu_input_kokkos_cannot_minimize_keeps_pre_change_refiners(
+    tmp_path: Path,
+) -> None:
+    """With min_style = fire the AV pre-relaxation would stop LAMMPS: keep the CPU paths."""
+    gpu = f"search_cmdargs = {_GPU_ARGS}"
+    config = _gpu_refine_input(tmp_path, gpu, min_style="fire")
+    assert config.eventsearch.refine_style == "partn"
+    config = _gpu_refine_input(tmp_path, gpu, min_style="fire", refine_style="artn")
+    assert config.eventsearch.refine_style == "artn"
+    assert config.artn_refine_forces == "full"
+
+
+@pytest.mark.parametrize(
+    ("lammps_options", "min_style"),
+    [
+        (f"search_cmdargs = {_GPU_ARGS}", "fire"),
+        ("search_cmdargs = -k on g 1", "cg"),
+        ("search_cmdargs = -k on t 4", "cg"),
+    ],
+    ids=["gpu-fire", "gpu-no-suffix", "cpu-kokkos-no-suffix"],
+)
+def test_explicit_av_refinement_needs_a_kokkos_minimizer(
+    tmp_path: Path, lammps_options: str, min_style: str
+) -> None:
+    with pytest.raises(ValueError, match="min_style = cg with -sf kk"):
+        _gpu_refine_input(
+            tmp_path,
+            lammps_options,
+            refine_style="artn",
+            artn_forces="av",
+            min_style=min_style,
+        )
+
+
+def test_the_gpu_default_survives_a_dump_and_reload(tmp_path: Path) -> None:
+    config = _gpu_refine_input(tmp_path, f"search_cmdargs = {_GPU_ARGS}")
+    reloaded = Config.model_validate(config.model_dump())
+    for c in (config, reloaded):
+        assert c.eventsearch.refine_style == "artn"
+        assert c.activevolume.artn_forces is None
+        assert c.artn_refine_forces == "av"
+
+
+def test_the_log_says_why_a_gpu_input_keeps_partn(tmp_path: Path) -> None:
+    lines: list[str] = []
+    for min_style in ("fire", "cg"):
+        config = _gpu_refine_input(
+            tmp_path, f"search_cmdargs = {_GPU_ARGS}", min_style=min_style
+        )
+        kmc = SimpleNamespace(
+            config=config,
+            loggers=SimpleNamespace(info=lambda name, line: lines.append(line)),
+        )
+        Initializer(kmc).log_refine_region()
+    assert len(lines) == 2
+    assert "min_style = fire), so pARTn refines" in lines[0]
+    assert lines[1] == "ARTn refinement force region = av"
 
 
 def test_explicit_partn_refiner_on_gpu(tmp_path: Path) -> None:

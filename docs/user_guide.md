@@ -384,7 +384,9 @@ artn_forces = av
 
 When `[Control] active_volume = True` and the private search instance requests at least one KOKKOS GPU,
 pyKMC defaults to its Python ARTn refiner on the active volume. The search instance receives `cmdargs` followed
-by `search_cmdargs`. The default elsewhere is pARTn, including runs that request a GPU only in `group_cmdargs`.
+by `search_cmdargs`. This refiner pre-relaxes on that instance, so the default needs `[Lammps] min_style = cg`
+and `-sf kk` in those arguments (KOKKOS minimizes only with `cg/kk`); without them pyKMC keeps pARTn and logs
+why. The default elsewhere is pARTn, including runs that request a GPU only in `group_cmdargs`.
 
 For any search style, `[EventSearch] refine_style = partn` or `artn` explicitly selects the refiner.
 Both read the `r_` parameters of `[pARTn]`. With `artn_forces` omitted, a Python ARTn search uses the
