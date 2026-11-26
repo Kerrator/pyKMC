@@ -92,11 +92,21 @@ Six optional keys choose how LAMMPS is opened. With all of them unset pyKMC open
   minimizations: the first one and those of event execution.
 - `group_pair_style` : the `pair_style` of that instance, when it must differ from `pair_style`.
 
-With a KOKKOS build of LAMMPS, this sends the force calls of the `artn` and `dimer` searches and the full-cell
-minimizations to one GPU:
+For example, these settings in an ARTn input run the search force calls, active-volume refinement and
+full-cell minimizations on one GPU. The ARTn search uses its default full cell.
+
 ```INI
 [Control]
+active_volume = True
 group_size = 1
+
+[ActiveVolume]
+rmov = 6.0
+ract = 11.7
+
+[EventSearch]
+style = artn
+nsearch = 2
 
 [Lammps]
 pair_style = mtp ./Zr.mtp chunksize 32768
@@ -109,8 +119,8 @@ group_cmdargs = -k on g 1 -sf kk -pk kokkos newton on neigh half
 group_pair_style = mtp/small ./Zr.mtp chunksize 32768
 ```
 - Put KOKKOS arguments in `search_cmdargs` and `group_cmdargs`. Workers that run pARTn searches or refinements
-  use the CPU because pARTn requires the FIRE minimizer. With `refine_style = artn` and `artn_forces = av`,
-  the search instance also pre-relaxes and refines the saddle. For KOKKOS on that instance, use `-sf kk` in
+  use the CPU because pARTn requires the FIRE minimizer. With the active volume enabled, a search instance
+  that requests a KOKKOS GPU also pre-relaxes and refines the saddle by default. Use `-sf kk` in
   `search_cmdargs` and `min_style = cg`, including when the group instance uses the CPU.
 - The group instance never runs pARTn, so `group_cmdargs` also works with `style = partn`. With KOKKOS on it
   needs `-sf kk` and `min_style = cg` (KOKKOS has no other minimizer). Set `group_size = 1` on one GPU: with more
@@ -282,9 +292,9 @@ For a detailed explanation of the pARTn algorithm and its parameters, please ref
 
 ### Dimer
 
-With `style = dimer`, new events are found with the dimer method (ported from SEAKMC, Liang and Xu 2023), and
-refinement uses pARTn unless `refine_style = artn` (see [Refinement with ARTn](#refinement-with-artn)). A dimer run therefore needs both a `[Dimer]` and a `[pARTn]` section; the `[pARTn]`
-section configures the refinement (the `r_` parameters).
+With `style = dimer`, pyKMC finds new events with the dimer method (ported from SEAKMC, Liang and Xu 2023).
+A dimer run needs both a `[Dimer]` section for the search and a `[pARTn]` section for the refiner's `r_`
+parameters. See [Refinement with ARTn](#refinement-with-artn).
 
 Each search starts from a random direction, drawn from a seed. With `seed` set in `[Control]`, the run draws
 the same seeds in the same order whatever the number of LAMMPS instances.
@@ -333,8 +343,7 @@ sessions with fewer ranks each instead.
 ### ARTn in pyKMC
 
 With `style = artn`, new events are found by pyKMC's own ARTn, a Python port of pARTn v1.1.0 (Poberznik et al.
-2024), and refinement uses pARTn unless `refine_style = artn`. It reads its parameters from the `[pARTn]` section, so an existing input
-switches with one word. Each search counts every force call and runs on a private LAMMPS instance using all ranks
+2024). The search reads its parameters from the `[pARTn]` section. Each search counts every force call and runs on a private LAMMPS instance using all ranks
 of its worker. As for the dimer, the movable atoms are those within `rmov` of the central atom with the active
 volume on and all atoms otherwise, excluding `[frozen_atoms]` in both cases. For `eam/alloy`, `eam/fs`, `mtp`
 and `mtp/small`, every worker reuses neighbor lists between force calls, as the dimer does by default. The ARTn input file cannot
@@ -352,9 +361,9 @@ If the lowest eigenvalue becomes positive after leaving the basin, `nnewchance` 
 with the initial push mixed with a random direction. The log names, once, each `[pARTn]` setting that the ARTn
 search ignores.
 
-With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the forces come from:
+With the active volume on, `artn_forces` in `[ActiveVolume]` chooses where the ARTn search evaluates forces:
 
-- `full` (the default): the full system, as for the dimer. Atoms beyond `rmov` stay fixed and see zero force.
+- `full` (the search default) uses the full system, as for the dimer. Atoms beyond `rmov` stay fixed and see zero force.
 - `av`: pARTn's active volume, built as for `style = partn`: only the atoms within `ract` of the central atom,
   in a periodic box with the cell's edges, and zero force on those beyond `rmov`. As under pARTn, the search still
   moves those atoms slightly (by about 1e-4 Å), and the energies are the active volume's. The forces are then pARTn's, so
@@ -373,16 +382,25 @@ artn_forces = av
 
 ### Refinement with ARTn
 
-`refine_style` in `[EventSearch]` chooses the refiner, for any `style`: `partn` (the default) or `artn`, pyKMC's
-own ARTn. Both read the `r_` parameters of `[pARTn]`. The ARTn refiner does what pyKMC does with pARTn: it sets
+When `[Control] active_volume = True` and the private search instance requests at least one KOKKOS GPU,
+pyKMC defaults to its Python ARTn refiner on the active volume. The search instance receives `cmdargs` followed
+by `search_cmdargs`. The default elsewhere is pARTn, including runs that request a GPU only in `group_cmdargs`.
+
+For any search style, `[EventSearch] refine_style = partn` or `artn` explicitly selects the refiner.
+Both read the `r_` parameters of `[pARTn]`. With `artn_forces` omitted, a Python ARTn search uses the
+full cell. A Python ARTn refinement uses the active volume under the GPU conditions above and the full
+cell elsewhere. Setting `[ActiveVolume] artn_forces` to `full` or `av` selects that region for both
+Python ARTn operations when the active volume is enabled.
+
+The ARTn refiner sets
 the rcut atoms at the reference saddle, relaxes the other atoms with LAMMPS (`min_style`, `frz_min`; with the
 active volume on, only those within `rmov`), then runs ARTn from there, stopping at the saddle, up to
 `r_max_attempts` times. A saddle closer than `r_delr_sad_thr` to the start is accepted. Each attempt starts
 afresh with its own seed, drawn from a stream of its own that `seed` in `[Control]` starts, so adding refinement
 changes no search seed and the seeds do not depend on the number of LAMMPS instances. `zseed` is not read, and
 `r_neigen` other than 1 is logged as ignored. The barrier is the saddle's potential energy minus the minimum's,
-with or without the active volume. With `artn_forces = av`, the first rank of each session builds the same
-active volume as pARTn. It measures the minimum energy there, sets the rcut atoms at the reference saddle,
+with or without the active volume. For refinement on the active volume, the first rank of each session builds
+the same active volume as pARTn. It measures the minimum energy there, sets the rcut atoms at the reference saddle,
 and holds them and the buffer fixed while the remaining atoms relax. Pre-relaxation and saddle refinement
 both use the search instance and its `search_cmdargs` and `search_pair_style`. The shared pARTn pre-relaxation
 can move an explicitly frozen atom inside `rmov` and outside the rcut group. The ARTn iterations then hold

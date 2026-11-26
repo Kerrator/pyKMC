@@ -58,9 +58,9 @@ def submit_artn_refine(
     The seeds, ``r_max_attempts`` of them, are drawn here from
     ``seed_stream``, on rank 0 in submit order, so they do not depend on the
     worker count. The movable atoms are the search's (within `rmov` with the
-    active volume on, excluding `[frozen_atoms]`). With ``artn_forces = av``,
+    active volume on, excluding `[frozen_atoms]`). With AV refinement forces,
     the worker builds the active volume for both pre-relaxation and refinement.
-    With ``artn_forces = full``, pre-relaxation stays within `rmov`.
+    With full-system forces and the active volume enabled, it pre-relaxes within `rmov`.
 
     Parameters
     ----------
@@ -99,7 +99,7 @@ def submit_artn_refine(
     relax_radius = None
     if config.control.active_volume:
         av = config.activevolume
-        if av.artn_forces == "av":
+        if config.artn_refine_forces == "av":
             options["av_radii"] = (av.rmov, av.ract)
         else:
             relax_radius = av.rmov

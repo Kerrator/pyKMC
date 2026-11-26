@@ -137,7 +137,11 @@
 
 - **`style`** : `Literal['partn', 'dimer', 'artn']`, mandatory
   <details><summary>Description</summary>
-  Method used to find events: 'partn', 'dimer' (the dimer finds the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section), or 'artn' (pyKMC's own ARTn finds the events with the [pARTn] parameters and pARTn refines them; seeded from [Control] seed, not zseed; settings it does not follow, neigen other than 1 and a set zseed, are logged once).
+  Method used to find events. The dimer search requires `[Dimer]` and `[pARTn]`. Python ARTn reads `[pARTn]` and uses `[Control] seed` for search seeds. It logs a set `zseed` and values of `neigen` other than one as ignored.
+  </details>
+- **`refine_style`** : `Literal['partn', 'artn']`, optional
+  <details><summary>Description</summary>
+  Method used to refine events for any search style. The default is Python ARTn when `active_volume = True` and the private search instance requests a KOKKOS GPU, and pARTn otherwise. Setting `partn` or `artn` explicitly selects that refiner. Both use the `r_` parameters of `[pARTn]`.
   </details>
 - **`nsearch`** : `int`, mandatory
   <details><summary>Description</summary>
@@ -471,8 +475,8 @@
   
   The dimer moves the atoms within `rmov` of the central atom when
   `[Control] active_volume = True`, and every atom otherwise; atoms in
-  `[frozen_atoms]` never move. Refinement still uses pARTn and reads the
-  `[pARTn]` section.
+  `[frozen_atoms]` never move in the dimer search. The refiner reads the
+  `r_` parameters in `[pARTn]`.
 </details>
 
 - **`start`** : `Literal['local', 'region']`, default = `'local'`
@@ -583,9 +587,9 @@
   <details><summary>Description</summary>
   Debug flag for active volume size checks
   </details>
-- **`artn_forces`** : `Literal['full', 'av']`, default = `'full'`
+- **`artn_forces`** : `Literal['full', 'av']`, optional
   <details><summary>Description</summary>
-  Force region for Python ARTn searches and refinements when the active volume is enabled. `full` uses the full system with atoms beyond `rmov` held fixed. `av` uses pARTn's active volume, which contains the atoms within `ract` and applies zero force to the buffer beyond `rmov`.
+  Force region for Python ARTn operations when the active volume is enabled. If omitted, searches use the full system. Python ARTn refinement defaults to the active volume when the search instance requests a KOKKOS GPU, and to the full system otherwise. An explicit value selects that region for both. `full` holds atoms beyond `rmov` fixed in the full system. `av` includes atoms within `ract` and applies zero force to the buffer beyond `rmov`.
   </details>
 
 ---

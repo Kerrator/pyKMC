@@ -3,8 +3,8 @@
 The search runs as one `artn_search` operation on a worker
 (:mod:`pykmc.engine.artn_search`), on the dimer's force path or, with
 `[ActiveVolume] artn_forces = av`, on pARTn's active volume. The refiner
-is `[EventSearch] refine_style`'s, pARTn by default. Its parameters come from the
-`[pARTn]` section; its seeds from the run-wide stream, as the dimer's.
+is selected by `[EventSearch] refine_style`. The search parameters come from the
+`[pARTn]` section and the seeds from the run-wide stream, as for the dimer.
 """
 
 from __future__ import annotations

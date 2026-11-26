@@ -65,7 +65,12 @@ class Initializer:
             LOGGING_CONFIG, verbosity=self.kmc.config.control.verbosity
         )
         self.kmc.loggers.title("log")
-        self.kmc.loggers.write_parameters("log", self.kmc.config)
+        config = self.kmc.config
+        self.kmc.loggers.write_parameters("log", config)
+        if config.control.active_volume and config.eventsearch.refine_style == "artn":
+            self.kmc.loggers.info(
+                "log", f"ARTn refinement force region = {config.artn_refine_forces}"
+            )
         if self.kmc.config.control.restart_file is None:
             self.kmc.loggers.output_file_header(
                 "output", disp_thr=self.kmc.config.control.disp_thr

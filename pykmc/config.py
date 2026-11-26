@@ -209,20 +209,19 @@ class EventSearchConfig(BaseModel):
 
     style: Literal["partn", "dimer", "artn"] = Field(
         ...,
-        description="Method used to find events: 'partn', 'dimer' (the dimer finds "
-        "the events and pARTn refines them; needs both a [Dimer] and a [pARTn] section), "
-        "or 'artn' (pyKMC's own ARTn finds the events with the [pARTn] parameters and "
-        "pARTn refines them; seeded from [Control] seed, not zseed; settings it does not "
-        "follow, neigen other than 1 and a set zseed, are logged once). `refine_style` "
-        "chooses the refiner for every style.",
+        description="Method used to find events: 'partn', 'dimer' (requires both a "
+        "[Dimer] and a [pARTn] section), or 'artn' (pyKMC's own ARTn, using the "
+        "[pARTn] parameters and [Control] seed; neigen other than 1 and a set zseed "
+        "are logged as ignored for searches). `refine_style` chooses the refiner "
+        "for every search style.",
     )
     refine_style: Literal["partn", "artn"] = Field(
         default="partn",
-        description="Method used to refine events, for any `style`: 'partn' (pARTn, as "
-        "before) or 'artn' (pyKMC's own ARTn, stopping at the saddle, with the [pARTn] "
-        "r_* parameters; each attempt has its own seed from a child of the [Control] seed "
-        "stream, not zseed; r_neigen other than 1 is logged as ignored). With the active "
-        "volume enabled, [ActiveVolume] artn_forces selects the force region for 'artn'.",
+        description="Event refiner for any search style. Defaults to 'artn' when the "
+        "active volume is enabled and the search instance requests a Kokkos GPU, "
+        "and to 'partn' otherwise. Both use the [pARTn] r_* parameters. Python ARTn "
+        "stops at the saddle and seeds each attempt from a child of the [Control] "
+        "seed stream. It ignores r_neigen values other than 1 and logs them.",
     )
     nsearch: int = Field(
         ...,
@@ -265,8 +264,8 @@ class DimerConfig(BaseModel):
 
     The dimer moves the atoms within `rmov` of the central atom when
     `[Control] active_volume = True`, and every atom otherwise; atoms in
-    `[frozen_atoms]` never move. Refinement still uses pARTn and reads the
-    `[pARTn]` section.
+    `[frozen_atoms]` never move. The refiner chosen by `refine_style` reads
+    the `[pARTn]` section.
     """
 
     start: Literal["local", "region"] = Field(
@@ -674,7 +673,9 @@ class ActiveVolume(BaseModel):
         description="Force region for Python ARTn searches and refinements when the "
         "active volume is enabled. 'full' uses the full system with atoms beyond "
         "`rmov` held fixed. 'av' uses pARTn's active volume, which contains the "
-        "atoms within `ract` and applies zero force to the buffer beyond `rmov`.",
+        "atoms within `ract` and applies zero force to the buffer beyond `rmov`. "
+        "When omitted, searches use 'full'. Python ARTn refinement uses 'av' on a "
+        "Kokkos GPU search instance and 'full' otherwise.",
     )
 
 
@@ -764,6 +765,23 @@ class LammpsConfig(BaseModel):
         default=None,
         description="Lammps pair_style command for the group instance (`lammps.log.0`, the full-cell minimizations), when it must differ from `pair_style`; `pair_coeff` is shared. E.g. `mtp/small pot.mtp chunksize 32768` with KOKKOS in `group_cmdargs`. None uses `pair_style`.",
     )
+
+    @property
+    def search_uses_kokkos_gpu(self) -> bool:
+        """Whether the search instance requests one or more GPUs with LAMMPS -k."""
+        args = (self.cmdargs or []) + (self.search_cmdargs or [])
+        in_kokkos_options = False
+        gpu_requested = False
+        for option, value in zip(args, args[1:], strict=False):
+            if option in ("-k", "-kokkos"):
+                # LAMMPS uses the last -k clause and reads it until the next switch.
+                in_kokkos_options = value in ("on", "yes", "true")
+                gpu_requested = False
+            elif option.startswith("-"):
+                in_kokkos_options = False
+            elif in_kokkos_options and option in ("g", "gpus"):
+                gpu_requested = int(value) > 0
+        return gpu_requested
 
     @field_validator("cmdargs", "search_cmdargs", "group_cmdargs", mode="before")
     @classmethod
@@ -1151,6 +1169,16 @@ class Config(BaseModel):
         default=None, description="Event selection bias parameters."
     )
 
+    @property
+    def artn_refine_forces(self) -> Literal["full", "av"]:
+        """Effective force region for the Python ARTn refiner."""
+        av = self.activevolume
+        if not self.control.active_volume or av is None:
+            return "full"
+        if "artn_forces" in av.model_fields_set:
+            return av.artn_forces
+        return "av" if self.lammps and self.lammps.search_uses_kokkos_gpu else "full"
+
     @classmethod
     def from_ini_file(cls, ini_path: str) -> Config:
         """Load and validates simulation configuration from an INI file.
@@ -1233,6 +1261,16 @@ class Config(BaseModel):
             If a required section or parameter is missing based on the validation rules.
 
         """
+        if (
+            "refine_style" not in self.eventsearch.model_fields_set
+            and self.control.active_volume
+            and self.lammps is not None
+            and self.lammps.search_uses_kokkos_gpu
+        ):
+            self.eventsearch = self.eventsearch.model_copy(
+                update={"refine_style": "artn"}
+            )
+
         validation_rules = {
             ("control.engine", "lammps"): ["lammps"],
             ("eventsearch.style", "partn"): ["partn"],
@@ -1288,7 +1326,7 @@ class Config(BaseModel):
 def check_pypartn(config: Config) -> None:
     """Raise if the run needs pARTn and its Python module, pypARTn, does not import.
 
-    `[EventSearch] style = partn` and `refine_style = partn` (the default) run
+    `[EventSearch] style = partn` and `refine_style = partn` run
     pARTn; `style = artn` or `dimer` with `refine_style = artn` need no pARTn.
     Called once the input is read, before any engine starts. It is not part of
     `Config`'s validation, so a config still loads where pypARTn is missing.

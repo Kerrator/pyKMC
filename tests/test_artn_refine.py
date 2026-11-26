@@ -21,7 +21,7 @@ from mpi4py import MPI
 import pykmc.artn
 from pykmc.artn import RefineResult, artn_refine, artn_search
 from pykmc.basins.basin import BasinsGenericEvents, StateData
-from pykmc.config import EventSearchConfig, PartnConfig
+from pykmc.config import Config, EventSearchConfig, PartnConfig
 from pykmc.dimer import DimerResult
 from pykmc.engine.artn_ranks import DistributedSpace
 from pykmc.engine.artn_search import ArtnSearchExtension, with_refiner
@@ -597,8 +597,6 @@ def test_refine_style_defaults_to_partn_and_takes_artn() -> None:
 
 def test_refine_style_artn_takes_either_force_path(tmp_path: Path) -> None:
     """refine_style reads from the input; with the AV on, full and av both load."""
-    from pykmc.config import Config
-
     text = (Path(__file__).parent / "data" / "input.in").read_text()
     text = text.replace("emin_event = 0.0", "emin_event = 0.0\nrefine_style = artn")
     text = text.replace("basin = True", "basin = True\nactive_volume = True")
@@ -610,6 +608,118 @@ def test_refine_style_artn_takes_either_force_path(tmp_path: Path) -> None:
         assert config.eventsearch.refine_style == "artn"
         assert config.eventsearch.style == "partn"
         assert config.activevolume.artn_forces == forces
+
+
+_GPU_ARGS = "-k on g 1 -sf kk"
+
+
+def _gpu_refine_input(
+    tmp_path: Path,
+    lammps_options: str,
+    *,
+    active: bool = True,
+    refine_style: str | None = None,
+    artn_forces: str | None = None,
+) -> Config:
+    """Read an ARTn input with the given LAMMPS instance and refinement settings."""
+    text = (Path(__file__).parent / "data" / "input.in").read_text()
+    text = text.replace("n_steps = 10", f"n_steps = 10\nactive_volume = {active}")
+    text = text.replace(
+        "pair_style = eam/alloy", f"{lammps_options}\npair_style = eam/alloy"
+    )
+    text = text.replace("style = partn", "style = artn")
+    if refine_style is not None:
+        text = text.replace(
+            "nsearch = 10", f"nsearch = 10\nrefine_style = {refine_style}"
+        )
+    text += "\n[ActiveVolume]\nrmov = 6\nract = 10\n"
+    if artn_forces is not None:
+        text += f"artn_forces = {artn_forces}\n"
+    path = tmp_path / "gpu_refinement.in"
+    path.write_text(text)
+    return Config.from_ini_file(str(path))
+
+
+@pytest.mark.parametrize(
+    ("lammps_options", "active", "expected"),
+    [
+        (f"search_cmdargs = {_GPU_ARGS}", True, "artn"),
+        ("cmdargs = -kokkos yes gpus 2", True, "artn"),
+        ("library = mtpkk", True, "partn"),
+        ("search_cmdargs = -k on t 4 -sf kk", True, "partn"),
+        (f"group_cmdargs = {_GPU_ARGS}", True, "partn"),
+        (f"search_cmdargs = {_GPU_ARGS}", False, "partn"),
+        (f"cmdargs = {_GPU_ARGS}\nsearch_cmdargs = -k off", True, "partn"),
+    ],
+    ids=[
+        "search-gpu",
+        "global-gpu",
+        "library-only",
+        "cpu-kokkos",
+        "group-only",
+        "av-off",
+        "search-disables-gpu",
+    ],
+)
+def test_refinement_default_uses_the_active_volume_search_gpu(
+    tmp_path: Path, lammps_options: str, active: bool, expected: str
+) -> None:
+    config = _gpu_refine_input(tmp_path, lammps_options, active=active)
+    assert config.eventsearch.refine_style == expected
+
+
+def test_explicit_partn_refiner_on_gpu(tmp_path: Path) -> None:
+    config = _gpu_refine_input(
+        tmp_path, f"search_cmdargs = {_GPU_ARGS}", refine_style="partn"
+    )
+    assert config.eventsearch.refine_style == "partn"
+
+
+@pytest.mark.parametrize(
+    ("refine_style", "artn_forces", "search_radii", "refine_radii"),
+    [
+        (None, None, None, (6, 10)),
+        ("artn", None, None, (6, 10)),
+        (None, "av", (6, 10), (6, 10)),
+        (None, "full", None, None),
+        ("artn", "av", (6, 10), (6, 10)),
+        ("artn", "full", None, None),
+    ],
+)
+def test_gpu_default_and_explicit_force_regions_reach_the_worker(
+    tmp_path: Path,
+    refine_style: str | None,
+    artn_forces: str | None,
+    search_radii: tuple[int, int] | None,
+    refine_radii: tuple[int, int] | None,
+) -> None:
+    config = _gpu_refine_input(
+        tmp_path,
+        f"search_cmdargs = {_GPU_ARGS}",
+        refine_style=refine_style,
+        artn_forces=artn_forces,
+    )
+    assert config.eventsearch.refine_style == "artn"
+    assert ArtnStrategy(config).options.get("av_radii") == search_radii
+
+    manager = RecordingManager()
+    system = _system()
+    submit_artn_refine(
+        manager,
+        config,
+        refine_seed_stream(9),
+        0,
+        system.positions,
+        system.cell,
+        system.types,
+        system.pbc,
+        NEIGHBORS,
+        SADDLE,
+    ).result()
+    ((op, sent),) = manager.calls
+    assert op == "artn_refine"
+    assert sent["options"].get("av_radii") == refine_radii
+    assert sent["relax_radius"] == (None if refine_radii else 6)
 
 
 def test_the_artn_extension_is_loaded_for_any_search_style() -> None:
@@ -720,7 +830,8 @@ def _config(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         control=SimpleNamespace(active_volume=active_volume),
-        activevolume=SimpleNamespace(rmov=3.0, ract=6.0, artn_forces=artn_forces),
+        activevolume=SimpleNamespace(rmov=3.0, ract=6.0),
+        artn_refine_forces=artn_forces,
         atomicenvironment=SimpleNamespace(atom_coloring_mode="full"),
         eventsearch=SimpleNamespace(refined_energy_thr=0.05, refine_style=refine_style),
         psr=SimpleNamespace(style="ira", matching_score_thr=0.1),
